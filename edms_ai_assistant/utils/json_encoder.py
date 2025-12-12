@@ -7,9 +7,9 @@ from enum import Enum
 
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
-        if hasattr(obj, 'model_dump'):
-            return obj.model_dump(mode='json')
-        if hasattr(obj, 'dict'):
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump(mode="json")
+        if hasattr(obj, "dict"):
             return obj.dict()
 
         if isinstance(obj, UUID):

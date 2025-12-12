@@ -23,10 +23,10 @@ class EmployeeClient:
     """
 
     def __init__(
-            self,
-            base_url: Optional[str] = None,
-            timeout: Optional[int] = None,
-            service_token: Optional[str] = None,
+        self,
+        base_url: Optional[str] = None,
+        timeout: Optional[int] = None,
+        service_token: Optional[str] = None,
     ):
         resolved_base_url = base_url or str(settings.edms.base_url)
         self.base_url = resolved_base_url.rstrip("/")
@@ -55,10 +55,10 @@ class EmployeeClient:
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def _make_request(
-            self,
-            method: str,
-            endpoint: str,
-            **kwargs,
+        self,
+        method: str,
+        endpoint: str,
+        **kwargs,
     ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
         """
         Выполняет HTTP-запрос и возвращает JSON-ответ.

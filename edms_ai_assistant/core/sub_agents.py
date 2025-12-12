@@ -25,7 +25,7 @@ def register_agent(name: str):
 
 
 # --- Функция Автоматического Обнаружения (Auto-Discovery) ---
-def discover_sub_agents(package_name: str = 'edms_ai_assistant.sub_agents'):
+def discover_sub_agents(package_name: str = "edms_ai_assistant.sub_agents"):
     """Сканирует указанный пакет и импортирует все модули, чтобы запустить декораторы @register_agent."""
     logger.info("Запуск Auto-Discovery под-агентов...")
     try:
@@ -37,7 +37,9 @@ def discover_sub_agents(package_name: str = 'edms_ai_assistant.sub_agents'):
                 full_module_name = f"{package_name}.{module_name}"
                 try:
                     importlib.import_module(full_module_name)
-                    logger.debug(f"Успешно обнаружен и импортирован модуль: {module_name}")
+                    logger.debug(
+                        f"Успешно обнаружен и импортирован модуль: {module_name}"
+                    )
                 except Exception as e:
                     logger.error(f"Ошибка при импорте модуля {module_name}: {e}")
     except ImportError as e:
@@ -67,4 +69,6 @@ def run_discovery_if_needed():
         logger.info("Запуск discovery из run_discovery_if_needed.")
         discover_sub_agents()
         _DISCOVERY_RUN = True
-        logger.info(f"Auto-Discovery завершено. Обнаружено агентов: {len(get_available_agent_names())}")
+        logger.info(
+            f"Auto-Discovery завершено. Обнаружено агентов: {len(get_available_agent_names())}"
+        )

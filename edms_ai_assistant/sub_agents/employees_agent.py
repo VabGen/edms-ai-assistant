@@ -7,7 +7,10 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from edms_ai_assistant.core.sub_agents import register_agent
 from edms_ai_assistant.core.orchestrator import OrchestratorState
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.tools.employee import find_responsible_tool, get_employee_by_id_tool
+from edms_ai_assistant.tools.employee import (
+    find_responsible_tool,
+    get_employee_by_id_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +21,12 @@ async def employees_agent_node(state: OrchestratorState) -> Dict[str, Any]:
     Узел под-агента для работы с сотрудниками.
     Использует инструменты через привязку к LLM.
     """
-    messages = state['messages']
-    user_token = state['user_token']
+    messages = state["messages"]
+    user_token = state["user_token"]
 
     # --- ИНИЦИАЛИЗАЦИЯ ИНСТРУМЕНТОВ ---
     from langchain_core.tools import tool
+
     @tool
     async def find_responsible_tool_wrapped(query: str) -> str:
         """Обёрнутый инструмент для поиска сотрудника, передающий токен."""
@@ -51,21 +55,29 @@ async def employees_agent_node(state: OrchestratorState) -> Dict[str, Any]:
         logger.debug(f"Кадровый агент: Итерация {iteration_count}")
         response = await llm_with_tools.ainvoke(current_messages)
 
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            tool_name = response.tool_calls[0]['name']
-            tool_args = response.tool_calls[0]['args']
-            tool_to_execute = next((t for t in tools_to_bind if t.name == tool_name), None)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            tool_name = response.tool_calls[0]["name"]
+            tool_args = response.tool_calls[0]["args"]
+            tool_to_execute = next(
+                (t for t in tools_to_bind if t.name == tool_name), None
+            )
             if tool_to_execute:
                 try:
                     tool_result = await tool_to_execute.ainvoke(tool_args)
                     from langchain_core.messages import ToolMessage
-                    tool_message = ToolMessage(content=tool_result, tool_call_id=response.tool_calls[0]['id'])
+
+                    tool_message = ToolMessage(
+                        content=tool_result, tool_call_id=response.tool_calls[0]["id"]
+                    )
                     current_messages += [response, tool_message]
                 except Exception as e:
                     logger.error(f"Ошибка выполнения инструмента {tool_name}: {e}")
                     error_msg = f"Ошибка выполнения инструмента: {e}"
                     from langchain_core.messages import ToolMessage
-                    tool_message = ToolMessage(content=error_msg, tool_call_id=response.tool_calls[0]['id'])
+
+                    tool_message = ToolMessage(
+                        content=error_msg, tool_call_id=response.tool_calls[0]["id"]
+                    )
                     current_messages += [response, tool_message]
             else:
                 logger.error(f"Инструмент {tool_name} не найден!")
@@ -75,12 +87,14 @@ async def employees_agent_node(state: OrchestratorState) -> Dict[str, Any]:
             break
     else:
         logger.warning("Кадровый агент: Достигнут лимит итераций")
-        final_ai_message = AIMessage(content="Процесс превысил допустимое количество шагов.")
+        final_ai_message = AIMessage(
+            content="Процесс превысил допустимое количество шагов."
+        )
 
     return {
         "result": "employees_agent_success",
         "final_response": final_ai_message.content,
-        "messages": [final_ai_message]
+        "messages": [final_ai_message],
     }
 
 

@@ -10,10 +10,10 @@ AsyncCallable = Callable[..., Awaitable[Any]]
 
 
 def async_retry(
-        max_attempts: int = 3,
-        delay: float = 1.0,
-        backoff: float = 2.0,
-        exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    max_attempts: int = 3,
+    delay: float = 1.0,
+    backoff: float = 2.0,
+    exceptions: Tuple[Type[Exception], ...] = (Exception,),
 ):
     """
     Декоратор для выполнения асинхронной функции с повторными попытками (экспоненциальный откат).
@@ -51,7 +51,9 @@ def async_retry(
             if last_exception is not None:
                 raise last_exception
 
-            raise RuntimeError(f"Retry mechanism failed for {func.__name__} without capturing an exception.")
+            raise RuntimeError(
+                f"Retry mechanism failed for {func.__name__} without capturing an exception."
+            )
 
         return wrapper
 

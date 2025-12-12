@@ -25,6 +25,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 # --------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -54,7 +55,9 @@ def _cleanup_file(file_path: Path):
         logger.warning(f"Failed to clean up {file_path}: {e}")
 
 
-async def save_uploaded_file_async(upload_file: UploadFile, user_uuid: uuid.UUID) -> Optional[Path]:
+async def save_uploaded_file_async(
+    upload_file: UploadFile, user_uuid: uuid.UUID
+) -> Optional[Path]:
     """
     Сохраняет загруженный файл во временный файл в UPLOAD_DIR.
     """
@@ -80,9 +83,11 @@ async def save_uploaded_file_async(upload_file: UploadFile, user_uuid: uuid.UUID
 
 @app.post("/chat", response_model=AssistantResponse)
 async def chat_with_assistant(
-        background_tasks: BackgroundTasks,
-        user_request: str = Form(..., description="JSON-строка с UserInput данными."),
-        file: Optional[UploadFile] = File(None, description="Загруженный файл (опционально)"),
+    background_tasks: BackgroundTasks,
+    user_request: str = Form(..., description="JSON-строка с UserInput данными."),
+    file: Optional[UploadFile] = File(
+        None, description="Загруженный файл (опционально)"
+    ),
 ):
     if not orchestrator_app:
         raise HTTPException(status_code=503, detail="Оркестратор не инициализирован")
@@ -97,24 +102,29 @@ async def chat_with_assistant(
 
     except json.JSONDecodeError as e:
         logger.error(f"Ошибка декодирования JSON в user_request: {e}")
-        raise HTTPException(status_code=422, detail=f"Поле user_request должно быть валидной JSON-строкой: {e}")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Поле user_request должно быть валидной JSON-строкой: {e}",
+        )
     except Exception as e:
         logger.error(f"Ошибка валидации Pydantic модели UserInput: {e}", exc_info=True)
-        raise HTTPException(status_code=422, detail=f"Ошибка валидации Pydantic модели UserInput: {e}")
+        raise HTTPException(
+            status_code=422, detail=f"Ошибка валидации Pydantic модели UserInput: {e}"
+        )
 
     user_uuid: uuid.UUID
     user_id_for_thread: str
     try:
-        _, payload_encoded, _ = user_token.split('.')
+        _, payload_encoded, _ = user_token.split(".")
 
         padding_needed = 4 - (len(payload_encoded) % 4)
         if padding_needed < 4:
-            payload_encoded += '=' * padding_needed
+            payload_encoded += "=" * padding_needed
 
-        payload_decoded = base64.urlsafe_b64decode(payload_encoded.encode('utf-8'))
+        payload_decoded = base64.urlsafe_b64decode(payload_encoded.encode("utf-8"))
         payload = json.loads(payload_decoded)
 
-        user_id_for_thread = payload.get('id') or payload.get('sub')
+        user_id_for_thread = payload.get("id") or payload.get("sub")
 
         if not user_id_for_thread:
             raise ValueError("User ID ('id' or 'sub') not found in JWT payload.")
@@ -125,13 +135,13 @@ async def chat_with_assistant(
         logger.error(f"Ошибка декодирования JWT или валидации UUID: {e}", exc_info=True)
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid user_token or extracted ID format. Expected valid JWT with a UUID in 'id' or 'sub' claim. Error: {e}"
+            detail=f"Invalid user_token or extracted ID format. Expected valid JWT with a UUID in 'id' or 'sub' claim. Error: {e}",
         )
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при обработке токена: {e}", exc_info=True)
         raise HTTPException(
             status_code=400,
-            detail=f"Token processing failed due to an unexpected error. {e}"
+            detail=f"Token processing failed due to an unexpected error. {e}",
         )
 
     if file and file.filename:
@@ -142,7 +152,9 @@ async def chat_with_assistant(
     thread_id = str(user_uuid)
     config = {"configurable": {"thread_id": thread_id}}
 
-    context_dict = user_request_model.context.model_dump() if user_request_model.context else None
+    context_dict = (
+        user_request_model.context.model_dump() if user_request_model.context else None
+    )
 
     initial_state = {
         "messages": [HumanMessage(content=user_request_model.message)],
@@ -163,7 +175,9 @@ async def chat_with_assistant(
 
         source_state = final_state
 
-        if final_state.get("called_subagent") and isinstance(final_state.get(final_state["called_subagent"]), dict):
+        if final_state.get("called_subagent") and isinstance(
+            final_state.get(final_state["called_subagent"]), dict
+        ):
             source_state = final_state[final_state["called_subagent"]]
 
         elif len(final_state) == 1 and isinstance(list(final_state.values())[0], dict):
@@ -180,18 +194,25 @@ async def chat_with_assistant(
                 if isinstance(last_message, BaseMessage) and last_message.content:
                     response_content = last_message.content
 
-                elif isinstance(last_message, dict) and 'content' in last_message:
-                    if last_message.get('role') != 'user' and last_message.get('type') != 'human':
-                        response_content = last_message['content']
+                elif isinstance(last_message, dict) and "content" in last_message:
+                    if (
+                        last_message.get("role") != "user"
+                        and last_message.get("type") != "human"
+                    ):
+                        response_content = last_message["content"]
 
         if not response_content:
             subagent_result = source_state.get("subagent_result")
-            if subagent_result and not subagent_result.startswith("general_agent_error"):
+            if subagent_result and not subagent_result.startswith(
+                "general_agent_error"
+            ):
                 response_content = subagent_result
 
         if not response_content:
             response_content = "Извините, не удалось сформулировать ответ."
-            logger.error("Не удалось извлечь final_response ни из поля, ни из последнего сообщения.")
+            logger.error(
+                "Не удалось извлечь final_response ни из поля, ни из последнего сообщения."
+            )
 
         if file_path:
             background_tasks.add_task(_cleanup_file, file_path)
@@ -203,7 +224,9 @@ async def chat_with_assistant(
         # Очистка файла при ошибке
         if file_path:
             background_tasks.add_task(_cleanup_file, file_path)
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера при обработке запроса")
+        raise HTTPException(
+            status_code=500, detail="Внутренняя ошибка сервера при обработке запроса"
+        )
 
 
 @app.get("/health")

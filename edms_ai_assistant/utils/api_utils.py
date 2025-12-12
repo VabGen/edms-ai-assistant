@@ -31,7 +31,9 @@ async def handle_api_error(response: httpx.Response, operation_name: str = "API 
             # 2. Если JSON невалиден, используем текстовое тело ответа
             error_details = f" Error response text: {response.text[:200]}..."
         except Exception:
-            error_details = f" Failed to decode error body, status code {response.status_code}."
+            error_details = (
+                f" Failed to decode error body, status code {response.status_code}."
+            )
 
         logger.error(
             f"{operation_name} failed with status {response.status_code}."
@@ -45,6 +47,7 @@ async def handle_api_error(response: httpx.Response, operation_name: str = "API 
 # -------------------------------------------------------------
 # --- Подготовка заголовков и Валидация ---
 # -------------------------------------------------------------
+
 
 def prepare_auth_headers(token: str) -> Dict[str, str]:
     """
@@ -89,23 +92,26 @@ def validate_document_id(doc_id: Optional[str]) -> Optional[uuid.UUID]:
         return uuid.UUID(doc_id)
     except ValueError:
         # В контексте сервиса, вызываемого API, лучше поднять HTTPException
-        raise HTTPException(status_code=400, detail="Invalid document_id format. Must be a valid UUID.")
+        raise HTTPException(
+            status_code=400, detail="Invalid document_id format. Must be a valid UUID."
+        )
 
 
 # -------------------------------------------------------------
 # --- Обработка пагинации ---
 # -------------------------------------------------------------
 
+
 async def fetch_all_pages(
-        client: httpx.AsyncClient,
-        base_url: str,
-        endpoint: str,
-        headers: Optional[Dict[str, str]] = None,
-        params: Optional[Dict[str, Union[str, int, float]]] = None,
-        page_param: str = "page",
-        page_start: int = 0,
-        size_param: str = "size",
-        default_page_size: int = 20,
+    client: httpx.AsyncClient,
+    base_url: str,
+    endpoint: str,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Union[str, int, float]]] = None,
+    page_param: str = "page",
+    page_start: int = 0,
+    size_param: str = "size",
+    default_page_size: int = 20,
 ) -> List[Dict[str, Any]]:
     """
     Асинхронно извлекает все страницы paginated API-ответа (пагинация "по страницам").
@@ -156,21 +162,29 @@ async def fetch_all_pages(
 
             if total_pages is not None:
                 if page >= total_pages - 1:
-                    logger.debug(f"{operation_name}: Reached total pages limit ({total_pages}). Stopping.")
+                    logger.debug(
+                        f"{operation_name}: Reached total pages limit ({total_pages}). Stopping."
+                    )
                     break
             elif total_elements is not None:
                 fetched = len(all_items)
                 if fetched >= total_elements:
-                    logger.debug(f"{operation_name}: Fetched all {total_elements} elements. Stopping.")
+                    logger.debug(
+                        f"{operation_name}: Fetched all {total_elements} elements. Stopping."
+                    )
                     break
             elif len(items) < base_params[size_param]:
-                logger.debug(f"{operation_name}: Last page detected (partial size). Stopping.")
+                logger.debug(
+                    f"{operation_name}: Last page detected (partial size). Stopping."
+                )
                 break
 
             page += 1
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Terminating pagination for {endpoint} due to HTTP error on page {page}.")
+            logger.error(
+                f"Terminating pagination for {endpoint} due to HTTP error on page {page}."
+            )
             break
         except Exception as e:
             logger.error(

@@ -19,9 +19,9 @@ async def tasks_agent_node(state: OrchestratorState) -> Dict[str, Any]:
     Узел под-агента для работы с задачами.
     Использует инструменты через привязку к LLM.
     """
-    messages = state['messages']
-    user_token = state['user_token']
-    context = state.get('context', {})
+    messages = state["messages"]
+    user_token = state["user_token"]
+    context = state.get("context", {})
 
     # --- ИНИЦИАЛИЗАЦИЯ ИНСТРУМЕНТОВ ---
     # from langchain_core.tools import tool
@@ -38,7 +38,7 @@ async def tasks_agent_node(state: OrchestratorState) -> Dict[str, Any]:
     # --- ВРЕМЕННАЯ РЕАЛИЗАЦИЯ БЕЗ ИНСТРУМЕНТА ---
     # Если инструмент для задачи не готов, просто возвращаем сообщение.
     last_message_content = messages[-1].content if messages else "Пустое сообщение"
-    document_id_from_context = context.get('document_id')
+    document_id_from_context = context.get("document_id")
     if document_id_from_context:
         result_text = f"Tasks Agent: Обработка запроса '{last_message_content}' для задачи, связанной с документом ID {document_id_from_context}."
     else:
@@ -60,7 +60,7 @@ async def tasks_agent_node(state: OrchestratorState) -> Dict[str, Any]:
     return {
         "result": "tasks_agent_success",
         "final_response": ai_message_content,
-        "messages": [final_ai_message]
+        "messages": [final_ai_message],
     }
 
 

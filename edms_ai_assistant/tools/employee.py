@@ -27,7 +27,9 @@ async def find_responsible_tool(query: str, service_token: str) -> str:
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Ошибка в find_responsible_tool: {e}")
-            return json.dumps({"error": f"Сбой поиска сотрудников: {str(e)}"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"Сбой поиска сотрудников: {str(e)}"}, ensure_ascii=False
+            )
 
 
 @tool
@@ -39,8 +41,12 @@ async def get_employee_by_id_tool(employee_id: str, service_token: str) -> str:
     try:
         employee_uuid = UUID(employee_id)
     except ValueError:
-        return json.dumps({"error": f"Неверный формат ID сотрудника: '{employee_id}'. Ожидается UUID."},
-                          ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": f"Неверный формат ID сотрудника: '{employee_id}'. Ожидается UUID."
+            },
+            ensure_ascii=False,
+        )
 
     logger.info(f"Вызов get_employee_by_id_tool с employee_id: {employee_id}")
 
@@ -49,9 +55,14 @@ async def get_employee_by_id_tool(employee_id: str, service_token: str) -> str:
             result = await client.get_employee(employee_uuid)
 
             if result is None:
-                return json.dumps({"employee": "Сотрудник не найден."}, ensure_ascii=False)
+                return json.dumps(
+                    {"employee": "Сотрудник не найден."}, ensure_ascii=False
+                )
 
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Ошибка в get_employee_by_id_tool: {e}")
-            return json.dumps({"error": f"Сбой получения сотрудника по ID: {str(e)}"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"Сбой получения сотрудника по ID: {str(e)}"},
+                ensure_ascii=False,
+            )

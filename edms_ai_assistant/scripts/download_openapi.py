@@ -103,13 +103,10 @@ POST_GENERATION_PATCHES: List[RegexPatch] = [
     (r"unique_items=True\s*,?", ""),
     (r",\s*,", ","),
     (r"Field\(\s*,", "Field("),
-    (
-        r"(Annotated\[)list\[UUID\](\s*\| None,\s*Field\(.*?)\]",
-        r"\1set[UUID]\2]"
-    ),
+    (r"(Annotated\[)list\[UUID\](\s*\| None,\s*Field\(.*?)\]", r"\1set[UUID]\2]"),
     (
         r"list\[UUID\] \| None = Field\((.*?)\)",
-        lambda m: f"set[UUID] | None = Field({m.group(1)})"
+        lambda m: f"set[UUID] | None = Field({m.group(1)})",
     ),
     (
         r"class JsonNode\(BaseModel\):\s*\n\s*__root__:\s*Any",
@@ -165,11 +162,15 @@ def fix_generated_file(file_path: str):
 
     future_match = re.search(future_import_pattern, content)
     future_block = future_match.group(1) if future_match else ""
-    if future_match: content = content.replace(future_block, "", 1)
+    if future_match:
+        content = content.replace(future_block, "", 1)
 
     generated_comment_match = re.search(generated_comment_pattern, content)
-    generated_comment_block = generated_comment_match.group(0) if generated_comment_match else ""
-    if generated_comment_match: content = content.replace(generated_comment_block, "", 1)
+    generated_comment_block = (
+        generated_comment_match.group(0) if generated_comment_match else ""
+    )
+    if generated_comment_match:
+        content = content.replace(generated_comment_block, "", 1)
 
     new_start = future_block + generated_comment_block + pydantic_import_line
     content = new_start + content

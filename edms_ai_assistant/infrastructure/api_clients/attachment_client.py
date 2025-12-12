@@ -21,13 +21,14 @@ class AttachmentClient:
     """
     Асинхронный клиент для работы с EDMS Attachment API.
     """
+
     DEFAULT_TIMEOUT = 30
 
     def __init__(
-            self,
-            base_url: Optional[str] = None,
-            timeout: Optional[int] = None,
-            service_token: Optional[str] = None,
+        self,
+        base_url: Optional[str] = None,
+        timeout: Optional[int] = None,
+        service_token: Optional[str] = None,
     ):
         resolved_base_url = base_url or str(settings.chancellor_next_base_url)
         self.base_url = resolved_base_url.rstrip("/")
@@ -56,10 +57,10 @@ class AttachmentClient:
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def _make_request(
-            self,
-            method: str,
-            endpoint: str,
-            **kwargs,
+        self,
+        method: str,
+        endpoint: str,
+        **kwargs,
     ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
         """
         Выполняет HTTP-запрос и возвращает JSON-ответ.
@@ -76,13 +77,17 @@ class AttachmentClient:
 
             content_type = response.headers.get("Content-Type", "")
             if "application/json" not in content_type:
-                logger.warning(f"Unexpected non-JSON content type for {method} {url}: {content_type}")
+                logger.warning(
+                    f"Unexpected non-JSON content type for {method} {url}: {content_type}"
+                )
                 return {}
 
             return response.json()
 
         except httpx.HTTPStatusError:
-            logger.error(f"HTTP Status Error for {method} {url}: {response.status_code}")
+            logger.error(
+                f"HTTP Status Error for {method} {url}: {response.status_code}"
+            )
             raise
         except httpx.RequestError as e:
             logger.error(f"Request error for {method} {url}: {e}")
@@ -99,7 +104,7 @@ class AttachmentClient:
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def download_attachment(
-            self, document_id: UUID, attachment_id: UUID
+        self, document_id: UUID, attachment_id: UUID
     ) -> Optional[bytes]:
         """
         Скачивает вложение документа как байты.
@@ -115,7 +120,9 @@ class AttachmentClient:
             if response.status_code == 200:
                 return response.content
 
-            logger.warning(f"Download failed with status {response.status_code} for {url}")
+            logger.warning(
+                f"Download failed with status {response.status_code} for {url}"
+            )
             return None
 
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
@@ -123,11 +130,11 @@ class AttachmentClient:
             return None
 
     # === Вложения (JSON) ===
-    async def get_document_attachments(
-            self, document_id: UUID
-    ) -> List[Dict[str, Any]]:
+    async def get_document_attachments(self, document_id: UUID) -> List[Dict[str, Any]]:
         """
         Получить список вложений документа. Возвращает список JSON.
         """
-        result = await self._make_request("GET", f"api/document/{document_id}/attachment")
+        result = await self._make_request(
+            "GET", f"api/document/{document_id}/attachment"
+        )
         return result if isinstance(result, list) else []

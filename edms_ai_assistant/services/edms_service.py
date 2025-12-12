@@ -5,8 +5,14 @@ from typing import List, Optional
 from uuid import UUID
 from edms_ai_assistant.infrastructure.api_clients.employee_client import EmployeeClient
 from edms_ai_assistant.infrastructure.api_clients.document_client import DocumentClient
-from edms_ai_assistant.infrastructure.api_clients.attachment_client import AttachmentClient
-from edms_ai_assistant.generated.resources_openapi import EmployeeDto, DocumentDto, UserInfoDto
+from edms_ai_assistant.infrastructure.api_clients.attachment_client import (
+    AttachmentClient,
+)
+from edms_ai_assistant.generated.resources_openapi import (
+    EmployeeDto,
+    DocumentDto,
+    UserInfoDto,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +38,9 @@ class EdmsService:
         return AttachmentClient(base_url=self.base_url)
 
     # --- Методы для работы с сотрудниками ---
-    async def find_employees_by_last_names(self, token: str, last_names: List[str]) -> List[EmployeeDto]:
+    async def find_employees_by_last_names(
+        self, token: str, last_names: List[str]
+    ) -> List[EmployeeDto]:
         """
         Находит сотрудников по списку фамилий.
         API-клиент должен быть обновлен для приема 'token'.
@@ -43,7 +51,7 @@ class EdmsService:
             # Предполагаем, что client.search_employees обновлен
             results = await client.search_employees(token=token, query=name)
             for emp_data in results:
-                if emp_data.get('lastName', '').lower() == name.lower():
+                if emp_data.get("lastName", "").lower() == name.lower():
                     found_employees.append(EmployeeDto.model_validate(emp_data))
         return found_employees
 
@@ -55,7 +63,9 @@ class EdmsService:
         return None
 
     # --- Методы для работы с документами ---
-    async def get_document_by_id(self, token: str, document_id: str) -> Optional[DocumentDto]:
+    async def get_document_by_id(
+        self, token: str, document_id: str
+    ) -> Optional[DocumentDto]:
         """
         Получает документ по ID.
         """
@@ -70,7 +80,9 @@ class EdmsService:
         return result
 
     # --- Методы для работы с вложениями ---
-    async def download_attachment(self, token: str, document_id: str, attachment_id: str) -> Optional[bytes]:
+    async def download_attachment(
+        self, token: str, document_id: str, attachment_id: str
+    ) -> Optional[bytes]:
         """
         Скачивает вложение как байты.
         """
@@ -79,7 +91,9 @@ class EdmsService:
             doc_uuid = UUID(document_id)
             att_uuid = UUID(attachment_id)
         except ValueError:
-            logger.error(f"Неверный формат ID документа или вложения: {document_id}, {attachment_id}")
+            logger.error(
+                f"Неверный формат ID документа или вложения: {document_id}, {attachment_id}"
+            )
             return None
 
         return await client.download_attachment(token, doc_uuid, att_uuid)

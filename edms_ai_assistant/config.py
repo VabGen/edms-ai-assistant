@@ -50,151 +50,157 @@ class Settings(BaseSettings):
 
     @property
     def LLM_ENDPOINT(self) -> str:
-        return getattr(self, 'llm__generative', self.llm__generative)
+        return getattr(self, "llm__generative", self.llm__generative)
 
     @property
     def EMBEDDING_ENDPOINT(self) -> str:
-        return getattr(self, 'llm__embedding', self.llm__embedding)
+        return getattr(self, "llm__embedding", self.llm__embedding)
 
     @property
     def LLM_MODEL_NAME(self) -> str:
-        return getattr(self, 'llm__generative_model', self.llm__generative_model)
+        return getattr(self, "llm__generative_model", self.llm__generative_model)
 
     @property
     def EMBEDDING_MODEL_NAME(self) -> str:
-        return getattr(self, 'llm__embedding_model', self.llm__embedding_model)
+        return getattr(self, "llm__embedding_model", self.llm__embedding_model)
 
     @property
     def LLM_API_KEY(self) -> str | None:
-        return getattr(self, 'llm_api_key', self.llm_api_key)
+        return getattr(self, "llm_api_key", self.llm_api_key)
 
     @property
     def LLM_TEMPERATURE(self) -> float:
-        return getattr(self, 'llm_temperature', self.llm_temperature)
+        return getattr(self, "llm_temperature", self.llm_temperature)
 
     @property
     def LLM_MAX_TOKENS(self) -> int | None:
-        return getattr(self, 'llm_max_tokens', self.llm_max_tokens)
+        return getattr(self, "llm_max_tokens", self.llm_max_tokens)
 
     @property
     def LLM_TIMEOUT(self) -> int:
-        return getattr(self, 'llm_timeout', self.llm_timeout)
+        return getattr(self, "llm_timeout", self.llm_timeout)
 
     @property
     def LLM_MAX_RETRIES(self) -> int:
-        return getattr(self, 'llm_max_retries', self.llm_max_retries)
+        return getattr(self, "llm_max_retries", self.llm_max_retries)
 
     @property
     def LLM_REQUEST_TIMEOUT(self) -> int:
-        return getattr(self, 'llm_request_timeout', self.llm_request_timeout)
+        return getattr(self, "llm_request_timeout", self.llm_request_timeout)
 
     @property
     def LLM_STREAM_USAGE(self) -> bool:
-        return getattr(self, 'llm_stream_usage', self.llm_stream_usage)
+        return getattr(self, "llm_stream_usage", self.llm_stream_usage)
 
     @property
     def EMBEDDING_TIMEOUT(self) -> int:
-        return getattr(self, 'embedding_timeout', self.embedding_timeout)
+        return getattr(self, "embedding_timeout", self.embedding_timeout)
 
     @property
     def EMBEDDING_MAX_RETRIES(self) -> int:
-        return getattr(self, 'embedding_max_retries', self.embedding_max_retries)
+        return getattr(self, "embedding_max_retries", self.embedding_max_retries)
 
     @property
     def EMBEDDING_REQUEST_TIMEOUT(self) -> int:
-        return getattr(self, 'embedding_request_timeout', self.embedding_request_timeout)
+        return getattr(
+            self, "embedding_request_timeout", self.embedding_request_timeout
+        )
 
     @property
     def EMBEDDING_CTX_LENGTH(self) -> int:
-        return getattr(self, 'embedding_ctx_length', self.embedding_ctx_length)
+        return getattr(self, "embedding_ctx_length", self.embedding_ctx_length)
 
     @property
     def EMBEDDING_CHUNK_SIZE(self) -> int:
-        return getattr(self, 'embedding_chunk_size', self.embedding_chunk_size)
+        return getattr(self, "embedding_chunk_size", self.embedding_chunk_size)
 
     @property
     def EMBEDDING_MAX_RETRIES_PER_REQUEST(self) -> int:
-        return getattr(self, 'embedding_max_retries_per_request', self.embedding_max_retries_per_request)
+        return getattr(
+            self,
+            "embedding_max_retries_per_request",
+            self.embedding_max_retries_per_request,
+        )
 
     @property
     def CHANCELLOR_NEXT_BASE_URL(self) -> str:
-        return getattr(self, 'chancellor_next_base_url', self.chancellor_next_base_url)
+        return getattr(self, "chancellor_next_base_url", self.chancellor_next_base_url)
 
     @property
     def EDMS_TIMEOUT(self):
-        return getattr(self, 'edms_timeout', self.edms_timeout)
+        return getattr(self, "edms_timeout", self.edms_timeout)
 
     @property
     def CHROMA_PERSIST_DIR(self) -> str:
-        return getattr(self, 'chroma_persist_dir', self.chroma_persist_dir)
+        return getattr(self, "chroma_persist_dir", self.chroma_persist_dir)
 
     @property
     def CHECKPOINT_DB_URL(self) -> str:
-        return getattr(self, 'checkpoint_db_url', self.checkpoint_db_url)
+        return getattr(self, "checkpoint_db_url", self.checkpoint_db_url)
 
     @property
     def SQL_DB_URL(self) -> str:
-        return getattr(self, 'sql_db_url', self.sql_db_url)
+        return getattr(self, "sql_db_url", self.sql_db_url)
 
     @property
     def API_PORT(self) -> int:
-        return getattr(self, 'api_port', self.api_port)
+        return getattr(self, "api_port", self.api_port)
 
     @property
     def DEBUG(self) -> bool:
-        return getattr(self, 'debug', self.debug)
+        return getattr(self, "debug", self.debug)
 
     @property
     def REDIS_URL(self) -> str:
-        return getattr(self, 'redis_url', self.redis_url)
+        return getattr(self, "redis_url", self.redis_url)
 
     @property
     def AGENT_ENABLE_TRACING(self) -> bool:
-        return getattr(self, 'agent_enable_tracing', self.agent_enable_tracing)
+        return getattr(self, "agent_enable_tracing", self.agent_enable_tracing)
 
     @property
     def AGENT_LOG_LEVEL(self) -> str:
-        return getattr(self, 'agent_log_level', self.agent_log_level)
+        return getattr(self, "agent_log_level", self.agent_log_level)
 
     @property
     def AGENT_MAX_RETRIES(self) -> int:
-        return getattr(self, 'agent_max_retries', self.agent_max_retries)
+        return getattr(self, "agent_max_retries", self.agent_max_retries)
 
     @property
     def LOGGING_LEVEL(self) -> str:
-        return getattr(self, 'logging_level', self.logging_level)
+        return getattr(self, "logging_level", self.logging_level)
 
     @property
     def LOGGING_FORMAT(self) -> str:
-        return getattr(self, 'logging_format', self.logging_format)
+        return getattr(self, "logging_format", self.logging_format)
 
     @property
     def TELEMETRY_ENABLED(self) -> bool:
-        return getattr(self, 'telemetry_enabled', self.telemetry_enabled)
+        return getattr(self, "telemetry_enabled", self.telemetry_enabled)
 
     @property
     def TELEMETRY_ENDPOINT(self) -> str:
-        return getattr(self, 'telemetry_endpoint', self.telemetry_endpoint)
+        return getattr(self, "telemetry_endpoint", self.telemetry_endpoint)
 
     @property
     def RAG_BATCH_SIZE(self) -> int:
-        return getattr(self, 'rag_batch_size', self.rag_batch_size)
+        return getattr(self, "rag_batch_size", self.rag_batch_size)
 
     @property
     def RAG_CHUNK_SIZE(self) -> int:
-        return getattr(self, 'rag_chunk_size', self.rag_chunk_size)
+        return getattr(self, "rag_chunk_size", self.rag_chunk_size)
 
     @property
     def RAG_CHUNK_OVERLAP(self) -> int:
-        return getattr(self, 'rag_chunk_overlap', self.rag_chunk_overlap)
+        return getattr(self, "rag_chunk_overlap", self.rag_chunk_overlap)
 
     @property
     def RAG_EMBEDDING_BATCH_SIZE(self) -> int:
-        return getattr(self, 'rag_embedding_batch_size', self.rag_embedding_batch_size)
+        return getattr(self, "rag_embedding_batch_size", self.rag_embedding_batch_size)
 
     @property
     def REACT_APP_API_URL(self) -> str:
-        return getattr(self, 'react_app_api_url', self.react_app_api_url)
+        return getattr(self, "react_app_api_url", self.react_app_api_url)
 
 
 settings = Settings()

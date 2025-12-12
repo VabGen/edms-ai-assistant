@@ -15,11 +15,11 @@ async def general_agent_node(state: OrchestratorState) -> Dict[str, Any]:
     """
     Узел под-агента для общих вопросов.
     """
-    messages = state['messages']
+    messages = state["messages"]
 
     llm = get_chat_model()
 
-    context = state.get('context', {})
+    context = state.get("context", {})
     context_prompt = ""
     if context:
         context_prompt = f"Учитывай, что пользователь находится в контексте: {json.dumps(context, ensure_ascii=False)}"
@@ -34,7 +34,9 @@ async def general_agent_node(state: OrchestratorState) -> Dict[str, Any]:
 
     try:
         response = await llm.ainvoke(augmented_messages)
-        ai_message_content = response.content if hasattr(response, 'content') else str(response)
+        ai_message_content = (
+            response.content if hasattr(response, "content") else str(response)
+        )
 
         new_messages = messages + [response]
 
@@ -43,7 +45,7 @@ async def general_agent_node(state: OrchestratorState) -> Dict[str, Any]:
         return {
             "subagent_result": ai_message_content,
             "final_response": ai_message_content,
-            "messages": new_messages
+            "messages": new_messages,
         }
     except Exception as e:
         logger.error(f"Ошибка в general_agent_node: {e}")
@@ -52,7 +54,7 @@ async def general_agent_node(state: OrchestratorState) -> Dict[str, Any]:
         return {
             "subagent_result": f"general_agent_error: {e}",
             "final_response": error_msg,
-            "messages": messages + [AIMessage(content=error_msg)]
+            "messages": messages + [AIMessage(content=error_msg)],
         }
 
 
