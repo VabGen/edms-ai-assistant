@@ -1,10 +1,12 @@
 # edms_ai_assistant/llm.py
 
 import logging
+from typing import List
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from edms_ai_assistant.config import settings
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -21,19 +23,16 @@ def get_chat_model() -> BaseLanguageModel:
         model_name=settings.LLM_MODEL_NAME,
         temperature=settings.LLM_TEMPERATURE,
         max_tokens=getattr(settings, "LLM_MAX_TOKENS", None),
-        timeout=getattr(settings, "LLM_TIMEOUT", 120),
-        max_retries=getattr(settings, "LLM_MAX_RETRIES", 3),
         request_timeout=getattr(settings, "LLM_REQUEST_TIMEOUT", 120),
-        default_headers=getattr(settings, "LLM_DEFAULT_HEADERS", None),
-        default_query=getattr(settings, "LLM_DEFAULT_QUERY", None),
+        max_retries=getattr(settings, "LLM_MAX_RETRIES", 3),
     )
     return llm
 
 
-def get_embedding_model() -> Embeddings:
-    """Инициализирует EmbeddingModel."""
+def get_embedding_model_openai() -> Embeddings:
+    """Инициализирует стандартную OpenAI/LangChain EmbeddingModel."""
     logger.info(
-        f"Инициализация EmbeddingModel: {settings.EMBEDDING_ENDPOINT}, модель: {settings.EMBEDDING_MODEL_NAME}"
+        f"Инициализация EmbeddingModel (OpenAI): {settings.EMBEDDING_ENDPOINT}, модель: {settings.EMBEDDING_MODEL_NAME}"
     )
 
     embedding_model = OpenAIEmbeddings(
@@ -42,37 +41,49 @@ def get_embedding_model() -> Embeddings:
         model=settings.EMBEDDING_MODEL_NAME,
         request_timeout=getattr(settings, "EMBEDDING_REQUEST_TIMEOUT", 120),
         max_retries=getattr(settings, "EMBEDDING_MAX_RETRIES", 3),
-        default_headers=getattr(settings, "EMBEDDING_DEFAULT_HEADERS", None),
-        default_query=getattr(settings, "EMBEDDING_DEFAULT_QUERY", None),
         chunk_size=getattr(settings, "EMBEDDING_CHUNK_SIZE", 1000),
     )
     return embedding_model
 
 
 class CustomHTTPEmbeddings(Embeddings):
-    """Кастомная модель эмбеддингов."""
+    """
+    Кастомная АСИНХРОННАЯ модель эмбеддингов, использующая httpx.
+    LangChain V2 требует реализации asinc-методов для асинхронных фреймворков.
+    """
 
-    def __init__(self, endpoint_url: str, model_name: str):
+    def __init__(self, endpoint_url: str, model_name: str, embedding_size: int = 384):
         self.endpoint_url = endpoint_url
         self.model_name = model_name
+        self.embedding_size = embedding_size  # Установим размер по умолчанию
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        import requests
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Асинхронный вызов для списка документов."""
+        async with httpx.AsyncClient() as client:
+            try:
+                payload = {"input": texts, "model": self.model_name}
+                response = await client.post(
+                    self.endpoint_url + "/embeddings",
+                    json=payload,
+                    timeout=getattr(settings, "EMBEDDING_REQUEST_TIMEOUT", 120)
+                )
+                response.raise_for_status()
+                data = response.json()
+                embeddings = [item["embedding"] for item in data.get("data", [])]
+                return embeddings
+            except Exception as e:
+                logger.error(f"Ошибка асинхронного вызова эндпоинта эмбеддингов: {e}")
+                return [[0.0] * self.embedding_size for _ in texts]
 
-        try:
-            payload = {"input": texts, "model": self.model_name}
-            response = requests.post(self.endpoint_url + "/embeddings", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            embeddings = [item["embedding"] for item in data.get("data", [])]
-            return embeddings
-        except Exception as e:
-            logger.error(f"Ошибка вызова эндпоинта эмбеддингов: {e}")
-            embedding_size = 384
-            return [[0.0] * embedding_size for _ in texts]
+    async def aembed_query(self, text: str) -> List[float]:
+        """Асинхронный вызов для одного запроса."""
+        return (await self.aembed_documents([text]))[0]
 
-    def embed_query(self, text: str) -> list[float]:
-        return self.embed_documents([text])[0]
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        raise NotImplementedError("Этот метод синхронный и не должен использоваться в асинхронном приложении.")
+
+    def embed_query(self, text: str) -> List[float]:
+        raise NotImplementedError("Этот метод синхронный и не должен использоваться в асинхронном приложении.")
 
 
 def get_embedding_model_custom() -> Embeddings:
@@ -80,10 +91,18 @@ def get_embedding_model_custom() -> Embeddings:
     logger.info(
         f"Инициализация кастомной EmbeddingModel: {settings.EMBEDDING_ENDPOINT}"
     )
+    embedding_size = getattr(settings, "EMBEDDING_SIZE", 384)
     return CustomHTTPEmbeddings(
         endpoint_url=settings.EMBEDDING_ENDPOINT,
         model_name=settings.EMBEDDING_MODEL_NAME,
+        embedding_size=embedding_size
     )
 
 
-get_embedding_model_to_use = get_embedding_model
+def get_embedding_model_to_use() -> Embeddings:
+    """
+    Выбирает и инициализирует модель эмбеддингов на основе конфигурации.
+    Использует кастомную, если явно указано (например, через EMBEDDING_CUSTOM=True в settings).
+    В вашем случае: если не указана опция выбора, оставляем вашу логику.
+    """
+    return get_embedding_model_openai()

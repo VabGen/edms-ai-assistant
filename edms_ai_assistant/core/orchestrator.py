@@ -1,320 +1,261 @@
+# core/orchestrator.py
+
 import logging
-from typing import TypedDict, List, Dict, Any, Optional, Literal
-from pydantic import Field, create_model
+import json
+from typing import List, Dict, Any, Optional
+from typing_extensions import TypedDict
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from pydantic import BaseModel, Field
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.core.sub_agents import (
-    get_available_agent_names,
-    get_sub_agent_executor,
-    run_discovery_if_needed,
-)
+from edms_ai_assistant.tools import get_available_tools  # <-- Фабрика инструментов
 
 logger = logging.getLogger(__name__)
 
-try:
-    from edms_ai_assistant.constants import SUMMARY_TYPES
-except ImportError:
-    SUMMARY_TYPES = {}
 
-
-def _extract_summary_intent(query: str) -> bool:
-    """Определяет, запрашивает ли пользователь суммирование или содержание документа/вложения."""
-
-    query = query.lower()
-
-    # 📌 ДОБАВИТЬ: Условия для вложений
-    summary_keywords = [
-        "о чем",
-        "содержание",
-        "резюме",
-        "кратко",
-        "суммируй",
-        "вложение",
-        "файл"
-        "что внутри",
-    ]
-
-    # 📌 Проверяем наличие ключевых слов
-    if any(keyword in query for keyword in summary_keywords):
-        return True
-
-    return False
-
-
-def _extract_summary_type(text: str) -> Optional[str]:
-    """Извлекает тип резюме по номеру или названию."""
-    text_lower = text.lower().replace("-", "").replace(" ", "")
-    for key, details in SUMMARY_TYPES.items():
-        if text_lower == key or text_lower == details["name"].lower().replace(
-                "-", ""
-        ).replace(" ", ""):
-            return key
-    return None
-
-
-def _generate_hitl_prompt() -> str:
-    """Генерирует запрос на уточнение типа резюме."""
-    prompt = " Чтобы я мог правильно суммаризировать документ, уточните, пожалуйста, тип резюме, который вам нужен:\n\n"
-
-    for num, details in SUMMARY_TYPES.items():
-        prompt += f"{num}. **{details['name']}** — {details['description']}\n"
-
-    prompt += "\nПросто введите номер (1-7) или название типа."
-    return prompt
-
+# --- 1. State ---
 
 class OrchestratorState(TypedDict):
-    """
-    Определение состояния графа LangGraph (Orchestrator).
-    """
+    """Единое состояние для LangGraph."""
     messages: List[BaseMessage]
     user_token: str
-    file_path: Optional[str]
-    context: Optional[Dict[str, Any]]
-    subagent_result: Optional[str]
-    called_subagent: Optional[str]
-    final_response: Optional[str]
-    agent_history: List[str]
-    summary_type: Optional[str]
-    is_hitl_query: bool
+    tools_to_call: List[Dict[str, Any]]
+    tool_results_history: List[Dict[str, Any]]
 
 
-run_discovery_if_needed()
+# --- 2. Schemas for Planning (Обязательный JSON-формат для Planner'а) ---
 
-AVAILABLE_AGENTS = get_available_agent_names()
-logger.info(f"Доступные агенты для маршрутизации: {AVAILABLE_AGENTS}")
-
-if not AVAILABLE_AGENTS:
-    logger.warning(
-        "НЕ НАЙДЕНО ЗАРЕГИСТРИРОВАННЫХ АГЕНТОВ! Оркестратор будет использовать резервный вариант."
-    )
-
-AgentLiteral = (
-    Literal[tuple(AVAILABLE_AGENTS)] if AVAILABLE_AGENTS else Literal["general_agent"]
-)
-
-DynamicRouteDecision = create_model(
-    "DynamicRouteDecision",
-    next_agent=(
-        AgentLiteral,
-        Field(..., description="Имя агента, которому нужно передать задачу. Должно быть одним из: " + ', '.join(
-            AVAILABLE_AGENTS) + "."),
-    ),
-    reasoning=(str, Field(..., description="Почему выбран именно этот агент.")),
-)
+class ToolCallRequest(BaseModel):
+    tool_name: str = Field(...,
+                           description="Имя инструмента (например, 'doc_metadata.get_by_id', 'employee_tools.search').")
+    arguments: Dict[str, Any] = Field(...,
+                                      description="Аргументы для инструмента. Для передачи данных используй синтаксис JSONPath: '$STEPS[0].result.attachmentDocument[0].id'.")
 
 
-async def orchestrate_node(state: OrchestratorState) -> Dict[str, Any]:
-    """
-    Узел оркестратора.
-    Включает логику определения намерения, HITL-механизм и LLM-маршрутизацию.
-    """
+class Plan(BaseModel):
+    """Список шагов для выполнения."""
+    steps: List[ToolCallRequest] = Field(..., description="Список инструментов, которые нужно вызвать.")
+    reasoning: str = Field(..., description="Объяснение плана.")
+
+
+# --- 3. Вспомогательный класс для обработки JSONPath ---
+
+class ArgumentMapper:
+    """Простой класс для маппинга аргументов, используя 'STEPS[index].result.path'."""
+
+    @staticmethod
+    def map_arguments(args: Dict[str, Any], tool_results_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Заменяет заполнители JSONPath на фактические значения."""
+        mapped_args = {}
+        for key, value in args.items():
+            if isinstance(value, str) and value.startswith("$STEPS["):
+                try:
+                    # 1. Извлекаем индекс и путь
+                    start_index = value.find('[') + 1
+                    end_index = value.find(']')
+                    step_index_str = value[start_index:end_index]
+                    step_index = int(step_index_str)
+
+                    path_start = value.find('.result.') + len('.result.')
+                    path = value[path_start:]
+
+                    current_val = None
+                    if step_index < len(tool_results_history):
+                        result_str = tool_results_history[step_index].get('result')
+                        if result_str:
+                            result_data = json.loads(result_str)
+                            current_val = result_data
+                            path_parts = path.split('.')
+
+                            for part in path_parts:
+                                if current_val is None:
+                                    break
+                                # Обработка массива (attachmentDocument[0])
+                                if '[' in part and ']' in part:
+                                    arr_name, index_str = part.split('[')
+                                    try:
+                                        index = int(index_str[:-1])
+                                        current_val = current_val.get(arr_name, [])[index]
+                                    except (ValueError, IndexError):
+                                        raise KeyError(f"Неверный формат или индекс массива: {part}")
+                                else:
+                                    # Обработка обычного ключа
+                                    current_val = current_val.get(part)
+
+                    mapped_args[key] = current_val
+                    logger.debug(f"Маппинг: {value} -> {current_val}")
+
+                except Exception as e:
+                    logger.error(f"Сбой парсинга JSONPath в {value}: {type(e).__name__}: {e}")
+                    mapped_args[key] = None
+            else:
+                mapped_args[key] = value
+        return mapped_args
+
+
+# --- 4. Nodes ---
+
+async def planner_node(state: OrchestratorState):
+    """LLM анализирует запрос и составляет план вызовов API."""
     messages = state["messages"]
-    last_message_content = messages[-1].content if messages else ""
+    tool_results_history = state.get("tool_results_history", [])
 
-    if state.get("is_hitl_query", False):
-        summary_type = _extract_summary_type(last_message_content)
-        if summary_type:
-            logger.info(f"Получен HITL-ответ. Тип резюме: {summary_type}")
-            return {
-                "called_subagent": "documents_agent",
-                "summary_type": summary_type,
-                "is_hitl_query": False,
-                "agent_history": state.get("agent_history", []) + ["hitl_response"],
-            }
-        else:
-            hitl_prompt = f"Не удалось распознать тип резюме. Пожалуйста, введите номер или название типа из списка.{_generate_hitl_prompt()}"
-            return {
-                "final_response": hitl_prompt,
-                "messages": [AIMessage(content=hitl_prompt)],
-                "is_hitl_query": True,
-                "called_subagent": "end_node",
-            }
+    system_prompt = """
+        Ты - центральный Оркестратор системы Chancellor NEXT. Твоя задача - составить план действий.
 
-    if _extract_summary_intent(last_message_content):
-        summary_type = _extract_summary_type(last_message_content)
+        **ОСОБОЕ ВНИМАНИЕ К КОНТЕКСТУ UI:** Если ты видишь в истории 'КОНТЕКСТ UI' с ID сущности (чистый UUID), ИСПОЛЬЗУЙ ЧИСТЫЙ UUID ИЗ ЭТОГО КОНТЕКСТА для заполнения аргумента 'document_id' или 'employee_id'.
 
-        if not summary_type and "documents_agent" in AVAILABLE_AGENTS:
-            hitl_prompt = _generate_hitl_prompt()
-            logger.info("Активирован HITL-запрос для уточнения типа резюме.")
-            return {
-                "final_response": hitl_prompt,
-                "messages": [AIMessage(content=hitl_prompt)],
-                "is_hitl_query": True,
-                "called_subagent": "end_node",
-                "agent_history": state.get("agent_history", []) + ["hitl_query"]
-            }
+        **ЦЕПОЧКА ШАГОВ (JSONPath):** Если результат предыдущего шага (ToolMessage) содержит данные, необходимые для текущего шага, ИСПОЛЬЗУЙ СЛЕДУЮЩИЙ СИНТАКСИС ДЛЯ МЭППИНГА АРГУМЕНТОВ:
+        Например, чтобы получить ID вложения: 'attachment_id': '$STEPS[0].result.attachmentDocument[0].id'.
 
-        if summary_type:
-            state["summary_type"] = summary_type
+        **☝️ ПРАВИЛО ПОСЛЕДОВАТЕЛЬНОСТИ:** При запросе сводки вложения ('о чем документ?') ВСЕГДА планируй два шага:
+        1. doc_metadata.get_by_id (чтобы получить ID вложения).
+        2. doc_attachment.summarize (используя данные из Шага 1 через JSONPath $STEPS[0].result...).
 
-    context = state.get("context", {})
+        **⚠️ ПРАВИЛО СВОДКИ (Summarize):** Для вызова **doc_attachment.summarize** требуются **'document_id'** (из КОНТЕКСТА UI) и **'attachment_id'** с **'file_name'** (из результата Шага 1). Используй синтаксис JSONPath для получения 'attachment_id' и 'file_name'.
 
-    last_message = (
-        messages[-1] if messages else HumanMessage(content="Пустое сообщение")
-    )
-    enhanced_message_content = f"Пользователь сказал: '{last_message.content}'"
+        Также, если это контракт, передай туда ключевые поля: **'contract_sum', 'reg_date' и 'duration_end'**, используя JSONPath из Шага 1.
 
-    document_id_from_context = context.get("document_id")
-    current_page = context.get("current_page", "unknown")
-    file_path = state.get("file_path")
+        Доступные инструменты:
+        1. **doc_metadata.get_by_id(...):** Получить все детальные метаданные (автор, статус, суммы, даты) о документе по его ID (UUID).
+        2. **doc_attachment.summarize(...):** Скачать и прочитать содержимое вложения, а затем создать его сводку.
+        3. **employee_tools.search(...):** Используется для поиска списка сотрудников по частичному совпадению (фамилия, имя, должность).
+        4. **employee_tools.get_by_id(...):** Используется для получения полных метаданных сотрудника по его UUID.
 
-    if document_id_from_context:
-        enhanced_message_content += f"\nКонтекст: Пользователь находится на странице документа с ID: {document_id_from_context}."
-    elif current_page != "unknown":
-        enhanced_message_content += (
-            f"\nКонтекст: Пользователь находится на странице: {current_page}."
-        )
+        Проанализируй историю. Если нужно получить информацию, создай список вызовов. Если информации достаточно для ответа пользователю, верни пустой список шагов.
+        """
 
-    if file_path:
-        enhanced_message_content += f"\nВложение: Пользователь загрузил файл. Приоритет отдается агентам, способным работать с файлами."
+    llm = get_chat_model().with_structured_output(Plan)
 
-    if state.get('summary_type'):
-        enhanced_message_content += f"\nИНСТРУКЦИЯ: Пользователь запросил резюме типа: {SUMMARY_TYPES.get(state['summary_type'], {}).get('name', 'Multi-sentence')}."
+    # 1. Вызов LLM
+    llm_output = await llm.ainvoke([HumanMessage(content=system_prompt)] + messages)
 
-    llm = get_chat_model()
-    orchestrator_llm = llm.with_structured_output(DynamicRouteDecision)
-
-    system_prompt = f"""Ты - маршрутизатор AI-ассистента для СЭД (edms).
-    Твоя задача - строго определить, какой из специализированных под-агентов должен обработать запрос пользователя.
-    Доступные под-агенты: {', '.join(AVAILABLE_AGENTS)}.
-    Проанализируй следующий запрос пользователя и контекст. Ответь строго в формате Pydantic-модели DynamicRouteDecision."""
-
-    llm_input_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": enhanced_message_content},
-    ]
-
+    # 2. Обработка результата
     try:
-        decision: DynamicRouteDecision = await orchestrator_llm.ainvoke(
-            llm_input_messages
-        )
-        logger.info(
-            f"Оркестратор выбрал под-агента: {decision.next_agent}. Причина: {decision.reasoning}"
-        )
-
-        return {
-            "called_subagent": decision.next_agent,
-            "agent_history": state.get("agent_history", []) + [decision.next_agent],
-        }
+        # 🚨 ИСПРАВЛЕНИЕ: Проверяем, является ли результат уже объектом Plan
+        if isinstance(llm_output, Plan):
+            # Успех: LangChain вернул Pydantic объект напрямую
+            response = llm_output
+        elif hasattr(llm_output, 'content') and llm_output.content:
+            # Резервный сценарий: если LLM вернул BaseMessage с JSON строкой внутри
+            response_data = json.loads(llm_output.content)
+            response = Plan(**response_data)
+        else:
+            # Неизвестный случай, возможно, LLM вернул сырую JSON-строку
+            response_data = json.loads(llm_output)
+            response = Plan(**response_data)
 
     except Exception as e:
-        logger.error(f"Ошибка в orchestrate_node (LLM/Structured Output): {e}")
-        return {
-            "called_subagent": "general_agent",  # Безопасный fallback
-            "subagent_result": f"Ошибка оркестратора: {e}",
-            "final_response": "Извините, произошла внутренняя ошибка при определении действия.",
-            "agent_history": state.get("agent_history", [])
-                             + ["orchestrator_error"],
-        }
+        # Отлавливаем любые ошибки, включая JSONDecodeError и unexpected type errors
+        logger.error(f"Ошибка парсинга плана LLM: {type(e).__name__}: {e}")
+        return {"tools_to_call": [], "tool_results_history": tool_results_history}
+
+    logger.info(f"PLANNER: Запланировано {len(response.steps)} шагов: {response.reasoning}")
+
+    return {"tools_to_call": [step.dict() for step in response.steps], "tool_results_history": tool_results_history}
 
 
-def route_logic(state: OrchestratorState) -> str:
-    """
-    Определяет, в какой узел графа перейти после orchestrate_node.
-    """
-    agent_to_call = state.get("called_subagent", "general_agent")
+async def executor_node(state: OrchestratorState):
+    """Выполняет запланированные инструменты."""
+    tools_to_call = state.get("tools_to_call", [])
+    tool_results_history = state.get("tool_results_history", [])
 
-    if agent_to_call == "end_node":
-        return "end_node"
+    llm_summarizer = get_chat_model()
 
-    if agent_to_call in AVAILABLE_AGENTS:
-        return agent_to_call
+    # 🚨 Инициализация и маппинг методов
+    tools_by_class = get_available_tools(state["user_token"], llm_summarizer)
+    tools_map = {}
+    for class_name, tool_instance in tools_by_class.items():
+        for attr_name in dir(tool_instance):
+            attr = getattr(tool_instance, attr_name)
+            if callable(attr) and not attr_name.startswith('_') and attr_name not in ['__init__']:
+                tools_map[f"{class_name}.{attr_name}"] = attr
 
-    logger.warning(f"Неизвестный агент '{agent_to_call}', используем general_agent")
-    return "general_agent"
+    new_messages = []
 
+    for tool_index, tool_request in enumerate(tools_to_call):
+        full_tool_name = tool_request["tool_name"]
+        raw_args = tool_request["arguments"]
 
-# ... (Весь код до функции make_agent_node остается без изменений) ...
+        args = ArgumentMapper.map_arguments(raw_args, tool_results_history)
+        tool_function = tools_map.get(full_tool_name)
 
-def make_agent_node(agent_name: str):
-    """
-    Создает функцию-узел для конкретного под-агента.
-    """
+        if tool_function:
+            try:
+                # 🚨 Вызов метода инструмента
+                result = await tool_function(**args)
 
-    async def agent_node(state: OrchestratorState) -> Dict[str, Any]:
-        logger.info(f"Запуск под-агента: {agent_name}")
+                new_tool_message = ToolMessage(
+                    content=result,
+                    tool_call_id=f"call_{full_tool_name}_{tool_index}",
+                    name=full_tool_name
+                )
+                new_messages.append(new_tool_message)
+                tool_results_history.append({"name": full_tool_name, "result": result})
 
-        executor = get_sub_agent_executor(agent_name)
-        if not executor:
-            error_msg = f"Ошибка конфигурации: Агент {agent_name} не найден или не скомпилирован."
-            logger.error(error_msg)
-            return {
-                "final_response": error_msg,
-                "messages": [AIMessage(content=error_msg)],
-                "subagent_result": error_msg,
-            }
+            except Exception as e:
+                error_msg = f"Error during {full_tool_name} call: {type(e).__name__}: {str(e)}"
+                logger.error(error_msg)
+                new_messages.append(ToolMessage(
+                    content=json.dumps({"error": error_msg}),
+                    tool_call_id=f"err_{full_tool_name}",
+                    name=full_tool_name
+                ))
+        else:
+            logger.warning(f"EXECUTOR: Tool '{full_tool_name}' not found in map.")
 
-        # 💡 Передаем текущее состояние целиком
-        sub_agent_inputs = state
-
-        try:
-            agent_output = await executor.ainvoke(sub_agent_inputs)
-
-            final_response = agent_output.get(
-                "final_response", "Под-агент завершил работу."
-            )
-
-            # 📌 ИЗМЕНЕНИЕ: Сброс summary_type после выполнения документального агента
-            # Это предотвратит его использование в следующих, не связанных запросах
-            if agent_name == 'documents_agent' and state.get('summary_type'):
-                logger.debug(f"Сброс summary_type: {state['summary_type']} после documents_agent.")
-                state['summary_type'] = None # Сброс в текущем state
-
-            return {
-                # 📌 ИЗМЕНЕНИЕ: Возвращаем обновленный state
-                "messages": agent_output.get(
-                    "messages", [AIMessage(content=final_response)]
-                ),
-                "final_response": final_response,
-                "subagent_result": final_response,
-                "called_subagent": agent_name,
-                # 💡 Явно возвращаем None для summary_type, если он был сброшен
-                "summary_type": state.get('summary_type'),
-            }
-
-        except Exception as e:
-            logger.error(f"Ошибка при выполнении {agent_name}: {e}", exc_info=True)
-            error_msg = f"Извините, возникла ошибка при работе с {agent_name.replace('_', ' ')}."
-            return {
-                "final_response": error_msg,
-                "messages": [AIMessage(content=error_msg)],
-                "subagent_result": f"Ошибка под-агента {agent_name}: {e}",
-            }
-
-    return agent_node
+    all_messages = state["messages"] + new_messages
+    return {"messages": all_messages, "tools_to_call": [], "tool_results_history": tool_results_history}
 
 
-def create_orchestrator_graph():
-    """
-    Создаёт и компилирует граф оркестратора с динамическими узлами и условными переходами.
-    """
-    workflow = StateGraph(OrchestratorState)
-    workflow.add_node("orchestrate", orchestrate_node)
+async def synthesizer_node(state: OrchestratorState):
+    """Генерирует финальный ответ."""
+    llm = get_chat_model()
 
-    conditional_map = {}
-    for agent_name in AVAILABLE_AGENTS:
-        workflow.add_node(agent_name, make_agent_node(agent_name))
-        conditional_map[agent_name] = agent_name
-        workflow.add_edge(agent_name, END)
-
-    if not AVAILABLE_AGENTS:
-        workflow.add_node("general_agent", make_agent_node("general_agent"))
-        conditional_map["general_agent"] = "general_agent"
-        workflow.add_edge("general_agent", END)
-
-    workflow.add_node("end_node", lambda state: state)
-    conditional_map["end_node"] = "end_node"
-    workflow.add_edge("end_node", END)
-
-    workflow.set_entry_point("orchestrate")
-
-    workflow.add_conditional_edges(
-        "orchestrate",
-        route_logic,
-        conditional_map
+    system_msg_content = (
+        "Ты - ассистент Chancellor NEXT. Используй информацию из ToolMessages (результаты API), "
+        "чтобы ответить на вопрос пользователя. "
+        "**ОТВЕЧАЙ СТРОГО И ТОЛЬКО ПО СУТИ ЗАПРОСА**. Не добавляй лишнюю информацию, если она не была явно запрошена. "
+        "Не показывай JSON. Отвечай вежливо и по сути. "
+        "**Если в сводке документа есть незаполненные поля или плейсхолдеры, явно укажи, что это, вероятно, шаблон, и приведи всю доступную информацию.**"
+        "Если данных нет или они нерелевантны, скажи об этом."
     )
 
-    app = workflow.compile()
-    return app
+    messages_for_llm = [HumanMessage(content=system_msg_content)] + state["messages"]
+
+    response_message = await llm.ainvoke(messages_for_llm)
+
+    return {"messages": [response_message]}
+
+
+# --- 5. Graph Construction ---
+
+def router_logic(state: OrchestratorState):
+    """Определяет следующий шаг."""
+    if state.get("tools_to_call"):
+        return "executor_node"
+    return "synthesizer_node"
+
+
+def create_edms_graph():
+    """Создает и компилирует LangGraph."""
+    workflow = StateGraph(OrchestratorState)
+
+    workflow.add_node("planner_node", planner_node)
+    workflow.add_node("executor_node", executor_node)
+    workflow.add_node("synthesizer_node", synthesizer_node)
+
+    workflow.set_entry_point("planner_node")
+
+    # После планировщика: есть шаги -> executor, нет шагов -> synthesis
+    workflow.add_conditional_edges(
+        "planner_node",
+        router_logic,
+        {"executor_node": "executor_node", "synthesizer_node": "synthesizer_node"}
+    )
+
+    # После экзекьютора -> Синтезатор (мы не планируем многошаговых вызовов инструментов)
+    workflow.add_edge("executor_node", "synthesizer_node")
+    workflow.add_edge("synthesizer_node", END)
+
+    return workflow.compile()
