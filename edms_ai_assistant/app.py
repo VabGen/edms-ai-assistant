@@ -174,6 +174,8 @@ async def chat_with_assistant(
             final_state = output
 
         source_state = final_state
+        logger.info(f"orchestrator_app.astream: {final_state}")
+
 
         if final_state.get("called_subagent") and isinstance(
             final_state.get(final_state["called_subagent"]), dict

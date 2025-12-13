@@ -165,7 +165,7 @@ class SummarizeAttachmentToolWrapped(BaseTool):
             "service_token": self.user_token,
             "summary_type": summary_type  # Передача summary_type
         }
-
+        logger.info(f"Вызов summarize_attachment_tool с tool_input: {tool_input}")
         return await summarize_attachment_tool.ainvoke(tool_input)
 
     async def ainvoke(self, input: Dict[str, Any], **kwargs) -> str:
