@@ -4,6 +4,33 @@ from typing_extensions import TypedDict
 from langchain_core.messages import BaseMessage
 
 
+class UserContext(BaseModel):
+    """Модель для дополнительного контекста пользователя."""
+    role: Optional[str] = Field(None, description="Роль пользователя в системе.")
+    permissions: List[str] = Field(default_factory=list, description="Права доступа пользователя.")
+
+
+class UserInput(BaseModel):
+    """Входные данные от пользователя через API."""
+    message: str = Field(..., description="Основное текстовое сообщение от пользователя.")
+    user_token: str = Field(..., description="JWT токен пользователя для аутентификации и доступа к EDMS.")
+    context_ui_id: Optional[str] = Field(None, description="ID документа или объекта, если запрос контекстный.")
+    context: Optional[UserContext] = Field(None, description="Дополнительный контекст о пользователе.")
+    file_path: Optional[str] = Field(None,
+                                     description="Временный путь к загруженному файлу, полученный из /upload-file.")
+
+
+class FileUploadResponse(BaseModel):
+    """Ответ после успешной загрузки файла."""
+    file_path: str = Field(..., description="Временный путь, который нужно передать в /chat.")
+    file_name: str = Field(..., description="Имя загруженного файла.")
+
+
+class AssistantResponse(BaseModel):
+    """Ответ, отправляемый пользователю."""
+    response: str = Field(..., description="Финальный ответ ассистента.")
+
+
 # ----------------------------------------------------------------------
 # 1. МОДЕЛИ ДЛЯ ОРКЕСТРАЦИИ (Orchestration Models)
 # ----------------------------------------------------------------------
@@ -27,24 +54,20 @@ class Plan(BaseModel):
 
 
 # ----------------------------------------------------------------------
-# 2. МОДЕЛЬ СОСТОЯНИЯ (State Model) - Ядро LangGraph
+# 2. МОДЕЛЬ СОСТОЯНИЯ (State Model) - Ядро LangGraph (ИСПРАВЛЕНО)
 # ----------------------------------------------------------------------
-
 class OrchestratorState(TypedDict):
     """
     Словарь состояния, используемый для передачи данных между узлами LangGraph.
-
-    messages: История диалога, включая пользовательские запросы и ответы LLM.
-    tools_to_call: Список запланированных вызовов Tools.
-    tool_results_history: Результаты выполненных вызовов Tools.
-    context_ui_id: ID активной сущности (UUID) из интерфейса.
-    user_context: Дополнительный контекст, инжектированный пользователем или системой.
+    ...
     """
     messages: List[BaseMessage]
     tools_to_call: List[Dict[str, Any]]
     tool_results_history: List[Dict[str, Any]]
     context_ui_id: Optional[str]
-    user_context: Optional[Dict[str, Any]] # НОВОЕ ПОЛЕ
+    user_context: Optional[Dict[str, Any]]
+    user_token: Optional[str]
+    file_path: Optional[str]
 
 
 # ----------------------------------------------------------------------

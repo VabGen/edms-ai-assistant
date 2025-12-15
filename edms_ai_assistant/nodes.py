@@ -108,12 +108,13 @@ async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
 
     # ----------------------------------------------------------------
     # 2. STANDARD LLM PLANNING (Для всех остальных запросов)
-    # ... (логика планировщика остается без изменений)
-
-    # ... (логика планировщика остается без изменений)
+    # ----------------------------------------------------------------
     user_context = state.get("user_context")
     user_context_str = json.dumps(user_context,
                                   ensure_ascii=False) if user_context else "Контекст пользователя не предоставлен."
+
+    context_ui_id = state.get("context_ui_id")
+    context_ui_id_str = f"ID контекстного документа: {context_ui_id}" if context_ui_id else ""
 
     system_prompt_content = f"""
     <ROLE>
@@ -131,6 +132,7 @@ async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
 
     <GLOBAL_CONTEXT>
     Дополнительный контекст пользователя: {user_context_str}
+    {context_ui_id_str}
     </GLOBAL_CONTEXT>
 
     <FINAL_INSTRUCTION>
@@ -165,15 +167,24 @@ async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------
-# 2. УЗЕЛ ИСПОЛНИТЕЛЯ (TOOL EXECUTOR) - без изменений
-# ... (код tool_executor_node без изменений)
-def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
+# 2. УЗЕЛ ИСПОЛНИТЕЛЯ (TOOL EXECUTOR)
+# ----------------------------------------------------------------
+async def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
     """
     Исполняет запланированные вызовы инструментов.
     Устойчив к ошибкам отсутствия инструмента и неверным аргументам.
     """
     tools_to_call = state.get("tools_to_call", [])
     executed_history = state.get("tool_results_history", [])
+
+    user_token = state.get("user_token")
+    logger.debug(
+        f"EXECUTOR: Токен в состоянии: {'ПРИСУТСТВУЕТ' if user_token and len(user_token) > 5 else 'ОТСУТСТВУЕТ'}")
+    if not user_token:
+        error_msg = "User token отсутствует в состоянии. Инструменты не могут быть выполнены."
+        logger.error(f"EXECUTOR: CRITICAL ERROR: {error_msg}")
+        return {"tool_results_history": executed_history, "tools_to_call": [],
+                "messages": state["messages"] + [AIMessage(content=error_msg)]}
 
     # Обрабатываем только первый инструмент в очереди
     if not tools_to_call:
@@ -190,35 +201,55 @@ def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
     resolved_args = args
 
     if tool is None:
-        # 1. Инструмент не найден (Галлюцинация LLM)
         error_message = f"Инструмент '{tool_name}' не найден в списке доступных инструментов."
         logger.error(f"EXECUTOR: Ошибка при вызове {tool_name}: {error_message}")
         tool_result = {"error": error_message}
 
     else:
         try:
-            # 2. Разрешение JSONPath в аргументах
             resolved_args = {k: _execute_jsonpath(v, executed_history) for k, v in args.items()}
 
-            # 2a. КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Нормализация аргументов (ХАК для слабой LLM)
             if tool_name == "employee_tools_search":
-                # LLM постоянно генерирует 'query' или 'search_term', а не 'search_query'
+
                 if 'query' in resolved_args:
+
                     resolved_args['search_query'] = resolved_args.pop('query')
+
                 elif 'search_term' in resolved_args:
+
                     resolved_args['search_query'] = resolved_args.pop('search_term')
 
-            # 3. Исполнение инструмента
-            logger.info(f"EXECUTOR: Исполнение: {tool_name} с аргументами: {resolved_args}")
-            tool_result = tool.invoke(resolved_args)
+            if tool_name in ["doc_metadata_get_by_id", "doc_attachment_get_content"]:
+
+                if 'doc_id' in resolved_args:
+                    resolved_args['document_id'] = resolved_args.pop('doc_id')
+
+            tool_kwargs = resolved_args.copy()
+            tool_kwargs['token'] = user_token
+            logger.info(f"EXECUTOR: Исполнение: {tool_name} с аргументами: {resolved_args} (токен передан)")
+
+            tool_func = None
+
+            # 2. **ФИНАЛЬНЫЙ ОБХОД:** Используем _arun и добавляем обязательный config={}
+            if hasattr(tool, '_arun') and callable(tool._arun):
+                tool_func = tool._arun
+                # Добавляем обязательный аргумент 'config', который требовал StructuredTool._arun()
+                tool_kwargs['config'] = {}
+            elif hasattr(tool, 'func') and callable(tool.func):
+                # Это было бы чистым способом, но в вашей версии func не доступен/не работает
+                tool_func = tool.func
+            else:
+                raise AttributeError(
+                    f"Инструмент '{tool_name}' не имеет доступной исполняемой функции (ни _arun, ни func).")
+
+            # 3. Асинхронный вызов
+            tool_result = await tool_func(**tool_kwargs)
 
         except Exception as e:
-            # 4. Ошибка при исполнении
             error_message = f"Ошибка выполнения: {type(e).__name__}: {e}"
             logger.error(f"EXECUTOR: Ошибка при вызове {tool_name}: {error_message}")
             tool_result = {"error": error_message}
 
-    # Добавляем результат (или ошибку) в историю исполнения
     executed_history.append({
         "tool_name": tool_name,
         "arguments": args,
@@ -226,7 +257,6 @@ def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
         "result": tool_result
     })
 
-    # ГАРАНТИРУЕМ ВОЗВРАТ DICT
     return {
         "tool_results_history": executed_history,
         "tools_to_call": tools_to_call[1:]
@@ -234,8 +264,8 @@ def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------
-# 3. УЗЕЛ ПРОВЕРКИ РЕЗУЛЬТАТОВ (CHECKER NODE) - без изменений
-# ... (код tool_result_checker_node без изменений)
+# 3. УЗЕЛ ПРОВЕРКИ РЕЗУЛЬТАТОВ (CHECKER NODE)
+# ----------------------------------------------------------------
 def tool_result_checker_node(state: OrchestratorState) -> Dict[str, Any]:
     """
     Определяет, что делать дальше: продолжить планирование, перейти к ответу или
@@ -330,6 +360,7 @@ async def responder_node(state: OrchestratorState) -> Dict[str, Any]:
     1. Если в результатах есть ошибки, извинись и объясни причину ошибки (например, "Инструмент не найден" или "Не удалось найти сотрудника").
     2. Если результатов несколько (например, найдено 2 сотрудника), попроси пользователя уточнить выбор.
     3. Если все успешно, дай прямой ответ на вопрос, используя информацию из <TOOL_RESULTS>.
+    4. Если <TOOL_RESULTS> пуст, а запрос пользователя является общим (приветствие, вопрос о погоде), ответь вежливо и спроси, чем ты можешь помочь в рамках СЭД.
     </INSTRUCTIONS>
     """
 
