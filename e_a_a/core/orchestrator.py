@@ -4,7 +4,7 @@ from pydantic import Field, create_model
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.core.sub_agents import (
+from e_a_a.core.sub_agents import (
     get_available_agent_names,
     get_sub_agent_executor,
     run_discovery_if_needed,

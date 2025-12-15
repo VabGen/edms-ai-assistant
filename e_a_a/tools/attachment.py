@@ -14,7 +14,7 @@ except ImportError:
     def extract_text_from_bytes(file_bytes: bytes, filename: str) -> str:
         return f"Mock text for summary from {filename}."
 
-from edms_ai_assistant.infrastructure.api_clients.attachment_client import (
+from e_a_a.infrastructure.api_clients.attachment_client import (
     AttachmentClient,
 )
 from edms_ai_assistant.llm import get_chat_model

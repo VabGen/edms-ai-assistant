@@ -23,11 +23,9 @@ try:
     test_message = "Привет! кто ты?"
     print(f"\nОтправка сообщения: '{test_message}'")
 
-    # Вызов LLM
     print("Выполняется вызов LLM...")
     response = llm.invoke(test_message)
 
-    # ответ
     print(f"\nПолучен ответ от LLM:")
     print(f"Тип ответа: {type(response)}")
     print(f"Содержимое: {response}")

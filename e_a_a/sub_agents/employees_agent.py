@@ -1,13 +1,13 @@
 # edms_ai_assistant/sub_agents/employees_agent.py
 
 import logging
-from typing import TypedDict, List, Dict, Any, Optional
+from typing import Dict, Any
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from edms_ai_assistant.core.sub_agents import register_agent
-from edms_ai_assistant.core.orchestrator import OrchestratorState
+from langchain_core.messages import AIMessage
+from e_a_a.core import register_agent
+from e_a_a.core import OrchestratorState
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.tools.employee import (
+from e_a_a.tools.employee import (
     find_responsible_tool,
     get_employee_by_id_tool,
 )

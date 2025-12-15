@@ -49,41 +49,41 @@ def get_embedding_model() -> Embeddings:
     return embedding_model
 
 
-class CustomHTTPEmbeddings(Embeddings):
-    """Кастомная модель эмбеддингов."""
-
-    def __init__(self, endpoint_url: str, model_name: str):
-        self.endpoint_url = endpoint_url
-        self.model_name = model_name
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        import requests
-
-        try:
-            payload = {"input": texts, "model": self.model_name}
-            response = requests.post(self.endpoint_url + "/embeddings", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            embeddings = [item["embedding"] for item in data.get("data", [])]
-            return embeddings
-        except Exception as e:
-            logger.error(f"Ошибка вызова эндпоинта эмбеддингов: {e}")
-            embedding_size = 384
-            return [[0.0] * embedding_size for _ in texts]
-
-    def embed_query(self, text: str) -> list[float]:
-        return self.embed_documents([text])[0]
-
-
-def get_embedding_model_custom() -> Embeddings:
-    """Инициализирует кастомную EmbeddingModel."""
-    logger.info(
-        f"Инициализация кастомной EmbeddingModel: {settings.EMBEDDING_ENDPOINT}"
-    )
-    return CustomHTTPEmbeddings(
-        endpoint_url=settings.EMBEDDING_ENDPOINT,
-        model_name=settings.EMBEDDING_MODEL_NAME,
-    )
+# class CustomHTTPEmbeddings(Embeddings):
+#     """Кастомная модель эмбеддингов."""
+#
+#     def __init__(self, endpoint_url: str, model_name: str):
+#         self.endpoint_url = endpoint_url
+#         self.model_name = model_name
+#
+#     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+#         import requests
+#
+#         try:
+#             payload = {"input": texts, "model": self.model_name}
+#             response = requests.post(self.endpoint_url + "/embeddings", json=payload)
+#             response.raise_for_status()
+#             data = response.json()
+#             embeddings = [item["embedding"] for item in data.get("data", [])]
+#             return embeddings
+#         except Exception as e:
+#             logger.error(f"Ошибка вызова эндпоинта эмбеддингов: {e}")
+#             embedding_size = 384
+#             return [[0.0] * embedding_size for _ in texts]
+#
+#     def embed_query(self, text: str) -> list[float]:
+#         return self.embed_documents([text])[0]
+#
+#
+# def get_embedding_model_custom() -> Embeddings:
+#     """Инициализирует кастомную EmbeddingModel."""
+#     logger.info(
+#         f"Инициализация кастомной EmbeddingModel: {settings.EMBEDDING_ENDPOINT}"
+#     )
+#     return CustomHTTPEmbeddings(
+#         endpoint_url=settings.EMBEDDING_ENDPOINT,
+#         model_name=settings.EMBEDDING_MODEL_NAME,
+#     )
 
 
 get_embedding_model_to_use = get_embedding_model

@@ -3,9 +3,9 @@
 import logging
 from typing import List, Optional
 from uuid import UUID
-from edms_ai_assistant.infrastructure.api_clients.employee_client import EmployeeClient
-from edms_ai_assistant.infrastructure.api_clients.document_client import DocumentClient
-from edms_ai_assistant.infrastructure.api_clients.attachment_client import (
+from e_a_a.infrastructure.api_clients.employee_client import EmployeeClient
+from e_a_a.infrastructure.api_clients.document_client import DocumentClient
+from e_a_a.infrastructure.api_clients.attachment_client import (
     AttachmentClient,
 )
 from edms_ai_assistant.generated.resources_openapi import (

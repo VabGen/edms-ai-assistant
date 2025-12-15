@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 import base64
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.core.orchestrator import create_orchestrator_graph
+from edms_ai_assistant.core import create_orchestrator_graph
 from edms_ai_assistant.models.orchestrator_models import UserInput, AssistantResponse
 from langchain_core.messages import HumanMessage, BaseMessage
 

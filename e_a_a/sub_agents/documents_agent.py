@@ -4,15 +4,15 @@ import logging
 import json
 from langchain_core.tools import BaseTool
 from pydantic import Field, BaseModel
-from typing import Dict, Any, Optional, List
+from typing import Optional
 from langgraph.graph import StateGraph, END
 from typing import Dict, Any
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
-from edms_ai_assistant.core.sub_agents import register_agent
-from edms_ai_assistant.core.orchestrator import OrchestratorState, _extract_summary_intent
+from e_a_a.core import register_agent
+from e_a_a.core import OrchestratorState, _extract_summary_intent
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.tools.document import get_document_tool, search_documents_tool
-from edms_ai_assistant.tools.attachment import summarize_attachment_tool, extract_and_summarize_file_async_tool
+from e_a_a.tools.document import get_document_tool, search_documents_tool
+from e_a_a.tools.attachment import summarize_attachment_tool, extract_and_summarize_file_async_tool
 from edms_ai_assistant.utils.format_utils import format_document_response
 
 try:

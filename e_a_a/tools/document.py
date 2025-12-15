@@ -4,7 +4,7 @@ from typing import Dict, Any
 import json
 import logging
 from uuid import UUID
-from edms_ai_assistant.infrastructure.api_clients.document_client import DocumentClient
+from e_a_a.infrastructure.api_clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 

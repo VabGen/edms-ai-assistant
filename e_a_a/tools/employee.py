@@ -4,7 +4,7 @@ from langchain_core.tools import tool
 import json
 import logging
 from uuid import UUID
-from edms_ai_assistant.infrastructure.api_clients.employee_client import EmployeeClient
+from e_a_a.infrastructure.api_clients.employee_client import EmployeeClient
 
 logger = logging.getLogger(__name__)
 

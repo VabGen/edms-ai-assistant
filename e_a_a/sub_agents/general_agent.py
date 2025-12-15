@@ -5,8 +5,8 @@ from typing import Dict, Any
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.core.sub_agents import register_agent
-from edms_ai_assistant.core.orchestrator import OrchestratorState
+from e_a_a.core import register_agent
+from e_a_a.core import OrchestratorState
 
 logger = logging.getLogger(__name__)
 
