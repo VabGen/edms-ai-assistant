@@ -10,6 +10,7 @@ import logging
 from .clients.employee_client import EmployeeClient
 from .clients.document_client import DocumentClient
 from .clients.attachment_client import AttachmentClient
+from .constants import SUMMARY_TYPES
 
 from .models import (
     GetDocumentMetadataArgs,
@@ -85,18 +86,40 @@ async def doc_attachment_get_content(document_id: str, attachment_id: str, **kwa
 
 @tool(args_schema=SummarizeContentArgs)
 async def doc_content_summarize(document_id: str, content_key: str, file_name: str,
+                                summary_type_id: str = "5", query: Optional[str] = None,
                                 metadata_context: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
     """
-    Создает структурированную или текстовую сводку по контенту (Остается моком).
+    Создает структурированную или текстовую сводку по контенту вложенного файла,
+    используя указанный тип сводки (Abstract, TL;DR, Structured и т.д.).
     """
-    # Этот мок не использует токен, но должен принимать его для единообразия.
-    logger.info(f"TOOL: Запрос сводки для ключа: {content_key}")
+    logger.info(f"TOOL: Запрос сводки для ключа: {content_key}, Тип: {summary_type_id}")
 
-    context_str = json.dumps(metadata_context, ensure_ascii=False) if metadata_context else "Контекст не предоставлен."
+    # Получаем описание выбранного типа
+    summary_info = SUMMARY_TYPES.get(summary_type_id, SUMMARY_TYPES["5"])
+    type_name = summary_info["name"]
+    type_description = summary_info["description"]
 
-    summary = f"**Автоматическая сводка:** Анализ контента '{file_name}' (Ключ: {content_key}) завершен. Основные метаданные: {metadata_context.get('title', 'N/A')}. Целевой вывод: контент документа соответствует ожиданиям."
+    # Имитация генерации сводки в зависимости от типа
+    if summary_type_id == "6" and query:
+        mock_summary = f"**Сводка по запросу ('{query}'):** Контент файла '{file_name}' подтверждает, что..."
+    elif summary_type_id == "7":
+        mock_summary = (
+            "**Структурированная сводка**\n"
+            "1. Цель: Регулирование отношений между сторонами.\n"
+            "2. Метод/Стороны: Сторона А (Поставщик) и Сторона Б (Заказчик).\n"
+            "3. Результаты/Условия: Общая сумма - 10 000 руб. Условия оплаты - 50% предоплата.\n"
+            "4. Выводы/Сроки: Срок исполнения - 30 рабочих дней."
+        )
+    elif summary_type_id == "3":
+        mock_summary = f"**TL;DR:** Документ является исходящим письмом о важных условиях договора. ({type_description})"
+    else:
+        mock_summary = (
+            f"**Автоматическая сводка ({type_name}):** Анализ контента '{file_name}' завершен. "
+            f"Это {type_description}. Документ создан {metadata_context.get('createDate', 'N/A')}. "
+            "Основное содержание касается регулирования условий поставки."
+        )
 
-    return {"summary": summary.strip()}
+    return {"summary": mock_summary.strip()}
 
 
 @tool(args_schema=SearchEmployeeArgs)

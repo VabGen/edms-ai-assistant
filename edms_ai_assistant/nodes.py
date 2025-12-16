@@ -70,41 +70,41 @@ async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
     # ----------------------------------------------------------------
     # 1. PLAN OVERRIDE (Для запроса сводки с ID - Исправление Теста 1)
     # ----------------------------------------------------------------
-    if (state.get("context_ui_id")
-            and messages[-1].content.lower().strip().startswith("сделай сводку")):
-        logger.info("PLANNER: Обнаружен запрос сводки с ID. Принудительное выполнение 3-шагового плана.")
-
-        doc_id = state["context_ui_id"]
-
-        # Шаг 1: Получить метаданные
-        step1 = ToolCallRequest(
-            tool_name="doc_metadata_get_by_id",
-            arguments={"document_id": doc_id}
-        )
-        # Шаг 2: Получить контент вложения
-        step2 = ToolCallRequest(
-            tool_name="doc_attachment_get_content",
-            arguments={
-                "document_id": doc_id,
-                # ИСПРАВЛЕНО: Добавлена точка для корректного JSONPath
-                "attachment_id": "$.STEPS[0].result.attachmentDocument[0].id"
-            }
-        )
-        # Шаг 3: Сделать сводку
-        step3 = ToolCallRequest(
-            tool_name="doc_content_summarize",
-            arguments={
-                "document_id": doc_id,
-                # ИСПРАВЛЕНО: Добавлена точка для корректного JSONPath
-                "content_key": "$.STEPS[1].result.content_key",
-                "file_name": "$.STEPS[0].result.attachmentDocument[0].fileName",
-                "metadata_context": "$.STEPS[0].result"
-            }
-        )
-
-        plan_steps = [step1, step2, step3]
-        logger.info(f"PLANNER: Принудительно запланировано {len(plan_steps)} шагов.")
-        return {"tools_to_call": [step.dict() for step in plan_steps]}
+    # if (state.get("context_ui_id")
+    #         and messages[-1].content.lower().strip().startswith("сделай сводку")):
+    #     logger.info("PLANNER: Обнаружен запрос сводки с ID. Принудительное выполнение 3-шагового плана.")
+    #
+    #     doc_id = state["context_ui_id"]
+    #
+    #     # Шаг 1: Получить метаданные
+    #     step1 = ToolCallRequest(
+    #         tool_name="doc_metadata_get_by_id",
+    #         arguments={"document_id": doc_id}
+    #     )
+    #     # Шаг 2: Получить контент вложения
+    #     step2 = ToolCallRequest(
+    #         tool_name="doc_attachment_get_content",
+    #         arguments={
+    #             "document_id": doc_id,
+    #             # ИСПРАВЛЕНО: Добавлена точка для корректного JSONPath
+    #             "attachment_id": "$.STEPS[0].result.attachmentDocument[0].id"
+    #         }
+    #     )
+    #     # Шаг 3: Сделать сводку
+    #     step3 = ToolCallRequest(
+    #         tool_name="doc_content_summarize",
+    #         arguments={
+    #             "document_id": doc_id,
+    #             # ИСПРАВЛЕНО: Добавлена точка для корректного JSONPath
+    #             "content_key": "$.STEPS[1].result.content_key",
+    #             "file_name": "$.STEPS[0].result.attachmentDocument[0].fileName",
+    #             "metadata_context": "$.STEPS[0].result"
+    #         }
+    #     )
+    #
+    #     plan_steps = [step1, step2, step3]
+    #     logger.info(f"PLANNER: Принудительно запланировано {len(plan_steps)} шагов.")
+    #     return {"tools_to_call": [step.dict() for step in plan_steps]}
 
     # ----------------------------------------------------------------
     # 2. STANDARD LLM PLANNING (Для всех остальных запросов)
@@ -117,28 +117,65 @@ async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
     context_ui_id_str = f"ID контекстного документа: {context_ui_id}" if context_ui_id else ""
 
     system_prompt_content = f"""
-    <ROLE>
-    Ты - центральный Оркестратор СЭД. Твоя задача - составить четкий, структурированный план действий в виде списка вызовов инструментов (<steps>).
-    </ROLE>
+            <ROLE>
+            Ты - центральный Оркестратор СЭД. Твоя задача - составить четкий, структурированный план действий в виде списка вызовов инструментов (<steps>).
+            </ROLE>
 
-    <AVAILABLE_TOOLS_SUMMARY>
-    Используй ТОЛЬКО следующие имена инструментов:
-    1. doc_metadata_get_by_id: Получить метаданные документа.
-    2. doc_attachment_get_content: Скачать вложение документа.
-    3. doc_content_summarize: Сделать сводку по скачанному контенту.
-    4. employee_tools_search: Найти сотрудника по частичному имени (ИСПОЛЬЗУЙ ИМЯ АРГУМЕНТА 'search_query').
-    5. employee_tools_get_by_id: Получить полные данные сотрудника по ID.
-    </AVAILABLE_TOOLS_SUMMARY>
+            <AVAILABLE_TOOLS_SUMMARY>
+            Используй ТОЛЬКО следующие имена инструментов:
+            1. doc_metadata_get_by_id: Получить метаданные документа.
+            2. doc_attachment_get_content: Скачать вложение документа.
+            3. doc_content_summarize: Сделать сводку по скачанному контенту.
+            4. employee_tools_search: Найти сотрудника по частичному имени (ИСПОЛЬЗУЙ ИМЯ АРГУМЕНТА 'search_query').
+            5. employee_tools_get_by_id: Получить полные данные сотрудника по ID.
+            </AVAILABLE_TOOLS_SUMMARY>
 
-    <GLOBAL_CONTEXT>
-    Дополнительный контекст пользователя: {user_context_str}
-    {context_ui_id_str}
-    </GLOBAL_CONTEXT>
-
-    <FINAL_INSTRUCTION>
-    Проанализируй запрос и доступные инструменты. Если информации достаточно или запрос не требует инструментов, верни пустой список шагов.
-    </FINAL_INSTRUCTION>
-    """
+            <GLOBAL_CONTEXT>
+            Дополнительный контекст пользователя: {user_context_str}
+            {context_ui_id_str}
+            </GLOBAL_CONTEXT>
+    
+            <PLANNING_EXAMPLE>
+            Для выполнения многошаговых задач используй JSONPath для передачи данных между шагами.
+    
+            ПРИМЕР ПОЛНОГО И КОРРЕКТНОГО ПЛАНА (Сводка документа по ID):
+            Шаг 0: doc_metadata_get_by_id (Использует document_id из GLOBAL_CONTEXT).
+            Шаг 1: doc_attachment_get_content (Использует document_id из GLOBAL_CONTEXT и attachment_id из Шага 0).
+            Шаг 2: doc_content_summarize (Требует document_id, content_key, file_name, И КОНТЕКСТ МЕТАДАННЫХ). // <-- Улучшение текста
+    
+            Корректный план из 3-х шагов для сводки (используй ID из GLOBAL_CONTEXT):
+            [
+                {{
+                  "tool_name": "doc_metadata_get_by_id",
+                  "arguments": {{
+                    "document_id": "{context_ui_id or 'ID_ИЗ_КОНТЕКСТА'}"
+                  }}
+                }},
+                {{
+                  "tool_name": "doc_attachment_get_content",
+                  "arguments": {{
+                    "document_id": "{context_ui_id or 'ID_ИЗ_КОНТЕКСТА'}",
+                    "attachment_id": "$.STEPS[0].result.attachmentDocument[0].id"
+                  }}
+                }},
+                {{
+                  "tool_name": "doc_content_summarize",
+                  "arguments": {{
+                    "document_id": "{context_ui_id or 'ID_ИЗ_КОНТЕКСТА'}",
+                    "content_key": "$.STEPS[1].result.content_key",
+                    "file_name": "$.STEPS[0].result.attachmentDocument[0].name", 
+                    "metadata_context": "$.STEPS[0].result" // <-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ В ПРИМЕРЕ
+                  }}
+                }}
+            ]
+            </PLANNING_EXAMPLE>
+    
+            <FINAL_INSTRUCTION>
+            Проанализируй запрос и доступные инструменты. Если информации достаточно или запрос не требует инструментов, верни пустой список шагов. 
+            ОБЯЗАТЕЛЬНО используй JSONPath для передачи ID вложения в doc_attachment_get_content.
+            ОБЯЗАТЕЛЬНО передай **все четыре аргумента** (document_id, content_key, file_name, metadata_context) в doc_content_summarize, используя правильные JSONPath. // <-- Улучшение текста
+            </FINAL_INSTRUCTION>
+            """
 
     messages_with_system = [SystemMessage(content=system_prompt_content)] + messages
     llm = get_chat_model(tools=ALL_TOOLS).with_structured_output(Plan)
@@ -198,7 +235,7 @@ async def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
 
     tool_result = None
     error_message = None
-    resolved_args = args
+    resolved_args = args  # Будет обновлено ниже
 
     if tool is None:
         error_message = f"Инструмент '{tool_name}' не найден в списке доступных инструментов."
@@ -207,42 +244,44 @@ async def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
 
     else:
         try:
+            # 1. Разрешение JSONPath для всех аргументов
             resolved_args = {k: _execute_jsonpath(v, executed_history) for k, v in args.items()}
 
-            if tool_name == "employee_tools_search":
+            # 2. Определение разрешенных аргументов на основе Pydantic-схемы
+            tool_schema = tool.args_schema.schema()
+            allowed_args = set(tool_schema.get('properties', {}).keys())
 
-                if 'query' in resolved_args:
+            # Разрешаем metadata_context для SummarizeContentArgs
+            if tool_name == "doc_content_summarize":
+                allowed_args.add("metadata_context")
 
-                    resolved_args['search_query'] = resolved_args.pop('query')
+            # 3. Формируем аргументы, передаваемые в tool_func, отфильтровывая лишние
+            tool_kwargs = {
+                k: v
+                for k, v in resolved_args.items()
+                if k in allowed_args
+            }
 
-                elif 'search_term' in resolved_args:
-
-                    resolved_args['search_query'] = resolved_args.pop('search_term')
-
-            if tool_name in ["doc_metadata_get_by_id", "doc_attachment_get_content"]:
-
-                if 'doc_id' in resolved_args:
-                    resolved_args['document_id'] = resolved_args.pop('doc_id')
-
-            tool_kwargs = resolved_args.copy()
+            # 4. Добавляем токен
             tool_kwargs['token'] = user_token
-            logger.info(f"EXECUTOR: Исполнение: {tool_name} с аргументами: {resolved_args} (токен передан)")
+
+            # 5. !!! КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: ВОЗВРАЩАЕМ 'config' !!!
+            # Требуется для StructuredTool._arun в этой конкретной версии/конфигурации.
+            tool_kwargs['config'] = {}
+
+            logger.info(f"EXECUTOR: Исполнение: {tool_name} с аргументами: {tool_kwargs} (токен передан)")
 
             tool_func = None
 
-            # 2. **ФИНАЛЬНЫЙ ОБХОД:** Используем _arun и добавляем обязательный config={}
+            # 6. Используем _arun
             if hasattr(tool, '_arun') and callable(tool._arun):
                 tool_func = tool._arun
-                # Добавляем обязательный аргумент 'config', который требовал StructuredTool._arun()
-                tool_kwargs['config'] = {}
-            elif hasattr(tool, 'func') and callable(tool.func):
-                # Это было бы чистым способом, но в вашей версии func не доступен/не работает
-                tool_func = tool.func
             else:
                 raise AttributeError(
-                    f"Инструмент '{tool_name}' не имеет доступной исполняемой функции (ни _arun, ни func).")
+                    f"Инструмент '{tool_name}' не имеет доступной асинхронной исполняемой функции (_arun)."
+                )
 
-            # 3. Асинхронный вызов
+            # 7. Асинхронный вызов
             tool_result = await tool_func(**tool_kwargs)
 
         except Exception as e:
@@ -250,6 +289,7 @@ async def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
             logger.error(f"EXECUTOR: Ошибка при вызове {tool_name}: {error_message}")
             tool_result = {"error": error_message}
 
+    # Сохраняем результат
     executed_history.append({
         "tool_name": tool_name,
         "arguments": args,

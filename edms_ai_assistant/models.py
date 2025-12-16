@@ -86,17 +86,22 @@ class GetAttachmentContentArgs(BaseModel):
 
 class SummarizeContentArgs(BaseModel):
     """
-    Аргументы для doc_content_summarize: создание сводки по контенту.
-    Максимально универсальная модель для любого типа документа.
+    Аргументы для создания сводки содержимого документа.
     """
-    document_id: str = Field(..., description="UUID родительского документа (для контекста).")
-    content_key: str = Field(...,
-                             description="Ключ для доступа к контенту файла в хранилище (например, путь к временному файлу или ID BLOB).")
-    file_name: str = Field(..., description="Имя файла для сводки.")
-
-    metadata_context: Optional[Dict[str, Any]] = Field(
+    document_id: str = Field(..., description="ID документа СЭД (например, 'df0b5549-a82a-11f0-b3ec-820d629f4f0e').")
+    content_key: str = Field(..., description="Внутренний ключ к файлу, полученный после скачивания вложения ($.STEPS[1].result.content_key).")
+    file_name: str = Field(..., description="Имя файла вложения для контекста ($.STEPS[0].result.attachmentDocument[0].name).")
+    summary_type_id: str = Field(
+        "5",
+        description=(
+            "ID типа требуемой сводки. "
+            "Доступные ID: 1 (Abstract), 2 (Extractive), 3 (TL;DR), 4 (Single-sentence), "
+            "5 (Multi-sentence - по умолчанию), 6 (Query-focused), 7 (Structured)."
+        )
+    )
+    query: Optional[str] = Field(
         None,
-        description="Словарь с ключевыми метаданными документа (например, сумма, даты, автор), которые помогают LLM в сводке."
+        description="Обязателен, если summary_type_id='6' (Query-focused). Содержит вопрос пользователя, на который нужно ответить на основе контента."
     )
 
 
