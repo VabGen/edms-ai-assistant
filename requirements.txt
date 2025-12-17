@@ -2,7 +2,9 @@ jsonpath-ng==1.7.0
 typing-extensions==4.15.0
 pypdf2==3.0.1
 docx2txt==0.9
+langgraph-prebuilt==1.0.5
 httpx
+
 # LangChain и LangGraph
 langchain==1.1.2
 langchain-community==0.4.1

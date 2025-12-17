@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     embedding_chunk_size: int = 1000
     embedding_max_retries_per_request: int = 6
 
+    ENVIRONMENT: str = "development"
+
     chancellor_next_base_url: str = "http://127.0.0.1:8098"
     edms_timeout: int = 120
     chroma_persist_dir: str = "./chroma_db"
@@ -47,6 +49,10 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+
+    @property
+    def LOGGING_LEVEL(self) -> str:
+        return getattr(self, "logging_level", self.logging_level)
 
     @property
     def LLM_ENDPOINT(self) -> str:

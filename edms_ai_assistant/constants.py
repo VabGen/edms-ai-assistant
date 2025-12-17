@@ -1,11 +1,14 @@
-SUMMARY_TYPES = {
-    "1": {"name": "Abstract", "description": "Кратко своими словами (суть, выводы)"},
-    "2": {"name": "Extractive", "description": "Выдержки из текста без изменений (для точности)"},
-    "3": {"name": "TL;DR", "description": "Очень коротко, на 1–2 предложения (для быстрого обзора)"},
-    "4": {"name": "Single-sentence", "description": "Одно предложение-вывод (для заголовков)"},
-    "5": {"name": "Multi-sentence", "description": "Развёрнутый обзор (3–5 предложений) (по умолчанию)"},
-    "6": {"name": "Query-focused", "description": "Суммаризация по конкретному вопросу (укажите вопрос)"},
-    "7": {"name": "Structured", "description": "По шаблону: Цель, Метод, Результаты, Выводы"},
+# edms_ai_assistant/constants.py
+
+from typing import Dict, Any
+
+SUMMARY_TYPES: Dict[str, Dict[str, Any]] = {
+    "1": {"name": "Abstract", "description": "Краткий обзор, фокусирующийся на цели и выводах."},
+    "2": {"name": "Multi-sentence", "description": "Полная, развернутая сводка в виде нескольких предложений (по умолчанию)."},
+    "3": {"name": "TL;DR", "description": "Самая краткая выжимка (слишком длинно; не читай)."},
+    "5": {"name": "Key Sentences", "description": "Список ключевых предложений из документа."},
+    "6": {"name": "Query-based", "description": "Сводка, отвечающая на конкретный вопрос пользователя (Query)."},
+    "7": {"name": "Structured", "description": "Структурированная сводка по заданному шаблону (Цель, Стороны, Условия, Сроки)."},
 }
 
 

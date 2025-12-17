@@ -1,26 +1,29 @@
-# Файл: edms_ai_assistant/nodes.py
-
 import json
 import logging
-from typing import Dict, Any, List
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, RemoveMessage, BaseMessage, AIMessage
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from typing import Dict, Any, List, Optional, Callable
+from langchain_core.messages import (
+    SystemMessage,
+    ToolMessage,
+    BaseMessage,
+    AIMessage,
+)
 from langchain_core.language_models import BaseChatModel
 from langchain.tools import BaseTool
 from jsonpath_ng.ext import parse as jsonpath_parse
+from pydantic import ValidationError
 
 from .models import OrchestratorState, Plan, ToolCallRequest
-from .tools import ALL_TOOLS
-from .llm import get_chat_model as get_base_chat_model
 
 logger = logging.getLogger(__name__)
 
 
-# ... (Вспомогательные функции get_chat_model и _execute_jsonpath остаются без изменений)
-def get_chat_model(tools: List[BaseTool] = None) -> BaseChatModel:
-    """Обертка для get_chat_model, добавляющая инструменты."""
-    llm = get_base_chat_model()
-    if tools:
+def get_llm_with_tools_binding(llm: BaseChatModel, tools: Optional[List[BaseTool]] = None) -> BaseChatModel:
+    """
+    Привязывает инструменты к LLM, если это возможно.
+    Используется для LLM, которые поддерживают Tool Calling (например, OpenAI).
+    """
+    if tools and hasattr(llm, 'bind_tools') and callable(llm.bind_tools):
+        logger.debug(f"Привязка {len(tools)} инструментов к LLM.")
         return llm.bind_tools(tools)
     return llm
 
@@ -28,425 +31,554 @@ def get_chat_model(tools: List[BaseTool] = None) -> BaseChatModel:
 def _execute_jsonpath(path_or_value: Any, tool_results_history: List[Dict[str, Any]]) -> Any:
     """
     Разрешает JSONPath выражения, используя историю исполнения инструментов.
-    Возвращает исходное значение, если это не JSONPath.
+    Возвращает исходное значение, если это не JSONPath (или None при ошибке).
     """
-    # ИЗМЕНЕНИЕ: Теперь ожидаем, что путь начинается с '$.STEPS'
+    if isinstance(path_or_value, str):
+        path_or_value = path_or_value.strip()
+        # Убираем возможные скобки, которые иногда добавляет LLM
+        if path_or_value.startswith('(') and path_or_value.endswith(')'):
+            path_or_value = path_or_value[1:-1].strip()
+
     if not isinstance(path_or_value, str) or not path_or_value.startswith('$.STEPS'):
         return path_or_value
 
     try:
-        # Создаем корневой объект, который включает историю
         root_data = {"STEPS": tool_results_history}
-
-        # Парсим и выполняем JSONPath
-        # Убедимся, что path_or_value корректно начинается с $
         jsonpath_expression = jsonpath_parse(path_or_value)
         match = jsonpath_expression.find(root_data)
 
         if match:
-            # Возвращаем значение первого совпадения
-            return match[0].value
+            result = match[0].value
+
+            if isinstance(result, list) and len(result) == 1:
+                return result[0]
+
+            return result
 
         logger.warning(f"JSONPath не нашел совпадений: {path_or_value}")
-        return None  # Если путь не найден, возвращаем None
+        return None
 
     except Exception as e:
-        logger.error(f"Ошибка при выполнении JSONPath {path_or_value}: {e}")
+        logger.error(f"Ошибка при выполнении JSONPath {path_or_value}: {e}", exc_info=True)
         return None
 
 
 # ----------------------------------------------------------------
-# 1. УЗЕЛ ПЛАНИРОВЩИКА (PLANNER NODE) - ИСПРАВЛЕНИЕ JSONPATH
+# 1. УЗЕЛ ПЛАНИРОВЩИКА (PLANNER NODE)
 # ----------------------------------------------------------------
 
-async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
+def planner_node_factory(llm_factory: Callable[[], BaseChatModel], tools: List[BaseTool]) -> Callable:
     """
-    LLM (Планировщик) анализирует запрос и составляет план действий.
-    Добавлена логика Plan Override для запроса сводки документа.
+    Фабрика для создания узла Планировщика с внедренными зависимостями.
     """
+    planner_llm = get_llm_with_tools_binding(
+        llm_factory(),
+        tools=tools
+    ).with_structured_output(Plan)
 
-    messages: List[Any] = state["messages"]
+    tool_names = [t.name for t in tools]
 
-    # ----------------------------------------------------------------
-    # 1. PLAN OVERRIDE (Для запроса сводки с ID - Исправление Теста 1)
-    # ----------------------------------------------------------------
-    # if (state.get("context_ui_id")
-    #         and messages[-1].content.lower().strip().startswith("сделай сводку")):
-    #     logger.info("PLANNER: Обнаружен запрос сводки с ID. Принудительное выполнение 3-шагового плана.")
-    #
-    #     doc_id = state["context_ui_id"]
-    #
-    #     # Шаг 1: Получить метаданные
-    #     step1 = ToolCallRequest(
-    #         tool_name="doc_metadata_get_by_id",
-    #         arguments={"document_id": doc_id}
-    #     )
-    #     # Шаг 2: Получить контент вложения
-    #     step2 = ToolCallRequest(
-    #         tool_name="doc_attachment_get_content",
-    #         arguments={
-    #             "document_id": doc_id,
-    #             # ИСПРАВЛЕНО: Добавлена точка для корректного JSONPath
-    #             "attachment_id": "$.STEPS[0].result.attachmentDocument[0].id"
-    #         }
-    #     )
-    #     # Шаг 3: Сделать сводку
-    #     step3 = ToolCallRequest(
-    #         tool_name="doc_content_summarize",
-    #         arguments={
-    #             "document_id": doc_id,
-    #             # ИСПРАВЛЕНО: Добавлена точка для корректного JSONPath
-    #             "content_key": "$.STEPS[1].result.content_key",
-    #             "file_name": "$.STEPS[0].result.attachmentDocument[0].fileName",
-    #             "metadata_context": "$.STEPS[0].result"
-    #         }
-    #     )
-    #
-    #     plan_steps = [step1, step2, step3]
-    #     logger.info(f"PLANNER: Принудительно запланировано {len(plan_steps)} шагов.")
-    #     return {"tools_to_call": [step.dict() for step in plan_steps]}
+    async def planner_node(state: OrchestratorState) -> Dict[str, Any]:
+        """
+        LLM (Планировщик) анализирует запрос и составляет план действий.
+        """
+        messages: List[BaseMessage] = state["messages"]
+        user_context = state.get("user_context")
+        user_context_str = json.dumps(user_context,
+                                      ensure_ascii=False) if user_context else "Контекст пользователя не предоставлен."
+        context_ui_id = state.get("context_ui_id")
+        context_ui_id_str = f"ID контекстного документа: {context_ui_id}" if context_ui_id else "ID контекстного документа: Отсутствует."
+        required_file_name = state.get("required_file_name")
+        required_file_name_str = f"ТРЕБУЕМЫЙ ФАЙЛ: {required_file_name}" if required_file_name else "ТРЕБУЕМЫЙ ФАЙЛ: Не указан."
+        # required_attachment_id_str = f"ТРЕБУЕМЫЙ ID ВЛОЖЕНИЯ: {required_file_id}"
 
-    # ----------------------------------------------------------------
-    # 2. STANDARD LLM PLANNING (Для всех остальных запросов)
-    # ----------------------------------------------------------------
-    user_context = state.get("user_context")
-    user_context_str = json.dumps(user_context,
-                                  ensure_ascii=False) if user_context else "Контекст пользователя не предоставлен."
+        # Генерация правильного JSONPath для Planner
+        attachment_id_jsonpath = (
+            f"$.STEPS[0].result.metadata.attachmentDocument[?(@.name=='{required_file_name}')].id"
+            if required_file_name else
+            "$.STEPS[0].result.metadata.attachmentDocument[0].id"
+        )
+        # attachment_id_jsonpath = attachment_id_jsonpath.replace("][0].id", "].id")
 
-    context_ui_id = state.get("context_ui_id")
-    context_ui_id_str = f"ID контекстного документа: {context_ui_id}" if context_ui_id else ""
+        attachment_id_jsonpath = (
+            "$.STEPS[0].result.metadata.attachmentDocument[0].id"
+        )
 
-    system_prompt_content = f"""
-            <ROLE>
-            Ты - центральный Оркестратор СЭД. Твоя задача - составить четкий, структурированный план действий в виде списка вызовов инструментов (<steps>).
-            </ROLE>
+        # summarize_content_jsonpath = "$.STEPS[1].result.content"
+        summarize_content_jsonpath = "$.STEPS[1].result.file_name"
 
-            <AVAILABLE_TOOLS_SUMMARY>
-            Используй ТОЛЬКО следующие имена инструментов:
-            1. doc_metadata_get_by_id: Получить метаданные документа.
-            2. doc_attachment_get_content: Скачать вложение документа.
-            3. doc_content_summarize: Сделать сводку по скачанному контенту.
-            4. employee_tools_search: Найти сотрудника по частичному имени (ИСПОЛЬЗУЙ ИМЯ АРГУМЕНТА 'search_query').
-            5. employee_tools_get_by_id: Получить полные данные сотрудника по ID.
-            </AVAILABLE_TOOLS_SUMMARY>
+        system_prompt_content = f"""
+                        <ROLE>
+                        Ты - центральный Оркестратор СЭД. Твоя задача - составить четкий, структурированный план действий в виде списка вызовов инструментов (<steps>) для ответа на запрос пользователя.
+                        Ты должен использовать ТОЛЬКО ИНСТРУМЕНТЫ ИЗ СПИСКА <AVAILABLE_TOOLS_SUMMARY>.
+                        </ROLE>
 
-            <GLOBAL_CONTEXT>
-            Дополнительный контекст пользователя: {user_context_str}
-            {context_ui_id_str}
-            </GLOBAL_CONTEXT>
-    
-            <PLANNING_EXAMPLE>
-            Для выполнения многошаговых задач используй JSONPath для передачи данных между шагами.
-    
-            ПРИМЕР ПОЛНОГО И КОРРЕКТНОГО ПЛАНА (Сводка документа по ID):
-            Шаг 0: doc_metadata_get_by_id (Использует document_id из GLOBAL_CONTEXT).
-            Шаг 1: doc_attachment_get_content (Использует document_id из GLOBAL_CONTEXT и attachment_id из Шага 0).
-            Шаг 2: doc_content_summarize (Требует document_id, content_key, file_name, И КОНТЕКСТ МЕТАДАННЫХ). // <-- Улучшение текста
-    
-            Корректный план из 3-х шагов для сводки (используй ID из GLOBAL_CONTEXT):
-            [
-                {{
-                  "tool_name": "doc_metadata_get_by_id",
-                  "arguments": {{
-                    "document_id": "{context_ui_id or 'ID_ИЗ_КОНТЕКСТА'}"
-                  }}
-                }},
-                {{
-                  "tool_name": "doc_attachment_get_content",
-                  "arguments": {{
-                    "document_id": "{context_ui_id or 'ID_ИЗ_КОНТЕКСТА'}",
-                    "attachment_id": "$.STEPS[0].result.attachmentDocument[0].id"
-                  }}
-                }},
-                {{
-                  "tool_name": "doc_content_summarize",
-                  "arguments": {{
-                    "document_id": "{context_ui_id or 'ID_ИЗ_КОНТЕКСТА'}",
-                    "content_key": "$.STEPS[1].result.content_key",
-                    "file_name": "$.STEPS[0].result.attachmentDocument[0].name", 
-                    "metadata_context": "$.STEPS[0].result" // <-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ В ПРИМЕРЕ
-                  }}
-                }}
-            ]
-            </PLANNING_EXAMPLE>
-    
-            <FINAL_INSTRUCTION>
-            Проанализируй запрос и доступные инструменты. Если информации достаточно или запрос не требует инструментов, верни пустой список шагов. 
-            ОБЯЗАТЕЛЬНО используй JSONPath для передачи ID вложения в doc_attachment_get_content.
-            ОБЯЗАТЕЛЬНО передай **все четыре аргумента** (document_id, content_key, file_name, metadata_context) в doc_content_summarize, используя правильные JSONPath. // <-- Улучшение текста
-            </FINAL_INSTRUCTION>
-            """
+                        <AVAILABLE_TOOLS_SUMMARY>
+                        Доступные инструменты: {', '.join(tool_names)}
+                        </AVAILABLE_TOOLS_SUMMARY>
 
-    messages_with_system = [SystemMessage(content=system_prompt_content)] + messages
-    llm = get_chat_model(tools=ALL_TOOLS).with_structured_output(Plan)
+                        <GLOBAL_CONTEXT>
+                        Дополнительный контекст пользователя (роль, права): {user_context_str}
+                        {context_ui_id_str}
+                        {required_file_name_str}
+                        </GLOBAL_CONTEXT>
 
-    try:
-        llm_output = await llm.ainvoke(messages_with_system)
+                        <PLANNING_INSTRUCTIONS>
+                        1. Многошаговые задачи: Используй JSONPath ($.STEPS[Индекс_Шага].result.Ключ) для передачи результатов предыдущих шагов в аргументы последующих. Индекс начинается с 0.
+                        2. Обязательный аргумент: Всегда передавай 'token' (ключ 'user_token' из состояния) в каждый инструмент.
+                        3. **КОНТЕКСТ ДОКУМЕНТА**: Используй `context_ui_id` (значение: {context_ui_id}) как аргумент `document_id` при вызове любых инструментов документации.
+                        4. **ОБЯЗАТЕЛЬНАЯ ЦЕПОЧКА ДЛЯ СВОДКИ**:
+                           - Шаг 0: Всегда начинай с `doc_metadata_get_by_id_tool` для получения метаданных.
+                           - Шаг 1: Используй `doc_attachment_get_content_tool`. **Обязательно включи аргументы `document_id` (значение из `<GLOBAL_CONTEXT>`) и `attachment_id` (через JSONPath).**
+                             **КРАЙНЕ ВАЖНО**: 
+                             a) Аргумент `document_id` должен быть равен `context_ui_id` (значение: {context_ui_id}).
+                             b) Аргумент `attachment_id` должен быть получен с помощью JSONPath из результатов Шага 0. Используй точный путь, включая фильтр:
+                                (Пример для attachment_id: `$.STEPS[0].result.metadata.attachmentDocument[0].id`)
+                           - Шаг 2: Используй `doc_content_summarize_tool`.
+                              a) Аргумент `content`: Получи с помощью JSONPath из результатов Шага 1 (ключ `content`). Пример: `$.STEPS[1].result.content`
+                              b) Аргумент **`file_name`**: Получи с помощью JSONPath из результатов Шага 1 (ключ `file_name`). Пример: `{summarize_content_jsonpath}`
+                              c) Аргумент **`document_id`**: Используй `context_ui_id` (значение: e56b2ce9-adb4-11f0-980d-1831bf272b96).
+                        </PLANNING_INSTRUCTIONS>
 
-        if isinstance(llm_output, Plan):
-            response = llm_output
-        elif hasattr(llm_output, 'content') and llm_output.content:
-            response_data = json.loads(llm_output.content)
-            response = Plan(**response_data)
-        else:
-            response = Plan(reasoning="Failed to parse LLM output.", steps=[])
+                        <FINAL_INSTRUCTION>
+                        Если для ответа не требуется вызов инструментов EDMS (например, это приветствие, благодарность или общий вопрос), верни ПУСТОЙ список шагов ([]).
+                        Твой вывод должен строго соответствовать схеме {Plan.__name__}.
+                        </FINAL_INSTRUCTION>
+                        """
 
+        current_messages = list(messages)
+        if state.get("tool_results_history"):
+            tool_history_message = ToolMessage(
+                content=json.dumps(state["tool_results_history"], ensure_ascii=False, indent=2),
+                tool_call_id="history_context"
+            )
+            current_messages.append(tool_history_message)
 
-    except Exception as e:
-        logger.error(f"Ошибка парсинга плана LLM: {type(e).__name__}: {e}")
-        return {"tools_to_call": []}
+        messages_with_system = [SystemMessage(content=system_prompt_content)] + current_messages
 
-    logger.info(f"PLANNER: Запланировано {len(response.steps)} шагов. Причина: {response.reasoning}")
+        try:
+            llm_output = await planner_llm.ainvoke(messages_with_system)
 
-    return {
-        "tools_to_call": [step.dict() for step in response.steps],
-    }
+            if isinstance(llm_output, Plan):
+                response = llm_output
+            else:
+                response_data = json.loads(llm_output.content)
+                response = Plan(**response_data)
+            logger.debug(f"PLANNER: Сгенерированный план:\n{response.model_dump_json(indent=2)}")
+
+        except (Exception, ValidationError) as e:
+            logger.error(f"Критическая ошибка парсинга/вызова LLM Планировщика: {type(e).__name__}: {e}", exc_info=True)
+            return {"tools_to_call": []}
+
+        valid_steps = []
+        for step in response.steps:
+            try:
+                if isinstance(step, dict):
+                    step = ToolCallRequest(**step)
+
+                if step.tool_name in tool_names:
+                    valid_steps.append(step.model_dump())
+                else:
+                    logger.warning(f"Планировщик предложил невалидный инструмент: {step.tool_name}")
+
+            except (ValidationError, AttributeError):
+                logger.error(f"Некорректный формат шага: {step}")
+
+        logger.info(f"PLANNER: Запланировано {len(valid_steps)} валидных шагов. Причина: {response.reasoning}")
+
+        return {
+            "tools_to_call": valid_steps,
+        }
+
+    return planner_node
 
 
 # ----------------------------------------------------------------
 # 2. УЗЕЛ ИСПОЛНИТЕЛЯ (TOOL EXECUTOR)
 # ----------------------------------------------------------------
-async def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
-    """
-    Исполняет запланированные вызовы инструментов.
-    Устойчив к ошибкам отсутствия инструмента и неверным аргументам.
-    """
-    tools_to_call = state.get("tools_to_call", [])
-    executed_history = state.get("tool_results_history", [])
+def tool_executor_node_factory(tools: List[BaseTool]) -> Callable:
+    tool_map = {t.name: t for t in tools}
 
-    user_token = state.get("user_token")
-    logger.debug(
-        f"EXECUTOR: Токен в состоянии: {'ПРИСУТСТВУЕТ' if user_token and len(user_token) > 5 else 'ОТСУТСТВУЕТ'}")
-    if not user_token:
-        error_msg = "User token отсутствует в состоянии. Инструменты не могут быть выполнены."
-        logger.error(f"EXECUTOR: CRITICAL ERROR: {error_msg}")
-        return {"tool_results_history": executed_history, "tools_to_call": [],
-                "messages": state["messages"] + [AIMessage(content=error_msg)]}
+    async def tool_executor_node(state: OrchestratorState) -> Dict[str, Any]:
 
-    # Обрабатываем только первый инструмент в очереди
-    if not tools_to_call:
-        return {"tool_results_history": executed_history, "tools_to_call": []}
+        tools_to_call = state.get("tools_to_call", [])
+        executed_history = state.get("tool_results_history", [])
+        user_token = state.get("user_token")
+        context_doc_id = state.get("document_id")
 
-    tool_to_call = tools_to_call[0]
-    tool_name = tool_to_call["tool_name"]
-    args = tool_to_call["arguments"]
+        if not tools_to_call:
+            return {"tool_results_history": executed_history, "tools_to_call": []}
 
-    tool = next((t for t in ALL_TOOLS if t.name == tool_name), None)
+        tool_to_call = tools_to_call[0]
+        tool_name = tool_to_call.get("tool_name")
+        args = tool_to_call.get("arguments", {})
 
-    tool_result = None
-    error_message = None
-    resolved_args = args  # Будет обновлено ниже
+        tool = tool_map.get(tool_name)
+        tool_result = None
+        resolved_args = args
 
-    if tool is None:
-        error_message = f"Инструмент '{tool_name}' не найден в списке доступных инструментов."
-        logger.error(f"EXECUTOR: Ошибка при вызове {tool_name}: {error_message}")
-        tool_result = {"error": error_message}
+        if tool is None:
+            tool_result = {"error": f"Инструмент '{tool_name}' не найден."}
+        else:
+            try:
+                resolved_args = {k: _execute_jsonpath(v, executed_history) for k, v in args.items()}
 
-    else:
-        try:
-            # 1. Разрешение JSONPath для всех аргументов
-            resolved_args = {k: _execute_jsonpath(v, executed_history) for k, v in args.items()}
+                if tool_name == "doc_attachment_get_content_tool" and resolved_args.get("attachment_id") is None:
+                    raw_path = args.get("attachment_id", "")
+                    required_file_name = state.get('required_file_name')
 
-            # 2. Определение разрешенных аргументов на основе Pydantic-схемы
-            tool_schema = tool.args_schema.schema()
-            allowed_args = set(tool_schema.get('properties', {}).keys())
+                    if required_file_name and 'name==' in raw_path:
+                        logger.warning(
+                            f"Фильтр JSONPath по имени файла ('{required_file_name}') вернул NULL. "
+                            f"Попытка использовать ID первого вложения: $.STEPS[0].result.metadata.attachmentDocument[0].id"
+                        )
+                        first_attachment_path = "$.STEPS[0].result.metadata.attachmentDocument[0].id"
 
-            # Разрешаем metadata_context для SummarizeContentArgs
-            if tool_name == "doc_content_summarize":
-                allowed_args.add("metadata_context")
+                        resolved_args["attachment_id"] = _execute_jsonpath(first_attachment_path, executed_history)
 
-            # 3. Формируем аргументы, передаваемые в tool_func, отфильтровывая лишние
-            tool_kwargs = {
-                k: v
-                for k, v in resolved_args.items()
-                if k in allowed_args
-            }
+                        if resolved_args["attachment_id"] is None:
+                            raise ValueError(
+                                f"JSONPath вернул NULL. Не удалось найти ID вложения по имени '{required_file_name}' или получить ID первого файла в документе."
+                            )
+                        logger.warning(
+                            f"Обход успешен. Используется ID первого вложения: {resolved_args['attachment_id']}")
+                    else:
+                        file_name_hint = required_file_name or (
+                            raw_path if "name==" in raw_path else "None")
+                        raise ValueError(
+                            f"JSONPath вернул NULL. Не удалось найти ID вложения по имени '{file_name_hint}' в метаданных документа. Проверьте имя файла или его наличие."
+                        )
 
-            # 4. Добавляем токен
-            tool_kwargs['token'] = user_token
+                if tool_name == "doc_content_summarize_tool" and resolved_args.get("content") is None:
+                    raise ValueError(
+                        "JSONPath вернул NULL. Не удалось получить контент файла для сводки. Шаг 1 (получение контента) завершился неудачей.")
 
-            # 5. !!! КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: ВОЗВРАЩАЕМ 'config' !!!
-            # Требуется для StructuredTool._arun в этой конкретной версии/конфигурации.
-            tool_kwargs['config'] = {}
+                tool_kwargs = {}
+                for k, v in resolved_args.items():
+                    if k in tool.args_schema.model_fields:
+                        tool_kwargs[k] = v
 
-            logger.info(f"EXECUTOR: Исполнение: {tool_name} с аргументами: {tool_kwargs} (токен передан)")
+                tool_kwargs['token'] = user_token
 
-            tool_func = None
+                if "document_id" in tool.args_schema.model_fields:
+                    if "document_id" not in tool_kwargs and context_doc_id:
+                        tool_kwargs["document_id"] = context_doc_id
 
-            # 6. Используем _arun
-            if hasattr(tool, '_arun') and callable(tool._arun):
-                tool_func = tool._arun
-            else:
-                raise AttributeError(
-                    f"Инструмент '{tool_name}' не имеет доступной асинхронной исполняемой функции (_arun)."
-                )
+                logger.info(f"EXECUTOR: Исполнение: {tool_name}")
+                tool_result = await tool.ainvoke(input=tool_kwargs)
 
-            # 7. Асинхронный вызов
-            tool_result = await tool_func(**tool_kwargs)
+                if isinstance(tool_result, dict):
+                    import json
+                    for key in ["metadata", "results"]:
+                        if key in tool_result and isinstance(tool_result[key], str):
+                            try:
+                                tool_result[key] = json.loads(tool_result[key])
+                                logger.debug(f"EXECUTOR: Поле '{key}' успешно десериализовано из строки в JSON.")
+                            except json.JSONDecodeError:
+                                pass
 
-        except Exception as e:
-            error_message = f"Ошибка выполнения: {type(e).__name__}: {e}"
-            logger.error(f"EXECUTOR: Ошибка при вызове {tool_name}: {error_message}")
-            tool_result = {"error": error_message}
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"EXECUTOR: Ошибка исполнения: {error_msg}")
+                tool_result = {"error": error_msg}
 
-    # Сохраняем результат
-    executed_history.append({
-        "tool_name": tool_name,
-        "arguments": args,
-        "resolved_arguments": resolved_args,
-        "result": tool_result
-    })
+        executed_history.append({
+            "tool_name": tool_name,
+            "arguments": args,
+            "resolved_arguments": resolved_args,
+            "result": tool_result
+        })
 
-    return {
-        "tool_results_history": executed_history,
-        "tools_to_call": tools_to_call[1:]
-    }
+        return {
+            "tool_results_history": executed_history,
+            "tools_to_call": tools_to_call[1:]
+        }
+
+    return tool_executor_node
 
 
 # ----------------------------------------------------------------
 # 3. УЗЕЛ ПРОВЕРКИ РЕЗУЛЬТАТОВ (CHECKER NODE)
 # ----------------------------------------------------------------
+
+TOOL_METADATA = 'doc_metadata_get_by_id_tool'
+TOOL_SEARCH_EMP = 'employee_tools_search_tool'
+
+
 def tool_result_checker_node(state: OrchestratorState) -> Dict[str, Any]:
-    """
-    Определяет, что делать дальше: продолжить планирование, перейти к ответу или
-    привлечь человека (Human in the Loop).
-
-    *** Возвращает DICT с ключом 'next_step' ***
-    """
     executed_history = state.get("tool_results_history", [])
-
     if not executed_history:
-        # Если история пуста, это ошибка.
-        return {"next_step": "responder"}
+        return {"next_route": "responder" if not state.get("tools_to_call") else "executor"}
 
-    last_result = executed_history[-1]["result"]
-    tool_name = executed_history[-1]["tool_name"]
-    logger.info(f"CHECKER: Проверка результата Tool: {tool_name}")
+    last_execution = executed_history[-1]
+    last_result = last_execution.get("result", {})
+    tool_name = last_execution.get("tool_name")
 
-    # Проверка на наличие ошибки
     if isinstance(last_result, dict) and "error" in last_result:
-        logger.error(f"CHECKER: Обнаружена ошибка исполнения: {last_result['error']}")
-        return {"next_step": "responder"}
+        logger.error(f"CHECKER: Обнаружена ошибка исполнения: {last_result['error']}. Переход к Responder.")
+        state["tools_to_call"] = []
+        return {"next_route": "responder"}
 
-    # Проверка на сценарий "Human in the Loop"
-    if tool_name == "employee_tools_search" and len(last_result) > 1:
-        logger.warning("CHECKER: Обнаружено несколько совпадений. Требуется Human-in-the-Loop.")
-        return {"next_step": "human_in_the_loop"}
+    if state.get("tools_to_call"):
+        logger.info("CHECKER: В очереди есть инструменты. Переход к исполнителю.")
+        return {"next_route": "executor"}
 
-    # Проверка, остались ли еще шаги в плане
-    if state["tools_to_call"]:
-        logger.info("CHECKER: В очереди есть инструменты. Возврат к планировщику.")
-        # ВОЗВРАЩАЕМ 'planner' (который должен перейти к executor)
-        return {"next_step": "planner"}
+    if tool_name == TOOL_METADATA:
+        metadata = last_result.get("metadata")
 
-    # Если инструментов в очереди нет и ошибок не было, переходим к финальному ответу
-    logger.info("CHECKER: Все запланированные шаги выполнены. Переход к ответу.")
-    return {"next_step": "responder"}
+        attachments = metadata.get("attachmentDocument") if isinstance(metadata, dict) else []
+        if not isinstance(attachments, list):
+            attachments = []
 
+        valid_attachments = [a for a in attachments if isinstance(a, dict) and a.get("id")]
 
-# ----------------------------------------------------------------
-# 4. УЗЕЛ ФИНАЛЬНОГО ОТВЕТА (RESPONDER NODE) - без изменений
-# ... (код responder_node без изменений)
-async def responder_node(state: OrchestratorState) -> Dict[str, Any]:
-    """
-    Генерирует финальный ответ пользователю на основе истории сообщений и результатов инструментов.
-    """
-    messages: List[Any] = state["messages"]
-    history: List[Dict[str, Any]] = state.get("tool_results_history", [])
+        required_file_name = state.get("required_file_name")
 
-    # Собираем историю ToolCall и ToolResult в сообщения
-    tool_messages: List[ToolMessage] = []
+        if len(valid_attachments) > 1 and not required_file_name:
+            logger.warning(
+                f"CHECKER: Обнаружено {len(valid_attachments)} валидных вложений. Требуется HiTL для выбора.")
+            return {
+                "next_route": "responder",
+                "selection_context": {
+                    "reason": "multiple_attachments",
+                    "attachments": [
+                        {
+                            "id": att["id"],
+                            "name": att["name"],
+                            "type": att.get("attachmentDocumentType", "UNKNOWN")
+                        }
+                        for att in valid_attachments
+                    ]
+                }
+            }
 
-    for idx, item in enumerate(history):
-        # ... (Логика формирования tool_messages остается без изменений)
-        if "error" in item["result"]:
-            result_content = f"ToolCall ({item['tool_name']}) ОШИБКА: {item['result']['error']}"
-        else:
+    if tool_name == TOOL_SEARCH_EMP:
+        results = last_result.get("results")
+        if isinstance(results, str):
             try:
-                result_str = json.dumps(item['result'], ensure_ascii=False)
-                result_content = "ToolCall OK. Результат:\n" + result_str[:1000] + (
-                    "..." if len(result_str) > 1000 else "")
+                results = json.loads(results)
             except:
-                result_content = "ToolCall OK. Результат: (невозможно сериализовать)"
+                results = []
 
-        fake_tool_call_id = f"call_{item['tool_name']}_{idx}"
+        if isinstance(results, list) and len(results) > 1:
+            logger.warning("CHECKER: Обнаружено несколько совпадений сотрудников. Требуется HiTL.")
 
-        tool_messages.append(ToolMessage(
-            content=result_content,
-            tool_call_id=fake_tool_call_id
-        ))
+            return {
+                "next_route": "responder",
+                "selection_context": {
+                    "reason": "multiple_employees",
+                    "employees": results
+                }
+            }
 
-    # Система видит весь контекст и результаты инструментов.
-    user_context = state.get("user_context")
-    user_context_str = json.dumps(user_context, ensure_ascii=False) if user_context else "Не предоставлен."
+    logger.info("CHECKER: Все запланированные шаги выполнены или HiTL не требуется. Переход к ответу.")
+    return {"next_route": "responder"}
 
-    system_prompt_content = f"""
-    <ROLE>
-    Ты - AI-ассистент СЭД. 
-    Твоя задача: проанализировать историю диалога, результаты вызовов инструментов (<TOOL_RESULTS>) и контекст пользователя (<USER_CONTEXT>).
-    Сформулируй краткий, точный и полезный финальный ответ пользователю.
-    </ROLE>
 
-    <USER_CONTEXT>
-    Дополнительный контекст пользователя (роль, права): {user_context_str}
-    </USER_CONTEXT>
+# ----------------------------------------------------------------
+# 4. УЗЕЛ ФИНАЛЬНОГО ОТВЕТА (RESPONDER NODE)
+# ----------------------------------------------------------------
 
-    <TOOL_RESULTS>
-    Это результаты всех выполненных тобой шагов. Используй их для формулирования ответа:
-    {json.dumps([h for h in history if "result" in h], ensure_ascii=False, indent=2)}
-    </TOOL_RESULTS>
-
-    <INSTRUCTIONS>
-    1. Если в результатах есть ошибки, извинись и объясни причину ошибки (например, "Инструмент не найден" или "Не удалось найти сотрудника").
-    2. Если результатов несколько (например, найдено 2 сотрудника), попроси пользователя уточнить выбор.
-    3. Если все успешно, дай прямой ответ на вопрос, используя информацию из <TOOL_RESULTS>.
-    4. Если <TOOL_RESULTS> пуст, а запрос пользователя является общим (приветствие, вопрос о погоде), ответь вежливо и спроси, чем ты можешь помочь в рамках СЭД.
-    </INSTRUCTIONS>
+def responder_node_factory(llm_factory: Callable[[], BaseChatModel]) -> Callable:
     """
+    Фабрика для создания узла Генератора Ответа с внедренным LLM.
+    """
+    responder_llm = llm_factory()
 
-    final_messages = [SystemMessage(content=system_prompt_content)] + messages + tool_messages
+    async def responder_node(state: OrchestratorState) -> Dict[str, Any]:
+        """
+        Генерирует финальный ответ пользователю.
+        """
+        messages: List[BaseMessage] = state["messages"]
+        history: List[Dict[str, Any]] = state.get("tool_results_history", [])
 
-    llm = get_chat_model()
+        # ----------------------------------------------------------------
+        # 4.1. ОБРАБОТКА HUMAN-IN-THE-LOOP (HiTL)
+        # ----------------------------------------------------------------
 
-    logger.info("RESPONDER: Генерация финального ответа.")
-    response = await llm.ainvoke(final_messages)
+        selection_context = state.get("selection_context")
 
-    # Обновляем состояние, добавляя финальный ответ LLM
-    new_messages: List[BaseMessage] = state["messages"] + [response]  # <-- Response - это AIMessage
+        if selection_context:
+            logger.info("RESPONDER: Генерация запроса на уточнение данных (Human-in-the-Loop).")
 
-    return {"messages": new_messages}
+            response_content = "Требуется уточнение, но я не смог определить, что именно. Пожалуйста, повторите запрос."
+
+            reason = selection_context.get("reason")
+
+            if reason == "multiple_attachments":
+                attachment_list = selection_context.get("attachments", [])
+
+                numbered_attachments = []
+                for i, att in enumerate(attachment_list):
+                    name = att.get('name', 'Неизвестный файл')
+                    file_type = att.get('type', 'UNKNOWN')
+
+                    display_name = name
+                    if file_type == "PRINT_DOCUMENT":
+                        display_name += " (Печатная форма)"
+
+                    numbered_attachments.append(
+                        f"{len(numbered_attachments) + 1}. **{display_name}**")
+
+                list_items = "\n".join(numbered_attachments)
+
+                summary_options = (
+                    "Доступные форматы сводки:\n"
+                    "  - `TL;DR`: Кратчайшая выжимка (1-2 предложения).\n"
+                    "  - `Развернутая`: Развернутый обзор (3-5 предложений, по умолчанию).\n"
+                    "  - `Структурированная`: Структурированная сводка (ключевые пункты)."
+                )
+
+                if not numbered_attachments:
+                    response_content = "Метаданные содержат несколько вложений, но не удалось определить основные файлы для обработки. Пожалуйста, уточните имя файла вручную."
+                else:
+                    response_content = (
+                        "Обнаружено несколько вложений. Пожалуйста, укажите, какой файл нужно обработать (по номеру или названию), "
+                        "и, при необходимости, выберите формат сводки:\n\n"
+                        "**Доступные вложения:**\n"
+                        f"{list_items}\n\n"
+                        f"{summary_options}\n\n"
+                        "Например: `Сделай структурированную сводку для файла 2` или `Сводка для файла 'Договор.pdf'`"
+                    )
+
+            elif reason == "multiple_employees":
+                employee_list = selection_context.get("employees", [])
+                list_items = "\n".join([
+                    f"{i + 1}. **{emp.get('full_name', 'N/A')}** ({emp.get('position', 'N/A')})"
+                    for i, emp in enumerate(employee_list)
+                ])
+                response_content = (
+                    "Найдено несколько сотрудников. Пожалуйста, уточните, данные какого сотрудника вы хотите получить:\n\n"
+                    "**Доступные сотрудники:**\n"
+                    f"{list_items}\n\n"
+                    "Например: `Выбери сотрудника 1` или `Данные для Иванова Ивана`"
+                )
+
+            response = AIMessage(content=response_content)
+
+            return {"messages": state["messages"] + [response], "tools_to_call": [], "selection_context": None,
+                    "next_route": None}
+
+        # ----------------------------------------------------------------
+        # 4.2. СТАНДАРТНЫЙ ОТВЕТ (Используем ToolMessage)
+        # ----------------------------------------------------------------
+        attachment_summary = ""
+        for item in history:
+            if item.get("tool_name") == 'doc_metadata_get_by_id_tool':
+                metadata = item["result"].get("metadata")
+
+                if isinstance(metadata, dict):
+                    attachments = metadata.get("attachmentDocument")
+
+                    if attachments and isinstance(attachments, list):
+                        attachment_list = []
+                        for att in attachments:
+                            if isinstance(att, dict) and att.get("name") and att.get("id"):
+                                name = att["name"]
+                                file_type = att.get("attachmentDocumentType", "UNKNOWN")
+
+                                display_name = name
+                                if file_type == "PRINT_DOCUMENT":
+                                    display_name += " (Печатная форма)"
+
+                                attachment_list.append(display_name)
+
+                        if attachment_list:
+                            attachment_summary = "Обнаруженные вложения документа (список для включения в ответ):\n* " + "\n* ".join(
+                                attachment_list)
+                            break
+                elif "error" in item["result"]:
+                    attachment_summary = f"**Ошибка получения метаданных:** {item['result']['error']}"
+                    break
+        # ====================================================================================
+
+        tool_messages: List[ToolMessage] = []
+        for idx, item in enumerate(history):
+            if "error" in item["result"]:
+                result_content = f"ToolCall ({item['tool_name']}) ОШИБКА: {item['result']['error']}"
+            else:
+                try:
+                    result_str = json.dumps(item['result'], ensure_ascii=False)
+                    result_content = "ToolCall OK. Результат:\n" + result_str[:4000] + (
+                        "..." if len(result_str) > 4000 else "")
+                except:
+                    result_content = "ToolCall OK. Результат: (невозможно сериализовать)"
+
+            fake_tool_call_id = f"call_{item['tool_name']}_{idx}"
+
+            tool_messages.append(ToolMessage(
+                content=result_content,
+                tool_call_id=fake_tool_call_id
+            ))
+
+        user_context = state.get("user_context")
+        user_context_str = json.dumps(user_context, ensure_ascii=False) if user_context else "Не предоставлен."
+
+        system_prompt_content = f"""
+        <ROLE>
+        Ты - AI-ассистент СЭД. Твоя задача: проанализировать историю диалога, результаты вызовов инструментов (<TOOL_RESULTS>) и контекст пользователя (<USER_CONTEXT>).
+        Сформулируй краткий, точный и полезный ФИНАЛЬНЫЙ ответ пользователю.
+        </ROLE>
+
+        <USER_CONTEXT>
+        Контекст пользователя: {user_context_str}
+        </USER_CONTEXT>
+
+        <GUARANTEED_ATTACHMENTS>
+        {attachment_summary if attachment_summary else "Документация о вложениях отсутствует в результатах или не требуется для ответа."}
+        </GUARANTEED_ATTACHMENTS>
+
+        <INSTRUCTIONS>
+        1. Используй <TOOL_RESULTS> и информацию из <GUARANTEED_ATTACHMENTS> для ответа. Если <GUARANTEED_ATTACHMENTS> содержит список вложений, **обязательно** перечисли его в финальном ответе.
+        2. Если в <TOOL_RESULTS> есть ошибки, извинись и объясни причину ошибки (например, "Не удалось найти документ").
+        3. Если <TOOL_RESULTS> пуст, а запрос пользователя является общим (приветствие, вопрос о погоде), ответь вежливо и спроси, чем ты можешь помочь в рамках СЭД.
+        4. Ответ должен быть только текстовым, без вызова функций.
+        </INSTRUCTIONS>
+        """
+
+        final_messages = [SystemMessage(content=system_prompt_content)] + messages + tool_messages
+
+        logger.info("RESPONDER: Генерация финального ответа.")
+        response = await responder_llm.ainvoke(final_messages)
+
+        new_messages: List[BaseMessage] = state["messages"] + [response]
+
+        return {"messages": new_messages, "next_route": None}
+
+    return responder_node
 
 
 # ----------------------------------------------------------------
-# 5. УЗЕЛ УДАЛЕНИЯ ИСТОРИИ (DELETE HISTORY NODE) - ИСПРАВЛЕНИЕ ДЛЯ SAVER
+# 5. УЗЕЛ УДАЛЕНИЯ ИСТОРИИ (DELETE HISTORY NODE)
 # ----------------------------------------------------------------
+
 def delete_history_node(state: OrchestratorState) -> Dict[str, Any]:
     """
-    Узел, который удаляет все сообщения, кроме последнего ответа AI,
-    используя явные команды RemoveMessage (самый надежный способ).
+    Узел, который сохраняет только последние 1-2 сообщения для контекста
+    следующего запроса (для Checkpointer).
     """
     messages: List[BaseMessage] = state["messages"]
 
-    if messages:
-        last_message = messages[-1]
-        logger.info("DELETER: Сохраняется только последнее сообщение.")
+    ai_messages = [m for m in messages if isinstance(m, AIMessage)]
 
-        # 1. Сообщения для удаления: все, кроме последнего
-        messages_to_remove = messages[:-1]
+    human_messages = [m for m in messages if m.type == 'human']
 
-        new_messages = []
+    retained_messages: List[BaseMessage] = []
 
-        # 2. Создаем команду RemoveMessage для каждого старого сообщения.
-        # Это заставляет Checkpointer удалить их по ID.
-        for msg in messages_to_remove:
-            # BaseMessage гарантирует наличие ID
-            new_messages.append(RemoveMessage(id=msg.id))
+    if human_messages:
+        retained_messages.append(human_messages[-1])
 
-        # 3. Добавляем последнее сообщение, которое должно быть сохранено.
-        new_messages.append(last_message)
+    if ai_messages:
+        retained_messages.append(ai_messages[-1])
 
-        # Checkpointer выполнит удаление и добавит одно сообщение.
-        return {"messages": new_messages}
+    logger.info(f"DELETER: Сохранено {len(retained_messages)} сообщений для следующего цикла.")
 
-    logger.warning("DELETER: Не удалось найти финальное сообщение для сохранения.")
-    return {}
+    state_update = {
+        "messages": retained_messages,
+        "tools_to_call": None,
+        "tool_results_history": None,
+        "selection_context": None,
+        "next_route": None,
+    }
+
+    return state_update

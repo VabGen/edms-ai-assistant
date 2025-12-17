@@ -1,47 +1,65 @@
+# edms_ai_assistant/models.py
+
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 from langchain_core.messages import BaseMessage
 
 
+# ----------------------------------------------------------------------
+# 1. МОДЕЛИ API (FastAPI Request/Response Models)
+# ----------------------------------------------------------------------
+
 class UserContext(BaseModel):
     """Модель для дополнительного контекста пользователя."""
-    role: Optional[str] = Field(None, description="Роль пользователя в системе.")
-    permissions: List[str] = Field(default_factory=list, description="Права доступа пользователя.")
+    role: Optional[str] = Field(None, description="Роль пользователя в системе (например, 'Менеджер' или 'Бухгалтер').")
+    permissions: List[str] = Field(default_factory=list, description="Список прав доступа пользователя в EDMS.")
 
 
 class UserInput(BaseModel):
     """Входные данные от пользователя через API."""
     message: str = Field(..., description="Основное текстовое сообщение от пользователя.")
-    user_token: str = Field(..., description="JWT токен пользователя для аутентификации и доступа к EDMS.")
-    context_ui_id: Optional[str] = Field(None, description="ID документа или объекта, если запрос контекстный.")
-    context: Optional[UserContext] = Field(None, description="Дополнительный контекст о пользователе.")
-    file_path: Optional[str] = Field(None,
-                                     description="Временный путь к загруженному файлу, полученный из /upload-file.")
+    user_token: str = Field(..., description="JWT токен пользователя для аутентификации и контекста LangGraph.")
+    context_ui_id: Optional[str] = Field(
+        None, description="UUID документа или объекта в EDMS, с которым пользователь взаимодействует."
+    )
+    context: Optional[UserContext] = Field(
+        None, description="Дополнительный структурированный контекст о пользователе."
+    )
+    file_path: Optional[str] = Field(
+        None, description="Временный путь к загруженному файлу, полученный из /upload-file."
+    )
 
 
 class FileUploadResponse(BaseModel):
     """Ответ после успешной загрузки файла."""
-    file_path: str = Field(..., description="Временный путь, который нужно передать в /chat.")
+    file_path: str = Field(
+        ..., description="Временный путь на сервере. Клиент должен передать его в поле `file_path` в /chat."
+    )
     file_name: str = Field(..., description="Имя загруженного файла.")
 
 
 class AssistantResponse(BaseModel):
     """Ответ, отправляемый пользователю."""
-    response: str = Field(..., description="Финальный ответ ассистента.")
+    response: str = Field(..., description="Финальный текстовый ответ ассистента.")
 
 
 # ----------------------------------------------------------------------
-# 1. МОДЕЛИ ДЛЯ ОРКЕСТРАЦИИ (Orchestration Models)
+# 2. МОДЕЛИ ДЛЯ ОРКЕСТРАЦИИ (Orchestration Models)
 # ----------------------------------------------------------------------
 
 class ToolCallRequest(BaseModel):
     """
-    Модель запроса на вызов конкретного инструмента.
+    Модель запроса на вызов конкретного инструмента, генерируемая планировщиком (LLM).
     """
     tool_name: str = Field(..., description="Имя инструмента (например, 'doc_metadata_get_by_id').")
-    arguments: Dict[str, Any] = Field(...,
-                                      description="Аргументы для инструмента. Для передачи данных используй синтаксис JSONPath: '$STEPS[0].result.attachmentDocument[0].id'.")
+    arguments: Dict[str, Any] = Field(
+        ...,
+        description=(
+            "Аргументы для инструмента. Для передачи данных используй синтаксис JSONPath. "
+            "Пример: '$STEPS[0].result.attachmentDocument[0].id'."
+        ),
+    )
 
 
 class Plan(BaseModel):
@@ -49,17 +67,18 @@ class Plan(BaseModel):
     Общий план действий, который генерирует LLM-Планировщик.
     """
     reasoning: str = Field(..., description="Объяснение плана, почему выбраны именно эти шаги.")
-    steps: List[ToolCallRequest] = Field(...,
-                                         description="Список инструментов, которые нужно вызвать в заданной последовательности.")
+    steps: List[ToolCallRequest] = Field(
+        ..., description="Список инструментов, которые нужно вызвать в заданной последовательности."
+    )
 
 
 # ----------------------------------------------------------------------
-# 2. МОДЕЛЬ СОСТОЯНИЯ (State Model) - Ядро LangGraph (ИСПРАВЛЕНО)
+# 3. МОДЕЛЬ СОСТОЯНИЯ (LangGraph State Model)
 # ----------------------------------------------------------------------
 class OrchestratorState(TypedDict):
     """
     Словарь состояния, используемый для передачи данных между узлами LangGraph.
-    ...
+    Все ключи должны быть здесь.
     """
     messages: List[BaseMessage]
     tools_to_call: List[Dict[str, Any]]
@@ -68,48 +87,51 @@ class OrchestratorState(TypedDict):
     user_context: Optional[Dict[str, Any]]
     user_token: Optional[str]
     file_path: Optional[str]
-
+    required_file_name: Optional[str]
 
 # ----------------------------------------------------------------------
-# 3. МОДЕЛИ ДЛЯ АРГУМЕНТОВ ИНСТРУМЕНТОВ (ARGS_SCHEMA)
+# 4. МОДЕЛИ ДЛЯ АРГУМЕНТОВ ИНСТРУМЕНТОВ (ARGS_SCHEMA)
 # ----------------------------------------------------------------------
-
 class GetDocumentMetadataArgs(BaseModel):
     document_id: str = Field(..., description="UUID документа, метаданные которого нужно получить.")
+    token: str = Field(..., description="JWT токен пользователя для аутентификации в EDMS.")
+
+class GetEmployeeByIdArgs(BaseModel):
+    employee_id: str = Field(..., description="UUID сотрудника для получения полных метаданных.")
+    token: str = Field(..., description="JWT токен пользователя для аутентификации в EDMS.")
 
 
 class GetAttachmentContentArgs(BaseModel):
     """Аргументы для doc_attachment_get_content: получение контента файла"""
     document_id: str = Field(..., description="UUID родительского документа.")
     attachment_id: str = Field(..., description="UUID вложения, контент которого нужно скачать.")
+    token: str = Field(..., description="JWT токен пользователя для аутентификации в EDMS.")
 
 
 class SummarizeContentArgs(BaseModel):
-    """
-    Аргументы для создания сводки содержимого документа.
-    """
-    document_id: str = Field(..., description="ID документа СЭД (например, 'df0b5549-a82a-11f0-b3ec-820d629f4f0e').")
-    content_key: str = Field(..., description="Внутренний ключ к файлу, полученный после скачивания вложения ($.STEPS[1].result.content_key).")
-    file_name: str = Field(..., description="Имя файла вложения для контекста ($.STEPS[0].result.attachmentDocument[0].name).")
+    document_id: str = Field(..., description="ID документа (UUID) из контекста.")
+    content: str = Field(..., description="Текстовый контент файла, извлеченный с предыдущего шага.")
+    file_name: str = Field(..., description="Имя файла, извлеченное с предыдущего шага.")
     summary_type_id: str = Field(
         "5",
         description=(
             "ID типа требуемой сводки. "
             "Доступные ID: 1 (Abstract), 2 (Extractive), 3 (TL;DR), 4 (Single-sentence), "
             "5 (Multi-sentence - по умолчанию), 6 (Query-focused), 7 (Structured)."
-        )
+        ),
     )
     query: Optional[str] = Field(
         None,
-        description="Обязателен, если summary_type_id='6' (Query-focused). Содержит вопрос пользователя, на который нужно ответить на основе контента."
+        description="Обязателен, если summary_type_id='6' (Query-focused). Содержит вопрос пользователя.",
     )
 
 
 class SearchEmployeeArgs(BaseModel):
     search_query: str = Field(
         ...,
-        description="КЛЮЧЕВОЕ ПОЛЕ: 'search_query'. Это частичное совпадение (фамилия, имя или должность) для поиска сотрудника."
+        description="КЛЮЧЕВОЕ ПОЛЕ: 'search_query'. Частичное совпадение (фамилия, имя или должность) для поиска сотрудника.",
     )
+    token: str = Field(..., description="JWT токен пользователя для аутентификации в EDMS.")
 
 
 class GetEmployeeByIdArgs(BaseModel):

@@ -1,9 +1,30 @@
-# Файл: edms_ai_assistant/clients/document_client.py
+# edms_ai_assistant/clients/document_client.py
 
 from typing import Optional, Dict, Any, List
-from .base_client import EdmsBaseClient
+from abc import abstractmethod
+from .base_client import EdmsHttpClient, EdmsBaseClient
 
-class DocumentClient(EdmsBaseClient):
+
+class BaseDocumentClient(EdmsBaseClient):
+    """Абстрактный класс для работы с документами."""
+
+    @abstractmethod
+    async def get_document_metadata(self, token: str, document_id: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_contract_responsible(self, token: str, document_id: str) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def search_documents(
+            self, token: str, filters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+
+# --- Реализация ---
+class DocumentClient(BaseDocumentClient, EdmsHttpClient):
     """Асинхронный клиент для работы с EDMS Document API."""
 
     async def get_document_metadata(self, token: str, document_id: str) -> Optional[Dict[str, Any]]:
@@ -26,15 +47,13 @@ class DocumentClient(EdmsBaseClient):
             f"api/document/{document_id}/responsible",
             token=token
         )
-        # Ожидаем List<ContractResponsibleDto>
         return result if isinstance(result, list) else []
 
     async def search_documents(
-        self, token: str, filters: Optional[Dict[str, Any]] = None
+            self, token: str, filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
         Упрощенный поиск документов.
-        NOTE: Оставляем как общий GET-метод, так как точный "search" POST-эндпоинт не предоставлен.
         """
         params = filters or {}
         result = await self._make_request(

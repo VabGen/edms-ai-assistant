@@ -1,37 +1,45 @@
-# Файл: edms_ai_assistant/clients/employee_client.py
+# edms_ai_assistant/clients/employee_client.py
 
 from typing import Optional, Dict, Any, List
-from uuid import UUID
-from .base_client import EdmsBaseClient
+from abc import abstractmethod
+from .base_client import EdmsHttpClient, EdmsBaseClient
 
 
-class EmployeeClient(EdmsBaseClient):
+class BaseEmployeeClient(EdmsBaseClient):
+    """Абстрактный класс для работы с сотрудниками."""
+
+    @abstractmethod
+    async def search_employees(self, token: str, query: str) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_employee(self, token: str, employee_id: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+
+class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
     """Асинхронный клиент для работы с EDMS Employee API."""
 
     async def search_employees(self, token: str, query: str) -> List[Dict[str, Any]]:
         """
         Поиск сотрудников по запросу (ФИО, должность) через POST api/employee/search.
 
-        NOTE: Мы передаем простой 'query' как searchQuery в тело запроса
-        и ожидаем ответа в виде SliceDto (который имеет поле 'content').
+        NOTE: В EDMS Chancellor Next Search API часто использует `searchQuery` для
+        единого текстового поиска. Избыточность полей (lastName, firstName и т.д.)
+        может быть нежелательной. Используем только 'searchQuery' для простоты.
         """
-        # Эндпоинт из реальной спецификации
         endpoint = "api/employee/search"
-
-        # Мы моделируем EmployeeFilter, передавая строку поиска в поле name
-        # (или searchQuery, в зависимости от внутренней структуры фильтра).
-        # Предположим, что LLM ищет по имени.
-        body = {"lastName": query, "firstName": query, "middleName": query, "searchQuery": query}
+        body = {"searchQuery": query}
 
         result = await self._make_request(
-            "POST",  # Используем POST
+            "POST",
             endpoint,
             token=token,
             json=body
         )
 
-        # Ожидаем SliceDto<EmployeeDto> и извлекаем список из поля 'content'
-        return result.get('content', []) if isinstance(result, dict) else []
+        content = result.get('content', []) if isinstance(result, dict) else []
+        return content if isinstance(content, list) else []
 
     async def get_employee(self, token: str, employee_id: str) -> Optional[Dict[str, Any]]:
         """Получить сотрудника по ID (GET api/employee/{id})."""

@@ -1,9 +1,32 @@
-# Файл: edms_ai_assistant/clients/attachment_client.py
+import re
+import urllib.parse
+from typing import Optional, Dict, Any, List, Tuple
+from abc import abstractmethod
+from .base_client import EdmsHttpClient, EdmsBaseClient
 
-from typing import Optional, Dict, Any, List
-from .base_client import EdmsBaseClient
+# Регулярное выражение для извлечения имени файла из Content-Disposition
+# Обработка как кодированного имени, так и прямого
+FILENAME_REGEX = re.compile(r'filename\*=UTF-8\'\'(.*)|filename="(.*)"')
 
-class AttachmentClient(EdmsBaseClient):
+
+class BaseAttachmentClient(EdmsBaseClient):
+    """Абстрактный класс для работы с вложениями."""
+
+    @abstractmethod
+    async def get_document_attachments(self, token: str, document_id: str) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def download_attachment(
+            self, token: str, document_id: str, attachment_id: str
+    ) -> Optional[Tuple[bytes, str]]:
+        """
+        Скачивает вложение и возвращает его байты и имя файла (Tuple[bytes, str]).
+        """
+        raise NotImplementedError
+
+
+class AttachmentClient(BaseAttachmentClient, EdmsHttpClient):
     """Асинхронный клиент для работы с EDMS Attachment API."""
 
     async def get_document_attachments(self, token: str, document_id: str) -> List[Dict[str, Any]]:
@@ -18,15 +41,36 @@ class AttachmentClient(EdmsBaseClient):
         return result if isinstance(result, list) else []
 
     async def download_attachment(
-        self, token: str, document_id: str, attachment_id: str
-    ) -> Optional[bytes]:
+            self, token: str, document_id: str, attachment_id: str
+    ) -> Optional[Tuple[bytes, str]]:
         """
-        Скачивает вложение документа как байты (GET /api/document/{documentId}/attachment/{id}).
+        Скачивает вложение документа как байты и извлекает имя файла из заголовка.
         """
-        return await self._make_request(
+        response = await self._make_request_response_object(
             "GET",
             f"api/document/{document_id}/attachment/{attachment_id}",
             token=token,
-            is_json_response=False,
             long_timeout=True
         )
+
+        if not response or not response.content:
+            return None
+
+        # 1. Извлечение имени файла
+        content_disposition = response.headers.get("Content-Disposition", "")
+        match = FILENAME_REGEX.search(content_disposition)
+
+        file_name = "unknown_attachment.bin"
+        if match:
+            # Декодируем, если это UTF-8 кодировка (group 1)
+            if match.group(1):
+                try:
+                    file_name = urllib.parse.unquote(match.group(1))
+                except Exception:
+                    file_name = "encoded_filename"
+            # Используем прямое имя (group 2)
+            elif match.group(2):
+                file_name = match.group(2)
+
+        # 2. Возврат байтов и имени
+        return response.content, file_name

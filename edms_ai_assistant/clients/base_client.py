@@ -1,8 +1,9 @@
-# edms_ai_assistant/clients/base_client.py
-
 import httpx
 import logging
-from typing import Dict, Any, Optional, Union, List
+import json
+import re
+from typing import Dict, Any, Optional, Union, List, Tuple
+from abc import ABC
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.utils.retry_utils import async_retry
 from edms_ai_assistant.utils.api_utils import handle_api_error, prepare_auth_headers
@@ -10,8 +11,13 @@ from edms_ai_assistant.utils.api_utils import handle_api_error, prepare_auth_hea
 logger = logging.getLogger(__name__)
 
 
-class EdmsBaseClient:
-    """Универсальный асинхронный клиент для API EDMS Chancellor NEXT."""
+class EdmsBaseClient(ABC):
+    """Абстрактный базовый класс для всех клиентов EDMS API."""
+    pass
+
+
+class EdmsHttpClient(EdmsBaseClient):
+    """Универсальный асинхронный клиент для API EDMS Chancellor NEXT, реализующий HTTP-запросы."""
 
     def __init__(
             self,
@@ -21,9 +27,12 @@ class EdmsBaseClient:
         resolved_base_url = base_url or settings.CHANCELLOR_NEXT_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
         self.timeout = timeout or settings.EDMS_TIMEOUT
-        self.client = httpx.AsyncClient(timeout=self.timeout)
+        # Клиент будет инициализирован при первом использовании или в __aenter__
+        self._client = None
 
     async def __aenter__(self):
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -31,7 +40,15 @@ class EdmsBaseClient:
 
     async def close(self):
         """Закрывает HTTP-клиент."""
-        await self.client.aclose()
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Получает или создает асинхронный клиент."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
 
     @async_retry(
         max_attempts=3,
@@ -50,27 +67,59 @@ class EdmsBaseClient:
     ) -> Union[Dict[str, Any], List[Dict[str, Any]], bytes, None]:
         """
         Выполняет HTTP-запрос с авторизацией, обработкой ошибок и повторными попытками.
+        Возвращает десериализованный JSON или сырые байты.
+        """
+        response = await self._make_request_response_object(
+            method, endpoint, token, long_timeout, **kwargs
+        )
+
+        if response.status_code == 204 or not response.content:
+            return {} if is_json_response else None
+
+        if not is_json_response:
+            return response.content
+
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            logger.error(f"Failed to decode JSON response from {method} {response.url}")
+            return {} if is_json_response else None
+
+    @async_retry(
+        max_attempts=3,
+        delay=1.0,
+        backoff=2.0,
+        exceptions=(httpx.RequestError, httpx.HTTPStatusError),
+    )
+    async def _make_request_response_object(
+            self,
+            method: str,
+            endpoint: str,
+            token: str,
+            long_timeout: bool = False,
+            **kwargs,
+    ) -> httpx.Response:
+        """
+        Выполняет HTTP-запрос и возвращает объект httpx.Response.
+        Используется, когда необходимо получить заголовки ответа (например, для имени файла).
         """
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = prepare_auth_headers(token)
 
+        current_timeout = kwargs.pop('timeout', self.timeout)
         if long_timeout:
-            kwargs['timeout'] = self.timeout + 30
+            current_timeout = self.timeout + 30
 
-        kwargs["headers"] = headers
+        current_headers = kwargs.get('headers', {})
+        current_headers.update(headers)
+        kwargs["headers"] = current_headers
+        kwargs['timeout'] = current_timeout
 
         try:
-            response = await self.client.request(method, url, **kwargs)
+            client = await self._get_client()
+            response = await client.request(method, url, **kwargs)
             await handle_api_error(response, f"{method} {url}")
-
-            if response.status_code == 204 or not response.content:
-                return {} if is_json_response else None
-
-            if not is_json_response:
-                return response.content
-
-            return response.json()
-
+            return response
         except httpx.HTTPStatusError:
             raise
         except httpx.RequestError:
