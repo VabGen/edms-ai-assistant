@@ -1,0 +1,48 @@
+#edms-ai-toggle {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+}
+
+#edms-ai-toggle:hover {
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.6);
+}
+
+#edms-ai-toggle:active {
+    transform: scale(0.95);
+}
+
+.magic-wand {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    opacity: 0.7;
+    z-index: 100;
+}
+
+.magic-wand:hover {
+    opacity: 1;
+    filter: drop-shadow(0 0 5px rgba(255, 215, 0, 0.8));
+    transform: translateY(-50%) scale(1.2) !important;
+    cursor: pointer;
+}
+
+#edms-ai-iframe {
+    animation: edms-slide-up 0.3s ease-out;
+}
+
+@keyframes edms-slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

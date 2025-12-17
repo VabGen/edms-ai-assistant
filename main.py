@@ -26,6 +26,7 @@ import tempfile
 from langchain_core.messages import HumanMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.runnables import Runnable
+from starlette.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
@@ -92,6 +93,17 @@ app = FastAPI(
     version="1.0.0",
     description="API для гибкого AI-ассистента, интегрированного с EDMS.",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000",
+                   "http://localhost:3001",
+                   "http://localhost:8080",
+                   "chrome-extension://*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

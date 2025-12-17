@@ -137,7 +137,7 @@ def planner_node_factory(llm_factory: Callable[[], BaseChatModel], tools: List[B
                            - Шаг 2: Используй `doc_content_summarize_tool`.
                               a) Аргумент `content`: Получи с помощью JSONPath из результатов Шага 1 (ключ `content`). Пример: `$.STEPS[1].result.content`
                               b) Аргумент **`file_name`**: Получи с помощью JSONPath из результатов Шага 1 (ключ `file_name`). Пример: `{summarize_content_jsonpath}`
-                              c) Аргумент **`document_id`**: Используй `context_ui_id` (значение: e56b2ce9-adb4-11f0-980d-1831bf272b96).
+                              c) Аргумент **`document_id`**: Используй `context_ui_id` (значение: {context_ui_id}). Пример: e56b2ce9-adb4-11f0-980d-1831bf272b96
                         </PLANNING_INSTRUCTIONS>
 
                         <FINAL_INSTRUCTION>
