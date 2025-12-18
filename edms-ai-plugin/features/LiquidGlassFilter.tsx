@@ -14,8 +14,6 @@ const LiquidGlassFilter: React.FC = () => {
                 position: 'absolute',
                 pointerEvents: 'none',
                 userSelect: 'none',
-                // В Shadow DOM лучше использовать opacity-0 и height-0,
-                // так как visibility:hidden иногда мешает применению фильтра в некоторых браузерах
                 opacity: 0,
                 height: 0,
                 width: 0
@@ -23,7 +21,8 @@ const LiquidGlassFilter: React.FC = () => {
             aria-hidden="true"
         >
             <defs>
-                <filter id="liquid-glass-filter" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
+                <filter id="liquid-glass-filter" x="-20%" y="-20%" width="140%" height="140%"
+                        colorInterpolationFilters="sRGB">
                     <feTurbulence
                         type="fractalNoise"
                         baseFrequency="0.012 0.012"

@@ -5,6 +5,10 @@
   "description": "AI-powered assistant for EDMS integration",
   "author": "Your Name",
   "private": true,
+  "alias": {
+    "vfile": "./node_modules/vfile/index.js",
+    "devlop": "./node_modules/devlop/index.js"
+  },
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
@@ -17,13 +21,14 @@
     "plasmo": "^0.90.5",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "react-markdown": "^9.0.0",
-    "remark-gfm": "^4.0.0",
+    "react-markdown": "^8.0.7",
+    "remark-gfm": "^3.0.1",
     "sharp": "^0.34.5",
     "tailwind-merge": "^2.3.0",
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@parcel/resolver-default": "^2.16.3",
     "@types/chrome": "^0.0.268",
     "@types/node": "^20.14.9",
     "@types/react": "18.2.0",
@@ -37,6 +42,7 @@
     "permissions": [
       "activeTab",
       "storage",
+      "cookies",
       "tabs"
     ],
     "host_permissions": [

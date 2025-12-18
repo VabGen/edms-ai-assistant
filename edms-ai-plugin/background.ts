@@ -1,5 +1,4 @@
-// public\background.ts
-export {} // Необходимо для инициализации файла как модуля в среде Plasmo
+export {}
 
 interface ChromeResponse {
     success: boolean;
@@ -9,56 +8,74 @@ interface ChromeResponse {
 
 const API_BASE_URL = 'http://localhost:8000';
 
+const activeRequests = new Map<string, AbortController>();
+
 /**
- * Слушатель сообщений от Content Script (вашего виджета)
+ * Основной слушатель сообщений
  */
-chrome.runtime.onMessage.addListener((request: { type: string; payload: any; }, sender: any, sendResponse: { (response: ChromeResponse): void; (response: ChromeResponse): void; (response: ChromeResponse): void; }) => {
-    if (request.type === 'sendChatMessage') {
-        handleJsonRequest('/chat', request.payload, sendResponse);
-        return true; // Держим канал связи открытым для асинхронного ответа
-    }
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const requestId = message.payload?.requestId || 'default';
 
-    if (request.type === 'sendShortSummary') {
-        handleJsonRequest('/short-summary', request.payload, sendResponse);
-        return true;
-    }
+    switch (message.type) {
+        case 'abortRequest':
+            const controller = activeRequests.get(requestId);
+            if (controller) {
+                controller.abort();
+                activeRequests.delete(requestId);
+            }
+            return false;
 
-    if (request.type === 'uploadFile') {
-        handleFileUpload(request.payload, sendResponse);
-        return true;
+        case 'sendChatMessage':
+            handleChatMessage(message.payload, sendResponse);
+            return true;
+
+        case 'uploadFile':
+            handleFileUpload(message.payload, sendResponse);
+            return true;
+
+        default:
+            return false;
     }
 });
 
 /**
- * Универсальный обработчик для JSON запросов
+ * Обработка чат-сообщений с поддержкой отмены
  */
-async function handleJsonRequest(
-    endpoint: string,
-    payload: any, // Измените на any, если Record вызывает сложности с вложенными объектами
-    sendResponse: (response: ChromeResponse) => void
-) {
+async function handleChatMessage(payload: any, sendResponse: (res: ChromeResponse) => void) {
+    const requestId = payload.requestId || 'default';
+    const controller = new AbortController();
+    activeRequests.set(requestId, controller);
+
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
+        const response = await fetch(`${API_BASE_URL}/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload),
+            signal: controller.signal
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || `Ошибка: ${response.status}`);
+        if (!response.ok) throw new Error(data.detail || `Ошибка сервера: ${response.status}`);
 
         sendResponse({success: true, data});
     } catch (err: any) {
-        sendResponse({success: false, error: err.message});
+        if (err.name === 'AbortError') {
+            sendResponse({success: false, error: 'Request aborted'});
+        } else {
+            sendResponse({success: false, error: err.message});
+        }
+    } finally {
+        activeRequests.delete(requestId);
     }
 }
 
-async function handleFileUpload(
-    payload: any,
-    sendResponse: (response: ChromeResponse) => void
-) {
+/**
+ * Обработка загрузки файлов
+ */
+async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse) => void) {
     try {
         const {fileData, fileName, user_token} = payload;
+
         const blobRes = await fetch(fileData);
         const blob = await blobRes.blob();
 
@@ -72,7 +89,7 @@ async function handleFileUpload(
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Ошибка сохранения');
+        if (!response.ok) throw new Error(data.detail || 'Ошибка сохранения файла');
 
         sendResponse({success: true, data});
     } catch (err: any) {

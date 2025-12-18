@@ -1,8 +1,5 @@
-// features\AssistantWidget.tsx
-'use client';
-
 import React, {useState, useRef, useEffect} from 'react';
-import {Paperclip, X, Mic, Send, MessageSquare, Loader2} from 'lucide-react';
+import {Paperclip, X, Mic, Send, MessageSquare, Loader2, Square} from 'lucide-react';
 import dayjs from "dayjs";
 import 'dayjs/locale/ru';
 
@@ -11,6 +8,22 @@ import ConfirmDialog from './ConfirmDialog';
 import LiquidGlassFilter from './LiquidGlassFilter';
 
 dayjs.locale('ru');
+
+const extractDocIdFromUrl = (): string => {
+    try {
+        const pathParts = window.location.pathname.split('/');
+        const id = pathParts[pathParts.length - 1];
+
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+        if (uuidRegex.test(id)) {
+            return id;
+        }
+    } catch (e) {
+        console.error("Ошибка при парсинге URL:", e);
+    }
+    return "main_assistant";
+};
 
 interface Message {
     role: 'user' | 'assistant';
@@ -22,7 +35,6 @@ interface Chat {
     preview?: string;
 }
 
-// Типизация для ответов от Chrome Runtime
 interface ChromeResponse {
     success: boolean;
     data?: any;
@@ -30,6 +42,33 @@ interface ChromeResponse {
     response?: string;
     message?: string;
 }
+
+const getAuthToken = (): string | null => {
+    try {
+        const directToken = localStorage.getItem('token') ||
+            localStorage.getItem('access_token') ||
+            sessionStorage.getItem('token');
+
+        if (directToken) return directToken;
+
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.includes('auth') || key.includes('user') || key.includes('oidc'))) {
+                const value = localStorage.getItem(key);
+                if (value && value.includes('eyJ')) {
+                    if (value.startsWith('{')) {
+                        const parsed = JSON.parse(value);
+                        return parsed.access_token || parsed.token || parsed.id_token || value;
+                    }
+                    return value;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Ошибка при поиске токена:", e);
+    }
+    return null;
+};
 
 const SoundWaveIndicator = () => (
     <div className="flex items-end justify-center space-x-0.5 w-5 h-4">
@@ -57,6 +96,9 @@ export const AssistantWidget = () => {
     const [isListening, setIsListening] = useState(false);
     const [recognition, setRecognition] = useState<any>(null);
 
+    // Реф для хранения ID текущего активного запроса, чтобы его можно было отменить
+    const currentRequestIdRef = useRef<string | null>(null);
+
     const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; chatId: string | null }>({
         isOpen: false,
         chatId: null
@@ -65,7 +107,6 @@ export const AssistantWidget = () => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Инициализация и SpeechRecognition (как на вашем скриншоте)
     useEffect(() => {
         setIsMounted(true);
         const win = window as any;
@@ -110,9 +151,28 @@ export const AssistantWidget = () => {
         }
     };
 
+    const handleStopGeneration = () => {
+        if (currentRequestIdRef.current) {
+            chrome.runtime.sendMessage({
+                type: 'abortRequest',
+                payload: {requestId: currentRequestIdRef.current}
+            });
+            currentRequestIdRef.current = null;
+            setIsLoading(false);
+            setMessages(prev => [...prev, {role: 'assistant', content: '🛑 Запрос прерван.'}]);
+        }
+    };
+
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if ((!inputValue.trim() && !attachedFile) || !activeChatId) return;
+
+        const userToken = getAuthToken() || "no_token_found";
+        const currentDocId = extractDocIdFromUrl();
+
+        // Генерируем уникальный ID для этого запроса
+        const requestId = Math.random().toString(36).substring(7);
+        currentRequestIdRef.current = requestId;
 
         const userContent = attachedFile ? `${inputValue} (Файл: ${attachedFile.name})`.trim() : inputValue;
         setMessages(prev => [...prev, {role: 'user', content: userContent}]);
@@ -125,27 +185,43 @@ export const AssistantWidget = () => {
         setIsLoading(true);
 
         try {
-            let finalFilePath: string | null = null; // Добавили тип string | null
+            let finalFilePath: string | null = null;
+
             if (fileToUpload) {
-                // Добавляем <any> к Promise, чтобы TypeScript разрешил обращение к .file_path
                 const uploadRes = await new Promise<any>((resolve, reject) => {
                     chrome.runtime.sendMessage({
                         type: 'uploadFile',
-                        payload: {fileData: fileToUpload.path, fileName: fileToUpload.name}
+                        payload: {
+                            fileData: fileToUpload.path,
+                            fileName: fileToUpload.name,
+                            user_token: userToken
+                        }
                     }, (res: ChromeResponse) => {
                         if (res?.success) resolve(res.data);
                         else reject(res?.error);
                     });
                 });
-                finalFilePath = uploadRes.file_path; // Теперь ошибки не будет
+                finalFilePath = uploadRes.file_path;
             }
 
-            // Убираем :any здесь, используем типизированный Promise
             const chatRes = await new Promise<any>((resolve, reject) => {
                 chrome.runtime.sendMessage({
                     type: 'sendChatMessage',
-                    payload: {message: currentInput, file_path: finalFilePath, context_ui_id: "main_assistant"}
-                }, (res: ChromeResponse) => (res?.success ? resolve(res.data) : reject(res?.error)));
+                    payload: {
+                        message: currentInput,
+                        file_path: finalFilePath,
+                        context_ui_id: currentDocId,
+                        user_token: userToken,
+                        requestId: requestId // Передаем ID в background.ts
+                    }
+                }, (res: ChromeResponse) => {
+                    if (res?.success) resolve(res.data);
+                    else {
+                        // Если фоновый скрипт вернул ошибку отмены, не считаем это ошибкой UI
+                        if (res?.error === 'Request aborted') reject('aborted');
+                        else reject(res?.error);
+                    }
+                });
             });
 
             setMessages(prev => [...prev, {
@@ -153,9 +229,12 @@ export const AssistantWidget = () => {
                 content: chatRes.response || chatRes.message || "Ответ получен."
             }]);
         } catch (err) {
-            setMessages(prev => [...prev, {role: 'assistant', content: `⚠️ Ошибка: ${err}`}]);
+            if (err !== 'aborted') {
+                setMessages(prev => [...prev, {role: 'assistant', content: `⚠️ Ошибка: ${err}`}]);
+            }
         } finally {
             setIsLoading(false);
+            currentRequestIdRef.current = null;
         }
     };
 
@@ -175,7 +254,7 @@ export const AssistantWidget = () => {
 
             {isWidgetVisible && (
                 <div
-                    className="flex flex-col w-[400px] h-[600px] bg-white rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-200 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-200 origin-bottom-right">
+                    className="flex flex-col w-[700px] h-[700px] bg-white rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-200 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-200 origin-bottom-right">
                     <header
                         className="flex items-center justify-between p-4 border-b border-slate-100 bg-white/80 backdrop-blur-md shrink-0">
                         <div className="flex items-center gap-3">
@@ -252,10 +331,25 @@ export const AssistantWidget = () => {
                                             className={`p-2 ${isListening ? 'text-red-500' : 'text-slate-400'}`}>
                                         {isListening ? <SoundWaveIndicator/> : <Mic size={20}/>}
                                     </button>
-                                    <button type="submit" disabled={isLoading}
-                                            className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all">
-                                        {isLoading ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                    </button>
+
+                                    {isLoading ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleStopGeneration}
+                                            className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600 transition-all flex items-center gap-2 animate-pulse"
+                                        >
+                                            <Square size={14} fill="currentColor"/>
+                                            <span className="text-[10px] font-bold uppercase">Stop</span>
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="submit"
+                                            disabled={isLoading || (!inputValue.trim() && !attachedFile)}
+                                            className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all"
+                                        >
+                                            <Send size={18}/>
+                                        </button>
+                                    )}
                                 </form>
                                 <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
                                     const file = e.target.files?.[0];

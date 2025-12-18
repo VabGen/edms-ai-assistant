@@ -9,12 +9,12 @@ interface ConfirmDialogProps {
 }
 
 export default function ConfirmDialog({
-    isOpen,
-    title,
-    message,
-    onConfirm,
-    onCancel
-}: ConfirmDialogProps) {
+                                          isOpen,
+                                          title,
+                                          message,
+                                          onConfirm,
+                                          onCancel
+                                      }: ConfirmDialogProps) {
 
     if (!isOpen) return null;
 
