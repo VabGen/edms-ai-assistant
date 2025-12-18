@@ -1,28 +1,50 @@
 {
   "name": "edms-ai-plugin",
+  "displayName": "EDMS AI Assistant",
   "version": "1.0.0",
+  "description": "AI-powered assistant for EDMS integration",
+  "author": "Your Name",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build && node scripts/build-extension.js",
-    "lint": "next lint"
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "dayjs": "^1.11.13",
     "lucide-react": "^0.400.0",
-    "next": "14.2.3",
-    "react": "^18",
-    "react-dom": "^18",
-    "tailwind-merge": "^2.3.0"
+    "plasmo": "^0.90.5",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-markdown": "^9.0.0",
+    "remark-gfm": "^4.0.0",
+    "sharp": "^0.34.5",
+    "tailwind-merge": "^2.3.0",
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
-    "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "autoprefixer": "^10.4.23",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.19",
-    "typescript": "^5"
+    "@types/node": "^20.14.9",
+    "@types/react": "18.2.0",
+    "@types/react-dom": "18.2.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.2"
+  },
+  "manifest": {
+    "permissions": [
+      "activeTab",
+      "storage",
+      "tabs"
+    ],
+    "host_permissions": [
+      "http://localhost:3000/*",
+      "http://localhost:3001/*",
+      "https://localhost:3000/*",
+      "http://localhost:8080/*",
+      "http://localhost:8000/*"
+    ]
   }
 }

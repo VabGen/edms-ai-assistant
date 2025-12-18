@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Настройки темы и анимаций */
+@layer base {
+    :root {
+        --color-neon-glass: rgba(255, 255, 255, 0.75);
+        --color-neon-glass-hover: rgba(255, 255, 255, 0.85);
+        --color-neon-border: rgba(255, 255, 255, 0.2);
+        --animate-sound-wave: sound-wave 0.6s ease-in-out infinite;
+    }
+}
+
+/* Анимации вынесены в стандартный CSS для поддержки во всех браузерах внутри Shadow DOM */
+@keyframes fadeInScale {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes sound-wave {
+    0%, 100% { transform: scaleY(0.5); }
+    50% { transform: scaleY(1.2); }
+}
+
+@keyframes particleExplode {
+    0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0); opacity: 0; }
+}
+
+/* Утилиты */
+@layer utilities {
+    .animate-sound-wave {
+        animation: var(--animate-sound-wave);
+    }
+
+    .neon-glass {
+        background: var(--color-neon-glass);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--color-neon-border);
+        transition: all 0.3s ease;
+    }
+
+    /* Кастомный скроллбар */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(99, 102, 241, 0.2); /* Indigo-200 */
+        border-radius: 10px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(99, 102, 241, 0.4);
+    }
+}
