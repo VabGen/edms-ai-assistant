@@ -46,6 +46,8 @@
       "tabs"
     ],
     "host_permissions": [
+      "http://localhost/*",
+      "http://127.0.0.1/*",
       "http://localhost:3000/*",
       "http://localhost:3001/*",
       "https://localhost:3000/*",

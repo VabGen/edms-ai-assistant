@@ -84,6 +84,8 @@ const SoundWaveIndicator = () => (
 
 export const AssistantWidget = () => {
     const [isMounted, setIsMounted] = useState(false);
+    // Состояние включения/выключения ассистента из настроек расширения
+    const [isEnabled, setIsEnabled] = useState(true);
     const [isWidgetVisible, setIsWidgetVisible] = useState(false);
     const [isChatPanelOpen, setIsChatPanelOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -96,7 +98,6 @@ export const AssistantWidget = () => {
     const [isListening, setIsListening] = useState(false);
     const [recognition, setRecognition] = useState<any>(null);
 
-    // Реф для хранения ID текущего активного запроса, чтобы его можно было отменить
     const currentRequestIdRef = useRef<string | null>(null);
 
     const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; chatId: string | null }>({
@@ -109,6 +110,22 @@ export const AssistantWidget = () => {
 
     useEffect(() => {
         setIsMounted(true);
+
+        // 1. Проверяем состояние включения при загрузке
+        chrome.storage.local.get(["assistantEnabled"], (result) => {
+            if (result.assistantEnabled !== undefined) {
+                setIsEnabled(result.assistantEnabled);
+            }
+        });
+
+        // 2. Слушаем изменения настроек (из popup)
+        const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+            if (changes.assistantEnabled) {
+                setIsEnabled(changes.assistantEnabled.newValue);
+            }
+        };
+        chrome.storage.onChanged.addListener(storageListener);
+
         const win = window as any;
         const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
 
@@ -128,6 +145,8 @@ export const AssistantWidget = () => {
             setChats([{chat_id: 'default_chat', preview: 'Новый диалог'}]);
             setActiveChatId('default_chat');
         }
+
+        return () => chrome.storage.onChanged.removeListener(storageListener);
     }, []);
 
     useEffect(() => {
@@ -136,7 +155,8 @@ export const AssistantWidget = () => {
         }
     }, [messages, isLoading, isMounted]);
 
-    if (!isMounted) return null;
+    // Если ассистент выключен в popup, не рендерим ничего
+    if (!isMounted || !isEnabled) return null;
 
     const toggleListening = () => {
         if (isListening) {
@@ -170,7 +190,6 @@ export const AssistantWidget = () => {
         const userToken = getAuthToken() || "no_token_found";
         const currentDocId = extractDocIdFromUrl();
 
-        // Генерируем уникальный ID для этого запроса
         const requestId = Math.random().toString(36).substring(7);
         currentRequestIdRef.current = requestId;
 
@@ -212,12 +231,11 @@ export const AssistantWidget = () => {
                         file_path: finalFilePath,
                         context_ui_id: currentDocId,
                         user_token: userToken,
-                        requestId: requestId // Передаем ID в background.ts
+                        requestId: requestId
                     }
                 }, (res: ChromeResponse) => {
                     if (res?.success) resolve(res.data);
                     else {
-                        // Если фоновый скрипт вернул ошибку отмены, не считаем это ошибкой UI
                         if (res?.error === 'Request aborted') reject('aborted');
                         else reject(res?.error);
                     }
