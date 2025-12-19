@@ -14,11 +14,10 @@ const extractDocIdFromUrl = (): string => {
         const pathParts = window.location.pathname.split('/');
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-        // Ищем UUID в любой части URL, а не только в последней
         const foundId = pathParts.find(part => uuidRegex.test(part));
         if (foundId) return foundId;
     } catch (e) {
-        console.error("Ошибка парсинга:", e);
+        console.error("Ошибка парсинга URL:", e);
     }
     return "main_assistant";
 };
@@ -70,10 +69,23 @@ export const AssistantWidget = () => {
 
     useEffect(() => {
         setIsMounted(true);
+
         chrome.storage.local.get(["assistantEnabled"], (result) => {
             if (result.assistantEnabled !== undefined) setIsEnabled(result.assistantEnabled);
         });
 
+        const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+            if (areaName === 'local' && changes.assistantEnabled) {
+                setIsEnabled(changes.assistantEnabled.newValue);
+                if (!changes.assistantEnabled.newValue) setIsWidgetVisible(false);
+            }
+        };
+
+        chrome.storage.onChanged.addListener(handleStorageChange);
+        return () => chrome.storage.onChanged.removeListener(handleStorageChange);
+    }, []);
+
+    useEffect(() => {
         const win = window as any;
         const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
         if (SpeechRecognition) {
@@ -85,9 +97,7 @@ export const AssistantWidget = () => {
             instance.onresult = (e: any) => {
                 let finalTranscript = '';
                 for (let i = e.resultIndex; i < e.results.length; ++i) {
-                    if (e.results[i].isFinal) {
-                        finalTranscript += e.results[i][0].transcript;
-                    }
+                    if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
                 }
                 if (finalTranscript) setInputValue(prev => prev + (prev ? ' ' : '') + finalTranscript);
             };
@@ -132,7 +142,7 @@ export const AssistantWidget = () => {
         }
 
         const userToken = getAuthToken() || "no_token_found";
-        const currentDocId = extractDocIdFromUrl(); // Получаем актуальный ID
+        const currentDocId = extractDocIdFromUrl();
         const requestId = Math.random().toString(36).substring(7);
         currentRequestIdRef.current = requestId;
 
@@ -157,12 +167,13 @@ export const AssistantWidget = () => {
                     }
                 }, (res) => {
                     if (res?.success) resolve(res.data);
-                    else reject(res?.error === 'aborted' ? 'aborted' : res?.error);
+                    else reject(res?.error === 'aborted' ? 'aborted' : (res?.error || 'Unknown error'));
                 });
             });
             setMessages(prev => [...prev, {role: 'assistant', content: chatRes.response || chatRes.message}]);
         } catch (err) {
-            if (err !== 'aborted' && err !== 'Request aborted') {
+            const errorMsg = String(err);
+            if (errorMsg !== 'aborted' && errorMsg !== 'Request aborted' && !errorMsg.includes('aborted')) {
                 setMessages(prev => [...prev, {role: 'assistant', content: `⚠️ Ошибка: ${err}`}]);
             }
         } finally {
