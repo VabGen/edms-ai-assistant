@@ -1,5 +1,5 @@
 import React, {useState, useRef, useEffect} from 'react';
-import {Paperclip, X, Mic, Send, MessageSquare, Loader2, Square} from 'lucide-react';
+import {Paperclip, X, Mic, Send, MessageSquare, Square, StopCircle} from 'lucide-react';
 import dayjs from "dayjs";
 import 'dayjs/locale/ru';
 
@@ -12,242 +12,157 @@ dayjs.locale('ru');
 const extractDocIdFromUrl = (): string => {
     try {
         const pathParts = window.location.pathname.split('/');
-        const id = pathParts[pathParts.length - 1];
-
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-        if (uuidRegex.test(id)) {
-            return id;
-        }
+        // Ищем UUID в любой части URL, а не только в последней
+        const foundId = pathParts.find(part => uuidRegex.test(part));
+        if (foundId) return foundId;
     } catch (e) {
-        console.error("Ошибка при парсинге URL:", e);
+        console.error("Ошибка парсинга:", e);
     }
     return "main_assistant";
 };
 
-interface Message {
-    role: 'user' | 'assistant';
-    content: string;
-}
-
-interface Chat {
-    chat_id: string;
-    preview?: string;
-}
-
-interface ChromeResponse {
-    success: boolean;
-    data?: any;
-    error?: string;
-    response?: string;
-    message?: string;
-}
-
 const getAuthToken = (): string | null => {
     try {
-        const directToken = localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            sessionStorage.getItem('token');
-
+        const directToken = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token');
         if (directToken) return directToken;
-
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key && (key.includes('auth') || key.includes('user') || key.includes('oidc'))) {
                 const value = localStorage.getItem(key);
-                if (value && value.includes('eyJ')) {
-                    if (value.startsWith('{')) {
-                        const parsed = JSON.parse(value);
-                        return parsed.access_token || parsed.token || parsed.id_token || value;
-                    }
-                    return value;
-                }
+                if (value?.includes('eyJ')) return value.startsWith('{') ? JSON.parse(value).access_token : value;
             }
         }
     } catch (e) {
-        console.error("Ошибка при поиске токена:", e);
+        console.error("Ошибка поиска токена:", e);
     }
     return null;
 };
 
 const SoundWaveIndicator = () => (
-    <div className="flex items-end justify-center space-x-0.5 w-5 h-4">
-        {[0, 1, 2].map((i) => (
-            <div
-                key={i}
-                className="w-0.5 bg-indigo-500 rounded-full animate-bounce origin-bottom"
-                style={{animationDelay: `${i * 0.15}s`}}
-            />
+    <div className="flex items-end justify-center space-x-1 h-3 mb-1">
+        {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="w-1 bg-indigo-500 rounded-full animate-bounce"
+                 style={{animationDuration: '0.6s', animationDelay: `${i * 0.1}s`}}/>
         ))}
     </div>
 );
 
 export const AssistantWidget = () => {
     const [isMounted, setIsMounted] = useState(false);
-    // Состояние включения/выключения ассистента из настроек расширения
     const [isEnabled, setIsEnabled] = useState(true);
     const [isWidgetVisible, setIsWidgetVisible] = useState(false);
     const [isChatPanelOpen, setIsChatPanelOpen] = useState(false);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<any[]>([]);
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [chats, setChats] = useState<Chat[]>([]);
-    const [activeChatId, setActiveChatId] = useState<string | null>(null);
-
-    const [attachedFile, setAttachedFile] = useState<{ path: string, name: string } | null>(null);
+    const [attachedFile, setAttachedFile] = useState<any>(null);
     const [isListening, setIsListening] = useState(false);
     const [recognition, setRecognition] = useState<any>(null);
 
-    const currentRequestIdRef = useRef<string | null>(null);
-
-    const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; chatId: string | null }>({
-        isOpen: false,
-        chatId: null
-    });
-
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const currentRequestIdRef = useRef<string | null>(null);
+
+    const frostedGlassClass = "bg-white/30 backdrop-blur-md border border-white/40 shadow-lg hover:bg-white/40 transition-all duration-300";
+    const liquidGlassClass = "relative isolation-auto before:content-[''] before:absolute before:inset-0 before:rounded-[32px] before:pointer-events-none before:box-shadow-[inset_0_0_15px_rgba(255,255,255,0.5)] after:content-[''] after:absolute after:inset-0 after:rounded-[32px] after:pointer-events-none after:bg-white/10 after:backdrop-blur-[8px] after:[filter:url(#liquid-glass-filter)] after:-z-10";
 
     useEffect(() => {
         setIsMounted(true);
-
-        // 1. Проверяем состояние включения при загрузке
         chrome.storage.local.get(["assistantEnabled"], (result) => {
-            if (result.assistantEnabled !== undefined) {
-                setIsEnabled(result.assistantEnabled);
-            }
+            if (result.assistantEnabled !== undefined) setIsEnabled(result.assistantEnabled);
         });
-
-        // 2. Слушаем изменения настроек (из popup)
-        const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-            if (changes.assistantEnabled) {
-                setIsEnabled(changes.assistantEnabled.newValue);
-            }
-        };
-        chrome.storage.onChanged.addListener(storageListener);
 
         const win = window as any;
         const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
-
         if (SpeechRecognition) {
             const instance = new SpeechRecognition();
-            instance.continuous = false;
             instance.lang = 'ru-RU';
+            instance.continuous = true;
+            instance.interimResults = true;
+
             instance.onresult = (e: any) => {
-                const transcript = e.results[0][0].transcript;
-                setInputValue(prev => prev + (prev ? " " : "") + transcript);
+                let finalTranscript = '';
+                for (let i = e.resultIndex; i < e.results.length; ++i) {
+                    if (e.results[i].isFinal) {
+                        finalTranscript += e.results[i][0].transcript;
+                    }
+                }
+                if (finalTranscript) setInputValue(prev => prev + (prev ? ' ' : '') + finalTranscript);
             };
+
             instance.onend = () => setIsListening(false);
+            instance.onerror = () => setIsListening(false);
             setRecognition(instance);
         }
-
-        if (chats.length === 0) {
-            setChats([{chat_id: 'default_chat', preview: 'Новый диалог'}]);
-            setActiveChatId('default_chat');
-        }
-
-        return () => chrome.storage.onChanged.removeListener(storageListener);
     }, []);
 
     useEffect(() => {
-        if (isMounted) {
-            messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-        }
+        if (isMounted) messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
     }, [messages, isLoading, isMounted]);
 
-    // Если ассистент выключен в popup, не рендерим ничего
-    if (!isMounted || !isEnabled) return null;
-
-    const toggleListening = () => {
-        if (isListening) {
-            recognition?.stop();
-        } else {
-            setIsListening(true);
-            try {
-                recognition?.start();
-            } catch {
-                setIsListening(false);
-            }
+    const handleAbortRequest = () => {
+        if (currentRequestIdRef.current) {
+            chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: currentRequestIdRef.current}});
+            setIsLoading(false);
+            currentRequestIdRef.current = null;
+            setMessages(prev => [...prev, {role: 'assistant', content: '_Запрос отменен пользователем._'}]);
         }
     };
 
-    const handleStopGeneration = () => {
-        if (currentRequestIdRef.current) {
-            chrome.runtime.sendMessage({
-                type: 'abortRequest',
-                payload: {requestId: currentRequestIdRef.current}
-            });
-            currentRequestIdRef.current = null;
-            setIsLoading(false);
-            setMessages(prev => [...prev, {role: 'assistant', content: '🛑 Запрос прерван.'}]);
+    const toggleListening = () => {
+        if (!recognition) return;
+        if (isListening) {
+            recognition.stop();
+        } else {
+            setInputValue('');
+            recognition.start();
+            setIsListening(true);
         }
     };
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if ((!inputValue.trim() && !attachedFile) || !activeChatId) return;
+        if ((!inputValue.trim() && !attachedFile) || isLoading) return;
+
+        if (isListening) {
+            recognition.stop();
+            setIsListening(false);
+        }
 
         const userToken = getAuthToken() || "no_token_found";
-        const currentDocId = extractDocIdFromUrl();
-
+        const currentDocId = extractDocIdFromUrl(); // Получаем актуальный ID
         const requestId = Math.random().toString(36).substring(7);
         currentRequestIdRef.current = requestId;
 
-        const userContent = attachedFile ? `${inputValue} (Файл: ${attachedFile.name})`.trim() : inputValue;
-        setMessages(prev => [...prev, {role: 'user', content: userContent}]);
+        setMessages(prev => [...prev, {
+            role: 'user',
+            content: attachedFile ? `${inputValue} (${attachedFile.name})` : inputValue
+        }]);
 
-        const currentInput = inputValue;
-        const fileToUpload = attachedFile;
-
-        setInputValue('');
-        setAttachedFile(null);
         setIsLoading(true);
+        const text = inputValue;
+        setInputValue('');
 
         try {
-            let finalFilePath: string | null = null;
-
-            if (fileToUpload) {
-                const uploadRes = await new Promise<any>((resolve, reject) => {
-                    chrome.runtime.sendMessage({
-                        type: 'uploadFile',
-                        payload: {
-                            fileData: fileToUpload.path,
-                            fileName: fileToUpload.name,
-                            user_token: userToken
-                        }
-                    }, (res: ChromeResponse) => {
-                        if (res?.success) resolve(res.data);
-                        else reject(res?.error);
-                    });
-                });
-                finalFilePath = uploadRes.file_path;
-            }
-
-            const chatRes = await new Promise<any>((resolve, reject) => {
+            const chatRes: any = await new Promise((resolve, reject) => {
                 chrome.runtime.sendMessage({
                     type: 'sendChatMessage',
                     payload: {
-                        message: currentInput,
-                        file_path: finalFilePath,
-                        context_ui_id: currentDocId,
+                        message: text,
                         user_token: userToken,
-                        requestId: requestId
+                        requestId,
+                        context_ui_id: currentDocId
                     }
-                }, (res: ChromeResponse) => {
+                }, (res) => {
                     if (res?.success) resolve(res.data);
-                    else {
-                        if (res?.error === 'Request aborted') reject('aborted');
-                        else reject(res?.error);
-                    }
+                    else reject(res?.error === 'aborted' ? 'aborted' : res?.error);
                 });
             });
-
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: chatRes.response || chatRes.message || "Ответ получен."
-            }]);
+            setMessages(prev => [...prev, {role: 'assistant', content: chatRes.response || chatRes.message}]);
         } catch (err) {
-            if (err !== 'aborted') {
+            if (err !== 'aborted' && err !== 'Request aborted') {
                 setMessages(prev => [...prev, {role: 'assistant', content: `⚠️ Ошибка: ${err}`}]);
             }
         } finally {
@@ -256,148 +171,113 @@ export const AssistantWidget = () => {
         }
     };
 
+    if (!isMounted || !isEnabled) return null;
+
     return (
         <div className="fixed bottom-5 right-5 z-[2147483647] font-sans flex flex-col items-end pointer-events-none">
             <LiquidGlassFilter/>
 
             {!isWidgetVisible && (
-                <button
-                    onClick={() => setIsWidgetVisible(true)}
-                    className="w-16 h-16 bg-indigo-600 rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform cursor-pointer pointer-events-auto group relative"
-                >
-                    <MessageSquare size={28} className="text-white group-hover:rotate-12 transition-transform"/>
-                    <div className="absolute inset-0 rounded-full bg-indigo-600 animate-ping opacity-20"/>
-                </button>
+                <div className="relative pointer-events-auto group cursor-pointer"
+                     onClick={() => setIsWidgetVisible(true)}>
+                    <div className="absolute inset-0 m-auto w-full h-full rounded-full bg-cyan-400/30 animate-liquid-ripple"/>
+                    <button className={`w-16 h-16 rounded-full flex items-center justify-center ${frostedGlassClass}`}>
+                        <MessageSquare size={28} className="text-indigo-600 group-hover:rotate-12 transition-transform"/>
+                    </button>
+                </div>
             )}
 
             {isWidgetVisible && (
-                <div
-                    className="flex flex-col w-[700px] h-[700px] bg-white rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-200 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-200 origin-bottom-right">
-                    <header
-                        className="flex items-center justify-between p-4 border-b border-slate-100 bg-white/80 backdrop-blur-md shrink-0">
+                <div className={`flex flex-col w-[500px] h-[650px] rounded-[32px] shadow-2xl border border-white/20 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-300 origin-bottom-right ${liquidGlassClass}`}>
+
+                    <header className="flex items-center justify-between p-4 border-b border-white/10 shrink-0 relative z-10">
                         <div className="flex items-center gap-3">
                             <button onClick={() => setIsChatPanelOpen(!isChatPanelOpen)}
-                                    className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors">
-                                <MessageSquare size={18}/>
+                                    className={`p-2 rounded-xl ${frostedGlassClass}`}>
+                                <MessageSquare size={18} className="text-indigo-700"/>
                             </button>
-                            <div className="flex flex-col">
-                                <h3 className="font-bold text-slate-800 text-sm leading-none">EDMS Assistant</h3>
-                                <span className="text-[10px] text-indigo-500 font-medium mt-1">Online</span>
-                            </div>
+                            <h3 className="font-bold text-slate-800 text-sm leading-none">EDMS Assistant</h3>
                         </div>
                         <button onClick={() => setIsWidgetVisible(false)}
-                                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all">
+                                className={`p-2 rounded-xl text-slate-500 hover:text-red-500 ${frostedGlassClass}`}>
                             <X size={20}/>
                         </button>
                     </header>
 
-                    <div className="flex-1 flex overflow-hidden">
+                    <div className="flex-1 flex overflow-hidden relative z-10">
                         {isChatPanelOpen && (
-                            <aside
-                                className="w-64 border-r border-slate-100 bg-slate-50 overflow-y-auto animate-in slide-in-from-left-2">
-                                <div className="p-3 space-y-2">
-                                    {chats.map((chat) => (
-                                        <div key={chat.chat_id} onClick={() => setActiveChatId(chat.chat_id)}
-                                             className={`p-3 rounded-xl cursor-pointer text-[11px] transition-all flex justify-between items-center ${activeChatId === chat.chat_id ? 'bg-white shadow-sm ring-1 ring-indigo-100 font-bold text-indigo-700' : 'hover:bg-slate-200 text-slate-600'}`}>
-                                            <span className="truncate pr-2">{chat.preview || 'Новый диалог'}</span>
-                                        </div>
-                                    ))}
+                            <aside className="w-48 border-r border-white/10 bg-white/10 backdrop-blur-sm p-3">
+                                <div className={`p-3 rounded-xl text-[11px] font-bold text-indigo-700 cursor-pointer ${frostedGlassClass}`}>
+                                    Новый диалог
                                 </div>
                             </aside>
                         )}
 
-                        <main className="flex-1 flex flex-col bg-white min-w-0">
-                            <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4">
-                                {messages.length === 0 && (
-                                    <div
-                                        className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-2 opacity-60">
-                                        <MessageSquare size={48} strokeWidth={1}/>
-                                        <p className="text-xs font-medium text-center">Задайте любой вопрос по EDMS</p>
-                                    </div>
-                                )}
-                                {messages.map((msg, idx) => (
-                                    <ChatMessage key={idx} content={msg.content} role={msg.role}/>
-                                ))}
-                                {isLoading && (
-                                    <div
-                                        className="flex gap-1.5 p-3 bg-slate-50 w-fit rounded-2xl rounded-tl-none border border-slate-100">
-                                        <div
-                                            className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]"/>
-                                        <div
-                                            className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.15s]"/>
-                                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"/>
-                                    </div>
-                                )}
+                        <main className="flex-1 flex flex-col min-w-0">
+                            <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 custom-scrollbar">
+                                {messages.map((msg, idx) => <ChatMessage key={idx} content={msg.content} role={msg.role}/>)}
+                                {isLoading && <div className="text-indigo-500 text-[10px] animate-pulse px-2">Печатаю...</div>}
                                 <div ref={messagesEndRef}/>
                             </div>
 
-                            <footer className="p-4 bg-white border-t border-slate-50 shrink-0">
+                            <footer className="p-4 shrink-0">
+                                {isListening && <SoundWaveIndicator/>}
                                 <form onSubmit={handleSendMessage}
-                                      className="flex items-center gap-2 bg-slate-100 rounded-2xl p-1.5 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-500/10 border border-transparent focus-within:border-indigo-200 transition-all">
+                                      className={`flex items-center gap-2 rounded-2xl p-1.5 border transition-all ${frostedGlassClass} focus-within:ring-4 focus-within:ring-indigo-500/20`}>
+
                                     <button type="button" onClick={() => fileInputRef.current?.click()}
-                                            className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
+                                            className="p-2 text-slate-500 hover:text-indigo-600">
                                         <Paperclip size={20}/>
                                     </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={toggleListening}
+                                        className={`p-2 rounded-lg transition-all ${isListening ? 'text-red-500 bg-red-100 animate-pulse' : 'text-slate-500 hover:text-indigo-600'}`}
+                                    >
+                                        {isListening ? <Square size={18} fill="currentColor"/> : <Mic size={20}/>}
+                                    </button>
+
                                     <input
                                         type="text"
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
-                                        placeholder="Спросите AI..."
-                                        className="flex-1 bg-transparent border-none outline-none text-sm px-1 h-10 text-slate-700"
+                                        placeholder={isListening ? "Слушаю..." : "Спросите AI..."}
+                                        className="flex-1 bg-transparent border-none outline-none text-sm text-slate-700 placeholder-slate-400"
                                     />
-                                    <button type="button" onClick={toggleListening}
-                                            className={`p-2 ${isListening ? 'text-red-500' : 'text-slate-400'}`}>
-                                        {isListening ? <SoundWaveIndicator/> : <Mic size={20}/>}
-                                    </button>
 
                                     {isLoading ? (
                                         <button
                                             type="button"
-                                            onClick={handleStopGeneration}
-                                            className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600 transition-all flex items-center gap-2 animate-pulse"
+                                            onClick={handleAbortRequest}
+                                            className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600"
+                                            title="Остановить генерацию"
                                         >
-                                            <Square size={14} fill="currentColor"/>
-                                            <span className="text-[10px] font-bold uppercase">Stop</span>
+                                            <StopCircle size={18}/>
                                         </button>
                                     ) : (
                                         <button
                                             type="submit"
-                                            disabled={isLoading || (!inputValue.trim() && !attachedFile)}
+                                            disabled={!inputValue.trim() && !attachedFile}
                                             className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all"
                                         >
                                             <Send size={18}/>
                                         </button>
                                     )}
                                 </form>
-                                <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                        const reader = new FileReader();
-                                        reader.onload = () => setAttachedFile({
-                                            path: reader.result as string,
-                                            name: file.name
-                                        });
-                                        reader.readAsDataURL(file);
-                                    }
-                                }}/>
                             </footer>
                         </main>
                     </div>
                 </div>
             )}
-
-            <ConfirmDialog
-                isOpen={confirmDialog.isOpen}
-                title="Очистить чат?"
-                message="Все сообщения будут удалены."
-                onConfirm={() => {
-                    setMessages([]);
-                    setConfirmDialog({isOpen: false, chatId: null});
-                }}
-                onCancel={() => setConfirmDialog({isOpen: false, chatId: null})}
-            />
+            <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = () => setAttachedFile({path: reader.result, name: file.name});
+                    reader.readAsDataURL(file);
+                }
+            }}/>
         </div>
     );
 };
-
-export default AssistantWidget;

@@ -1,9 +1,5 @@
 import React from 'react';
 
-/**
- * Компонент LiquidGlassFilter для Plasmo/Shadow DOM
- * Применяется к элементам через className="[filter:url(#liquid-glass-filter)]"
- */
 const LiquidGlassFilter: React.FC = () => {
     return (
         <svg
@@ -13,28 +9,23 @@ const LiquidGlassFilter: React.FC = () => {
             style={{
                 position: 'absolute',
                 pointerEvents: 'none',
-                userSelect: 'none',
-                opacity: 0,
-                height: 0,
-                width: 0
+                visibility: 'hidden'
             }}
-            aria-hidden="true"
         >
             <defs>
-                <filter id="liquid-glass-filter" x="-20%" y="-20%" width="140%" height="140%"
-                        colorInterpolationFilters="sRGB">
+                <filter id="liquid-glass-filter" x="-20%" y="-20%" width="140%" height="140%">
                     <feTurbulence
                         type="fractalNoise"
-                        baseFrequency="0.012 0.012"
-                        numOctaves="3"
+                        baseFrequency="0.007 0.007"
+                        numOctaves="2"
                         seed="92"
                         result="noise"
                     />
-                    <feGaussianBlur in="noise" stdDeviation="3" result="blurred"/>
+                    <feGaussianBlur in="noise" stdDeviation="2" result="blurred" />
                     <feDisplacementMap
                         in="SourceGraphic"
                         in2="blurred"
-                        scale="35"
+                        scale="75"
                         xChannelSelector="R"
                         yChannelSelector="G"
                     />

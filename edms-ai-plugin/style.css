@@ -2,58 +2,87 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Настройки темы и анимаций */
 @layer base {
     :root {
-        --color-neon-glass: rgba(255, 255, 255, 0.75);
-        --color-neon-glass-hover: rgba(255, 255, 255, 0.85);
-        --color-neon-border: rgba(255, 255, 255, 0.2);
-        --animate-sound-wave: sound-wave 0.6s ease-in-out infinite;
+        --color-liquid-bg: rgba(255, 255, 255, 0.05);
     }
 }
 
-/* Анимации вынесены в стандартный CSS для поддержки во всех браузерах внутри Shadow DOM */
-@keyframes fadeInScale {
-    from { opacity: 0; transform: scale(0.92); }
-    to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes sound-wave {
-    0%, 100% { transform: scaleY(0.5); }
-    50% { transform: scaleY(1.2); }
-}
-
-@keyframes particleExplode {
-    0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-    100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0); opacity: 0; }
-}
-
-/* Утилиты */
-@layer utilities {
-    .animate-sound-wave {
-        animation: var(--animate-sound-wave);
-    }
-
-    .neon-glass {
-        background: var(--color-neon-glass);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid var(--color-neon-border);
+@layer components {
+    .frosted-glass {
+        @apply bg-white/20 backdrop-blur-md border border-white/30 shadow-lg;
         transition: all 0.3s ease;
     }
-
-    /* Кастомный скроллбар */
-    .custom-scrollbar::-webkit-scrollbar {
-        width: 4px;
+    .frosted-glass:hover {
+        @apply bg-white/30 border-white/50;
     }
-    .custom-scrollbar::-webkit-scrollbar-track {
+
+    .liquid-glass {
+        position: relative;
+        isolation: isolate;
         background: transparent;
     }
+
+    .liquid-glass::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        box-shadow: inset 0 0 15px 0px #ffffff;
+        background-color: rgba(255, 255, 255, 0);
+        z-index: 1;
+    }
+
+    .liquid-glass::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        filter: url(#liquid-glass-filter);
+        -webkit-filter: url(#liquid-glass-filter);
+        z-index: -1;
+    }
+}
+
+@layer utilities {
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: rgba(99, 102, 241, 0.2); /* Indigo-200 */
+        background: rgba(99, 102, 241, 0.3);
         border-radius: 10px;
     }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: rgba(99, 102, 241, 0.4);
+
+    @keyframes liquid-ripple {
+        0% {
+            transform: scale(0.8);
+            opacity: 0.6;
+        }
+        100% {
+            transform: scale(2.2);
+            opacity: 0;
+        }
     }
+
+    .animate-liquid-ripple {
+        animation: liquid-ripple 3s cubic-bezier(0, 0.2, 0.4, 1) infinite;
+    }
+
+    .input-focus-glow:focus-within {
+        @apply ring-4 ring-indigo-500/20 border-indigo-400/50 bg-white/50;
+        transition: all 0.3s ease;
+    }
+}
+
+@keyframes soft-pulse {
+    0% { transform: scale(1); opacity: 0.4; }
+    100% { transform: scale(1.8); opacity: 0; }
+}
+
+.soft-wave {
+    animation: soft-pulse 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
