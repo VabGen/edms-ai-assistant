@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # edms_ai_assistant/llm.py
 @functools.lru_cache(maxsize=1)
-def get_chat_model() -> BaseChatModel: # Используйте BaseChatModel
+def get_chat_model() -> BaseChatModel:
     return ChatOpenAI(
         openai_api_base="https://api.proxyapi.ru/openai/v1",
         openai_api_key=settings.OPENAI_API_KEY,
