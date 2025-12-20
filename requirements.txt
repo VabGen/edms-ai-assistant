@@ -1,3 +1,4 @@
+command==0.1.0
 unstructured[docx]
 aiofiles
 langchain-text-splitters

@@ -170,31 +170,39 @@ async def chat_endpoint(
             if not requested_path.exists():
                 logger.error(f"Файл не найден: {current_file_path}")
 
-        response_text = await agent.chat(
+        agent_result = await agent.chat(
             message=user_input.message,
             user_token=user_input.user_token,
             context_ui_id=user_input.context_ui_id,
             thread_id=thread_id,
             user_context=user_input.context.model_dump() if user_input.context else None,
-            file_path=current_file_path
+            file_path=current_file_path,
+            human_choice=user_input.human_choice
         )
 
         if current_file_path:
             background_tasks.add_task(_cleanup_file, current_file_path)
 
+        if agent_result["status"] == "requires_action":
+            return AssistantResponse(
+                status="requires_action",
+                action_type=agent_result.get("action_type"),
+                message=agent_result.get("message"),
+                thread_id=thread_id
+            )
+
         return AssistantResponse(
-            response=response_text,
+            status="success",
+            response=agent_result.get("content"),
             thread_id=thread_id
         )
 
     except HTTPException:
-        if current_file_path:
-            _cleanup_file(current_file_path)
+        if current_file_path: _cleanup_file(current_file_path)
         raise
     except Exception as e:
         logger.error(f"Ошибка в эндпоинте /chat: {e}", exc_info=True)
-        if current_file_path:
-            _cleanup_file(current_file_path)
+        if current_file_path: _cleanup_file(current_file_path)
         raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
 
 

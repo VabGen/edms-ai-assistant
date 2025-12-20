@@ -31,7 +31,7 @@ async def doc_get_details(document_id: str, token: str) -> Dict[str, Any]:
             raw_data = await client.get_document_metadata(token, document_id)
             doc = DocumentDto.model_validate(raw_data)
 
-            logger.info(f"Информация о документе: {doc}")
+            # logger.info(f"Информация о документе: {doc}")
 
             full_data = doc.model_dump(
                 exclude_none=True,

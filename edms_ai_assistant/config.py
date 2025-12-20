@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     llm__embedding: str = "http://model-embedding.shared.du.iba/v1"
     llm__embedding_model: str = "default-embedding-model"
     llm_api_key: str | None = None
+    openai_api_key: str | None = None
 
     llm_temperature: float = 0.6
     llm_max_tokens: int | None = None
@@ -73,6 +74,10 @@ class Settings(BaseSettings):
     @property
     def LLM_API_KEY(self) -> str | None:
         return getattr(self, "llm_api_key", self.llm_api_key)
+
+    @property
+    def OPENAI_API_KEY(self) -> str | None:
+        return getattr(self, "openai_api_key", self.openai_api_key)
 
     @property
     def LLM_TEMPERATURE(self) -> float:

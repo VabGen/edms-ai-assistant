@@ -1,7 +1,7 @@
 # edms_ai_assistant/llm.py
 import logging
 import functools
-from langchain_core.language_models import BaseLanguageModel
+from langchain_core.language_models import BaseLanguageModel, BaseChatModel
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from edms_ai_assistant.config import settings
@@ -40,10 +40,10 @@ logger = logging.getLogger(__name__)
 
 # edms_ai_assistant/llm.py
 @functools.lru_cache(maxsize=1)
-def get_chat_model() -> BaseLanguageModel:
+def get_chat_model() -> BaseChatModel: # Используйте BaseChatModel
     return ChatOpenAI(
         openai_api_base="https://api.proxyapi.ru/openai/v1",
-        openai_api_key="sk-peQ4dbtr20yWOrae82lbPjXNqFl7pvaO",
+        openai_api_key=settings.OPENAI_API_KEY,
         model_name="gpt-4o-mini",
         temperature=0.1,
     )

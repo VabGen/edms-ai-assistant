@@ -1,3 +1,4 @@
+# edms_ai_assistant\agent.py
 import logging
 import operator
 from typing import List, Optional, Annotated, Dict, Any, TypedDict
@@ -5,6 +6,7 @@ from typing import List, Optional, Annotated, Dict, Any, TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 
 from edms_ai_assistant.llm import get_chat_model
 from edms_ai_assistant.tools import all_tools
@@ -22,62 +24,38 @@ class EdmsAgentState(TypedDict):
 
 class EdmsDocumentAgent:
     def __init__(self):
+        # Получаем объект модели из llm.py
         self.model = get_chat_model()
         self.tools = all_tools
+        self.checkpointer = MemorySaver()
 
-        self.system_message = (
+        self.system_template = (
             "<identity>\n"
-            "Ты — экспертный ИИ-ассистент системы электронного документооборота (EDMS). "
-            "Твоя задача: профессиональный анализ метаданных и содержимого документов.\n"
+            "Ты — экспертный ИИ-ассистент системы электронного документооборота (EDMS).\n"
             "</identity>\n\n"
-
             "<context>\n"
             "- Текущий UUID документа в системе: {context_ui_id}\n"
-            "- Все действия выполняются от лица авторизованного пользователя.\n"
             "</context>\n\n"
-
             "<tool_policy>\n"
             "   <local_files>\n"
-            "   Если в контексте предоставлен `file_path`, для любых вопросов по этому файлу используй "
-            "исключительно инструмент `read_local_file_content`. Игнорируй инструменты EDMS для локальных файлов.\n"
-            "   </local_files>\n\n"
-
+            "   Если предоставлен `file_path`, используй `read_local_file_content`.\n"
+            "   </local_files>\n"
             "   <edms_files>\n"
-            "   При работе с вложениями внутри EDMS (context_ui_id) строго соблюдай протокол:\n"
-            "   1. **Discovery**: Если пользователь упоминает файл по типу (РКК, Договор) или имени, "
-            "ТЫ ОБЯЗАН сначала вызвать `doc_get_details`.\n"
-            "   2. **Selection**: Проанализируй массив `attachmentDocument`. Найди объект, где `name` или "
-            "`attachmentDocumentType` наиболее релевантны запросу.\n"
-            "   3. **Extraction**: Используй полученный `id` вложения как аргумент `attachment_id` в инструменте `doc_get_file_content`.\n"
-            "   4. **Fallback**: Вызывай `doc_get_file_content` без `attachment_id` ТОЛЬКО если в метаданных присутствует ровно одно вложение.\n"
+            "   Протокол: 1. doc_get_details -> 2. Выбор ID -> 3. doc_get_file_content.\n"
             "   </edms_files>\n"
             "</tool_policy>\n\n"
-
-            "<constraints>\n"
-            "- Запрещено галлюцинировать именами файлов. Используй только данные из `doc_get_details`.\n"
-            "- Если подходящий файл не найден, выведи список доступных имен файлов и попроси уточнения.\n"
-            "- Всегда сообщай название файла, с которым работаешь.\n"
-            "</constraints>\n\n"
-
-            "<thought_process>\n"
-            "Перед вызовом инструмента проговори про себя (внутренний монолог):\n"
-            "1. Какой тип файла ищет пользователь?\n"
-            "2. Знаю ли я UUID этого вложения? (Если нет — вызываю doc_get_details).\n"
-            "3. Какой инструмент соответствует источнику (локальный диск или облако EDMS)?\n"
-            "</thought_process>"
+            "ПРАВИЛО HITL:\n"
+            "Для суммаризации используй `doc_summarize_text`. Система остановится для выбора типа (Extractive/Abstractive/Thesis).\n"
         )
 
-        try:
-            self.agent = create_react_agent(
-                model=self.model,
-                tools=self.tools,
-                state_modifier=self.system_message
-            )
-        except (TypeError, ValueError):
-            self.agent = create_react_agent(
-                model=self.model,
-                tools=self.tools
-            )
+        # Передаем объект модели напрямую.
+        # interrupt_before=["tools"] создает точку прерывания для HITL.
+        self.agent = create_react_agent(
+            model=self.model,
+            tools=self.tools,
+            checkpointer=self.checkpointer,
+            interrupt_before=["tools"]
+        )
 
     async def chat(
             self,
@@ -86,46 +64,97 @@ class EdmsDocumentAgent:
             context_ui_id: Optional[str] = None,
             thread_id: Optional[str] = None,
             user_context: Optional[Dict[str, Any]] = None,
-            file_path: Optional[str] = None
-    ) -> str:
+            file_path: Optional[str] = None,
+            human_choice: Optional[str] = None
+    ) -> Dict[str, Any]:
         try:
-            current_system_message = self.system_message.replace("{context_ui_id}", context_ui_id or "не задан")
-
-            if file_path:
-                file_info = f"\n[ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ]:\nПУТЬ: {file_path}"
-            else:
-                file_info = ""
-
-            context_header = (
-                f"КОНТЕКСТ СИСТЕМЫ:\n"
-                f"- Токен: {user_token}\n"
-                f"- ID текущего документа: {context_ui_id or 'не задан'}"
-                f"{file_info}\n"
-            )
-
-            new_messages = [
-                SystemMessage(content=current_system_message),
-                HumanMessage(content=f"{context_header}\nЗАПРОС ПОЛЬЗОВАТЕЛЯ: {message}")
-            ]
-
-            inputs = {
-                "messages": new_messages,
-                "user_token": user_token,
-                "context_ui_id": context_ui_id,
-                "user_context": user_context or {},
-                "file_path": file_path
-            }
-
             config: RunnableConfig = {
                 "configurable": {"thread_id": thread_id or "default_session"}
             }
 
-            result = await self.agent.ainvoke(inputs, config=config)
+            if human_choice:
+                # ЛОГИКА ПРОДОЛЖЕНИЯ ПОСЛЕ ВЫБОРА ПОЛЬЗОВАТЕЛЯ
+                snapshot = await self.agent.aget_state(config)
+                if snapshot.values and "messages" in snapshot.values:
+                    last_message = snapshot.values["messages"][-1]
 
+                    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                        tool_call = last_message.tool_calls[0]
+                        new_args = {**tool_call["args"]}
+
+                        # Подставляем выбор пользователя в аргумент 'focus' (для суммаризации)
+                        if tool_call["name"] == "doc_summarize_text":
+                            new_args["focus"] = human_choice
+
+                        updated_tool_calls = [{
+                            "name": tool_call["name"],
+                            "args": new_args,
+                            "id": tool_call["id"],
+                            "type": "tool_call"
+                        }]
+
+                        # Обновляем состояние агента перед продолжением
+                        await self.agent.aupdate_state(
+                            config,
+                            {"messages": [last_message.copy(update={"tool_calls": updated_tool_calls})]},
+                            as_node="agent"
+                        )
+                # Продолжаем выполнение с None (агент возьмет данные из обновленного состояния)
+                result = await self.agent.ainvoke(None, config=config)
+            else:
+                # ПЕРВИЧНЫЙ ЗАПУСК
+                current_sys = self.system_template.format(context_ui_id=context_ui_id or "не задан")
+                context_header = f"КОНТЕКСТ:\n- Токен: {user_token}\n- ID документа: {context_ui_id or 'не задан'}\n"
+
+                if user_context:
+                    context_header += f"- Данные профиля: {user_context}\n"
+
+                if file_path:
+                    context_header += f"- Локальный файл: {file_path}\n"
+
+                inputs: EdmsAgentState = {
+                    "messages": [
+                        SystemMessage(content=current_sys),
+                        HumanMessage(content=f"{context_header}\nЗАПРОС: {message}")
+                    ],
+                    "user_token": user_token,
+                    "context_ui_id": context_ui_id,
+                    "user_context": user_context or {},
+                    "file_path": file_path
+                }
+
+                # ПЕРЕДАЕМ inputs как словарь (без распаковки **)
+                result = await self.agent.ainvoke(inputs, config=config)
+
+            # ПРОВЕРКА СОСТОЯНИЯ: НУЖНО ЛИ ПРЕРЫВАНИЕ (HITL)?
+            final_snapshot = await self.agent.aget_state(config)
+
+            if final_snapshot.next:
+                last_msg = final_snapshot.values["messages"][-1]
+                if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                    tool_name = last_msg.tool_calls[0]["name"]
+
+                    # Если вызван инструмент суммаризации — возвращаем сигнал для фронтенда
+                    if tool_name == "doc_summarize_text":
+                        return {
+                            "status": "requires_action",
+                            "action_type": "summarize_selection",
+                            "message": "Файл загружен. Выберите режим анализа для создания выжимки:"
+                        }
+                    # Для остальных инструментов (чтение файла и т.д.) — авто-продолжение
+                    else:
+                        logger.info(f"Авто-продолжение для инструмента: {tool_name}")
+                        result = await self.agent.ainvoke(None, config=config)
+
+            # ВОЗВРАТ УСПЕШНОГО РЕЗУЛЬТАТА
             if result and "messages" in result:
-                return result["messages"][-1].content
+                return {
+                    "status": "success",
+                    "content": result["messages"][-1].content
+                }
 
-            return "Извините, я не смог сформировать ответ."
+            return {"status": "error", "message": "Агент не вернул сообщений."}
+
         except Exception as e:
-            logger.error(f"Ошибка в chat: {e}", exc_info=True)
-            return f"Техническая ошибка: {str(e)}"
+            logger.error(f"Ошибка в EdmsDocumentAgent.chat: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)}

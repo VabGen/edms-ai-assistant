@@ -22,6 +22,7 @@ class UserInput(BaseModel):
     )
     context: Optional[UserContext] = None
     file_path: Optional[str] = None
+    human_choice: Optional[str] = None
 
 
 class FileUploadResponse(BaseModel):
@@ -31,9 +32,12 @@ class FileUploadResponse(BaseModel):
 
 
 class AssistantResponse(BaseModel):
-    """То, что фронт ожидает получить обратно."""
-    response: str
-    thread_id: str
+    """Ответ ассистента."""
+    status: str
+    response: Optional[str] = None
+    action_type: Optional[str] = None
+    message: Optional[str] = None
+    thread_id: Optional[str] = None
 
 
 class AgentState(TypedDict):
