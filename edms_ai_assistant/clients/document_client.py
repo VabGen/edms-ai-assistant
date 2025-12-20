@@ -1,11 +1,10 @@
 # edms_ai_assistant/clients/document_client.py
-
 from typing import Optional, Dict, Any, List
 from abc import abstractmethod
 from .base_client import EdmsHttpClient, EdmsBaseClient
 
 
-class BaseDocumentClient(EdmsBaseClient):
+class EdmsDocumentClient(EdmsBaseClient):
     """Абстрактный класс для работы с документами."""
 
     @abstractmethod
@@ -23,8 +22,7 @@ class BaseDocumentClient(EdmsBaseClient):
         raise NotImplementedError
 
 
-# --- Реализация ---
-class DocumentClient(BaseDocumentClient, EdmsHttpClient):
+class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
     """Асинхронный клиент для работы с EDMS Document API."""
 
     async def get_document_metadata(self, token: str, document_id: str) -> Optional[Dict[str, Any]]:

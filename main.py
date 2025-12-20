@@ -1,16 +1,16 @@
-# edms_ai_assistant/main.py
-
+# main.py
 import os
 import sys
 import logging
-import json
-import uuid
-import base64
-import functools
 import shutil
+import uuid
+import tempfile
+import aiofiles
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional, List, Union, Annotated, Dict, Any
+from typing import Optional, Annotated, Union
+
+import uvicorn
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -21,280 +21,187 @@ from fastapi import (
     Depends,
     status,
 )
-import uvicorn
-import tempfile
-from langchain_core.messages import HumanMessage, BaseMessage
-from langgraph.checkpoint.memory import InMemorySaver
-from langchain_core.runnables import Runnable
 from starlette.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.models import (
-    OrchestratorState,
     UserInput,
     AssistantResponse,
     FileUploadResponse,
 )
-from edms_ai_assistant.graph import build_orchestrator_graph
+from edms_ai_assistant.agent import EdmsDocumentAgent
 from edms_ai_assistant.security import extract_user_id_from_token
 
-logging.basicConfig(level=settings.LOGGING_LEVEL, format=settings.LOGGING_FORMAT)
+logging.basicConfig(
+    level=settings.LOGGING_LEVEL,
+    format=settings.LOGGING_FORMAT
+)
 logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 
-
-@functools.lru_cache(maxsize=1)
-def get_memory_checkpointer() -> InMemorySaver:
-    """ Ленивая инициализация InMemorySaver. """
-    logger.info("Инициализация InMemorySaver для Checkpointing.")
-    return InMemorySaver()
+_agent: Optional[EdmsDocumentAgent] = None
 
 
-@functools.lru_cache(maxsize=1)
-def get_orchestrator_app() -> Runnable:
-    checkpointer = get_memory_checkpointer()
-    graph = build_orchestrator_graph()
-
-    logger.info("Компиляция LangGraph с Checkpointer...")
-    app_compiled = graph.compile(checkpointer=checkpointer)
-    logger.info("Оркестратор LangGraph скомпилирован.")
-
-    return app_compiled
+def get_agent() -> EdmsDocumentAgent:
+    """Dependency для получения синглтона агента."""
+    if _agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ИИ-Агент еще не инициализирован."
+        )
+    return _agent
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """ Управление жизненным циклом приложения FastAPI. """
+    """Управление жизненным циклом приложения."""
+    global _agent
+
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Директория для загрузки файлов: {UPLOAD_DIR}")
+    logger.info(f"Временное хранилище готово: {UPLOAD_DIR}")
 
     try:
-        get_orchestrator_app()
+        _agent = EdmsDocumentAgent()
+        logger.info("Ассистент EDMS успешно инициализирован.")
     except Exception as e:
-        logger.error(f"Критическая ошибка при инициализации оркестратора: {e}", exc_info=True)
+        logger.error(f"Критическая ошибка инициализации агента: {e}", exc_info=True)
 
     yield
 
-    try:
-        if UPLOAD_DIR.exists():
-            shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
-            logger.info(f"Очищена временная директория: {UPLOAD_DIR}")
-    except Exception as e:
-        logger.warning(f"Не удалось очистить временную директорию: {e}")
-
-    logger.info("Выключение ассистента завершено.")
+    if UPLOAD_DIR.exists():
+        shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
+        logger.info("Временные файлы удалены.")
 
 
 app = FastAPI(
-    title="AI-Powered EDMS Orchestrator API",
-    version="1.0.0",
-    description="API для гибкого AI-ассистента, интегрированного с EDMS.",
+    title="EDMS AI Assistant API",
+    version="2.0.0",
+    description="Профессиональный AI-сервис для работы с документами и данными EDMS.",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-                   "http://localhost:3001",
-                   "http://localhost:8080",
-                   "chrome-extension://*"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-def _cleanup_file(file_path: Union[Path, str]) -> None:
-    """ Фоновая задача для безопасного удаления временного файла. """
-    path = Path(file_path) if isinstance(file_path, str) else file_path
+def _cleanup_file(file_path: str) -> None:
+    """Фоновое удаление файла."""
     try:
-        if path.resolve().parent.samefile(UPLOAD_DIR.resolve()):
-            path.unlink(missing_ok=True)
-            logger.debug(f"Cleaned up temporary file: {path}")
-        else:
-            logger.warning(f"Skipping cleanup for file outside UPLOAD_DIR: {path}")
+        path = Path(file_path)
+        if path.exists():
+            path.unlink()
+            logger.debug(f"Файл удален: {file_path}")
     except Exception as e:
-        logger.warning(f"Failed to clean up {path}: {e}")
+        logger.warning(f"Не удалось удалить файл {file_path}: {e}")
 
 
-async def save_uploaded_file_async(upload_file: UploadFile, user_id: str) -> Optional[Path]:
-    """ Сохраняет загруженный файл в асинхронном режиме. """
-    if not upload_file.filename:
-        return None
+async def save_upload(file: UploadFile, user_id: str) -> Path:
+    """Безопасное асинхронное сохранение файла."""
+    ext = Path(file.filename).suffix
+    if ext.lower() not in ['.pdf', '.docx', '.txt']:
+        raise ValueError("Неподдерживаемый тип файла")
 
-    file_extension = Path(upload_file.filename).suffix
-    file_path = UPLOAD_DIR / f"{user_id}_{uuid.uuid4()}{file_extension}"
+    dest = UPLOAD_DIR / f"{user_id}_{uuid.uuid4()}{ext}"
 
-    try:
-        content = await upload_file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
+    async with aiofiles.open(dest, "wb") as f:
+        content = await file.read()
+        await f.write(content)
+    return dest
 
-        logger.info(f"Saved uploaded file to {file_path}")
-        return file_path
-    except Exception as e:
-        logger.error(f"File save error for {upload_file.filename}: {e}", exc_info=True)
-        return None
-
-
-# ----------------------------------------------------------------
-# ЗАВИСИМОСТИ (DEPENDENCIES)
-# ----------------------------------------------------------------
-
-def get_orchestrator_dependency() -> Runnable:
-    """Dependency для получения инициализированного оркестратора."""
-    orchestrator = get_orchestrator_app()
-    if not orchestrator:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Оркестратор еще не инициализирован. Пожалуйста, подождите.",
-        )
-    return orchestrator
-
-
-# ----------------------------------------------------------------
-# ЭНДПОИНТЫ
-# ----------------------------------------------------------------
 
 @app.get("/health")
-def health_check(
-        orchestrator: Annotated[Runnable, Depends(get_orchestrator_dependency)]
-):
-    """Проверка состояния сервиса и доступности оркестратора."""
-    return {"status": "ok", "orchestrator_status": "ready"}
+def health_check(agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]):
+    """Проверка работоспособности системы."""
+    return {"status": "ok", "agent_status": "ready"}
 
 
 @app.post("/upload-file", response_model=FileUploadResponse)
-async def upload_file_for_analysis(
-        file: Annotated[UploadFile, File(..., description="Файл для загрузки и анализа.")],
-        user_token: Annotated[str, Form(..., description="JWT токен пользователя.")],
-        background_tasks: BackgroundTasks,
+async def upload_file(
+        user_token: Annotated[str, Form(...)],
+        file: Annotated[UploadFile, File(...)]
 ):
-    """ Загружает файл и сохраняет его во временное хранилище. """
-    if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Отсутствует имя файла.")
-
+    """Загрузка файла перед анализом."""
     try:
-        user_id_for_thread = extract_user_id_from_token(user_token)
-
-        file_path = await save_uploaded_file_async(file, user_id_for_thread)
-
-        if not file_path:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Ошибка при сохранении файла на сервере."
-            )
+        user_id = extract_user_id_from_token(user_token)
+        saved_path = await save_upload(file, user_id)
 
         return FileUploadResponse(
-            file_path=str(file_path),
-            file_name=file.filename,
+            file_path=str(saved_path),
+            file_name=file.filename
         )
-
     except ValueError as e:
-        logger.warning(f"Неверный токен при загрузке: {e}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Неверный токен: {e}")
+        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
-        logger.error(f"Критическая ошибка при загрузке файла: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Внутренняя ошибка сервера при обработке файла"
-        )
+        logger.error(f"Ошибка загрузки: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при сохранении файла.")
 
 
 @app.post("/chat", response_model=AssistantResponse)
-async def chat_with_assistant(
+async def chat_endpoint(
         user_input: UserInput,
         background_tasks: BackgroundTasks,
-        orchestrator: Annotated[Runnable, Depends(get_orchestrator_dependency)],
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
 ):
-    """ Основной эндпоинт для чата. """
-    file_path: Optional[str] = user_input.file_path
+    """Основной эндпоинт взаимодействия с ассистентом."""
+    current_file_path = user_input.file_path
 
     try:
-        user_id_for_thread = extract_user_id_from_token(user_input.user_token)
-    except ValueError as e:
-        logger.error(f"Ошибка токена в /chat: {e}")
-        if file_path:
-            background_tasks.add_task(_cleanup_file, file_path)
+        try:
+            thread_id = extract_user_id_from_token(user_input.user_token)
+        except Exception as e:
+            logger.warning(f"Ошибка парсинга токена: {e}")
+            raise HTTPException(status_code=401, detail="Невалидный токен")
 
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Неверный/невалидный токен: {e}",
+        if current_file_path:
+            requested_path = Path(current_file_path).resolve()
+            base_path = UPLOAD_DIR.resolve()
+            if not str(requested_path).startswith(str(base_path)):
+                logger.warning(f"Попытка доступа вне разрешенной папки: {current_file_path}")
+                raise HTTPException(status_code=403, detail="Доступ к указанному файлу запрещен")
+
+            if not requested_path.exists():
+                logger.error(f"Файл не найден: {current_file_path}")
+
+        response_text = await agent.chat(
+            message=user_input.message,
+            user_token=user_input.user_token,
+            context_ui_id=user_input.context_ui_id,
+            thread_id=thread_id,
+            user_context=user_input.context.model_dump() if user_input.context else None,
+            file_path=current_file_path
         )
 
-    thread_id = user_id_for_thread
-    config = {"configurable": {"thread_id": thread_id}}
+        if current_file_path:
+            background_tasks.add_task(_cleanup_file, current_file_path)
 
-    user_context_dict: Optional[Dict[str, Any]] = (
-        user_input.context.model_dump(mode='json') if user_input.context else None
-    )
-
-    initial_state: OrchestratorState = {
-        "messages": [HumanMessage(content=user_input.message)],
-        "context_ui_id": user_input.context_ui_id,
-        "user_context": user_context_dict,
-        "file_path": file_path,
-        "user_token": user_input.user_token,
-        "tools_to_call": [],
-        "tool_results_history": [],
-        "required_file_name": None,
-    }
-
-    try:
-        final_state: Dict[str, Any] = initial_state.copy()
-
-        async for output in orchestrator.astream(initial_state, config=config):
-            if isinstance(output, dict):
-                all_changes = {}
-                for changes in output.values():
-                    if isinstance(changes, dict):
-                        all_changes.update(changes)
-                final_state.update(all_changes)
-
-        messages: List[BaseMessage] = final_state.get("messages", [])
-        response_content = (
-            messages[-1].content
-            if messages and isinstance(messages[-1], BaseMessage)
-            else None
+        return AssistantResponse(
+            response=response_text,
+            thread_id=thread_id
         )
 
-        if not response_content:
-            logger.error(
-                f"Не удалось извлечь финальный ответ из LangGraph. Состояние: {final_state}"
-            )
-            response_content = "Извините, не удалось сформулировать ответ из-за внутренней ошибки оркестратора."
-
-        if file_path:
-            background_tasks.add_task(_cleanup_file, file_path)
-
-        return AssistantResponse(response=response_content)
-
+    except HTTPException:
+        if current_file_path:
+            _cleanup_file(current_file_path)
+        raise
     except Exception as e:
-        logger.error(f"Критическая ошибка в обработчике чата: {e}", exc_info=True)
-        if file_path:
-            background_tasks.add_task(_cleanup_file, file_path)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Внутренняя ошибка сервера при обработке запроса"
-        )
+        logger.error(f"Ошибка в эндпоинте /chat: {e}", exc_info=True)
+        if current_file_path:
+            _cleanup_file(current_file_path)
+        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
 
 
 if __name__ == "__main__":
-    try:
-        orchestrator_app = get_orchestrator_app()
-    except Exception as e:
-        logger.error(f"Критическая ошибка при инициализации оркестратора: {e}", exc_info=True)
-        sys.exit(1)
-
-    logger.info("LangGraph Оркестратор инициализирован и готов к запуску сервера.")
-
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=settings.API_PORT,
-        log_level=settings.LOGGING_LEVEL.lower(),
-        reload=settings.ENVIRONMENT == "development",
+        reload=(settings.ENVIRONMENT == "development")
     )

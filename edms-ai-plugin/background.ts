@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 /**
- * Обработка чат-сообщений с поддержкой отмены
+ * Обработка чат-сообщений
  */
 async function handleChatMessage(payload: any, sendResponse: (res: ChromeResponse) => void) {
     const requestId = payload.requestId || 'default';
@@ -70,7 +70,7 @@ async function handleChatMessage(payload: any, sendResponse: (res: ChromeRespons
 }
 
 /**
- * Обработка загрузки файлов
+ * Обработка загрузки файлов согласно логике main.py
  */
 async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse) => void) {
     try {
@@ -81,7 +81,7 @@ async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse
 
         const formData = new FormData();
         formData.append('file', blob, fileName);
-        if (user_token) formData.append('user_token', user_token);
+        formData.append('user_token', user_token);
 
         const response = await fetch(`${API_BASE_URL}/upload-file`, {
             method: 'POST',
@@ -89,10 +89,11 @@ async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Ошибка сохранения файла');
+        if (!response.ok) throw new Error(data.detail || 'Ошибка сохранения файла на сервере');
 
         sendResponse({success: true, data});
     } catch (err: any) {
+        console.error("Upload error:", err);
         sendResponse({success: false, error: err.message});
     }
 }

@@ -1,7 +1,7 @@
+# edms_ai_assistant\clients\base_client.py
 import httpx
 import logging
 import json
-import re
 from typing import Dict, Any, Optional, Union, List, Tuple
 from abc import ABC
 from edms_ai_assistant.config import settings
@@ -17,7 +17,7 @@ class EdmsBaseClient(ABC):
 
 
 class EdmsHttpClient(EdmsBaseClient):
-    """Универсальный асинхронный клиент для API EDMS Chancellor NEXT, реализующий HTTP-запросы."""
+    """Универсальный асинхронный клиент для API EDMS, реализующий HTTP-запросы."""
 
     def __init__(
             self,
@@ -27,7 +27,6 @@ class EdmsHttpClient(EdmsBaseClient):
         resolved_base_url = base_url or settings.CHANCELLOR_NEXT_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
         self.timeout = timeout or settings.EDMS_TIMEOUT
-        # Клиент будет инициализирован при первом использовании или в __aenter__
         self._client = None
 
     async def __aenter__(self):

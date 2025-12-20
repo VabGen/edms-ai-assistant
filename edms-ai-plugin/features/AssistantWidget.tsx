@@ -13,7 +13,6 @@ const extractDocIdFromUrl = (): string => {
     try {
         const pathParts = window.location.pathname.split('/');
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
         const foundId = pathParts.find(part => uuidRegex.test(part));
         if (foundId) return foundId;
     } catch (e) {
@@ -69,7 +68,6 @@ export const AssistantWidget = () => {
 
     useEffect(() => {
         setIsMounted(true);
-
         chrome.storage.local.get(["assistantEnabled"], (result) => {
             if (result.assistantEnabled !== undefined) setIsEnabled(result.assistantEnabled);
         });
@@ -80,7 +78,6 @@ export const AssistantWidget = () => {
                 if (!changes.assistantEnabled.newValue) setIsWidgetVisible(false);
             }
         };
-
         chrome.storage.onChanged.addListener(handleStorageChange);
         return () => chrome.storage.onChanged.removeListener(handleStorageChange);
     }, []);
@@ -93,7 +90,6 @@ export const AssistantWidget = () => {
             instance.lang = 'ru-RU';
             instance.continuous = true;
             instance.interimResults = true;
-
             instance.onresult = (e: any) => {
                 let finalTranscript = '';
                 for (let i = e.resultIndex; i < e.results.length; ++i) {
@@ -101,7 +97,6 @@ export const AssistantWidget = () => {
                 }
                 if (finalTranscript) setInputValue(prev => prev + (prev ? ' ' : '') + finalTranscript);
             };
-
             instance.onend = () => setIsListening(false);
             instance.onerror = () => setIsListening(false);
             setRecognition(instance);
@@ -148,7 +143,7 @@ export const AssistantWidget = () => {
 
         setMessages(prev => [...prev, {
             role: 'user',
-            content: attachedFile ? `${inputValue} (${attachedFile.name})` : inputValue
+            content: attachedFile ? `${inputValue} (Файл: ${attachedFile.name})` : inputValue
         }]);
 
         setIsLoading(true);
@@ -156,6 +151,25 @@ export const AssistantWidget = () => {
         setInputValue('');
 
         try {
+            let serverFilePath = null;
+
+            if (attachedFile) {
+                const uploadRes: any = await new Promise((resolve, reject) => {
+                    chrome.runtime.sendMessage({
+                        type: 'uploadFile',
+                        payload: {
+                            fileData: attachedFile.path,
+                            fileName: attachedFile.name,
+                            user_token: userToken
+                        }
+                    }, (res) => {
+                        if (res?.success) resolve(res.data);
+                        else reject(res?.error || 'Ошибка при загрузке файла на сервер');
+                    });
+                });
+                serverFilePath = uploadRes.file_path;
+            }
+
             const chatRes: any = await new Promise((resolve, reject) => {
                 chrome.runtime.sendMessage({
                     type: 'sendChatMessage',
@@ -163,15 +177,18 @@ export const AssistantWidget = () => {
                         message: text,
                         user_token: userToken,
                         requestId,
-                        context_ui_id: currentDocId
+                        context_ui_id: currentDocId,
+                        file_path: serverFilePath
                     }
                 }, (res) => {
                     if (res?.success) resolve(res.data);
                     else reject(res?.error === 'aborted' ? 'aborted' : (res?.error || 'Unknown error'));
                 });
             });
+
             setMessages(prev => [...prev, {role: 'assistant', content: chatRes.response || chatRes.message}]);
-        } catch (err) {
+
+        } catch (err: any) {
             const errorMsg = String(err);
             if (errorMsg !== 'aborted' && errorMsg !== 'Request aborted' && !errorMsg.includes('aborted')) {
                 setMessages(prev => [...prev, {role: 'assistant', content: `⚠️ Ошибка: ${err}`}]);
@@ -179,6 +196,8 @@ export const AssistantWidget = () => {
         } finally {
             setIsLoading(false);
             currentRequestIdRef.current = null;
+            setAttachedFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
 
@@ -191,53 +210,124 @@ export const AssistantWidget = () => {
             {!isWidgetVisible && (
                 <div className="relative pointer-events-auto group cursor-pointer"
                      onClick={() => setIsWidgetVisible(true)}>
-                    <div className="absolute inset-0 m-auto w-full h-full rounded-full bg-cyan-400/30 animate-liquid-ripple"/>
+                    <div
+                        className="absolute inset-0 m-auto w-full h-full rounded-full bg-cyan-400/30 animate-liquid-ripple"/>
                     <button className={`w-16 h-16 rounded-full flex items-center justify-center ${frostedGlassClass}`}>
-                        <MessageSquare size={28} className="text-indigo-600 group-hover:rotate-12 transition-transform"/>
+                        <MessageSquare size={28}
+                                       className="text-indigo-600 group-hover:rotate-12 transition-transform"/>
                     </button>
                 </div>
             )}
 
             {isWidgetVisible && (
-                <div className={`flex flex-col w-[500px] h-[650px] rounded-[32px] shadow-2xl border border-white/20 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-300 origin-bottom-right ${liquidGlassClass}`}>
+                <div
+                    className={`flex flex-col w-[500px] h-[650px] rounded-[32px] shadow-2xl border border-white/20 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-300 origin-bottom-right ${liquidGlassClass}`}>
 
-                    <header className="flex items-center justify-between p-4 border-b border-white/10 shrink-0 relative z-10">
+                    <header
+                        className="flex items-center justify-between p-4 border-b border-white/10 shrink-0 relative z-20">
                         <div className="flex items-center gap-3">
-                            <button onClick={() => setIsChatPanelOpen(!isChatPanelOpen)}
-                                    className={`p-2 rounded-xl ${frostedGlassClass}`}>
-                                <MessageSquare size={18} className="text-indigo-700"/>
+                            <button
+                                onClick={() => setIsChatPanelOpen(!isChatPanelOpen)}
+                                className={`
+                                    p-2.5 rounded-xl transition-all duration-300 group relative overflow-hidden flex items-center justify-center
+                                    ${isChatPanelOpen ? 'bg-indigo-100/80 text-indigo-700 shadow-inner' : 'hover:bg-indigo-50 text-slate-500 hover:text-indigo-600'}
+                                    ${frostedGlassClass}
+                                    pointer-events-auto
+                                `}
+                            >
+                                <div className="flex flex-col gap-1.5 w-5 h-5 justify-center items-center">
+                                    <span
+                                        className={`h-0.5 bg-current rounded-full transition-all duration-300 origin-center ${isChatPanelOpen ? 'absolute rotate-45 w-5' : 'w-5 group-hover:w-3 group-hover:-translate-x-1'}`}></span>
+                                    <span
+                                        className={`h-0.5 bg-current rounded-full transition-all duration-200 ${isChatPanelOpen ? 'opacity-0' : 'w-5'}`}></span>
+                                    <span
+                                        className={`h-0.5 bg-current rounded-full transition-all duration-300 origin-center ${isChatPanelOpen ? 'absolute -rotate-45 w-5' : 'w-5 group-hover:w-4 group-hover:translate-x-0.5'}`}></span>
+                                </div>
                             </button>
+
                             <h3 className="font-bold text-slate-800 text-sm leading-none">EDMS Assistant</h3>
                         </div>
+
                         <button onClick={() => setIsWidgetVisible(false)}
-                                className={`p-2 rounded-xl text-slate-500 hover:text-red-500 ${frostedGlassClass}`}>
+                                className={`p-2 rounded-xl text-slate-500 hover:text-red-500 ${frostedGlassClass} pointer-events-auto`}>
                             <X size={20}/>
                         </button>
                     </header>
 
-                    <div className="flex-1 flex overflow-hidden relative z-10">
-                        {isChatPanelOpen && (
-                            <aside className="w-48 border-r border-white/10 bg-white/10 backdrop-blur-sm p-3">
-                                <div className={`p-3 rounded-xl text-[11px] font-bold text-indigo-700 cursor-pointer ${frostedGlassClass}`}>
-                                    Новый диалог
-                                </div>
-                            </aside>
-                        )}
+                    <div className="flex-1 flex overflow-hidden relative z-10 bg-white">
+                        <aside className={`
+                            relative h-full flex flex-col
+                            bg-slate-50/80 backdrop-blur-md
+                            border-r border-indigo-100/30
+                            transition-all duration-300 ease-in-out shrink-0
+                            ${isChatPanelOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden'}
+                        `}>
+                            <div className="p-4 w-64">
+                                <button
+                                    className="w-full py-2.5 px-4 rounded-xl bg-indigo-100/50 text-indigo-700 font-semibold hover:bg-indigo-200/70 transition-all text-sm flex items-center justify-center gap-2 border border-indigo-200/50 shadow-sm">
+                                    <span className="text-lg">+</span> Новый диалог
+                                </button>
 
-                        <main className="flex-1 flex flex-col min-w-0">
+                                <div className="mt-6 flex flex-col gap-2">
+                                    <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold px-2">История</p>
+                                    <div
+                                        className="text-xs text-slate-500 italic px-2 py-4 text-center bg-white/40 rounded-xl border border-dashed border-slate-200">
+                                        История пуста
+                                    </div>
+                                </div>
+                            </div>
+                        </aside>
+
+                        <main className="flex-1 flex flex-col min-w-0 bg-white transition-all duration-300 relative">
                             <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 custom-scrollbar">
-                                {messages.map((msg, idx) => <ChatMessage key={idx} content={msg.content} role={msg.role}/>)}
-                                {isLoading && <div className="text-indigo-500 text-[10px] animate-pulse px-2">Печатаю...</div>}
+                                {messages.map((msg, idx) => (
+                                    <ChatMessage key={idx} content={msg.content} role={msg.role}/>
+                                ))}
+
+                                {isLoading && (
+                                    <div
+                                        className="flex items-center gap-1.5 px-4 py-3 bg-indigo-50/40 w-fit rounded-2xl border border-indigo-100/30 ml-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                                        <span className="sr-only">Печатаю...</span>
+                                        <div
+                                            className="h-1.5 w-1.5 bg-indigo-400 rounded-full animate-typing-dot [animation-delay:-0.32s]"></div>
+                                        <div
+                                            className="h-1.5 w-1.5 bg-indigo-400 rounded-full animate-typing-dot [animation-delay:-0.16s]"></div>
+                                        <div
+                                            className="h-1.5 w-1.5 bg-indigo-400 rounded-full animate-typing-dot"></div>
+                                    </div>
+                                )}
                                 <div ref={messagesEndRef}/>
                             </div>
 
-                            <footer className="p-4 shrink-0">
+                            <footer className="p-4 shrink-0 bg-white/50 backdrop-blur-sm border-t border-gray-50">
                                 {isListening && <SoundWaveIndicator/>}
+
+                                {attachedFile && (
+                                    <div
+                                        className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-indigo-50/80 backdrop-blur-sm border border-indigo-100 rounded-xl w-fit animate-in slide-in-from-bottom-2 duration-200">
+                                        <Paperclip size={14} className="text-indigo-500"/>
+                                        <span
+                                            className="text-[11px] font-medium text-indigo-700 truncate max-w-[200px]">
+                                            {attachedFile.name}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setAttachedFile(null);
+                                                if (fileInputRef.current) fileInputRef.current.value = "";
+                                            }}
+                                            className="ml-1 p-0.5 hover:bg-indigo-200 rounded-full text-indigo-400 hover:text-indigo-600 transition-colors"
+                                        >
+                                            <X size={14}/>
+                                        </button>
+                                    </div>
+                                )}
+
                                 <form onSubmit={handleSendMessage}
                                       className={`flex items-center gap-2 rounded-2xl p-1.5 border transition-all ${frostedGlassClass} focus-within:ring-4 focus-within:ring-indigo-500/20`}>
 
                                     <button type="button" onClick={() => fileInputRef.current?.click()}
-                                            className="p-2 text-slate-500 hover:text-indigo-600">
+                                            className="p-2 text-slate-500 hover:text-indigo-600 transition-colors">
                                         <Paperclip size={20}/>
                                     </button>
 
@@ -261,8 +351,7 @@ export const AssistantWidget = () => {
                                         <button
                                             type="button"
                                             onClick={handleAbortRequest}
-                                            className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600"
-                                            title="Остановить генерацию"
+                                            className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600 transition-all active:scale-95"
                                         >
                                             <StopCircle size={18}/>
                                         </button>
@@ -270,7 +359,7 @@ export const AssistantWidget = () => {
                                         <button
                                             type="submit"
                                             disabled={!inputValue.trim() && !attachedFile}
-                                            className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all"
+                                            className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all active:scale-95"
                                         >
                                             <Send size={18}/>
                                         </button>
@@ -281,14 +370,19 @@ export const AssistantWidget = () => {
                     </div>
                 </div>
             )}
-            <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = () => setAttachedFile({path: reader.result, name: file.name});
-                    reader.readAsDataURL(file);
-                }
-            }}/>
+            <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = () => setAttachedFile({path: reader.result, name: file.name});
+                        reader.readAsDataURL(file);
+                    }
+                }}
+            />
         </div>
     );
 };

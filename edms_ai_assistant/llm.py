@@ -1,5 +1,4 @@
 # edms_ai_assistant/llm.py
-
 import logging
 import functools
 from langchain_core.language_models import BaseLanguageModel
@@ -10,33 +9,44 @@ from edms_ai_assistant.config import settings
 logger = logging.getLogger(__name__)
 
 
+# @functools.lru_cache(maxsize=1)
+# def get_chat_model() -> BaseLanguageModel:
+#     """
+#     Инициализирует и кэширует ChatModel.
+#     Использует lru_cache для обеспечения инициализации только один раз.
+#     """
+#     logger.info(
+#         f"Инициализация ChatModel: {settings.LLM_ENDPOINT}, модель: {settings.LLM_MODEL_NAME}"
+#     )
+#
+#     llm_params = {
+#         "openai_api_base": settings.LLM_ENDPOINT,
+#         "openai_api_key": settings.LLM_API_KEY or "placeholder-key",
+#         "model_name": settings.LLM_MODEL_NAME,
+#         "temperature": settings.LLM_TEMPERATURE,
+#         "max_tokens": getattr(settings, "LLM_MAX_TOKENS", None),
+#         "timeout": getattr(settings, "LLM_TIMEOUT", 120),
+#         "max_retries": getattr(settings, "LLM_MAX_RETRIES", 3),
+#         "request_timeout": getattr(settings, "LLM_REQUEST_TIMEOUT", 120),
+#         "default_headers": getattr(settings, "LLM_DEFAULT_HEADERS", None),
+#         "default_query": getattr(settings, "LLM_DEFAULT_QUERY", None),
+#     }
+#     llm_params = {k: v for k, v in llm_params.items() if v is not None}
+#
+#     llm = ChatOpenAI(**llm_params)
+#
+#     return llm
+
+
+# edms_ai_assistant/llm.py
 @functools.lru_cache(maxsize=1)
 def get_chat_model() -> BaseLanguageModel:
-    """
-    Инициализирует и кэширует ChatModel.
-    Использует lru_cache для обеспечения инициализации только один раз.
-    """
-    logger.info(
-        f"Инициализация ChatModel: {settings.LLM_ENDPOINT}, модель: {settings.LLM_MODEL_NAME}"
+    return ChatOpenAI(
+        openai_api_base="https://api.proxyapi.ru/openai/v1",
+        openai_api_key="sk-peQ4dbtr20yWOrae82lbPjXNqFl7pvaO",
+        model_name="gpt-4o-mini",
+        temperature=0.1,
     )
-
-    llm_params = {
-        "openai_api_base": settings.LLM_ENDPOINT,
-        "openai_api_key": settings.LLM_API_KEY or "placeholder-key",
-        "model_name": settings.LLM_MODEL_NAME,
-        "temperature": settings.LLM_TEMPERATURE,
-        "max_tokens": getattr(settings, "LLM_MAX_TOKENS", None),
-        "timeout": getattr(settings, "LLM_TIMEOUT", 120),
-        "max_retries": getattr(settings, "LLM_MAX_RETRIES", 3),
-        "request_timeout": getattr(settings, "LLM_REQUEST_TIMEOUT", 120),
-        "default_headers": getattr(settings, "LLM_DEFAULT_HEADERS", None),
-        "default_query": getattr(settings, "LLM_DEFAULT_QUERY", None),
-    }
-    llm_params = {k: v for k, v in llm_params.items() if v is not None}
-
-    llm = ChatOpenAI(**llm_params)
-
-    return llm
 
 
 @functools.lru_cache(maxsize=1)
