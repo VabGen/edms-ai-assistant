@@ -1,9 +1,9 @@
 import logging
-import operator
-from typing import List, Optional, Annotated, Dict, Any, TypedDict
+import asyncio
+import re
+from typing import Dict
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -12,13 +12,7 @@ from edms_ai_assistant.tools import all_tools
 
 logger = logging.getLogger(__name__)
 
-
-class EdmsAgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], operator.add]
-    context_ui_id: Optional[str]
-    user_token: str
-    user_context: Optional[Dict[str, Any]]
-    file_path: Optional[str]
+UUID_PATTERN = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.I)
 
 
 class EdmsDocumentAgent:
@@ -27,14 +21,25 @@ class EdmsDocumentAgent:
         self.tools = all_tools
         self.checkpointer = MemorySaver()
 
-        self.system_template = (
-            "Ты — экспертный ИИ-ассистент системы электронного документооборота (EDMS).\n"
-            "Текущий UUID документа: {context_ui_id}\n"
-            "ПРАВИЛА:\n"
-            "1. Если нужно узнать список файлов или метаданные — используй doc_get_details.\n"
-            "2. Если пользователь спрашивает о содержании вложений — ОБЯЗАТЕЛЬНО сначала получи текст через doc_get_file_content,\n"
-            "   а затем ВСЕГДА передавай этот текст в doc_summarize_text для формирования ответа.\n"
-            "3. НЕ ПЕРЕСКАЗЫВАЙ содержимое файлов самостоятельно без вызова doc_summarize_text."
+        self.tool_manifesto_template = (
+            "### SYSTEM ROLE: EDMS EXPERT AGENT\n"
+            "Ты — профессиональный аналитик СЭД.\n"
+            "Текущий UUID документа (context_ui_id): {context_ui_id}\n\n"
+
+            "### ЛОГИКА РАБОТЫ:\n"
+            "1. На вопросы о реквизитах или 'о чем документ' — используй ТОЛЬКО `doc_get_details`.\n"
+            "2. К анализу вложений (`doc_get_file_content`) переходи только если данных в карточке недостаточно или есть прямой запрос на анализ текста.\n\n"
+
+            "### ПРАВИЛА СУММАРИЗАЦИИ (КРИТИЧНО):\n"
+            "1. Как только ты получил текст файла, ты ОБЯЗАН вызвать инструмент `doc_summarize_text`.\n"
+            "2. **ЗАПРЕЩЕНО** предлагать типы сводки текстом. Просто инициируй вызов инструмента.\n"
+            "3. В поле `summary_type` передавай значение 'abstractive' как технический плейсхолдер.\n"
+            "4. Помни: этот вызов НЕ БУДЕТ выполнен сразу. Система остановится и покажет пользователю кнопки выбора.\n"
+            "5. Только после того, как пользователь нажмет кнопку, инструмент будет запущен с выбранным типом.\n"
+
+            "### ПРАВИЛА ПОВЕДЕНИЯ:\n"
+            "- Используй имя {user_name} для вежливого обращения к пользователю.\n"
+            "- Будь лаконичен. Если в `doc_get_details` есть поле 'shortSummary', используй его для ответа на вопрос 'о чем документ', не скачивая файлы.\n"
         )
 
         self.agent = create_react_agent(
@@ -44,102 +49,98 @@ class EdmsDocumentAgent:
             interrupt_before=["tools"]
         )
 
-    async def chat(
-            self,
-            message: str,
-            user_token: str,
-            context_ui_id: Optional[str] = None,
-            thread_id: Optional[str] = None,
-            user_context: Optional[Dict[str, Any]] = None,
-            file_path: Optional[str] = None,
-            human_choice: Optional[str] = None
-    ) -> Dict[str, Any]:
-        try:
-            config: RunnableConfig = {"configurable": {"thread_id": thread_id or "default_session"}}
-            current_sys = self.system_template.format(context_ui_id=context_ui_id or "не задан")
+    async def chat(self, message: str, user_token: str, context_ui_id: str = None,
+                   thread_id: str = None, user_context: Dict = None,
+                   file_path: str = None, human_choice: str = None) -> Dict:
 
-            if human_choice:
-                snapshot = await self.agent.aget_state(config)
-                if snapshot.values and "messages" in snapshot.values:
-                    last_message = snapshot.values["messages"][-1]
-                    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                        tool_call = last_message.tool_calls[0]
-                        new_args = {**tool_call["args"], "summary_type": human_choice}
+        config = {"configurable": {"thread_id": thread_id or "default"}}
 
-                        await self.agent.aupdate_state(
-                            config,
-                            {"messages": [last_message.copy(update={"tool_calls": [{**tool_call, "args": new_args}]})]},
-                            as_node="agent"
-                        )
-                await self.agent.ainvoke(None, config=config)
+        user_name = f"{user_context.get('firstName', '')} {user_context.get('middleName', '')}".strip() or "пользователь"
 
-            else:
-                route_check = await self.model.ainvoke([
-                    SystemMessage(content="Ты — классификатор. Отвечай только 'YES' или 'NO'."),
-                    HumanMessage(content=f"Нужны инструменты для запроса '{message}'?")
-                ])
+        if human_choice:
+            state = await self.agent.aget_state(config)
+            if state.next:
+                last_msg = state.values["messages"][-1]
+                fixed_calls = []
+                for tc in getattr(last_msg, "tool_calls", []):
+                    args = tc["args"].copy()
+                    args["token"] = user_token
+                    if tc["name"] == "doc_summarize_text":
+                        args["summary_type"] = human_choice
+                    fixed_calls.append({**tc, "args": args})
 
-                if "NO" in route_check.content.upper():
-                    response = await self.model.ainvoke(
-                        [SystemMessage(content=current_sys), HumanMessage(content=message)])
-                    return {"status": "success", "content": response.content}
+                await self.agent.aupdate_state(
+                    config,
+                    {"messages": [AIMessage(content="", tool_calls=fixed_calls, id=last_msg.id)]},
+                    as_node="agent"
+                )
+            return await self._orchestrate(None, config, user_token, context_ui_id, file_path)
 
-                context_info = f"TOKEN: {user_token}\nID: {context_ui_id}\n"
+        manifesto = self.tool_manifesto_template.format(
+            context_ui_id=context_ui_id or "Не указан",
+            user_name=user_name
+        )
 
-                if file_path:
-                    context_info += f"[ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ]: {file_path}\n"
+        env = (f"### CONTEXT\nACTIVE_DOC_ID: {context_ui_id}\nLOCAL_FILE: {file_path}\n")
 
-                if user_context:
-                    context_info += f"USER_CONTEXT: {user_context}\n"
+        inputs = {"messages": [SystemMessage(content=manifesto + env), HumanMessage(content=message)]}
+        return await self._orchestrate(inputs, config, user_token, context_ui_id, file_path)
 
-                inputs = {
-                    "messages": [
-                        SystemMessage(content=current_sys),
-                        HumanMessage(content=f"{context_info}ЗАПРОС: {message}")
-                    ],
-                    "user_token": user_token,
-                    "context_ui_id": context_ui_id,
-                    "user_context": user_context,
-                    "file_path": file_path
-                }
-                await self.agent.ainvoke(inputs, config=config)
+    async def _orchestrate(self, inputs, config, token, doc_id, file_path):
+        max_iterations = 8
+        current_input = inputs
 
-            while True:
+        for i in range(max_iterations):
+            try:
+                await asyncio.wait_for(self.agent.ainvoke(current_input, config=config), timeout=60.0)
+                current_input = None
+
                 state = await self.agent.aget_state(config)
                 if not state.next:
                     break
 
                 last_msg = state.values["messages"][-1]
-                tool_calls = getattr(last_msg, 'tool_calls', [])
-
-                if tool_calls:
-                    t_name = tool_calls[0]["name"]
-
-                    if t_name == "doc_summarize_text" and not human_choice:
-                        return {
-                            "status": "requires_action",
-                            "action_type": "summarize_selection",
-                            "message": "Выберите режим суммаризации для анализа файла:"
-                        }
-
-                    human_choice = None
-                    await self.agent.ainvoke(None, config=config)
-                else:
+                if not isinstance(last_msg, AIMessage):
                     break
 
-            final_state = await self.agent.aget_state(config)
-            final_msg = final_state.values["messages"][-1]
+                tool_calls = getattr(last_msg, "tool_calls", [])
 
-            if not final_msg.content and hasattr(final_msg, 'tool_calls') and final_msg.tool_calls:
-                if final_msg.tool_calls[0]["name"] == "doc_summarize_text":
+                if any(tc["name"] == "doc_summarize_text" for tc in tool_calls):
                     return {
                         "status": "requires_action",
                         "action_type": "summarize_selection",
-                        "message": "Для ответа выберите тип резюме:"
+                        "message": "Выберите формат сводки для документа:"
                     }
 
-            return {"status": "success", "content": final_msg.content or "Не удалось получить ответ."}
+                fixed_calls = []
+                for tc in tool_calls:
+                    new_args = dict(tc["args"])
+                    new_args["token"] = token
 
-        except Exception as e:
-            logger.error(f"Ошибка в EdmsDocumentAgent: {e}", exc_info=True)
-            return {"status": "error", "message": "Ошибка обработки запроса."}
+                    if "document_id" in new_args: new_args["document_id"] = doc_id
+                    if tc["name"] == "doc_get_file_content" and not new_args.get("attachment_id"):
+                        for m in reversed(state.values["messages"]):
+                            if isinstance(m, ToolMessage) and "ID:" in str(m.content):
+                                uuids = UUID_PATTERN.findall(str(m.content))
+                                if uuids:
+                                    new_args["attachment_id"] = uuids[0]
+                                    break
+
+                    fixed_calls.append({**tc, "args": new_args})
+
+                await self.agent.aupdate_state(
+                    config,
+                    {"messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]},
+                    as_node="agent"
+                )
+
+            except asyncio.TimeoutError:
+                return {"status": "error",
+                        "message": "Модель слишком долго обрабатывает файл. Попробуйте уточнить запрос."}
+
+        final_state = await self.agent.aget_state(config)
+        for m in reversed(final_state.values["messages"]):
+            if isinstance(m, AIMessage) and m.content:
+                return {"status": "success", "content": m.content}
+
+        return {"status": "success", "content": "Операция выполнена."}

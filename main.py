@@ -8,7 +8,7 @@ import tempfile
 import aiofiles
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional, Annotated, Union
+from typing import Optional, Annotated
 
 import uvicorn
 from fastapi import (
@@ -22,6 +22,8 @@ from fastapi import (
     status,
 )
 from starlette.middleware.cors import CORSMiddleware
+
+from edms_ai_assistant.clients.employee_client import EmployeeClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
@@ -117,12 +119,6 @@ async def save_upload(file: UploadFile, user_id: str) -> Path:
     return dest
 
 
-@app.get("/health")
-def health_check(agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]):
-    """Проверка работоспособности системы."""
-    return {"status": "ok", "agent_status": "ready"}
-
-
 @app.post("/upload-file", response_model=FileUploadResponse)
 async def upload_file(
         user_token: Annotated[str, Form(...)],
@@ -146,44 +142,41 @@ async def upload_file(
 
 @app.post("/chat", response_model=AssistantResponse)
 async def chat_endpoint(
-        user_input: UserInput,
-        background_tasks: BackgroundTasks,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
+    user_input: UserInput,
+    background_tasks: BackgroundTasks,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
 ):
-    """Основной эндпоинт взаимодействия с ассистентом."""
     current_file_path = user_input.file_path
+    doc_id = user_input.context_ui_id
 
     try:
-        try:
-            thread_id = extract_user_id_from_token(user_input.user_token)
-        except Exception as e:
-            logger.warning(f"Ошибка парсинга токена: {e}")
-            raise HTTPException(status_code=401, detail="Невалидный токен")
+        user_id = extract_user_id_from_token(user_input.user_token)
+        thread_id = f"{user_id}_{doc_id or 'general'}"
 
-        if current_file_path:
-            requested_path = Path(current_file_path).resolve()
-            base_path = UPLOAD_DIR.resolve()
-            if not str(requested_path).startswith(str(base_path)):
-                logger.warning(f"Попытка доступа вне разрешенной папки: {current_file_path}")
-                raise HTTPException(status_code=403, detail="Доступ к указанному файлу запрещен")
+        user_context = user_input.context.model_dump() if user_input.context else None
+        if not user_context:
+            try:
+                async with EmployeeClient() as emp_client:
+                    user_context = await emp_client.get_employee(user_input.user_token, user_id)
+            except: logger.warning("Не удалось загрузить контекст сотрудника")
 
-            if not requested_path.exists():
-                logger.error(f"Файл не найден: {current_file_path}")
+        if current_file_path and not Path(current_file_path).exists():
+            current_file_path = None
 
         agent_result = await agent.chat(
             message=user_input.message,
             user_token=user_input.user_token,
-            context_ui_id=user_input.context_ui_id,
+            context_ui_id=doc_id,
             thread_id=thread_id,
-            user_context=user_input.context.model_dump() if user_input.context else None,
+            user_context=user_context,
             file_path=current_file_path,
             human_choice=user_input.human_choice
         )
 
-        if current_file_path:
+        if current_file_path and agent_result.get("status") != "requires_action":
             background_tasks.add_task(_cleanup_file, current_file_path)
 
-        if agent_result["status"] == "requires_action":
+        if agent_result.get("status") == "requires_action":
             return AssistantResponse(
                 status="requires_action",
                 action_type=agent_result.get("action_type"),
@@ -197,13 +190,10 @@ async def chat_endpoint(
             thread_id=thread_id
         )
 
-    except HTTPException:
-        if current_file_path: _cleanup_file(current_file_path)
-        raise
     except Exception as e:
-        logger.error(f"Ошибка в эндпоинте /chat: {e}", exc_info=True)
+        logger.error(f"Chat error: {e}", exc_info=True)
         if current_file_path: _cleanup_file(current_file_path)
-        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ошибка сервера")
 
 
 if __name__ == "__main__":

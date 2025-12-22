@@ -5,6 +5,7 @@ from langchain_core.language_models import BaseLanguageModel, BaseChatModel
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from edms_ai_assistant.config import settings
+from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +39,19 @@ logger = logging.getLogger(__name__)
 #     return llm
 
 
-# edms_ai_assistant/llm.py
 @functools.lru_cache(maxsize=1)
-def get_chat_model() -> BaseChatModel:
+def get_chat_model():
     return ChatOpenAI(
         openai_api_base="https://api.proxyapi.ru/openai/v1",
         openai_api_key=settings.OPENAI_API_KEY,
         model_name="gpt-4o-mini",
-        temperature=0.1,
+        temperature=0,
+        max_retries=3,
+        timeout=60,
+        model_kwargs={
+            "seed": 42,
+            "top_p": 1,
+        }
     )
 
 

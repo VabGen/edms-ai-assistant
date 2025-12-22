@@ -33,50 +33,40 @@ async def doc_summarize_text(
         summary_type: SummarizeType = SummarizeType.ABSTRACTIVE
 ) -> Dict[str, Any]:
     """
-    Создает краткую выжимку (summary) предоставленного текста выбранным методом.
+    ВАЖНО: Используй этот инструмент ТОЛЬКО когда пользователь просит сделать 'сводку', 'выжимку',
+    'резюме' или 'краткое содержание' текста файла.
+    Этот инструмент берет сырой текст документа и превращает его в краткий аналитический отчет.
+    Поддерживает экстрактивный, абстрактивный и тезисный типы.
     """
     try:
         llm = get_chat_model()
 
         instructions = {
-            SummarizeType.EXTRACTIVE: (
-                "действуй как метод экстрактивной суммаризации. Выдели и процитируй наиболее важные "
-                "факты, сущности и предложения из текста без искажения их оригинального смысла."
-            ),
-            SummarizeType.ABSTRACTIVE: (
-                "действуй как метод абстрактивной суммаризации. Напиши лаконичный пересказ сути "
-                "документа своими словами, сохраняя логическую связь и основные идеи."
-            ),
-            SummarizeType.THESIS: (
-                "сформируй тезисный план документа. Выдели ключевые положения и идеи в виде "
-                "структурированного списка (тезисов)."
-            )
+            SummarizeType.EXTRACTIVE: "выдели ключевые факты и цитаты",
+            SummarizeType.ABSTRACTIVE: "напиши краткий пересказ сути документа своими словами",
+            SummarizeType.THESIS: "сформируй структурированный тезисный план"
         }
 
         target_instruction = instructions.get(summary_type, instructions[SummarizeType.ABSTRACTIVE])
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"Ты — эксперт-аналитик EDMS. Твоя задача: {target_instruction}"),
-            ("user", "Текст для обработки:\n\n{text}\n\nРезультат:")
+            ("system", f"Ты — эксперт-аналитик СЭД. Твоя задача: {target_instruction}. "
+                       f"Отвечай кратко и только по делу."),
+            ("user", "ТЕКСТ ДОКУМЕНТА:\n{text}\n\nРЕЗУЛЬТАТ:")
         ])
 
-        chain = prompt | llm | StrOutputParser()
-
-        # Логика обрезки контекста
-        if len(text) > 40000:
-            logger.info("Текст слишком длинный, используем комбинированное окно")
-            processing_text = text[:20000] + "\n... [пропуск части текста] ...\n" + text[-10000:]
+        if len(text) > 30000:
+            processing_text = text[:15000] + "\n... [ТЕКСТ ОБРЕЗАН ДЛЯ АНАЛИЗА] ...\n" + text[-10000:]
         else:
             processing_text = text
 
+        chain = prompt | llm | StrOutputParser()
         summary = await chain.ainvoke({"text": processing_text})
 
         return {
             "status": "success",
-            "type_used": summary_type,
             "summary": summary
         }
-
     except Exception as e:
-        logger.error(f"Ошибка при суммаризации: {e}", exc_info=True)
-        return {"error": f"Не удалось сжать текст: {str(e)}"}
+        logger.error(f"Summarization error: {e}")
+        return {"error": str(e)}
