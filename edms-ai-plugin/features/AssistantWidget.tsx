@@ -61,7 +61,6 @@ export const AssistantWidget = () => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const currentRequestIdRef = useRef<string | null>(null);
-
     const currentServerFilePath = useRef<string | null>(null);
 
     const frostedGlassClass = "bg-white/30 backdrop-blur-md border border-white/40 shadow-lg hover:bg-white/40 transition-all duration-300";
@@ -73,6 +72,22 @@ export const AssistantWidget = () => {
             if (result.assistantEnabled !== undefined) setIsEnabled(result.assistantEnabled);
         });
 
+        const handleExternalUpdate = (event: MessageEvent) => {
+            if (event.data?.type === 'REFRESH_CHAT_HISTORY' && event.data?.messages) {
+                const newMsgs = event.data.messages.map((m: any) => ({
+                    role: m.type === 'human' ? 'user' : 'assistant',
+                    content: m.content
+                }));
+                setMessages(prev => [...prev, ...newMsgs]);
+                setIsWidgetVisible(true);
+                setTimeout(() => {
+                    messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
+                }, 100);
+            }
+        };
+
+        window.addEventListener('message', handleExternalUpdate);
+
         const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
             if (areaName === 'local' && changes.assistantEnabled) {
                 setIsEnabled(changes.assistantEnabled.newValue);
@@ -80,7 +95,11 @@ export const AssistantWidget = () => {
             }
         };
         chrome.storage.onChanged.addListener(handleStorageChange);
-        return () => chrome.storage.onChanged.removeListener(handleStorageChange);
+
+        return () => {
+            chrome.storage.onChanged.removeListener(handleStorageChange);
+            window.removeEventListener('message', handleExternalUpdate);
+        };
     }, []);
 
     useEffect(() => {
@@ -158,7 +177,7 @@ export const AssistantWidget = () => {
                         user_token: userToken,
                         requestId,
                         context_ui_id: currentDocId,
-                        file_path: currentServerFilePath.current, // Берем из Ref
+                        file_path: currentServerFilePath.current,
                         human_choice: humanChoice
                     }
                 }, (res) => {
@@ -175,9 +194,34 @@ export const AssistantWidget = () => {
                 }]);
             } else {
                 currentServerFilePath.current = null;
-                setMessages(prev => [...prev, {role: 'assistant', content: chatRes.content || chatRes.response}]);
-            }
 
+                let finalContent = "";
+
+                // 1. Проверка на массив сообщений
+                if (chatRes.messages && Array.isArray(chatRes.messages)) {
+                    const lastMsg = chatRes.messages[chatRes.messages.length - 1];
+                    finalContent = lastMsg.content;
+                } else {
+                    finalContent = chatRes.content || chatRes.response || chatRes.message;
+                }
+
+                // 2. Обработка объекта/JSON-строки
+                if (typeof finalContent === 'object' && finalContent !== null) {
+                    finalContent = (finalContent as any).summary || (finalContent as any).content || JSON.stringify(finalContent);
+                } else if (typeof finalContent === 'string' && finalContent.trim().startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(finalContent);
+                        finalContent = parsed.summary || parsed.content || finalContent;
+                    } catch (e) {
+                        console.warn("Raw content parsing failed", e);
+                    }
+                }
+
+                setMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: finalContent || "Ответ получен, но пуст"
+                }]);
+            }
         } catch (err: any) {
             if (!String(err).includes('aborted')) {
                 setMessages(prev => [...prev, {role: 'assistant', content: `⚠️ Ошибка: ${err}`}]);
@@ -193,7 +237,7 @@ export const AssistantWidget = () => {
     const renderActionButtons = (msg: any) => {
         if (msg.action_type === 'summarize_selection') {
             return (
-                <div className="mt-3 flex flex-wrap gap-2 animate-in fade-in zoom-in duration-500">
+                <div className="mt-3 flex flex-wrap gap-2 relative z-0">
                     {[
                         {id: 'abstractive', label: 'Пересказ', icon: <FileText size={14}/>},
                         {id: 'extractive', label: 'Факты', icon: <Search size={14}/>},
@@ -201,8 +245,11 @@ export const AssistantWidget = () => {
                     ].map(btn => (
                         <button
                             key={btn.id}
-                            onClick={() => handleSendMessage(undefined, btn.id)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-white text-indigo-600 border border-indigo-100 rounded-lg text-xs font-bold hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleSendMessage(undefined, btn.id);
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-white text-indigo-600 border border-indigo-100 rounded-lg text-xs font-bold hover:bg-indigo-600 hover:text-white transition-colors shadow-sm active:scale-95"
                         >
                             {btn.icon} {btn.label}
                         </button>
@@ -225,13 +272,17 @@ export const AssistantWidget = () => {
     const toggleListening = () => {
         if (!recognition) return;
         if (isListening) recognition.stop();
-        else { setInputValue(''); recognition.start(); setIsListening(true); }
+        else {
+            setInputValue('');
+            recognition.start();
+            setIsListening(true);
+        }
     };
 
     if (!isMounted || !isEnabled) return null;
 
     return (
-        <div className="fixed bottom-5 right-5 z-[2147483647] font-sans flex flex-col items-end pointer-events-none">
+        <div className="fixed bottom-5 right-5 z-[2147483647] isolation: 'isolate' font-sans flex flex-col items-end pointer-events-none">
             <LiquidGlassFilter/>
 
             {!isWidgetVisible && (
@@ -246,7 +297,7 @@ export const AssistantWidget = () => {
             {isWidgetVisible && (
                 <div className={`flex flex-col w-[500px] h-[650px] rounded-[32px] shadow-2xl border border-white/20 overflow-hidden pointer-events-auto animate-in fade-in zoom-in duration-300 origin-bottom-right ${liquidGlassClass}`}>
 
-                    <header className="flex items-center justify-between p-4 border-b border-white/10 shrink-0 relative z-20">
+                    <header className="flex items-center justify-between p-4 border-b border-white/10 shrink-0 relative z-[50] bg-white">
                         <div className="flex items-center gap-3">
                             <button
                                 onClick={() => setIsChatPanelOpen(!isChatPanelOpen)}
@@ -266,22 +317,24 @@ export const AssistantWidget = () => {
                     </header>
 
                     <div className="flex-1 flex overflow-hidden relative z-10 bg-white">
-                        <aside className={`relative h-full flex flex-col bg-slate-50/80 backdrop-blur-md border-r border-indigo-100/30 transition-all duration-300 ease-in-out shrink-0 ${isChatPanelOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden'}`}>
+                        <aside className={`relative h-full flex flex-col bg-slate-50/80 backdrop-blur-md border-r border-indigo-100/30 transition-all duration-300 ease-in-out shrink-0 z-20 ${isChatPanelOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden'}`}>
                             <div className="p-4 w-64">
-                                <button className="w-full py-2.5 px-4 rounded-xl bg-indigo-100/50 text-indigo-700 font-semibold hover:bg-indigo-200/70 transition-all text-sm flex items-center justify-center gap-2 border border-indigo-200/50 shadow-sm">
+                                <button onClick={() => setMessages([])} className="w-full py-2.5 px-4 rounded-xl bg-indigo-100/50 text-indigo-700 font-semibold hover:bg-indigo-200/70 transition-all text-sm flex items-center justify-center gap-2 border border-indigo-200/50 shadow-sm">
                                     <span className="text-lg">+</span> Новый диалог
                                 </button>
                                 <div className="mt-6 flex flex-col gap-2">
                                     <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold px-2">История</p>
-                                    <div className="text-xs text-slate-500 italic px-2 py-4 text-center bg-white/40 rounded-xl border border-dashed border-slate-200">История пуста</div>
+                                    <div className="text-xs text-slate-500 italic px-2 py-4 text-center bg-white/40 rounded-xl border border-dashed border-slate-200">
+                                        {messages.length > 0 ? `Сообщений: ${messages.length}` : 'История пуста'}
+                                    </div>
                                 </div>
                             </div>
                         </aside>
 
-                        <main className="flex-1 flex flex-col min-w-0 bg-white relative">
-                            <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 custom-scrollbar">
+                        <main className="flex-1 flex flex-col min-w-0 bg-white relative overflow-hidden">
+                            <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 custom-scrollbar relative z-10">
                                 {messages.map((msg, idx) => (
-                                    <div key={idx} className="flex flex-col">
+                                    <div key={idx} className="flex flex-col relative z-0">
                                         <ChatMessage content={msg.content} role={msg.role}/>
                                         {renderActionButtons(msg)}
                                     </div>
@@ -297,17 +350,18 @@ export const AssistantWidget = () => {
                                 <div ref={messagesEndRef}/>
                             </div>
 
-                            <footer className="p-4 shrink-0 bg-white/50 backdrop-blur-sm border-t border-gray-50">
+                            <footer className="p-4 shrink-0 bg-white border-t border-gray-100 relative z-[100]">
                                 {isListening && <SoundWaveIndicator/>}
                                 {attachedFile && (
                                     <div className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-indigo-50/80 border border-indigo-100 rounded-xl w-fit animate-in slide-in-from-bottom-2">
                                         <Paperclip size={14} className="text-indigo-500"/>
                                         <span className="text-[11px] font-medium text-indigo-700 truncate max-w-[200px]">{attachedFile.name}</span>
-                                        <button onClick={() => setAttachedFile(null)} className="ml-1 p-0.5 hover:bg-indigo-200 rounded-full text-indigo-400"><X size={14}/></button>
+                                        <button onClick={() => setAttachedFile(null)} className="ml-1 p-0.5 hover:bg-indigo-200 rounded-full text-indigo-400">
+                                            <X size={14}/></button>
                                     </div>
                                 )}
 
-                                <form onSubmit={handleSendMessage} className={`flex items-center gap-2 rounded-2xl p-1.5 border transition-all ${frostedGlassClass} focus-within:ring-4 focus-within:ring-indigo-500/20`}>
+                                <form onSubmit={handleSendMessage} className={`flex items-center gap-2 rounded-2xl p-1.5 border transition-all bg-white shadow-sm ${frostedGlassClass} focus-within:ring-4 focus-within:ring-indigo-500/20`}>
                                     <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-500 hover:text-indigo-600"><Paperclip size={20}/></button>
                                     <button type="button" onClick={toggleListening} className={`p-2 rounded-lg ${isListening ? 'text-red-500 bg-red-100 animate-pulse' : 'text-slate-500 hover:text-indigo-600'}`}>
                                         {isListening ? <Square size={18} fill="currentColor"/> : <Mic size={20}/>}
@@ -320,9 +374,11 @@ export const AssistantWidget = () => {
                                         className="flex-1 bg-transparent border-none outline-none text-sm text-slate-700 placeholder-slate-400"
                                     />
                                     {isLoading ? (
-                                        <button type="button" onClick={handleAbortRequest} className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600 transition-all"><StopCircle size={18}/></button>
+                                        <button type="button" onClick={handleAbortRequest} className="p-2.5 bg-red-500 text-white rounded-xl shadow-md hover:bg-red-600 transition-all">
+                                            <StopCircle size={18}/></button>
                                     ) : (
-                                        <button type="submit" disabled={!inputValue.trim() && !attachedFile} className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all"><Send size={18}/></button>
+                                        <button type="submit" disabled={!inputValue.trim() && !attachedFile} className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 disabled:opacity-30 transition-all">
+                                            <Send size={18}/></button>
                                     )}
                                 </form>
                             </footer>

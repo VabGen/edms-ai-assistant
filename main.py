@@ -1,5 +1,6 @@
 # main.py
 import os
+import re
 import sys
 import logging
 import shutil
@@ -21,6 +22,8 @@ from fastapi import (
     Depends,
     status,
 )
+from langchain_core.messages import HumanMessage, AIMessage
+from openai.types import file_content
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -142,9 +145,9 @@ async def upload_file(
 
 @app.post("/chat", response_model=AssistantResponse)
 async def chat_endpoint(
-    user_input: UserInput,
-    background_tasks: BackgroundTasks,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
+        user_input: UserInput,
+        background_tasks: BackgroundTasks,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
 ):
     current_file_path = user_input.file_path
     doc_id = user_input.context_ui_id
@@ -158,7 +161,8 @@ async def chat_endpoint(
             try:
                 async with EmployeeClient() as emp_client:
                     user_context = await emp_client.get_employee(user_input.user_token, user_id)
-            except: logger.warning("Не удалось загрузить контекст сотрудника")
+            except:
+                logger.warning("Не удалось загрузить контекст сотрудника")
 
         if current_file_path and not Path(current_file_path).exists():
             current_file_path = None
@@ -194,6 +198,119 @@ async def chat_endpoint(
         logger.error(f"Chat error: {e}", exc_info=True)
         if current_file_path: _cleanup_file(current_file_path)
         raise HTTPException(status_code=500, detail="Ошибка сервера")
+
+
+from fastapi import Header, HTTPException
+from pydantic import BaseModel
+from edms_ai_assistant.tools import all_tools
+
+
+class DirectSummarizeRequest(BaseModel):
+    attachment_id: str
+    summary_type: str
+    thread_id: str
+    file_name: str
+
+
+# Функция для поиска конкретного инструмента по имени
+def get_tool_by_name(name: str):
+    return next((t for t in all_tools if t.name == name), None)
+
+
+@app.post("/actions/summarize", response_model=AssistantResponse)
+async def api_direct_summarize(
+        user_input: UserInput,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
+):
+    try:
+        user_token = user_input.user_token
+        user_id = extract_user_id_from_token(user_token)
+        doc_id = user_input.context_ui_id
+        # Привязываем историю к конкретному документу, чтобы результат появился в чате
+        thread_id = f"{user_id}_{doc_id or 'general'}"
+
+        # 1. Берем attachment_id из file_path (который мы прокинули в AttachmentActions.tsx)
+        attachment_id = user_input.file_path
+        # 2. Берем тип суммаризации из human_choice (из выпадающего списка фронта)
+        summary_type = user_input.human_choice or "abstractive"
+
+        if not attachment_id:
+            raise HTTPException(status_code=400, detail="Не указан ID файла")
+
+        # Получаем инструменты напрямую
+        get_file_tool = get_tool_by_name("doc_get_file_content")
+        summarize_tool = get_tool_by_name("doc_summarize_text")
+
+        # Шаг 1: Скачивание и извлечение текста
+        file_data = await get_file_tool.ainvoke({
+            "document_id": doc_id,
+            "attachment_id": attachment_id,
+            "token": user_token
+        })
+
+        if isinstance(file_data, dict) and file_data.get("status") == "error":
+            # Если файл не найден или ошибка доступа
+            raise HTTPException(status_code=400, detail=file_data.get("message"))
+
+        # Шаг 2: Вызов суммаризации
+        summary_result = await summarize_tool.ainvoke({
+            "text": file_data.get("content", ""),
+            "summary_type": summary_type
+        })
+
+        # Вытаскиваем текст ответа
+        if isinstance(summary_result, dict):
+            summary_text = summary_result.get("summary", "Не удалось извлечь резюме")
+        else:
+            summary_text = str(summary_result)
+
+        # Шаг 3: Сохранение в историю LangGraph
+        # Это важно, чтобы когда пользователь открыл чат, он увидел этот результат там
+        config = {"configurable": {"thread_id": thread_id}}
+
+        labels = {"extractive": "факты", "abstractive": "пересказ", "thesis": "тезисы"}
+        display_label = labels.get(summary_type, "анализ")
+
+        await agent.agent.aupdate_state(config, {
+            "messages": [
+                HumanMessage(content=f"Кнопка: Анализ файла ({display_label})"),
+                AIMessage(content=summary_text)
+            ]
+        }, as_node="agent")
+
+        return AssistantResponse(
+            status="success",
+            response=summary_text,
+            thread_id=thread_id
+        )
+
+    except Exception as e:
+        logger.error(f"Action error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Ошибка при обработке файла: {str(e)}")
+
+
+@app.get("/chat/history/{thread_id}")
+async def get_history(
+        thread_id: str,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
+):
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        # Используем метод aget_state (асинхронный)
+        state = await agent.agent.aget_state(config)
+        messages = state.values.get("messages", [])
+
+        return {
+            "messages": [
+                {
+                    "type": "human" if m.type == "human" else "ai",
+                    "content": m.content
+                } for m in messages
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching history: {e}")
+        raise HTTPException(status_code=500, detail="Не удалось загрузить историю")
 
 
 if __name__ == "__main__":
