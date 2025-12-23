@@ -41,18 +41,29 @@ logger = logging.getLogger(__name__)
 
 @functools.lru_cache(maxsize=1)
 def get_chat_model():
-    return ChatOpenAI(
-        openai_api_base="https://api.proxyapi.ru/openai/v1",
-        openai_api_key=settings.OPENAI_API_KEY,
-        model_name="gpt-4o-mini",
-        temperature=0,
-        max_retries=3,
-        timeout=60,
-        model_kwargs={
+    settings_kwargs = {
+        "model": "gpt-4o-mini",
+        "temperature": 0,
+        "openai_api_base": "https://api.proxyapi.ru/openai/v1",
+        "openai_api_key": settings.OPENAI_API_KEY,
+        "max_retries": 5,  # Увеличиваем для стабильности через прокси
+        "timeout": 90,  # Увеличиваем для тяжелых промптов аналитики
+        "streaming": True,  # Включаем потоковую передачу
+        "max_tokens": 4096,  # Ограничиваем выход, чтобы не "улетал" в бесконечность
+        "model_kwargs": {
             "seed": 42,
-            "top_p": 1,
+            "top_p": 0.0000001,  # Максимальное сужение выбора токенов
+            "parallel_tool_calls": False,  # Выключаем параллельность, если важна строгая последовательность шагов
         }
-    )
+    }
+
+    try:
+        model = ChatOpenAI(**settings_kwargs)
+        logger.info(f"LLM Model '{settings_kwargs['model']}' initialized successfully.")
+        return model
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        raise
 
 
 @functools.lru_cache(maxsize=1)

@@ -13,7 +13,6 @@ const activeRequests = new Map<string, AbortController>();
  * Основной слушатель сообщений
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // Извлекаем requestId для возможности отмены
     const requestId = message.payload?.requestId || 'default';
 
     switch (message.type) {

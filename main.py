@@ -23,7 +23,6 @@ from fastapi import (
     status,
 )
 from langchain_core.messages import HumanMessage, AIMessage
-from openai.types import file_content
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -212,7 +211,6 @@ class DirectSummarizeRequest(BaseModel):
     file_name: str
 
 
-# Функция для поиска конкретного инструмента по имени
 def get_tool_by_name(name: str):
     return next((t for t in all_tools if t.name == name), None)
 
@@ -226,22 +224,16 @@ async def api_direct_summarize(
         user_token = user_input.user_token
         user_id = extract_user_id_from_token(user_token)
         doc_id = user_input.context_ui_id
-        # Привязываем историю к конкретному документу, чтобы результат появился в чате
         thread_id = f"{user_id}_{doc_id or 'general'}"
-
-        # 1. Берем attachment_id из file_path (который мы прокинули в AttachmentActions.tsx)
         attachment_id = user_input.file_path
-        # 2. Берем тип суммаризации из human_choice (из выпадающего списка фронта)
         summary_type = user_input.human_choice or "abstractive"
 
         if not attachment_id:
             raise HTTPException(status_code=400, detail="Не указан ID файла")
 
-        # Получаем инструменты напрямую
         get_file_tool = get_tool_by_name("doc_get_file_content")
         summarize_tool = get_tool_by_name("doc_summarize_text")
 
-        # Шаг 1: Скачивание и извлечение текста
         file_data = await get_file_tool.ainvoke({
             "document_id": doc_id,
             "attachment_id": attachment_id,
@@ -249,23 +241,18 @@ async def api_direct_summarize(
         })
 
         if isinstance(file_data, dict) and file_data.get("status") == "error":
-            # Если файл не найден или ошибка доступа
             raise HTTPException(status_code=400, detail=file_data.get("message"))
 
-        # Шаг 2: Вызов суммаризации
         summary_result = await summarize_tool.ainvoke({
             "text": file_data.get("content", ""),
             "summary_type": summary_type
         })
 
-        # Вытаскиваем текст ответа
         if isinstance(summary_result, dict):
             summary_text = summary_result.get("summary", "Не удалось извлечь резюме")
         else:
             summary_text = str(summary_result)
 
-        # Шаг 3: Сохранение в историю LangGraph
-        # Это важно, чтобы когда пользователь открыл чат, он увидел этот результат там
         config = {"configurable": {"thread_id": thread_id}}
 
         labels = {"extractive": "факты", "abstractive": "пересказ", "thesis": "тезисы"}
@@ -296,7 +283,6 @@ async def get_history(
 ):
     try:
         config = {"configurable": {"thread_id": thread_id}}
-        # Используем метод aget_state (асинхронный)
         state = await agent.agent.aget_state(config)
         messages = state.values.get("messages", [])
 

@@ -1,7 +1,6 @@
 import type {PlasmoCSConfig, PlasmoGetInlineAnchorList, PlasmoGetStyle} from "plasmo"
-import React, {useState, useEffect} from "react"
+import React, {useState, useEffect, useMemo} from "react"
 
-// Конфигурация путей
 export const config: PlasmoCSConfig = {
     matches: [
         "http://localhost:3000/*",
@@ -10,35 +9,58 @@ export const config: PlasmoCSConfig = {
     ]
 }
 
-/**
- * КЛЮЧЕВОЙ МОМЕНТ: Переопределение стилей контейнера Plasmo.
- * Это принудительно занижает z-index кнопок-звездочек,
- * чтобы они не "прорезали" основной чат.
- */
 export const getStyle: PlasmoGetStyle = () => {
     const style = document.createElement("style")
     style.textContent = `
-    :host {
-      z-index: 1 !important; 
-      position: relative !important;
+    :host { z-index: 1000 !important; position: relative !important; }
+    #plasmo-shadow-container { z-index: 1000 !important; }
+    @keyframes fadeInScale {
+      from { opacity: 0; transform: translateY(-50%) scale(0.95); }
+      to { opacity: 1; transform: translateY(-50%) scale(1); }
     }
-    #plasmo-shadow-container {
-      z-index: 1 !important;
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
   `
     return style
 }
 
-/**
- * Ищем только блоки вложений.
- * Фильтр :has(span.lead) гарантирует, что мы вешаем кнопки
- * только там, где есть имя файла.
- */
 export const getInlineAnchorList: PlasmoGetInlineAnchorList = async () => {
     return document.querySelectorAll('div.alert.alert-secondary:has(span.lead)')
 }
 
-// --- Вспомогательные функции ---
+const Icons = {
+    Sparkles: () => (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+             strokeLinecap="round" strokeLinejoin="round">
+            <path
+                d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+        </svg>
+    ),
+    Chart: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+    ),
+    FileText: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+    ),
+    Target: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+        </svg>
+    )
+}
 
 const extractDocIdFromUrl = (): string => {
     try {
@@ -47,7 +69,7 @@ const extractDocIdFromUrl = (): string => {
         const foundId = pathParts.find(part => uuidRegex.test(part));
         if (foundId) return foundId;
     } catch (e) {
-        console.error("Ошибка парсинга URL:", e);
+        console.error(e);
     }
     return "main_assistant";
 };
@@ -55,41 +77,39 @@ const extractDocIdFromUrl = (): string => {
 const getAuthToken = (): string | null => {
     try {
         const directToken = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token');
-        if (directToken) return directToken;
+        if (directToken) return directToken.replace("Bearer ", "");
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key && (key.includes('auth') || key.includes('user') || key.includes('oidc'))) {
                 const value = localStorage.getItem(key);
-                if (value?.includes('eyJ')) return value.startsWith('{') ? JSON.parse(value).access_token : value;
+                if (value?.includes('eyJ')) {
+                    const token = value.startsWith('{') ? JSON.parse(value).access_token : value;
+                    return token.replace("Bearer ", "");
+                }
             }
         }
     } catch (e) {
-        console.error("Token error:", e);
+        console.error(e);
     }
     return null;
 };
 
-interface AttachmentProps {
-    anchor?: { element: HTMLElement }
-}
-
-const AttachmentActions = ({anchor}: AttachmentProps) => {
+const AttachmentActions = ({anchor}: { anchor?: { element: HTMLElement } }) => {
     const [isEnabled, setIsEnabled] = useState(true);
     const [isHovered, setIsHovered] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const element = anchor?.element;
 
-    const fileName = anchor?.element?.querySelector('span.lead')?.textContent || "Документ";
+    const fileName = useMemo(() =>
+            anchor?.element?.querySelector('span.lead')?.textContent?.trim() || "Документ"
+        , [anchor]);
 
     useEffect(() => {
-        chrome.storage.local.get(["assistantEnabled"], (result) => {
-            if (result.assistantEnabled !== undefined) setIsEnabled(result.assistantEnabled);
+        chrome.storage.local.get(["assistantEnabled"], (res) => {
+            if (res.assistantEnabled !== undefined) setIsEnabled(res.assistantEnabled);
         });
 
         const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-            if (changes.assistantEnabled) {
-                setIsEnabled(changes.assistantEnabled.newValue);
-            }
+            if (changes.assistantEnabled) setIsEnabled(changes.assistantEnabled.newValue);
         };
 
         chrome.storage.onChanged.addListener(handleStorageChange);
@@ -98,15 +118,21 @@ const AttachmentActions = ({anchor}: AttachmentProps) => {
 
     const getActualFileId = (el: HTMLElement): string => {
         const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
         const links = el.querySelectorAll('a');
         for (const link of links) {
-            const attrs = ['href', 'onclick', 'data-id', 'id'];
+            const attrs = ['href', 'onclick', 'data-id', 'id', 'data-file-id'];
             for (const attr of attrs) {
                 const val = link.getAttribute(attr);
                 const match = val?.match(uuidRegex);
                 if (match) return match[0];
             }
         }
+
+        const allContent = el.innerHTML;
+        const contentMatch = allContent.match(uuidRegex);
+        if (contentMatch) return contentMatch[0];
+
         return fileName;
     };
 
@@ -114,17 +140,14 @@ const AttachmentActions = ({anchor}: AttachmentProps) => {
         e.stopPropagation();
         if (!anchor?.element || isLoading) return;
 
+        const token = getAuthToken();
+        if (!token) return alert("Авторизация не найдена");
+
         setIsLoading(true);
         const fileId = getActualFileId(anchor.element);
         const currentDocId = extractDocIdFromUrl();
-        let token = getAuthToken();
 
-        if (token?.startsWith("Bearer ")) token = token.replace("Bearer ", "");
-        if (!token) {
-            alert("Авторизация не найдена");
-            setIsLoading(false);
-            return;
-        }
+        console.log(`[AI Assistant] Отправка файла: Name="${fileName}", ID="${fileId}"`);
 
         chrome.runtime.sendMessage({
             type: "sendChatMessage",
@@ -138,16 +161,12 @@ const AttachmentActions = ({anchor}: AttachmentProps) => {
         }, (res) => {
             setIsLoading(false);
             setIsHovered(false);
-
             if (res?.success) {
                 window.postMessage({
                     type: "REFRESH_CHAT_HISTORY",
                     messages: [
-                        {type: 'human', content: `Запрошен анализ файла: ${fileName} (${summaryType})`},
-                        {
-                            type: 'ai',
-                            content: res.data?.content || res.data?.response || "Файл проанализирован. Результат в чате."
-                        }
+                        {type: 'human', content: `Запрошен анализ файла: ${fileName}`},
+                        {type: 'ai', content: res.data?.content || res.data?.response || "Готово."}
                     ]
                 }, "*");
             } else {
@@ -160,49 +179,43 @@ const AttachmentActions = ({anchor}: AttachmentProps) => {
 
     return (
         <div
-            style={containerStyle}
+            style={s.container}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
-            <div style={{
-                ...triggerBtnStyle,
-                borderColor: isLoading ? '#007bff' : (isHovered ? '#aaa' : '#ddd'),
-                transform: isHovered ? 'scale(1.1)' : 'scale(1)'
+            <button type="button" style={{
+                ...s.trigger,
+                color: isLoading ? '#6366f1' : (isHovered ? '#4f46e5' : '#94a3b8'),
+                borderColor: isHovered || isLoading ? '#e0e7ff' : '#f1f5f9',
+                backgroundColor: isHovered ? '#f8faff' : '#fff',
             }}>
                 {isLoading ? (
-                    <span style={spinAnimation}>⏳</span>
-                ) : "✨"}
-            </div>
+                    <span style={{animation: 'spin 1s linear infinite', display: 'flex'}}>⏳</span>
+                ) : (
+                    <Icons.Sparkles/>
+                )}
+            </button>
 
             {isHovered && !isLoading && (
-                <div style={dropdownStyle}>
-                    <div style={menuHeaderStyle}>Анализ документа</div>
-                    <div
-                        style={menuItemStyle}
-                        onClick={(e) => handleAction("extractive", e)}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f0f7ff')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#fff')}
-                    >
-                        <span style={{fontSize: '16px'}}>📊</span>
-                        <span>Факты</span>
+                <div style={s.dropdown}>
+                    <div style={s.header}>Анализ документа</div>
+                    <div style={s.item} onClick={(e) => handleAction("extractive", e)}
+                         onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                         onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                        <span style={s.iconWrapper}><Icons.Chart/></span>
+                        <span style={s.label}>Факты</span>
                     </div>
-                    <div
-                        style={menuItemStyle}
-                        onClick={(e) => handleAction("abstractive", e)}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f0f7ff')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#fff')}
-                    >
-                        <span style={{fontSize: '16px'}}>📝</span>
-                        <span>Пересказ</span>
+                    <div style={s.item} onClick={(e) => handleAction("abstractive", e)}
+                         onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                         onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                        <span style={s.iconWrapper}><Icons.FileText/></span>
+                        <span style={s.label}>Пересказ</span>
                     </div>
-                    <div
-                        style={menuItemStyle}
-                        onClick={(e) => handleAction("thesis", e)}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f0f7ff')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#fff')}
-                    >
-                        <span style={{fontSize: '16px'}}>📍</span>
-                        <span>Тезисы</span>
+                    <div style={s.item} onClick={(e) => handleAction("thesis", e)}
+                         onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                         onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                        <span style={s.iconWrapper}><Icons.Target/></span>
+                        <span style={s.label}>Тезисы</span>
                     </div>
                 </div>
             )}
@@ -210,76 +223,43 @@ const AttachmentActions = ({anchor}: AttachmentProps) => {
     )
 }
 
-// --- Стили ---
-
-const containerStyle: React.CSSProperties = {
-    position: 'relative',
-    display: 'inline-flex',
-    marginLeft: '12px',
-    verticalAlign: 'middle',
-    zIndex: 1
-}
-
-const triggerBtnStyle: React.CSSProperties = {
-    fontSize: '16px',
-    width: '28px',
-    height: '28px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '50%',
-    background: '#fff',
-    border: '1px solid #ddd',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
-    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-    cursor: 'pointer',
-    userSelect: 'none'
-}
-
-const dropdownStyle: React.CSSProperties = {
-    position: 'absolute',
-    top: '50%',
-    left: '34px',
-    transform: 'translateY(-50%)',
-    backgroundColor: '#ffffff',
-    border: '1px solid #d1d1d1',
-    borderRadius: '10px',
-    boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
-    zIndex: 10,
-    width: '145px',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '5px',
-    overflow: 'hidden'
-}
-
-const menuHeaderStyle: React.CSSProperties = {
-    padding: '6px 10px',
-    fontSize: '10px',
-    fontWeight: 700,
-    color: '#aaa',
-    textTransform: 'uppercase',
-    letterSpacing: '0.4px',
-    borderBottom: '1px solid #f0f0f0',
-    marginBottom: '4px'
-}
-
-const menuItemStyle: React.CSSProperties = {
-    padding: '8px 10px',
-    fontSize: '13px',
-    color: '#333',
-    borderRadius: '6px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    cursor: 'pointer',
-    transition: 'background-color 0.2s ease',
-    backgroundColor: '#fff'
-}
-
-const spinAnimation: React.CSSProperties = {
-    display: 'inline-block',
-    fontSize: '14px'
-}
+const s: Record<string, React.CSSProperties> = {
+    container: {
+        position: 'relative',
+        display: 'inline-flex',
+        marginLeft: '12px',
+        verticalAlign: 'middle',
+        zIndex: 1000
+    },
+    trigger: {
+        all: 'unset',
+        width: '28px',
+        height: '28px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: '8px',
+        border: '1px solid',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        background: '#fff',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+    },
+    dropdown: {
+        position: 'absolute', top: '50%', left: '34px', transform: 'translateY(-50%)', backgroundColor: '#fff',
+        border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 10px 15px rgba(0,0,0,0.1)',
+        width: '150px', padding: '5px', animation: 'fadeInScale 0.15s ease-out', zIndex: 10001
+    },
+    header: {
+        padding: '6px 10px', fontSize: '10px', fontWeight: 700, color: '#94a3b8',
+        textTransform: 'uppercase', borderBottom: '1px solid #f1f5f9', marginBottom: '4px'
+    },
+    item: {
+        display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px',
+        cursor: 'pointer', borderRadius: '8px', transition: 'all 0.15s ease'
+    },
+    iconWrapper: {color: '#6366f1', display: 'flex', alignItems: 'center'},
+    label: {fontSize: '13px', fontWeight: 500, color: '#334155'}
+};
 
 export default AttachmentActions;

@@ -55,8 +55,8 @@ async def doc_summarize_text(
             ("user", "ТЕКСТ ДОКУМЕНТА:\n{text}\n\nРЕЗУЛЬТАТ:")
         ])
 
-        if len(text) > 30000:
-            processing_text = text[:15000] + "\n... [ТЕКСТ ОБРЕЗАН ДЛЯ АНАЛИЗА] ...\n" + text[-10000:]
+        if len(text) > 10000:
+            processing_text = text[:7000] + "\n[...]\n" + text[-3000:]
         else:
             processing_text = text
 

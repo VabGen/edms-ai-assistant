@@ -69,8 +69,8 @@ async def doc_get_file_content(document_id: str, token: str, attachment_id: Opti
         return {
             "status": "success",
             "file_name": file_name,
-            "content": text_content[:25000],
-            "is_truncated": len(text_content) > 25000
+            "content": text_content[:12000],
+            "is_truncated": len(text_content) > 12000
         }
 
     except Exception as e:

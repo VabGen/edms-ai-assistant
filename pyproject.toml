@@ -52,6 +52,8 @@ dependencies = [
     "docx>=0.2.4,<0.3.0",
     "aiofiles>=25.1.0,<26.0.0",
     "command>=0.1.0,<0.2.0",
+    "torch>=2.9.1,<3.0.0",
+    "unstructured_inference>=1.1.2,<2.0.0",
 ]
 
 [project.optional-dependencies]
