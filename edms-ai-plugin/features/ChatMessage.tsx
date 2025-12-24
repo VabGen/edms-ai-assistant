@@ -27,7 +27,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({content, role}) => {
                         code({node, inline, className, children, ...props}: any) {
                             const match = /language-(\w+)/.exec(className || '');
 
-                            // В v8 inline — это логический флаг (true для `code`, false для ```code```)
                             if (!inline) {
                                 return (
                                     <div className="relative my-3">

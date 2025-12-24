@@ -3,8 +3,6 @@ from typing import Dict, Any, Optional, List
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-# ИСПРАВЛЕНО: Импортируем реализацию EmployeeClient.
-# В вашем файле employee_client.py именно этот класс содержит логику.
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
 from edms_ai_assistant.generated.resources_openapi import (
@@ -41,10 +39,8 @@ async def employee_search_tool(
     Затем, если указан employee_id, возвращает полные данные сотрудника.
     """
     try:
-        # Использование реализации EmployeeClient убирает ошибку "Can't instantiate abstract class"
         async with EmployeeClient() as client:
 
-            # --- СЦЕНАРИЙ 1: Прямой запрос по ID (после выбора из списка) ---
             if employee_id:
                 raw_data = await client.get_employee(token, employee_id)
                 if not raw_data:
@@ -56,8 +52,6 @@ async def employee_search_tool(
                     "data": employee_dto.model_dump(exclude_none=True, exclude_unset=True)
                 }
 
-            # --- СЦЕНАРИЙ 2: Поиск по критериям ---
-            # Очищаем filter_params от None и пустых строк
             payload = {k: v for k, v in filter_params.items() if v}
 
             if "includes" not in payload:
@@ -71,7 +65,6 @@ async def employee_search_tool(
             if not results:
                 return {"status": "not_found", "message": "Сотрудники не найдены."}
 
-            # Если результат ровно один — сразу отдаем его
             if len(results) == 1:
                 res_item = results[0]
                 employee_dto = EmployeeDto.model_validate(res_item)
@@ -80,12 +73,10 @@ async def employee_search_tool(
                     "data": employee_dto.model_dump(exclude_none=True, exclude_unset=True)
                 }
 
-            # --- СЦЕНАРИЙ 3: Множественный выбор (requires_action) ---
             choices = []
             for r in results:
                 item = r if isinstance(r, dict) else r.model_dump()
 
-                # Собираем компактные данные для списка выбора
                 choices.append({
                     "id": str(item.get("id", "")),
                     "full_name": f"{item.get('lastName', '')} {item.get('firstName', '')} {item.get('middleName', '')}".strip(),

@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class BaseEmployeeClient(EdmsBaseClient):
     """
     Абстрактный интерфейс.
-    Используем имя BaseEmployeeClient, чтобы не путать с реализацией.
+    Используем имя BaseEmployeeClient
     """
 
     @abstractmethod

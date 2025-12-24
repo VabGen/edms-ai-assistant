@@ -79,7 +79,7 @@ async function handleChatMessage(payload: any, sendResponse: (res: ChromeRespons
 }
 
 /**
- * Обработка загрузки файлов (без изменений)
+ * Обработка загрузки файлов
  */
 async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse) => void) {
     try {
@@ -107,7 +107,7 @@ async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse
 }
 
 /**
- * Получение истории (без изменений)
+ * Получение истории
  */
 async function handleGetHistory(payload: any, sendResponse: (res: ChromeResponse) => void) {
     try {

@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 async def download_openapi_spec(url: str, output_file: str) -> bool:
     """
     Загружает спецификацию OpenAPI с заданного URL и сохраняет ее в файл.
-    (Код не изменен, так как он корректен)
     """
     logger.info(f"Downloading OpenAPI spec from {url}...")
     async with httpx.AsyncClient() as client:
@@ -51,7 +50,6 @@ async def download_openapi_spec(url: str, output_file: str) -> bool:
 def run_datamodel_codegen(input_file: str, output_file: str) -> bool:
     """
     Запускает datamodel-codegen для генерации Pydantic-моделей из OpenAPI-спецификации.
-    (Код не изменен, так как он корректен)
     """
     logger.info(f"Running datamodel-codegen on {input_file}...")
     cmd = [
@@ -128,10 +126,6 @@ def apply_regex_patches(content: str, patches: List[RegexPatch]) -> str:
 def fix_generated_file(file_path: str):
     """
     Применяет необходимые исправления к сгенерированному файлу Pydantic-моделей.
-
-    Улучшения:
-    1. Изолирует логику исправления импортов Pydantic в отдельный шаг.
-    2. Использует изолированный список патчей.
     """
     logger.info(f"Applying fixes to {file_path}...")
     with open(file_path, "r", encoding="utf-8") as f:
@@ -185,7 +179,6 @@ def fix_generated_file(file_path: str):
 async def main():
     """
     Основная функция, оркестрирующая процесс генерации DTO.
-    (Код не изменен)
     """
 
     def check_datamodel_codegen():

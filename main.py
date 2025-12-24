@@ -1,7 +1,4 @@
 # main.py
-import os
-import re
-import sys
 import logging
 import shutil
 import uuid
@@ -26,9 +23,6 @@ from langchain_core.messages import HumanMessage, AIMessage
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
-
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.models import (
     UserInput,
@@ -37,6 +31,7 @@ from edms_ai_assistant.models import (
 )
 from edms_ai_assistant.agent import EdmsDocumentAgent
 from edms_ai_assistant.security import extract_user_id_from_token
+from edms_ai_assistant.tools import all_tools
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
@@ -45,12 +40,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
-
 _agent: Optional[EdmsDocumentAgent] = None
 
 
 def get_agent() -> EdmsDocumentAgent:
-    """Dependency для получения синглтона агента."""
     if _agent is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -61,29 +54,22 @@ def get_agent() -> EdmsDocumentAgent:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Управление жизненным циклом приложения."""
     global _agent
-
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Временное хранилище готово: {UPLOAD_DIR}")
-
+    logger.info(f"Временное хранилище: {UPLOAD_DIR}")
     try:
         _agent = EdmsDocumentAgent()
         logger.info("Ассистент EDMS успешно инициализирован.")
     except Exception as e:
-        logger.error(f"Критическая ошибка инициализации агента: {e}", exc_info=True)
-
+        logger.error(f"Ошибка инициализации агента: {e}", exc_info=True)
     yield
-
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
-        logger.info("Временные файлы удалены.")
 
 
 app = FastAPI(
     title="EDMS AI Assistant API",
-    version="2.0.0",
-    description="Профессиональный AI-сервис для работы с документами и данными EDMS.",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -96,8 +82,9 @@ app.add_middleware(
 )
 
 
-def _cleanup_file(file_path: str) -> None:
-    """Фоновое удаление файла."""
+def _cleanup_file(file_path: Optional[str]) -> None:
+    """Безопасное фоновое удаление файла."""
+    if not file_path: return
     try:
         path = Path(file_path)
         if path.exists():
@@ -108,13 +95,11 @@ def _cleanup_file(file_path: str) -> None:
 
 
 async def save_upload(file: UploadFile, user_id: str) -> Path:
-    """Безопасное асинхронное сохранение файла."""
     ext = Path(file.filename).suffix
     if ext.lower() not in ['.pdf', '.docx', '.txt']:
         raise ValueError("Неподдерживаемый тип файла")
 
     dest = UPLOAD_DIR / f"{user_id}_{uuid.uuid4()}{ext}"
-
     async with aiofiles.open(dest, "wb") as f:
         content = await file.read()
         await f.write(content)
@@ -126,20 +111,15 @@ async def upload_file(
         user_token: Annotated[str, Form(...)],
         file: Annotated[UploadFile, File(...)]
 ):
-    """Загрузка файла перед анализом."""
     try:
         user_id = extract_user_id_from_token(user_token)
         saved_path = await save_upload(file, user_id)
-
-        return FileUploadResponse(
-            file_path=str(saved_path),
-            file_name=file.filename
-        )
+        return FileUploadResponse(file_path=str(saved_path), file_name=file.filename)
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Ошибка загрузки: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка при сохранении файла.")
+        raise HTTPException(status_code=500, detail="Ошибка при сохранении файла")
 
 
 @app.post("/chat", response_model=AssistantResponse)
@@ -148,28 +128,27 @@ async def chat_endpoint(
         background_tasks: BackgroundTasks,
         agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
 ):
-    current_file_path = user_input.file_path
-    doc_id = user_input.context_ui_id
-
     try:
         user_id = extract_user_id_from_token(user_input.user_token)
-        thread_id = f"{user_id}_{doc_id or 'general'}"
+        thread_id = f"{user_id}_{user_input.context_ui_id or 'general'}"
+        current_file_path = user_input.file_path
+        if current_file_path and not Path(current_file_path).exists():
+            logger.warning(f"Файл {current_file_path} не найден на диске, сбрасываем путь.")
+            current_file_path = None
 
         user_context = user_input.context.model_dump() if user_input.context else None
         if not user_context:
             try:
                 async with EmployeeClient() as emp_client:
                     user_context = await emp_client.get_employee(user_input.user_token, user_id)
-            except:
-                logger.warning("Не удалось загрузить контекст сотрудника")
+            except Exception:
+                logger.warning("Контекст сотрудника не получен")
 
-        if current_file_path and not Path(current_file_path).exists():
-            current_file_path = None
-
+        # 2. ВЫЗОВ АГЕНТА
         agent_result = await agent.chat(
             message=user_input.message,
             user_token=user_input.user_token,
-            context_ui_id=doc_id,
+            context_ui_id=user_input.context_ui_id,
             thread_id=thread_id,
             user_context=user_context,
             file_path=current_file_path,
@@ -189,30 +168,14 @@ async def chat_endpoint(
 
         return AssistantResponse(
             status="success",
-            response=agent_result.get("content"),
+            response=agent_result.get("content") or "Готово",
             thread_id=thread_id
         )
 
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
-        if current_file_path: _cleanup_file(current_file_path)
+        if user_input.file_path: _cleanup_file(user_input.file_path)
         raise HTTPException(status_code=500, detail="Ошибка сервера")
-
-
-from fastapi import Header, HTTPException
-from pydantic import BaseModel
-from edms_ai_assistant.tools import all_tools
-
-
-class DirectSummarizeRequest(BaseModel):
-    attachment_id: str
-    summary_type: str
-    thread_id: str
-    file_name: str
-
-
-def get_tool_by_name(name: str):
-    return next((t for t in all_tools if t.name == name), None)
 
 
 @app.post("/actions/summarize", response_model=AssistantResponse)
@@ -220,89 +183,68 @@ async def api_direct_summarize(
         user_input: UserInput,
         agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
 ):
+    """Прямой вызов суммаризации через инструменты (для кнопок)."""
     try:
-        user_token = user_input.user_token
-        user_id = extract_user_id_from_token(user_token)
-        doc_id = user_input.context_ui_id
-        thread_id = f"{user_id}_{doc_id or 'general'}"
-        attachment_id = user_input.file_path
-        summary_type = user_input.human_choice or "abstractive"
-
-        if not attachment_id:
-            raise HTTPException(status_code=400, detail="Не указан ID файла")
-
-        get_file_tool = get_tool_by_name("doc_get_file_content")
-        summarize_tool = get_tool_by_name("doc_summarize_text")
+        user_id = extract_user_id_from_token(user_input.user_token)
+        thread_id = f"{user_id}_{user_input.context_ui_id or 'general'}"
+        get_file_tool = next((t for t in all_tools if t.name == "doc_get_file_content"), None)
+        summarize_tool = next((t for t in all_tools if t.name == "doc_summarize_text"), None)
 
         file_data = await get_file_tool.ainvoke({
-            "document_id": doc_id,
-            "attachment_id": attachment_id,
-            "token": user_token
+            "document_id": user_input.context_ui_id,
+            "attachment_id": user_input.file_path,
+            "token": user_input.user_token
         })
 
         if isinstance(file_data, dict) and file_data.get("status") == "error":
-            raise HTTPException(status_code=400, detail=file_data.get("message"))
+            logger.error(f"File Fetch Error: {file_data.get('message')}")
+            return AssistantResponse(status="success", response=f"Ошибка: {file_data.get('message')}", thread_id=thread_id)
+
+        extracted_text = file_data.get("content") if isinstance(file_data, dict) else str(file_data)
+
+        if not extracted_text or len(extracted_text.strip()) < 10:
+             return AssistantResponse(status="success", response="Файл пуст или не содержит текста.", thread_id=thread_id)
 
         summary_result = await summarize_tool.ainvoke({
-            "text": file_data.get("content", ""),
-            "summary_type": summary_type
+            "text": extracted_text,
+            "summary_type": user_input.human_choice or "abstractive"
         })
 
-        if isinstance(summary_result, dict):
-            summary_text = summary_result.get("summary", "Не удалось извлечь резюме")
+        if isinstance(summary_result, dict) and summary_result.get("status") == "error":
+             summary_text = summary_result.get("message", "Техническая ошибка суммаризации.")
         else:
-            summary_text = str(summary_result)
-
-        config = {"configurable": {"thread_id": thread_id}}
+             summary_text = summary_result.get("content") or summary_result.get("summary") or "Ошибка анализа."
 
         labels = {"extractive": "факты", "abstractive": "пересказ", "thesis": "тезисы"}
-        display_label = labels.get(summary_type, "анализ")
+        display_label = labels.get(user_input.human_choice, "анализ")
 
-        await agent.agent.aupdate_state(config, {
+        await agent.agent.aupdate_state({"configurable": {"thread_id": thread_id}}, {
             "messages": [
-                HumanMessage(content=f"Кнопка: Анализ файла ({display_label})"),
+                HumanMessage(content=f"Запрос анализа: {display_label}"),
                 AIMessage(content=summary_text)
             ]
         }, as_node="agent")
 
-        return AssistantResponse(
-            status="success",
-            response=summary_text,
-            thread_id=thread_id
-        )
-
+        return AssistantResponse(status="success", response=summary_text, thread_id=thread_id)
     except Exception as e:
         logger.error(f"Action error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ошибка при обработке файла: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ошибка обработки файла")
 
 
 @app.get("/chat/history/{thread_id}")
-async def get_history(
-        thread_id: str,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
-):
+async def get_history(thread_id: str, agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]):
     try:
-        config = {"configurable": {"thread_id": thread_id}}
-        state = await agent.agent.aget_state(config)
+        state = await agent.agent.aget_state({"configurable": {"thread_id": thread_id}})
         messages = state.values.get("messages", [])
-
         return {
             "messages": [
-                {
-                    "type": "human" if m.type == "human" else "ai",
-                    "content": m.content
-                } for m in messages
+                {"type": "human" if m.type == "human" else "ai", "content": m.content}
+                for m in messages if m.content
             ]
         }
     except Exception as e:
-        logger.error(f"Error fetching history: {e}")
-        raise HTTPException(status_code=500, detail="Не удалось загрузить историю")
+        raise HTTPException(status_code=500, detail="История недоступна")
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=settings.API_PORT,
-        reload=(settings.ENVIRONMENT == "development")
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=settings.API_PORT, reload=settings.DEBUG)

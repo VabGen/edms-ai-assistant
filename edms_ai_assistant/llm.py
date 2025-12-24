@@ -46,23 +46,21 @@ def get_chat_model():
         "temperature": 0,
         "openai_api_base": "https://api.proxyapi.ru/openai/v1",
         "openai_api_key": settings.OPENAI_API_KEY,
-        "max_retries": 5,  # Увеличиваем для стабильности через прокси
-        "timeout": 90,  # Увеличиваем для тяжелых промптов аналитики
-        "streaming": True,  # Включаем потоковую передачу
-        "max_tokens": 4096,  # Ограничиваем выход, чтобы не "улетал" в бесконечность
-        "model_kwargs": {
-            "seed": 42,
-            "top_p": 0.0000001,  # Максимальное сужение выбора токенов
-            "parallel_tool_calls": False,  # Выключаем параллельность, если важна строгая последовательность шагов
-        }
+        "max_retries": 5,
+        "timeout": 90,
+        "streaming": True,
+        "max_tokens": 4096,
+        "seed": 42,
+        "top_p": 0.0000001,
+        # "parallel_tool_calls": False,
     }
 
     try:
         model = ChatOpenAI(**settings_kwargs)
-        logger.info(f"LLM Model '{settings_kwargs['model']}' initialized successfully.")
+        logger.info(f"LLM Model '{settings_kwargs['model']}' успешно инициализирована.")
         return model
     except Exception as e:
-        logger.error(f"Failed to initialize LLM: {e}")
+        logger.error(f"Ошибка при инициализации LLM: {e}")
         raise
 
 

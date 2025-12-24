@@ -60,7 +60,7 @@ export default function ParticleEffect({isActive, onComplete}: ParticleEffectPro
 
     return (
         <>
-            {/* Инъекция анимации специально для Shadow DOM */}
+            {/* Инъекция анимации для Shadow DOM */}
             <style>
                 {`
           @keyframes particleExplode {
