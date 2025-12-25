@@ -1,4 +1,3 @@
-# edms_ai_assistant/agent.py
 import logging
 import asyncio
 import re
@@ -9,6 +8,7 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
+from datetime import datetime
 
 from edms_ai_assistant.llm import get_chat_model
 from edms_ai_assistant.tools import all_tools
@@ -39,25 +39,20 @@ class EdmsDocumentAgent:
 
             "### OPERATION ALGORITHM (ALGORITHMIC STEPS):\n"
             "Соблюдай последовательность действий (Chain-of-Thought):\n\n"
-            "1. **IDENTIFICATION**: При запросе анализа файла по его НАЗВАНИЮ (например, 'Обложка дела'):\n"
+            "1. **IDENTIFICATION**: При запросе анализа файла по его НАЗВАНИЮ:\n"
             "   - ВСЕГДА начинай с вызова `doc_get_details(document_id=active_id)`.\n"
-            "   - В полученном JSON найди массив `attachmentDocument` и извлеки `id` (attachment_id) файла, имя которого максимально совпадает с запросом.\n\n"
+            "   - Найди в `attachmentDocument` нужный `id` (attachment_id).\n\n"
             "2. **EXTRACTION**: Получив ID вложения:\n"
-            "   - Вызови `doc_get_file_content(attachment_id=...)` для получения текста.\n"
-            "   - Если указан путь в LOCAL_FILE, используй `read_local_file_content` как приоритетный источник.\n\n"
+            "   - Вызови `doc_get_file_content(attachment_id=...)` для получения текста.\n\n"
             "3. **PROCESSING (STRICT RULE)**:\n"
-            "   - Любой вопрос о содержании или деталях файла (например: 'о чем этот файл?', 'что в нем?', 'анализ') ОБЯЗАТЕЛЬНО должен проходить через `doc_summarize_text`.\n"
-            "   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО отвечать самостоятельно.\n"
-            "   - ПОРЯДОК ДЕЙСТВИЙ: Сначала получи текст файла, затем вызови инструмент `doc_summarize_text` (не указывай тип суммаризации, если пользователь не просил конкретный формат).\n"
-            "   - Это запустит процесс выбора формата в интерфейсе.\n"
+            "   - Любой запрос анализа ОБЯЗАТЕЛЬНО проходит через `doc_summarize_text`.\n"
+            "   - ВАЖНО: Если в сообщении пользователя УЖЕ указан формат (факты, тезисы, пересказ), "
+            "     используй его СРАЗУ в параметре `summary_type`. Не уточняй это у пользователя.\n"
+            "   - Если формат НЕ указан, оставь `summary_type` пустым (null).\n\n"
 
-            "### STRICT CONSTRAINTS (GUARDRAILS):\n"
-            "- **NO HALLUCINATIONS**: Запрещено пересказывать текст своими словами. Используй ТОЛЬКО результат инструмента `doc_summarize_text`.\n"
-            "- **ERROR HANDLING**: Если инструмент суммаризации вернул техническую ошибку, ответь: 'К сожалению, автоматическая суммаризация сейчас недоступна. Попробуйте повторить запрос позже', не пытаясь анализировать текст самостоятельно.\n"
-            "- **COMMUNICATION**: Соблюдай деловой этикет, обращайся к пользователю по имени {user_name}.\n\n"
-
-            "### EXECUTION RULE:\n"
-            "Твой ответ должен всегда завершаться вызовом инструмента, если цепочка анализа (Details -> Content -> Summary) не завершена."
+            "### STRICT CONSTRAINTS:\n"
+            "- **NO HALLUCINATIONS**: Запрещено пересказывать текст своими словами без инструмента.\n"
+            "- **COMMUNICATION**: Соблюдай деловой этикет, обращайся к пользователю по имени {user_name}.\n"
         )
 
         self.agent = self._build_graph()
@@ -72,7 +67,6 @@ class EdmsDocumentAgent:
 
         workflow.add_node("agent", call_model)
         workflow.add_node("tools", ToolNode(self.tools))
-
         workflow.add_edge(START, "agent")
 
         def should_continue(state: AgentState):
@@ -101,11 +95,12 @@ class EdmsDocumentAgent:
 
         config = {"configurable": {"thread_id": thread_id or "default"}}
         user_context = user_context or {}
-        user_name = f"{user_context.get('firstName', '')}".strip() or "пользователь"
+        # Извлекаем имя для приветствия (сначала firstName, потом общее имя)
+        user_name = (user_context.get('firstName') or user_context.get('name') or "пользователь").strip()
 
         state = await self.agent.aget_state(config)
 
-        # 1. Если это ответ на ПРЕРЫВАНИЕ (старая логика кнопок в чате)
+        # 1. Если кнопка нажата в процессе (прерывание)
         if human_choice and state.next:
             last_msg = state.values["messages"][-1]
             fixed_calls = []
@@ -116,15 +111,13 @@ class EdmsDocumentAgent:
                 fixed_calls.append({"name": tc["name"], "args": args, "id": tc["id"]})
 
             await self.agent.aupdate_state(config, {
-                "messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]},
+                "messages": [AIMessage(content="", tool_calls=fixed_calls, id=last_msg.id)]},
                                            as_node="agent")
             return await self._orchestrate(None, config, user_token, context_ui_id, file_path, is_choice_active=True)
 
-        # 2. НОВЫЙ КЕЙС: Если кнопка нажата СНАРУЖИ (в строке вложения)
-        # Мы добавляем human_choice прямо в текст сообщения, чтобы LLM сразу видела формат
+        # 2. Если формат выбран заранее (внешняя кнопка вложения)
         effective_message = message
         if human_choice and not state.next:
-            # Мапим технические имена в понятные для промпта ключевые слова
             format_map = {"extractive": "факты", "thesis": "тезисы", "abstractive": "пересказ"}
             format_word = format_map.get(human_choice, human_choice)
             effective_message = f"{message}. Формат анализа: {format_word}."
@@ -132,29 +125,36 @@ class EdmsDocumentAgent:
         if state.next and message:
             await self._clear_stuck_tool_calls(config, state.values["messages"][-1])
 
-        manifesto = self.tool_manifesto_template.format(context_ui_id=context_ui_id or "Не указан", user_name=user_name)
-        env = f"\n### ENVIRONMENT\nACTIVE_DOC_ID: {context_ui_id}\nLOCAL_FILE: {file_path}\n"
+        # Передача текущей даты и контекста
+        current_date = datetime.now().strftime("%d.%m.%Y")
+        manifesto = self.tool_manifesto_template.format(
+            context_ui_id=context_ui_id or "Не указан",
+            user_name=user_name
+        )
+        env = (
+            f"\n### ENVIRONMENT\n"
+            f"CURRENT_DATE: {current_date}\n"
+            f"ACTIVE_DOC_ID: {context_ui_id}\n"
+            f"LOCAL_FILE: {file_path}\n"
+        )
 
         if not state.values.get("messages"):
             inputs = {"messages": [SystemMessage(content=manifesto + env), HumanMessage(content=effective_message)]}
         else:
             inputs = {"messages": [HumanMessage(content=effective_message)]}
 
-        # Передаем флаг is_choice_active=True, чтобы _orchestrate не перехватил управление
         return await self._orchestrate(inputs, config, user_token, context_ui_id, file_path,
                                        is_choice_active=bool(human_choice))
 
     async def _orchestrate(self, inputs, config, token, doc_id, file_path, is_choice_active=False, iteration=0):
         if iteration > 10:
-            return {"status": "error", "message": "Слишком много итераций (возможная зацикленность)"}
+            return {"status": "error", "message": "Слишком много итераций"}
 
         try:
             await asyncio.wait_for(self.agent.ainvoke(inputs, config=config), timeout=210.0)
-
             state = await self.agent.aget_state(config)
             messages = state.values.get("messages", [])
-            if not messages:
-                return {"status": "error", "message": "Цепочка сообщений пуста"}
+            if not messages: return {"status": "error", "message": "Пустая цепочка"}
 
             last_msg = messages[-1]
 
@@ -166,85 +166,83 @@ class EdmsDocumentAgent:
                 return {"status": "success", "content": "Запрос обработан."}
 
             fixed_calls = []
+            format_keywords = {"факты": "extractive", "тезисы": "thesis", "пересказ": "abstractive"}
+
             for tc in last_msg.tool_calls:
                 new_args = dict(tc["args"])
                 new_args["token"] = token
 
+                # Принудительная подстановка пути, если файл загружен
+                if tc["name"] in ["doc_get_file_content", "read_local_file_content"] and file_path:
+                    new_args["file_path"] = file_path
+
                 if tc["name"] not in ["employee_search_tool", "read_local_file_content"]:
                     new_args["document_id"] = doc_id
 
-                if (tc["name"] in ["doc_get_file_content", "read_local_file_content"]) and file_path:
-                    if not new_args.get("attachment_id") and not new_args.get("file_path"):
-                        new_args["file_path"] = file_path
-
+                # 1. Автоподстановка ID вложения по имени
                 if tc["name"] == "doc_get_file_content" and not new_args.get("attachment_id"):
-                    # Пытаемся найти ID в истории сообщений от инструментов (из ответа doc_get_details)
                     for m in reversed(messages):
                         if isinstance(m, ToolMessage):
                             try:
                                 import json
                                 data = json.loads(m.content)
-                                # Если это список вложений
                                 if isinstance(data, dict) and "attachmentDocument" in data:
-                                    attachments = data["attachmentDocument"]
-                                    # Ищем файл, имя которого упоминалось в HumanMessage
-                                    user_query = ""
-                                    for hm in reversed(messages):
-                                        if isinstance(hm, HumanMessage):
-                                            user_query = str(hm.content)
-                                            break
-
-                                    for a in attachments:
-                                        if a.get("name") and (a["name"].lower() in user_query.lower() or user_query.lower() in a["name"].lower()):
+                                    user_query = next(
+                                        (str(hm.content) for hm in reversed(messages) if isinstance(hm, HumanMessage)),
+                                        "")
+                                    for a in data["attachmentDocument"]:
+                                        if a.get("name") and (
+                                                a["name"].lower() in user_query.lower() or user_query.lower() in a[
+                                            "name"].lower()):
                                             new_args["attachment_id"] = a["id"]
-                                            logger.info(f"Фоновая подстановка ID по имени файла: {a['name']}")
                                             break
                             except:
                                 continue
 
-                if tc["name"] == "doc_summarize_text" and (
-                        not new_args.get("text") or len(str(new_args.get("text"))) < 20):
-                    logger.info("Суммаризатор вызван без контента, извлекаю из истории...")
-                    import json
-                    for m in reversed(messages):
-                        if isinstance(m, ToolMessage):
-                            try:
-                                data = json.loads(m.content)
-                                if isinstance(data, dict):
-                                    if data.get("status") == "success" and data.get("content"):
+                # 2. Обработка суммаризатора
+                if tc["name"] == "doc_summarize_text":
+                    # Восстанавливаем текст из истории, если модель его не передала
+                    if not new_args.get("text") or len(str(new_args.get("text"))) < 20:
+                        import json
+                        for m in reversed(messages):
+                            if isinstance(m, ToolMessage):
+                                try:
+                                    data = json.loads(m.content)
+                                    if isinstance(data, dict) and data.get("status") == "success" and data.get(
+                                            "content"):
                                         new_args["text"] = data["content"]
                                         break
-                                    if data.get("status") == "error":
+                                except:
+                                    if len(str(m.content)) > 100:
+                                        new_args["text"] = m.content
                                         break
-                            except:
-                                if len(str(m.content)) > 100:
-                                    new_args["text"] = m.content
-                                    break
+
+                    # Ищем формат в истории сообщений (чтобы не переспрашивать)
+                    if not new_args.get("summary_type"):
+                        for m in reversed(messages):
+                            if isinstance(m, HumanMessage):
+                                text = str(m.content).lower()
+                                for kw, fmt in format_keywords.items():
+                                    if kw in text:
+                                        new_args["summary_type"] = fmt
+                                        is_choice_active = True
+                                        break
+                                if new_args.get("summary_type"): break
 
                 fixed_calls.append({"name": tc["name"], "args": new_args, "id": tc["id"]})
 
+            # Финальная проверка: нужно ли показать кнопки выбора формата
             summary_call = next((tc for tc in fixed_calls if tc["name"] == "doc_summarize_text"), None)
             if summary_call and not is_choice_active:
-                # Берем содержание последнего сообщения пользователя
-                user_msg_text = ""
-                for m in reversed(messages):
-                    if isinstance(m, HumanMessage):
-                        user_msg_text = str(m.content).lower()
-                        break
-
-                # Список ключевых слов, которые "гасят" необходимость выбора
-                keywords = ["факты", "тезисы", "пересказ", "extractive", "thesis", "abstractive", "сводка"]
-
-                # Если пользователь уже указал формат в тексте сообщения
-                user_already_chose = any(kw in user_msg_text for kw in keywords)
-
-                # Если формат уже есть в аргументах вызова инструмента
+                user_msg_text = next(
+                    (str(m.content).lower() for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+                user_already_chose = any(kw in user_msg_text for kw in format_keywords.keys())
                 args_have_type = bool(summary_call["args"].get("summary_type"))
 
                 if not (user_already_chose or args_have_type):
-                    # Только если НИГДЕ нет упоминания формата, показываем кнопки
+                    # Очищаем контент, чтобы не было текста "Выберите формат" (только кнопки)
                     await self.agent.aupdate_state(config, {
-                        "messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]
+                        "messages": [AIMessage(content="", tool_calls=fixed_calls, id=last_msg.id)]
                     }, as_node="agent")
 
                     return {
@@ -253,6 +251,7 @@ class EdmsDocumentAgent:
                         "message": "Пожалуйста, выберите формат анализа."
                     }
 
+            # Если всё в порядке, продолжаем выполнение
             await self.agent.aupdate_state(config, {
                 "messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]
             }, as_node="agent")
@@ -261,8 +260,7 @@ class EdmsDocumentAgent:
                                            iteration=iteration + 1)
 
         except asyncio.TimeoutError:
-            logger.error("Timeout во время выполнения оркестрации")
-            return {"status": "error", "message": "Превышено время ожидания ответа от ИИ."}
+            return {"status": "error", "message": "Превышено время ожидания."}
         except Exception as e:
-            logger.error(f"Ошибка в _orchestrate: {e}", exc_info=True)
-            return {"status": "error", "message": f"Ошибка оркестрации: {str(e)}"}
+            logger.error(f"Error in orchestrate: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)}
