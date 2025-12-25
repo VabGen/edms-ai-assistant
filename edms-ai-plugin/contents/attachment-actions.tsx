@@ -119,9 +119,11 @@ const AttachmentActions = ({anchor}: { anchor?: { element: HTMLElement } }) => {
     const getActualFileId = (el: HTMLElement): string => {
         const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+        // 1. Ищем во всех ссылках внутри элемента
         const links = el.querySelectorAll('a');
         for (const link of links) {
-            const attrs = ['href', 'onclick', 'data-id', 'id', 'data-file-id'];
+            // Проверяем все возможные атрибуты, где может быть ID
+            const attrs = ['href', 'onclick', 'data-id', 'id', 'data-file-id', 'data-attach-id'];
             for (const attr of attrs) {
                 const val = link.getAttribute(attr);
                 const match = val?.match(uuidRegex);
@@ -129,11 +131,16 @@ const AttachmentActions = ({anchor}: { anchor?: { element: HTMLElement } }) => {
             }
         }
 
-        const allContent = el.innerHTML;
-        const contentMatch = allContent.match(uuidRegex);
+        // 2. Ищем в родителе (иногда кнопка находится внутри контейнера с ID)
+        const parentId = el.closest('[id]')?.id || el.closest('[data-id]')?.getAttribute('data-id');
+        const parentMatch = parentId?.match(uuidRegex);
+        if (parentMatch) return parentMatch[0];
+
+        // 3. Последний шанс: ищем UUID просто в тексте HTML контейнера
+        const contentMatch = el.innerHTML.match(uuidRegex);
         if (contentMatch) return contentMatch[0];
 
-        return fileName;
+        return ""; // Возвращаем пустоту вместо имени файла, чтобы сервер выдал ошибку поиска
     };
 
     const handleAction = (summaryType: string, e: React.MouseEvent) => {
@@ -143,16 +150,15 @@ const AttachmentActions = ({anchor}: { anchor?: { element: HTMLElement } }) => {
         const token = getAuthToken();
         if (!token) return alert("Авторизация не найдена");
 
-        setIsLoading(true);
         const fileId = getActualFileId(anchor.element);
         const currentDocId = extractDocIdFromUrl();
 
-        console.log(`[AI Assistant] Отправка файла: Name="${fileName}", ID="${fileId}"`);
+        setIsLoading(true);
 
         chrome.runtime.sendMessage({
-            type: "sendChatMessage",
+            type: "summarizeDocument",
             payload: {
-                message: `Анализ файла: ${fileName}`,
+                message: fileName,
                 user_token: token,
                 context_ui_id: currentDocId,
                 file_path: fileId,
@@ -162,18 +168,19 @@ const AttachmentActions = ({anchor}: { anchor?: { element: HTMLElement } }) => {
             setIsLoading(false);
             setIsHovered(false);
             if (res?.success) {
+                const finalContent = res.data?.response || "Анализ завершен.";
                 window.postMessage({
                     type: "REFRESH_CHAT_HISTORY",
                     messages: [
                         {type: 'human', content: `Запрошен анализ файла: ${fileName}`},
-                        {type: 'ai', content: res.data?.content || res.data?.response || "Готово."}
+                        {type: 'ai', content: finalContent}
                     ]
                 }, "*");
             } else {
                 alert("Ошибка: " + (res?.error || "Неизвестная ошибка"));
             }
         });
-    }
+    };
 
     if (!isEnabled) return null;
 

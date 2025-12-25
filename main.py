@@ -19,7 +19,7 @@ from fastapi import (
     Depends,
     status,
 )
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -178,57 +178,36 @@ async def chat_endpoint(
         raise HTTPException(status_code=500, detail="Ошибка сервера")
 
 
+import difflib
+from langchain_core.messages import HumanMessage, AIMessage
+
+
 @app.post("/actions/summarize", response_model=AssistantResponse)
-async def api_direct_summarize(
-        user_input: UserInput,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]
-):
-    """Прямой вызов суммаризации через инструменты (для кнопок)."""
+async def api_direct_summarize(user_input: UserInput, agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]):
     try:
         user_id = extract_user_id_from_token(user_input.user_token)
         thread_id = f"{user_id}_{user_input.context_ui_id or 'general'}"
-        get_file_tool = next((t for t in all_tools if t.name == "doc_get_file_content"), None)
-        summarize_tool = next((t for t in all_tools if t.name == "doc_summarize_text"), None)
 
-        file_data = await get_file_tool.ainvoke({
-            "document_id": user_input.context_ui_id,
-            "attachment_id": user_input.file_path,
-            "token": user_input.user_token
-        })
+        # Мы не вызываем инструменты вручную.
+        # Мы просим Агента выполнить задачу, передав ему выбор пользователя (human_choice)
+        # Это заставит агента пройти путь: Details -> Content -> Summarize -> Final Text
+        agent_result = await agent.chat(
+            message=f"Сделай анализ вложения {user_input.message}",
+            user_token=user_input.user_token,
+            context_ui_id=user_input.context_ui_id,
+            thread_id=thread_id,
+            file_path=user_input.file_path,
+            human_choice=user_input.human_choice  # Это 'extractive', 'abstractive' или 'thesis'
+        )
 
-        if isinstance(file_data, dict) and file_data.get("status") == "error":
-            logger.error(f"File Fetch Error: {file_data.get('message')}")
-            return AssistantResponse(status="success", response=f"Ошибка: {file_data.get('message')}", thread_id=thread_id)
-
-        extracted_text = file_data.get("content") if isinstance(file_data, dict) else str(file_data)
-
-        if not extracted_text or len(extracted_text.strip()) < 10:
-             return AssistantResponse(status="success", response="Файл пуст или не содержит текста.", thread_id=thread_id)
-
-        summary_result = await summarize_tool.ainvoke({
-            "text": extracted_text,
-            "summary_type": user_input.human_choice or "abstractive"
-        })
-
-        if isinstance(summary_result, dict) and summary_result.get("status") == "error":
-             summary_text = summary_result.get("message", "Техническая ошибка суммаризации.")
-        else:
-             summary_text = summary_result.get("content") or summary_result.get("summary") or "Ошибка анализа."
-
-        labels = {"extractive": "факты", "abstractive": "пересказ", "thesis": "тезисы"}
-        display_label = labels.get(user_input.human_choice, "анализ")
-
-        await agent.agent.aupdate_state({"configurable": {"thread_id": thread_id}}, {
-            "messages": [
-                HumanMessage(content=f"Запрос анализа: {display_label}"),
-                AIMessage(content=summary_text)
-            ]
-        }, as_node="agent")
-
-        return AssistantResponse(status="success", response=summary_text, thread_id=thread_id)
+        return AssistantResponse(
+            status="success",
+            response=agent_result.get("content") or "Анализ завершен.",
+            thread_id=thread_id
+        )
     except Exception as e:
         logger.error(f"Action error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ошибка обработки файла")
+        raise HTTPException(status_code=500, detail="Ошибка при генерации анализа")
 
 
 @app.get("/chat/history/{thread_id}")

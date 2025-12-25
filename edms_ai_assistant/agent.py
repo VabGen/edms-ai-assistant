@@ -105,6 +105,7 @@ class EdmsDocumentAgent:
 
         state = await self.agent.aget_state(config)
 
+        # 1. Если это ответ на ПРЕРЫВАНИЕ (старая логика кнопок в чате)
         if human_choice and state.next:
             last_msg = state.values["messages"][-1]
             fixed_calls = []
@@ -119,6 +120,15 @@ class EdmsDocumentAgent:
                                            as_node="agent")
             return await self._orchestrate(None, config, user_token, context_ui_id, file_path, is_choice_active=True)
 
+        # 2. НОВЫЙ КЕЙС: Если кнопка нажата СНАРУЖИ (в строке вложения)
+        # Мы добавляем human_choice прямо в текст сообщения, чтобы LLM сразу видела формат
+        effective_message = message
+        if human_choice and not state.next:
+            # Мапим технические имена в понятные для промпта ключевые слова
+            format_map = {"extractive": "факты", "thesis": "тезисы", "abstractive": "пересказ"}
+            format_word = format_map.get(human_choice, human_choice)
+            effective_message = f"{message}. Формат анализа: {format_word}."
+
         if state.next and message:
             await self._clear_stuck_tool_calls(config, state.values["messages"][-1])
 
@@ -126,11 +136,13 @@ class EdmsDocumentAgent:
         env = f"\n### ENVIRONMENT\nACTIVE_DOC_ID: {context_ui_id}\nLOCAL_FILE: {file_path}\n"
 
         if not state.values.get("messages"):
-            inputs = {"messages": [SystemMessage(content=manifesto + env), HumanMessage(content=message)]}
+            inputs = {"messages": [SystemMessage(content=manifesto + env), HumanMessage(content=effective_message)]}
         else:
-            inputs = {"messages": [HumanMessage(content=message)]}
+            inputs = {"messages": [HumanMessage(content=effective_message)]}
 
-        return await self._orchestrate(inputs, config, user_token, context_ui_id, file_path)
+        # Передаем флаг is_choice_active=True, чтобы _orchestrate не перехватил управление
+        return await self._orchestrate(inputs, config, user_token, context_ui_id, file_path,
+                                       is_choice_active=bool(human_choice))
 
     async def _orchestrate(self, inputs, config, token, doc_id, file_path, is_choice_active=False, iteration=0):
         if iteration > 10:
@@ -165,15 +177,30 @@ class EdmsDocumentAgent:
                     if not new_args.get("attachment_id") and not new_args.get("file_path"):
                         new_args["file_path"] = file_path
 
-                if tc["name"] == "doc_get_file_content" and not new_args.get("attachment_id") and not new_args.get(
-                        "file_path"):
+                if tc["name"] == "doc_get_file_content" and not new_args.get("attachment_id"):
+                    # Пытаемся найти ID в истории сообщений от инструментов (из ответа doc_get_details)
                     for m in reversed(messages):
-                        if isinstance(m, ToolMessage) and UUID_PATTERN.search(str(m.content)):
-                            uuids = UUID_PATTERN.findall(str(m.content))
-                            if uuids:
-                                new_args["attachment_id"] = uuids[0]
-                                logger.info(f"Автоподстановка ID вложения: {uuids[0]}")
-                                break
+                        if isinstance(m, ToolMessage):
+                            try:
+                                import json
+                                data = json.loads(m.content)
+                                # Если это список вложений
+                                if isinstance(data, dict) and "attachmentDocument" in data:
+                                    attachments = data["attachmentDocument"]
+                                    # Ищем файл, имя которого упоминалось в HumanMessage
+                                    user_query = ""
+                                    for hm in reversed(messages):
+                                        if isinstance(hm, HumanMessage):
+                                            user_query = str(hm.content)
+                                            break
+
+                                    for a in attachments:
+                                        if a.get("name") and (a["name"].lower() in user_query.lower() or user_query.lower() in a["name"].lower()):
+                                            new_args["attachment_id"] = a["id"]
+                                            logger.info(f"Фоновая подстановка ID по имени файла: {a['name']}")
+                                            break
+                            except:
+                                continue
 
                 if tc["name"] == "doc_summarize_text" and (
                         not new_args.get("text") or len(str(new_args.get("text"))) < 20):
@@ -198,10 +225,24 @@ class EdmsDocumentAgent:
 
             summary_call = next((tc for tc in fixed_calls if tc["name"] == "doc_summarize_text"), None)
             if summary_call and not is_choice_active:
-                user_msg = next((m.content.lower() for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-                keywords = ["факты", "тезисы", "extractive", "thesis", "пересказ", "абстракт", "подробно"]
+                # Берем содержание последнего сообщения пользователя
+                user_msg_text = ""
+                for m in reversed(messages):
+                    if isinstance(m, HumanMessage):
+                        user_msg_text = str(m.content).lower()
+                        break
 
-                if not any(kw in user_msg for kw in keywords):
+                # Список ключевых слов, которые "гасят" необходимость выбора
+                keywords = ["факты", "тезисы", "пересказ", "extractive", "thesis", "abstractive", "сводка"]
+
+                # Если пользователь уже указал формат в тексте сообщения
+                user_already_chose = any(kw in user_msg_text for kw in keywords)
+
+                # Если формат уже есть в аргументах вызова инструмента
+                args_have_type = bool(summary_call["args"].get("summary_type"))
+
+                if not (user_already_chose or args_have_type):
+                    # Только если НИГДЕ нет упоминания формата, показываем кнопки
                     await self.agent.aupdate_state(config, {
                         "messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]
                     }, as_node="agent")
@@ -209,7 +250,7 @@ class EdmsDocumentAgent:
                     return {
                         "status": "requires_action",
                         "action_type": "summarize_selection",
-                        "message": "В каком формате подготовить анализ?"
+                        "message": "Пожалуйста, выберите формат анализа."
                     }
 
             await self.agent.aupdate_state(config, {
