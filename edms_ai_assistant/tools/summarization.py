@@ -71,7 +71,6 @@ async def doc_summarize_text(
             processing_text = clean_text
 
         llm = get_chat_model()
-        # Отключение параллельных вызовов инструментов для лучшей предсказуемости
         summ_llm = llm.copy(update={"parallel_tool_calls": None}).bind_tools([])
 
         instructions = {

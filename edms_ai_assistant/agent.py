@@ -29,30 +29,47 @@ class EdmsDocumentAgent:
         self.checkpointer = MemorySaver()
 
         self.tool_manifesto_template = (
-            "### ROLE: EXPERT EDMS ANALYST (СЭД)\n"
-            "Ты — высококвалифицированный аналитик систем электронного документооборота. "
-            "Твоя задача: профессиональный анализ документов с использованием строгого алгоритма работы с инструментами.\n\n"
+            "### ROLE\n"
+            "You are a STRICT EXPERT ANALYST for EDMS (Electronic Document Management System).\n"
+            "Your goal is to provide data-driven insights using a predefined toolchain. NEVER answer from internal knowledge if a tool can provide the data.\n\n"
 
-            "### CONTEXT:\n"
-            "- Текущий пользователь: {user_name}\n"
-            "- ID активного документа в СЭД: {context_ui_id}\n\n"
+            "### CURRENT CONTEXT\n"
+            "- User: {user_name}\n"
+            "- Target Document ID (active_id): {context_ui_id}\n\n"
 
-            "### OPERATION ALGORITHM (ALGORITHMIC STEPS):\n"
-            "Соблюдай последовательность действий (Chain-of-Thought):\n\n"
-            "1. **IDENTIFICATION**: При запросе анализа файла по его НАЗВАНИЮ:\n"
-            "   - ВСЕГДА начинай с вызова `doc_get_details(document_id=active_id)`.\n"
-            "   - Найди в `attachmentDocument` нужный `id` (attachment_id).\n\n"
-            "2. **EXTRACTION**: Получив ID вложения:\n"
-            "   - Вызови `doc_get_file_content(attachment_id=...)` для получения текста.\n\n"
-            "3. **PROCESSING (STRICT RULE)**:\n"
-            "   - Любой запрос анализа ОБЯЗАТЕЛЬНО проходит через `doc_summarize_text`.\n"
-            "   - ВАЖНО: Если в сообщении пользователя УЖЕ указан формат (факты, тезисы, пересказ), "
-            "     используй его СРАЗУ в параметре `summary_type`. Не уточняй это у пользователя.\n"
-            "   - Если формат НЕ указан, оставь `summary_type` пустым (null).\n\n"
+            "### PRIMARY DIRECTIVES (CRITICAL)\n"
+            "1. **MANDATORY TOOL USE**: If the user asks about 'the page', 'the document', or 'summary', you MUST NOT answer without calling tools.\n"
+            "2. **CHAIN OF THOUGHT**: Always follow this sequence:\n"
+            "   - [Step 1: Meta-data] Call `doc_get_details` to see what files exist.\n"
+            "   - [Step 2: Content] Call `doc_get_file_content` using the `id` found in Step 1.\n"
+            "   - [Step 3: Analysis] Call `doc_summarize_text` with the content from Step 2.\n"
+            "3. **FORCE RE-ANALYSIS**: Even if you have information about the document in the chat history, if the user explicitly asks for a 'summary' (сводка), 'analysis' (анализ), or 'report' (отчет), you MUST call `doc_summarize_text` again. DO NOT answer from memory.\n\n"
 
-            "### STRICT CONSTRAINTS:\n"
-            "- **NO HALLUCINATIONS**: Запрещено пересказывать текст своими словами без инструмента.\n"
-            "- **COMMUNICATION**: Соблюдай деловой этикет, обращайся к пользователю по имени {user_name}.\n"
+            "### SUMMARY RULES (FOR BUTTONS UI)\n"
+            "1. **STRICT NULL POLICY**: When calling `doc_summarize_text`, you MUST leave `summary_type` EMPTY (null) unless the user explicitly used keywords: 'тезисы' (thesis), 'факты' (extractive), 'детально/пересказ' (abstractive).\n"
+            "2. If the user says 'сделай сводку', 'проанализируй', 'о чем файл' — call `doc_summarize_text` with ONLY the `text` argument. This triggers the format selection UI.\n\n"
+
+            "### TOOL EXECUTION LOGIC\n"
+            "#### SCENARIO A: General inquiry (e.g., 'Analyze this page', 'What is this?')\n"
+            "- ACTION: Immediately call `doc_get_details(document_id=\"{context_ui_id}\")`.\n"
+            "- REASON: You need to identify attachments before analysis.\n\n"
+
+            "#### SCENARIO B: File-specific inquiry (e.g., 'Summarize Cover Letter')\n"
+            "- ACTION 1: Call `doc_get_details` to find the exact `attachment_id` for 'Cover Letter'.\n"
+            "- ACTION 2: Use that ID to call `doc_get_file_content`.\n"
+            "- ACTION 3: Pass text to `doc_summarize_text` with `summary_type=null`.\n\n"
+
+            "#### SCENARIO C: Local file path is provided (LOCAL_FILE is not empty)\n"
+            "- ACTION: Prioritize `read_local_file_content` over EDMS API calls.\n\n"
+
+            "### GUARDRAILS & FORMATTING\n"
+            "- **NO SELF-ANALYSIS**: Do not summarize text yourself. You are only the 'orchestrator'. The actual summary MUST come from `doc_summarize_text`.\n"
+            "- **INTERRUPT RULE**: If you call `doc_summarize_text` without a `summary_type`, STOP your response immediately after the tool call. The system will handle the UI selection.\n"
+            "- **LANGUAGE**: Respond in Russian, addressing the user as {user_name}.\n"
+            "- **ERROR**: If a tool fails, state: 'К сожалению, автоматический анализ сейчас недоступен. Попробуйте позже.'\n\n"
+
+            "### FINAL REQUIREMENT\n"
+            "Every response MUST end with a Tool Call until the final analytical Summary is delivered."
         )
 
         self.agent = self._build_graph()
@@ -95,7 +112,6 @@ class EdmsDocumentAgent:
 
         config = {"configurable": {"thread_id": thread_id or "default"}}
         user_context = user_context or {}
-        # Извлекаем имя для приветствия (сначала firstName, потом общее имя)
         user_name = (user_context.get('firstName') or user_context.get('name') or "пользователь").strip()
 
         state = await self.agent.aget_state(config)
@@ -115,7 +131,6 @@ class EdmsDocumentAgent:
                                            as_node="agent")
             return await self._orchestrate(None, config, user_token, context_ui_id, file_path, is_choice_active=True)
 
-        # 2. Если формат выбран заранее (внешняя кнопка вложения)
         effective_message = message
         if human_choice and not state.next:
             format_map = {"extractive": "факты", "thesis": "тезисы", "abstractive": "пересказ"}
@@ -125,7 +140,6 @@ class EdmsDocumentAgent:
         if state.next and message:
             await self._clear_stuck_tool_calls(config, state.values["messages"][-1])
 
-        # Передача текущей даты и контекста
         current_date = datetime.now().strftime("%d.%m.%Y")
         manifesto = self.tool_manifesto_template.format(
             context_ui_id=context_ui_id or "Не указан",
@@ -158,7 +172,6 @@ class EdmsDocumentAgent:
 
             last_msg = messages[-1]
 
-            # 1. Если цепочка завершена или нет вызовов инструментов
             if not state.next or not isinstance(last_msg, AIMessage) or not last_msg.tool_calls:
                 for m in reversed(messages):
                     if isinstance(m, AIMessage) and m.content and not m.tool_calls:
@@ -166,15 +179,12 @@ class EdmsDocumentAgent:
                             return {"status": "success", "content": m.content}
                 return {"status": "success", "content": "Запрос обработан."}
 
-            # 2. Подготовка вызовов инструментов
             fixed_calls = []
             format_keywords = {"факты": "extractive", "тезисы": "thesis", "пересказ": "abstractive"}
 
-            # Определяем, был ли в этом прогоне только что прочитан новый контент
             newly_read_content = None
             for m in reversed(messages):
                 if isinstance(m, ToolMessage):
-                    # Ищем результат doc_get_file_content или read_local_file_content
                     try:
                         import json
                         data = json.loads(m.content)
@@ -190,26 +200,20 @@ class EdmsDocumentAgent:
                 new_args = dict(tc["args"])
                 new_args["token"] = token
 
-                # Подстановка ID документа, если он есть
                 if doc_id and "document_id" in new_args:
                     new_args["document_id"] = doc_id
 
-                # ПРИНУДИТЕЛЬНЫЙ ПУТЬ К ФАЙЛУ (Решает вашу проблему с подгрузкой старого файла)
                 if file_path and tc["name"] in ["doc_get_file_content", "read_local_file_content"]:
                     new_args["file_path"] = file_path
                     if "attachment_id" in new_args: new_args["attachment_id"] = None
 
-                # ОБРАБОТКА СУММАРИЗАТОРА
                 if tc["name"] == "doc_summarize_text":
-                    # Если есть свежепрочитанный контент — берем его приоритетно
                     if newly_read_content:
                         new_args["text"] = newly_read_content
 
-                    # Если текста все еще нет (модель не передала), ищем в истории (но осторожно)
                     elif not new_args.get("text") or len(str(new_args.get("text"))) < 20:
                         new_args["text"] = newly_read_content  # Мы уже нашли его выше
 
-                    # Поиск выбора формата пользователем
                     if not new_args.get("summary_type"):
                         format_found = False
                         for m in reversed(messages):
@@ -225,32 +229,30 @@ class EdmsDocumentAgent:
 
                 fixed_calls.append({"name": tc["name"], "args": new_args, "id": tc["id"]})
 
-            # --- КРИТИЧЕСКИЙ БЛОК ПРОВЕРКИ (ВНЕ ЦИКЛА) ---
             summary_call = next((tc for tc in fixed_calls if tc["name"] == "doc_summarize_text"), None)
 
-            if summary_call and not is_choice_active:
+            if summary_call:
                 user_msg_text = next(
                     (str(m.content).lower() for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-                user_already_chose = any(re.search(rf'\b{kw}\b', user_msg_text) for kw in format_keywords.keys())
+                has_type_in_msg = any(re.search(rf'\b{kw}\b', user_msg_text) for kw in format_keywords.keys())
+                has_type_in_args = bool(summary_call["args"].get("summary_type"))
 
-                if not (user_already_chose or summary_call["args"].get("summary_type")):
-                    # Очищаем ответ AI и запрашиваем кнопки
+                if not (has_type_in_msg or has_type_in_args or is_choice_active):
                     await self.agent.aupdate_state(config, {
                         "messages": [AIMessage(content="", tool_calls=fixed_calls, id=last_msg.id)]
                     }, as_node="agent")
 
+                    logger.info("Interrupting for format selection buttons...")
                     return {
                         "status": "requires_action",
                         "action_type": "summarize_selection",
                         "message": "Пожалуйста, выберите формат анализа документа."
                     }
 
-            # Продолжаем выполнение: обновляем состояние и вызываем инструменты
             await self.agent.aupdate_state(config, {
                 "messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]
             }, as_node="agent")
 
-            # Передаем inputs=None, чтобы агент продолжил с текущего состояния (вызов инструментов)
             return await self._orchestrate(None, config, token, doc_id, file_path, is_choice_active=True,
                                            iteration=iteration + 1)
 
