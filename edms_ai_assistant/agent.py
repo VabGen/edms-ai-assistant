@@ -158,6 +158,7 @@ class EdmsDocumentAgent:
 
             last_msg = messages[-1]
 
+            # 1. Если цепочка завершена или нет вызовов инструментов
             if not state.next or not isinstance(last_msg, AIMessage) or not last_msg.tool_calls:
                 for m in reversed(messages):
                     if isinstance(m, AIMessage) and m.content and not m.tool_calls:
@@ -165,82 +166,75 @@ class EdmsDocumentAgent:
                             return {"status": "success", "content": m.content}
                 return {"status": "success", "content": "Запрос обработан."}
 
+            # 2. Подготовка вызовов инструментов
             fixed_calls = []
             format_keywords = {"факты": "extractive", "тезисы": "thesis", "пересказ": "abstractive"}
+
+            # Определяем, был ли в этом прогоне только что прочитан новый контент
+            newly_read_content = None
+            for m in reversed(messages):
+                if isinstance(m, ToolMessage):
+                    # Ищем результат doc_get_file_content или read_local_file_content
+                    try:
+                        import json
+                        data = json.loads(m.content)
+                        if isinstance(data, dict) and data.get("status") == "success" and data.get("content"):
+                            newly_read_content = data["content"]
+                            break
+                    except:
+                        if len(str(m.content)) > 100:
+                            newly_read_content = m.content
+                            break
 
             for tc in last_msg.tool_calls:
                 new_args = dict(tc["args"])
                 new_args["token"] = token
 
-                # Принудительная подстановка пути, если файл загружен
-                if tc["name"] in ["doc_get_file_content", "read_local_file_content"] and file_path:
-                    new_args["file_path"] = file_path
-
-                if tc["name"] not in ["employee_search_tool", "read_local_file_content"]:
+                # Подстановка ID документа, если он есть
+                if doc_id and "document_id" in new_args:
                     new_args["document_id"] = doc_id
 
-                # 1. Автоподстановка ID вложения по имени
-                if tc["name"] == "doc_get_file_content" and not new_args.get("attachment_id"):
-                    for m in reversed(messages):
-                        if isinstance(m, ToolMessage):
-                            try:
-                                import json
-                                data = json.loads(m.content)
-                                if isinstance(data, dict) and "attachmentDocument" in data:
-                                    user_query = next(
-                                        (str(hm.content) for hm in reversed(messages) if isinstance(hm, HumanMessage)),
-                                        "")
-                                    for a in data["attachmentDocument"]:
-                                        if a.get("name") and (
-                                                a["name"].lower() in user_query.lower() or user_query.lower() in a[
-                                            "name"].lower()):
-                                            new_args["attachment_id"] = a["id"]
-                                            break
-                            except:
-                                continue
+                # ПРИНУДИТЕЛЬНЫЙ ПУТЬ К ФАЙЛУ (Решает вашу проблему с подгрузкой старого файла)
+                if file_path and tc["name"] in ["doc_get_file_content", "read_local_file_content"]:
+                    new_args["file_path"] = file_path
+                    if "attachment_id" in new_args: new_args["attachment_id"] = None
 
-                # 2. Обработка суммаризатора
+                # ОБРАБОТКА СУММАРИЗАТОРА
                 if tc["name"] == "doc_summarize_text":
-                    # Восстанавливаем текст из истории, если модель его не передала
-                    if not new_args.get("text") or len(str(new_args.get("text"))) < 20:
-                        import json
-                        for m in reversed(messages):
-                            if isinstance(m, ToolMessage):
-                                try:
-                                    data = json.loads(m.content)
-                                    if isinstance(data, dict) and data.get("status") == "success" and data.get(
-                                            "content"):
-                                        new_args["text"] = data["content"]
-                                        break
-                                except:
-                                    if len(str(m.content)) > 100:
-                                        new_args["text"] = m.content
-                                        break
+                    # Если есть свежепрочитанный контент — берем его приоритетно
+                    if newly_read_content:
+                        new_args["text"] = newly_read_content
 
-                    # Ищем формат в истории сообщений (чтобы не переспрашивать)
+                    # Если текста все еще нет (модель не передала), ищем в истории (но осторожно)
+                    elif not new_args.get("text") or len(str(new_args.get("text"))) < 20:
+                        new_args["text"] = newly_read_content  # Мы уже нашли его выше
+
+                    # Поиск выбора формата пользователем
                     if not new_args.get("summary_type"):
+                        format_found = False
                         for m in reversed(messages):
                             if isinstance(m, HumanMessage):
                                 text = str(m.content).lower()
                                 for kw, fmt in format_keywords.items():
-                                    if kw in text:
+                                    if re.search(rf'\b{kw}\b', text):
                                         new_args["summary_type"] = fmt
                                         is_choice_active = True
+                                        format_found = True
                                         break
-                                if new_args.get("summary_type"): break
+                            if format_found: break
 
                 fixed_calls.append({"name": tc["name"], "args": new_args, "id": tc["id"]})
 
-            # Финальная проверка: нужно ли показать кнопки выбора формата
+            # --- КРИТИЧЕСКИЙ БЛОК ПРОВЕРКИ (ВНЕ ЦИКЛА) ---
             summary_call = next((tc for tc in fixed_calls if tc["name"] == "doc_summarize_text"), None)
+
             if summary_call and not is_choice_active:
                 user_msg_text = next(
                     (str(m.content).lower() for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-                user_already_chose = any(kw in user_msg_text for kw in format_keywords.keys())
-                args_have_type = bool(summary_call["args"].get("summary_type"))
+                user_already_chose = any(re.search(rf'\b{kw}\b', user_msg_text) for kw in format_keywords.keys())
 
-                if not (user_already_chose or args_have_type):
-                    # Очищаем контент, чтобы не было текста "Выберите формат" (только кнопки)
+                if not (user_already_chose or summary_call["args"].get("summary_type")):
+                    # Очищаем ответ AI и запрашиваем кнопки
                     await self.agent.aupdate_state(config, {
                         "messages": [AIMessage(content="", tool_calls=fixed_calls, id=last_msg.id)]
                     }, as_node="agent")
@@ -248,14 +242,15 @@ class EdmsDocumentAgent:
                     return {
                         "status": "requires_action",
                         "action_type": "summarize_selection",
-                        "message": "Пожалуйста, выберите формат анализа."
+                        "message": "Пожалуйста, выберите формат анализа документа."
                     }
 
-            # Если всё в порядке, продолжаем выполнение
+            # Продолжаем выполнение: обновляем состояние и вызываем инструменты
             await self.agent.aupdate_state(config, {
                 "messages": [AIMessage(content=last_msg.content, tool_calls=fixed_calls, id=last_msg.id)]
             }, as_node="agent")
 
+            # Передаем inputs=None, чтобы агент продолжил с текущего состояния (вызов инструментов)
             return await self._orchestrate(None, config, token, doc_id, file_path, is_choice_active=True,
                                            iteration=iteration + 1)
 
