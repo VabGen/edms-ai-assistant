@@ -16,16 +16,16 @@ const LiquidGlassFilter: React.FC = () => {
                 <filter id="liquid-glass-filter" x="-20%" y="-20%" width="140%" height="140%">
                     <feTurbulence
                         type="fractalNoise"
-                        baseFrequency="0.007 0.007"
+                        baseFrequency="0.005 0.005"
                         numOctaves="2"
                         seed="92"
                         result="noise"
                     />
-                    <feGaussianBlur in="noise" stdDeviation="2" result="blurred" />
+                    <feGaussianBlur in="noise" stdDeviation="3" result="blurred"/>
                     <feDisplacementMap
                         in="SourceGraphic"
                         in2="blurred"
-                        scale="75"
+                        scale="45"
                         xChannelSelector="R"
                         yChannelSelector="G"
                     />

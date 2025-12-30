@@ -15,10 +15,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({content, role}) => {
         <div
             className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
             <div
-                className={`max-w-[85%] px-4 py-3 rounded-[20px] text-sm leading-relaxed shadow-sm ${
+                className={`max-w-[88%] px-4 py-3 rounded-[24px] text-sm leading-relaxed backdrop-blur-md shadow-sm border transition-all ${
                     isUser
-                        ? 'bg-indigo-600 text-white rounded-tr-none'
-                        : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'
+                        ? 'bg-indigo-600/70 text-white border-white/20 rounded-tr-none'
+                        : 'bg-white/40 text-slate-800 border-white/40 rounded-tl-none'
                 }`}
             >
                 <ReactMarkdown
@@ -31,7 +31,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({content, role}) => {
                                 return (
                                     <div className="relative my-3">
                                         <pre
-                                            className="overflow-x-auto p-3 rounded-xl bg-slate-900 font-mono text-xs text-indigo-100 shadow-inner">
+                                            className="overflow-x-auto p-3 rounded-xl bg-slate-900/80 backdrop-blur-sm font-mono text-xs text-indigo-100 shadow-inner border border-white/10">
                                             <code className={className} {...props}>
                                                 {children}
                                             </code>
@@ -42,10 +42,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({content, role}) => {
 
                             return (
                                 <code
-                                    className={`font-mono text-[13px] px-1.5 py-0.5 rounded border ${
+                                    className={`font-mono text-[13px] px-1.5 py-0.5 rounded ${
                                         isUser
-                                            ? 'bg-indigo-500 border-indigo-400 text-white'
-                                            : 'bg-slate-100 border-slate-200 text-indigo-600'
+                                            ? 'bg-white/20 text-white'
+                                            : 'bg-indigo-100/50 text-indigo-700'
                                     }`}
                                     {...props}
                                 >
@@ -67,7 +67,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({content, role}) => {
                         a: ({children, href}) => (
                             <a
                                 href={href}
-                                className={`${isUser ? 'text-indigo-100' : 'text-indigo-600'} hover:underline font-bold transition-all`}
+                                className={`${isUser ? 'text-white' : 'text-indigo-600'} hover:underline font-bold transition-all underline-offset-2`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
@@ -77,30 +77,41 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({content, role}) => {
 
                         blockquote: ({children}) => (
                             <blockquote
-                                className={`border-l-4 pl-3 italic my-2 ${isUser ? 'border-indigo-300 text-indigo-100' : 'border-slate-200 text-slate-500'}`}>
+                                className={`border-l-4 pl-3 italic my-2 ${
+                                    isUser
+                                        ? 'border-white/40 text-indigo-50'
+                                        : 'border-indigo-200 text-slate-600'
+                                }`}>
                                 {children}
                             </blockquote>
                         ),
 
                         table: ({children}) => (
-                            <div className="overflow-x-auto my-3 rounded-lg border border-slate-100">
+                            <div
+                                className="overflow-x-auto my-3 rounded-xl border border-white/30 bg-white/20 backdrop-blur-sm">
                                 <table className="w-full text-xs text-left border-collapse">
                                     {children}
                                 </table>
                             </div>
                         ),
-                        th: ({children}) => <th
-                            className="bg-slate-50 p-2 border border-slate-100 font-bold">{children}</th>,
-                        td: ({children}) => <td className="p-2 border border-slate-100">{children}</td>,
+                        th: ({children}) => (
+                            <th className={`p-2 border-b border-white/30 font-bold ${isUser ? 'bg-white/10' : 'bg-white/40'}`}>
+                                {children}
+                            </th>
+                        ),
+                        td: ({children}) => <td className="p-2 border-b border-white/10">{children}</td>,
                     }}
                 >
                     {content}
                 </ReactMarkdown>
 
-                <div className={`text-[10px] mt-1.5 opacity-50 flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                    {dayjs().format('HH:mm')}
+                <div
+                    className={`text-[10px] mt-2 opacity-60 flex items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <span>{dayjs().format('HH:mm')}</span>
+                    {isUser && <span className="text-[8px]">●</span>}
                 </div>
             </div>
         </div>
     );
+
 };

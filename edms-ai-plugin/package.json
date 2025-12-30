@@ -43,7 +43,8 @@
       "activeTab",
       "storage",
       "cookies",
-      "tabs"
+      "tabs",
+      "audioCapture"
     ],
     "host_permissions": [
       "http://localhost/*",

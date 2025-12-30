@@ -1,3 +1,4 @@
+// background.ts
 export {}
 
 interface ChromeResponse {
@@ -9,9 +10,6 @@ interface ChromeResponse {
 const API_BASE_URL = 'http://localhost:8000';
 const activeRequests = new Map<string, AbortController>();
 
-/**
- * Основной слушатель сообщений
- */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const requestId = message.payload?.requestId || 'default';
 
@@ -28,7 +26,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             handleChatMessage(message.payload, sendResponse);
             return true;
 
-        // НОВЫЙ КЕЙС: Для внешних кнопок суммаризации
         case 'summarizeDocument':
             handleDirectAction(message.payload, '/actions/summarize', sendResponse);
             return true;
@@ -41,32 +38,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             handleGetHistory(message.payload, sendResponse);
             return true;
 
+        case 'createNewChat':
+            handleCreateNewChat(message.payload, sendResponse);
+            return true;
+
         default:
             return false;
     }
 });
 
-/**
- * Обработка обычных чат-сообщений -> уходит на /chat
- */
 async function handleChatMessage(payload: any, sendResponse: (res: ChromeResponse) => void) {
     const endpoint = `${API_BASE_URL}/chat`;
-    console.log(`[Background] Chat request to ${endpoint}`);
     await performFetch(endpoint, payload, sendResponse);
 }
 
-/**
- * Обработка прямых действий (внешние кнопки) -> уходит на /actions/summarize
- */
 async function handleDirectAction(payload: any, path: string, sendResponse: (res: ChromeResponse) => void) {
     const endpoint = `${API_BASE_URL}${path}`;
-    console.log(`[Background] Direct Action to ${endpoint}, choice: ${payload.human_choice}`);
     await performFetch(endpoint, payload, sendResponse);
 }
 
-/**
- * Универсальная функция для выполнения запроса
- */
+async function handleCreateNewChat(payload: any, sendResponse: (res: ChromeResponse) => void) {
+    const endpoint = `${API_BASE_URL}/chat/new`;
+    const simplifiedPayload = {user_token: payload.user_token};
+    await performFetch(endpoint, simplifiedPayload, sendResponse);
+}
+
 async function performFetch(endpoint: string, payload: any, sendResponse: (res: ChromeResponse) => void) {
     const requestId = payload.requestId || 'default';
     const controller = new AbortController();
@@ -75,33 +71,27 @@ async function performFetch(endpoint: string, payload: any, sendResponse: (res: 
     try {
         const response = await fetch(endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {"Content-Type": "application/json"},
             body: JSON.stringify(payload),
             signal: controller.signal
         });
 
         const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `Ошибка сервера: ${response.status}`);
 
-        if (!response.ok) {
-            throw new Error(data.detail || `Ошибка сервера: ${response.status}`);
-        }
-
-        sendResponse({ success: true, data });
+        sendResponse({success: true, data});
     } catch (err: any) {
         if (err.name === 'AbortError') {
-            sendResponse({ success: false, error: 'Request aborted' });
+            sendResponse({success: false, error: 'Request aborted'});
         } else {
             console.error("API Error:", err);
-            sendResponse({ success: false, error: err.message });
+            sendResponse({success: false, error: err.message});
         }
     } finally {
         activeRequests.delete(requestId);
     }
 }
 
-/**
- * Обработка загрузки файлов
- */
 async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse) => void) {
     try {
         const {fileData, fileName, user_token} = payload;
@@ -118,28 +108,19 @@ async function handleFileUpload(payload: any, sendResponse: (res: ChromeResponse
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Ошибка сохранения файла на сервере');
-
+        if (!response.ok) throw new Error(data.detail || 'Ошибка сохранения файла');
         sendResponse({success: true, data});
     } catch (err: any) {
-        console.error("Upload error:", err);
         sendResponse({success: false, error: err.message});
     }
 }
 
-/**
- * Получение истории
- */
 async function handleGetHistory(payload: any, sendResponse: (res: ChromeResponse) => void) {
     try {
         const {thread_id} = payload;
-        const response = await fetch(`${API_BASE_URL}/chat/history/${thread_id}`, {
-            method: "GET"
-        });
-
+        const response = await fetch(`${API_BASE_URL}/chat/history/${thread_id}`);
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Ошибка при загрузке истории');
-
+        if (!response.ok) throw new Error(data.detail || 'Ошибка истории');
         sendResponse({success: true, data});
     } catch (err: any) {
         sendResponse({success: false, error: err.message});

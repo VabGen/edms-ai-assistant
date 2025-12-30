@@ -21,10 +21,6 @@ class BaseEmployeeClient(EdmsBaseClient):
 
 
 class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
-    """
-    РЕАЛИЗАЦИЯ. Именно этот класс нужно импортировать в инструменты.
-    """
-
     async def get_employee(self, token: str, employee_id: str) -> Optional[Dict[str, Any]]:
         endpoint = f"api/employee/{employee_id}"
         logger.info(f"Запрос данных сотрудника ID: {employee_id}")

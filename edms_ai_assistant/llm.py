@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 def get_chat_model():
     settings_kwargs = {
         "model": "gpt-4o-mini",
-        "temperature": 0,
+        "temperature": 0.6,
         "openai_api_base": "https://api.proxyapi.ru/openai/v1",
         "openai_api_key": settings.OPENAI_API_KEY,
         "max_retries": 5,
@@ -52,7 +52,6 @@ def get_chat_model():
         "max_tokens": 4096,
         "seed": 42,
         "top_p": 0.0000001,
-        # "parallel_tool_calls": False,
     }
 
     try:

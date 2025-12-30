@@ -4,34 +4,38 @@
 
 @layer base {
     :root {
-        --color-liquid-bg: rgba(255, 255, 255, 0.05);
+        --glass-border: rgba(255, 255, 255, 0.4);
+        --glass-bg: rgba(255, 255, 255, 0.35);
+        --glass-shadow: rgba(31, 38, 135, 0.15);
     }
 }
 
 @layer components {
     .frosted-glass {
-        @apply bg-white/20 backdrop-blur-md border border-white/30 shadow-lg;
-        transition: all 0.3s ease;
+        @apply backdrop-blur-xl border shadow-xl;
+        background: var(--glass-bg);
+        border-color: var(--glass-border);
+        box-shadow: 0 8px 32px 0 var(--glass-shadow);
     }
-    .frosted-glass:hover {
-        @apply bg-white/30 border-white/50;
+
+    .glass-input-container {
+        @apply flex items-center gap-1 rounded-2xl p-1.5 transition-all duration-300;
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .glass-input-container:focus-within {
+        background: rgba(255, 255, 255, 0.4);
+        border-color: rgba(99, 102, 241, 0.4);
+        box-shadow: 0 0 15px rgba(99, 102, 241, 0.1);
     }
 
     .liquid-glass {
         position: relative;
         isolation: isolate;
         background: transparent;
-    }
-
-    .liquid-glass::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        pointer-events: none;
-        box-shadow: inset 0 0 15px 0px #ffffff;
-        background-color: rgba(255, 255, 255, 0);
-        z-index: 1;
+        overflow: hidden;
     }
 
     .liquid-glass::after {
@@ -40,49 +44,41 @@
         inset: 0;
         border-radius: inherit;
         pointer-events: none;
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
         filter: url(#liquid-glass-filter);
-        -webkit-filter: url(#liquid-glass-filter);
         z-index: -1;
     }
 }
 
 @layer utilities {
-    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
     .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: rgba(99, 102, 241, 0.3);
+        background: rgba(99, 102, 241, 0.25);
         border-radius: 10px;
     }
 
     @keyframes liquid-ripple {
         0% {
             transform: scale(0.8);
-            opacity: 0.6;
+            opacity: 0.5;
         }
         100% {
-            transform: scale(2.2);
+            transform: scale(2.0);
             opacity: 0;
         }
     }
 
     .animate-liquid-ripple {
-        animation: liquid-ripple 3s cubic-bezier(0, 0.2, 0.4, 1) infinite;
+        animation: liquid-ripple 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
     }
 
-    .input-focus-glow:focus-within {
-        @apply ring-4 ring-indigo-500/20 border-indigo-400/50 bg-white/50;
-        transition: all 0.3s ease;
-    }
-}
-
-@keyframes soft-pulse {
-    0% { transform: scale(1); opacity: 0.4; }
-    100% { transform: scale(1.8); opacity: 0; }
-}
-
-.soft-wave {
-    animation: soft-pulse 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
