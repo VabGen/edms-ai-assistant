@@ -17,7 +17,9 @@ def extract_user_id_from_token(user_token: str) -> str:
     try:
         parts = user_token.split(".")
         if len(parts) != 3:
-            raise ValueError("Неверный формат JWT: ожидается три части (Header.Payload.Signature).")
+            raise ValueError(
+                "Неверный формат JWT: ожидается три части (Header.Payload.Signature)."
+            )
 
         _, payload_encoded, _ = parts
 
@@ -31,7 +33,9 @@ def extract_user_id_from_token(user_token: str) -> str:
         user_id_for_thread = str(payload.get("id") or payload.get("sub"))
 
         if not user_id_for_thread:
-            raise ValueError("User ID ('id' или 'sub') не найдены в полезной нагрузке JWT.")
+            raise ValueError(
+                "User ID ('id' или 'sub') не найдены в полезной нагрузке JWT."
+            )
 
         return user_id_for_thread
 

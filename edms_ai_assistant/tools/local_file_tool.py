@@ -1,38 +1,60 @@
 # edms_ai_assistant\tools\local_file_tool.py
 import os
+from typing import Dict, Any
+
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from edms_ai_assistant.services.file_processor import FileProcessorService, logger
+from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 
 
 class LocalFileInput(BaseModel):
     file_path: str = Field(
         ...,
-        description="ПОЛНЫЙ путь к локальному файлу. Возьми его ИЗ ТЕКСТА ЗАПРОСА в блоке [ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ]."
+        description="ПОЛНЫЙ путь к локальному файлу. Возьми его ИЗ ТЕКСТА ЗАПРОСА в блоке [ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ].",
     )
 
 
 @tool("read_local_file_content", args_schema=LocalFileInput)
-def read_local_file_content(file_path: str):
+def read_local_file_content(file_path: str) -> Dict[str, Any]:
     """
-    Инструмент для извлечения текстового содержимого из локально загруженного файла (PDF, DOCX, TXT).
-    Используй его, когда пользователь спрашивает о 'загруженном файле' или 'этом файле'.
+    Извлекает текст из локального файла (PDF, DOCX, TXT).
+    Используй для анализа документов, загруженных пользователем напрямую.
     """
-    logger.info(f"[TOOL] Вызов read_local_file_content для пути: {file_path}")
+    logger.info(f"[NLP-TOOL] Анализ локального файла: {file_path}")
 
-    if file_path.strip() == "file_path" or file_path.strip() == "":
-        return (
-            "ОШИБКА: Вы передали техническое имя 'file_path'. "
-            "Пожалуйста, посмотрите в историю сообщений, найдите строку '[ПУТЬ К ФАЙЛУ]' "
-            "и передайте её значение (реальный путь на диске)."
-        )
+    # Защита от передачи плейсхолдера
+    if "file_path" in file_path or not file_path.strip():
+        return {
+            "status": "error",
+            "message": "Передан некорректный путь. Найдите реальный путь в блоке [ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ].",
+        }
 
     if not os.path.exists(file_path):
-        logger.error(f"[TOOL] Файл не найден. Текущая директория: {os.getcwd()}")
-        return f"ОШИБКА: Файл не найден по пути: {file_path}. Убедитесь, что путь указан верно."
+        return {
+            "status": "error",
+            "message": f"Файл не найден по указанному пути. Проверьте доступность файла.",
+        }
 
     try:
-        return FileProcessorService.extract_text(file_path)
+        nlp = EDMSNaturalLanguageService()
+        file_meta = nlp.analyze_local_file(file_path)
+        text_content = FileProcessorService.extract_text(file_path)
+
+        limit = 15000
+        truncated_content = text_content[:limit]
+
+        return {
+            "status": "success",
+            "meta": file_meta,
+            "content": truncated_content,
+            "is_truncated": len(text_content) > limit,
+            "total_chars": len(text_content),
+        }
+
     except Exception as e:
-        logger.error(f"[TOOL] Ошибка при чтении файла: {e}")
-        return f"Произошла ошибка при чтении содержимого файла: {str(e)}"
+        logger.error(f"[NLP-TOOL] Ошибка обработки файла: {e}")
+        return {
+            "status": "error",
+            "message": f"Не удалось извлечь данные из файла: {str(e)}",
+        }

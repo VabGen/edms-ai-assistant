@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 def async_retry(
-        max_attempts: int = 3,
-        delay: float = 1.0,
-        backoff: float = 2.0,
-        exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    max_attempts: int = 3,
+    delay: float = 1.0,
+    backoff: float = 2.0,
+    exceptions: Tuple[Type[Exception], ...] = (Exception,),
 ) -> Callable:
     """
     Асинхронный декоратор с логикой повторных попыток.
@@ -26,7 +26,7 @@ def async_retry(
                 try:
                     return await func(*args, **kwargs)
                 except exceptions as e:
-                    is_last_attempt = (attempt == max_attempts - 1)
+                    is_last_attempt = attempt == max_attempts - 1
 
                     if is_last_attempt:
                         logger.error(

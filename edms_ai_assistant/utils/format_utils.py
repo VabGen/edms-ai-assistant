@@ -12,12 +12,14 @@ def format_document_response(text_content: str) -> str:
         r"Я буду использовать другой подход для предоставления информации о документе\.",
         r"Для получения более подробного содержания файла необходимо его извлечь и проанализировать\.",
         r"Для получения более подробной информации о содержании вложения необходимо обратиться к соответствующему инструменту или сервису, который поддерживает извлечение содержимого документов\.",
-        r"Для получения более подробного содержания файла необходимо использовать дополнительный инструмент 'summarize_attachment_tool_wrapped'\."
+        r"Для получения более подробного содержания файла необходимо использовать дополнительный инструмент 'summarize_attachment_tool_wrapped'\.",
     ]
 
     cleaned_content = formatted_content
     for phrase in junk_phrases:
-        cleaned_content = re.sub(phrase, '', cleaned_content, flags=re.IGNORECASE | re.DOTALL).strip()
+        cleaned_content = re.sub(
+            phrase, "", cleaned_content, flags=re.IGNORECASE | re.DOTALL
+        ).strip()
 
     lines = cleaned_content.split("\n")
     filtered_lines = []
@@ -44,7 +46,7 @@ def format_document_response(text_content: str) -> str:
 
         for keyword in unwanted_keywords:
             if line.strip().startswith(f"- **{keyword}**") or line.strip().startswith(
-                    f"- {keyword}"
+                f"- {keyword}"
             ):
                 is_unwanted = True
                 break
@@ -55,9 +57,9 @@ def format_document_response(text_content: str) -> str:
     formatted_content = "\n".join(filtered_lines)
 
     if not formatted_content.strip().startswith(
-            "##"
+        "##"
     ) and not formatted_content.strip().startswith("#"):
         formatted_content = "## Информация о Документе\n\n" + formatted_content
-    formatted_content = re.sub(r'\n\s*\n', '\n\n', formatted_content).strip()
+    formatted_content = re.sub(r"\n\s*\n", "\n\n", formatted_content).strip()
 
     return formatted_content

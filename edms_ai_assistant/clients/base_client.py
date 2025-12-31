@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class EdmsBaseClient(ABC):
     """Абстрактный базовый класс для всех клиентов EDMS API."""
+
     pass
 
 
@@ -20,9 +21,9 @@ class EdmsHttpClient(EdmsBaseClient):
     """Универсальный асинхронный клиент для API EDMS, реализующий HTTP-запросы."""
 
     def __init__(
-            self,
-            base_url: Optional[str] = None,
-            timeout: Optional[int] = None,
+        self,
+        base_url: Optional[str] = None,
+        timeout: Optional[int] = None,
     ):
         resolved_base_url = base_url or settings.CHANCELLOR_NEXT_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
@@ -56,13 +57,13 @@ class EdmsHttpClient(EdmsBaseClient):
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def _make_request(
-            self,
-            method: str,
-            endpoint: str,
-            token: str,
-            is_json_response: bool = True,
-            long_timeout: bool = False,
-            **kwargs,
+        self,
+        method: str,
+        endpoint: str,
+        token: str,
+        is_json_response: bool = True,
+        long_timeout: bool = False,
+        **kwargs,
     ) -> Union[Dict[str, Any], List[Dict[str, Any]], bytes, None]:
         """
         Выполняет HTTP-запрос с авторизацией, обработкой ошибок и повторными попытками.
@@ -91,12 +92,12 @@ class EdmsHttpClient(EdmsBaseClient):
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def _make_request_response_object(
-            self,
-            method: str,
-            endpoint: str,
-            token: str,
-            long_timeout: bool = False,
-            **kwargs,
+        self,
+        method: str,
+        endpoint: str,
+        token: str,
+        long_timeout: bool = False,
+        **kwargs,
     ) -> httpx.Response:
         """
         Выполняет HTTP-запрос и возвращает объект httpx.Response.
@@ -105,14 +106,14 @@ class EdmsHttpClient(EdmsBaseClient):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = prepare_auth_headers(token)
 
-        current_timeout = kwargs.pop('timeout', self.timeout)
+        current_timeout = kwargs.pop("timeout", self.timeout)
         if long_timeout:
             current_timeout = self.timeout + 30
 
-        current_headers = kwargs.get('headers', {})
+        current_headers = kwargs.get("headers", {})
         current_headers.update(headers)
         kwargs["headers"] = current_headers
-        kwargs['timeout'] = current_timeout
+        kwargs["timeout"] = current_timeout
 
         try:
             client = await self._get_client()

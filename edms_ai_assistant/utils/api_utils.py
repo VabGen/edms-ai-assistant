@@ -10,10 +10,7 @@ logger = logging.getLogger(__name__)
 
 def prepare_auth_headers(token: str) -> Dict[str, str]:
     """Создает стандартные заголовки для EDMS API."""
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
 async def handle_api_error(response: httpx.Response, request_info: str):

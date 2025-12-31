@@ -11,5 +11,4 @@ all_tools = [
     doc_summarize_text,
     read_local_file_content,
     employee_search_tool,
-
 ]

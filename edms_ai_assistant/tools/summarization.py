@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from edms_ai_assistant.llm import get_chat_model
+from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 
 logger = logging.getLogger(__name__)
 
@@ -24,49 +25,52 @@ class SummarizeInput(BaseModel):
             "ОБЯЗАТЕЛЬНО оставь это поле пустым (null), если пользователь "
             "не указал конкретный формат (например, 'тезисы' или 'факты'). "
             "Если поле пустое, система предложит пользователю выбрать формат кнопками."
-        )
+        ),
     )
 
 
 @tool("doc_summarize_text", args_schema=SummarizeInput)
 async def doc_summarize_text(
-        text: str,
-        summary_type: Optional[SummarizeType] = None
+    text: str, summary_type: Optional[SummarizeType] = None
 ) -> Dict[str, Any]:
     """
-    Инструмент для глубокого анализа и суммаризации текста.
-    ВАЖНО: Если ты вызываешь этот инструмент БЕЗ указания summary_type (summary_type=null),
-    выполнение будет немедленно ПРЕРВАНО для запроса формата у пользователя.
-    Используй это поведение для всех общих запросов типа 'сделай сводку', 'о чем файл', 'о чем вложения' или 'проанализируй'.
+    Выполняет интеллектуальный анализ и сжатие текста.
+    Если summary_type не указан, возвращает статус 'requires_choice' с рекомендацией формата.
     """
+    nlp = EDMSNaturalLanguageService()
+    clean_text = text.strip()
+    if clean_text.startswith("{") and clean_text.endswith("}"):
+        try:
+            import json
+
+            data = json.loads(clean_text)
+            clean_text = data.get("content", data.get("document_info", clean_text))
+        except:
+            pass
+
     if summary_type is None:
+        analysis = nlp.suggest_summarize_format(clean_text)
         return {
             "status": "requires_choice",
-            "message": "Формат суммаризации не определен."
+            "message": "Выберите формат анализа документа.",
+            "suggestion": analysis,
         }
 
-    actual_type = summary_type
-
-    logger.info(f"Executing summarization. Type: {actual_type}")
+    logger.info(f"[NLP-SUMMARIZE] Обработка типа: {summary_type}")
 
     try:
-        clean_text = text.strip()
-        if clean_text.startswith("{") and clean_text.endswith("}"):
-            import json
-            try:
-                data = json.loads(clean_text)
-                clean_text = data.get("content", clean_text)
-            except json.JSONDecodeError:
-                pass
-
         if not clean_text or len(clean_text) < 50:
             return {
                 "status": "success",
-                "content": f"Текст слишком краткий для анализа:\n\n{clean_text}"
+                "content": "Текст слишком мал для глубокого анализа.",
             }
 
         if len(clean_text) > 12000:
-            processing_text = clean_text[:8000] + "\n[... контент обрезан ...]\n" + clean_text[-4000:]
+            processing_text = (
+                clean_text[:8000]
+                + "\n[... контент пропущен для оптимизации ...]\n"
+                + clean_text[-4000:]
+            )
         else:
             processing_text = clean_text
 
@@ -74,18 +78,20 @@ async def doc_summarize_text(
         summ_llm = llm.copy(update={"parallel_tool_calls": None}).bind_tools([])
 
         instructions = {
-            SummarizeType.EXTRACTIVE: "выдели ключевые факты и цитаты",
-            SummarizeType.ABSTRACTIVE: "напиши краткий пересказ сути документа своими словами",
-            SummarizeType.THESIS: "сформируй структурированный тезисный план"
+            SummarizeType.EXTRACTIVE: "Выдели ключевые факты, даты, суммы и конкретные обязательства. Оформи списком.",
+            SummarizeType.ABSTRACTIVE: "Напиши связный краткий пересказ сути документа своими словами (1-2 абзаца).",
+            SummarizeType.THESIS: "Сформируй структурированный тезисный план документа с выделением главных мыслей.",
         }
 
-        target_instruction = instructions.get(actual_type, instructions[SummarizeType.ABSTRACTIVE])
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system",
-             f"Ты — эксперт-аналитик СЭД. Твоя задача: {target_instruction}. Отвечай кратко, структурировано, на русском языке."),
-            ("user", "ТЕКСТ ДЛЯ АНАЛИЗА:\n{text}\n\nРЕЗУЛЬТАТ:")
-        ])
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    f"Ты — ведущий аналитик СЭД. Задача: {instructions[summary_type]}. Пиши строго по делу, на русском языке.",
+                ),
+                ("user", "ИСХОДНЫЙ ТЕКСТ:\n{text}\n\nРЕЗУЛЬТАТ:"),
+            ]
+        )
 
         chain = prompt | summ_llm | StrOutputParser()
         summary = await chain.ainvoke({"text": processing_text})
@@ -93,9 +99,12 @@ async def doc_summarize_text(
         return {
             "status": "success",
             "content": summary.strip(),
-            "summary_type": actual_type
+            "meta": {"format_used": summary_type, "text_length": len(clean_text)},
         }
 
     except Exception as e:
-        logger.error(f"Summarization error: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Ошибка суммаризации: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Не удалось проанализировать текст: {str(e)}",
+        }

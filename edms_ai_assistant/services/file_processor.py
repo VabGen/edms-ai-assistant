@@ -1,10 +1,6 @@
 import logging
 from pathlib import Path
-from langchain_community.document_loaders import (
-    PyPDFLoader,
-    Docx2txtLoader,
-    TextLoader
-)
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +24,9 @@ class FileProcessorService:
                 loader = TextLoader(file_path, encoding="utf-8")
             else:
                 logger.warning(f"Попытка парсинга неподдерживаемого формата: {ext}")
-                return f"Формат файла {ext} пока не поддерживается для глубокого анализа."
+                return (
+                    f"Формат файла {ext} пока не поддерживается для глубокого анализа."
+                )
 
             docs = loader.load()
 
@@ -43,5 +41,7 @@ class FileProcessorService:
             return full_text
 
         except Exception as e:
-            logger.error(f"Ошибка при парсинге файла {ext} ({file_path}): {e}", exc_info=True)
+            logger.error(
+                f"Ошибка при парсинге файла {ext} ({file_path}): {e}", exc_info=True
+            )
             return f"Произошла техническая ошибка при чтении файла {ext}: {str(e)}"

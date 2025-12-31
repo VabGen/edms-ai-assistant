@@ -94,8 +94,12 @@ async def chat_endpoint(user_input: UserInput, background_tasks: BackgroundTasks
         human_choice=user_input.human_choice
     )
 
-    if user_input.file_path and result.get("status") != "requires_action":
-        background_tasks.add_task(_cleanup_file, user_input.file_path)
+    if user_input.file_path:
+        is_system_attachment = bool(UUID_PATTERN.match(str(user_input.file_path)))
+
+        if not is_system_attachment and result.get("status") not in ["requires_action", "requires_choice"]:
+            logger.info(f"Запланировано удаление временного файла: {user_input.file_path}")
+            background_tasks.add_task(_cleanup_file, user_input.file_path)
 
     return AssistantResponse(
         status=result.get("status", "success"),
