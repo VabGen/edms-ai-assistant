@@ -1,11 +1,13 @@
 import type {PlasmoCSConfig, PlasmoGetInlineAnchorList, PlasmoGetStyle} from "plasmo"
 import React, {useState, useEffect, useMemo} from "react"
+import { extractDocIdFromUrl, getAuthToken } from "~utils/edms-helpers"
 
 export const config: PlasmoCSConfig = {
     matches: [
         "http://localhost:3000/*",
         "http://localhost:3001/*",
-        "http://localhost:8080/*"
+        "http://localhost:8080/*",
+        "https://next.edo.iba/*"
     ]
 }
 
@@ -61,38 +63,6 @@ const Icons = {
         </svg>
     )
 }
-
-const extractDocIdFromUrl = (): string => {
-    try {
-        const pathParts = window.location.pathname.split('/');
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const foundId = pathParts.find(part => uuidRegex.test(part));
-        if (foundId) return foundId;
-    } catch (e) {
-        console.error(e);
-    }
-    return "main_assistant";
-};
-
-const getAuthToken = (): string | null => {
-    try {
-        const directToken = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token');
-        if (directToken) return directToken.replace("Bearer ", "");
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.includes('auth') || key.includes('user') || key.includes('oidc'))) {
-                const value = localStorage.getItem(key);
-                if (value?.includes('eyJ')) {
-                    const token = value.startsWith('{') ? JSON.parse(value).access_token : value;
-                    return token.replace("Bearer ", "");
-                }
-            }
-        }
-    } catch (e) {
-        console.error(e);
-    }
-    return null;
-};
 
 const AttachmentActions = ({anchor}: { anchor?: { element: HTMLElement } }) => {
     const [isEnabled, setIsEnabled] = useState(true);

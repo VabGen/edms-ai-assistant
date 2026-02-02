@@ -10,12 +10,17 @@ def extract_user_id_from_token(user_token: str) -> str:
     """
     Декодирует JWT payload для извлечения ID пользователя ('id' или 'sub').
 
-    ВНИМАНИЕ: Это *НЕ* валидация JWT. Это только декодирование PAYLOAD
-    JWT (подпись, срок действия) через специализированные библиотеки (pyjwt)
-    или прокси (API Gateway).
+    ВНИМАНИЕ: Это *НЕ* валидация JWT. Это только декодирование PAYLOAD.
+    Валидация JWT (подпись, срок действия) должна выполняться через
+    специализированные библиотеки (pyjwt) или прокси (API Gateway).
     """
     try:
-        parts = user_token.split(".")
+        token = user_token.strip()
+        if token.startswith("Bearer "):
+            token = token[7:]
+            logger.debug("Удален префикс 'Bearer ' из токена")
+
+        parts = token.split(".")
         if len(parts) != 3:
             raise ValueError(
                 "Неверный формат JWT: ожидается три части (Header.Payload.Signature)."
@@ -37,6 +42,7 @@ def extract_user_id_from_token(user_token: str) -> str:
                 "User ID ('id' или 'sub') не найдены в полезной нагрузке JWT."
             )
 
+        logger.debug(f"Успешно извлечен user_id: {user_id_for_thread}")
         return user_id_for_thread
 
     except (ValueError, IndexError, json.JSONDecodeError) as e:

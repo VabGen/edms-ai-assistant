@@ -42,6 +42,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             handleCreateNewChat(message.payload, sendResponse);
             return true;
 
+        case 'autofillAppeal':
+            handleAutofillAppeal(message.payload, sendResponse);
+            return true;
+
         default:
             return false;
     }
@@ -61,6 +65,19 @@ async function handleCreateNewChat(payload: any, sendResponse: (res: ChromeRespo
     const endpoint = `${API_BASE_URL}/chat/new`;
     const simplifiedPayload = {user_token: payload.user_token};
     await performFetch(endpoint, simplifiedPayload, sendResponse);
+}
+
+async function handleAutofillAppeal(payload: any, sendResponse: (res: ChromeResponse) => void) {
+    const endpoint = `${API_BASE_URL}/appeal/autofill`;
+
+    const requestPayload = {
+        message: payload.message || "Заполни обращение",
+        user_token: payload.user_token,
+        context_ui_id: payload.context_ui_id,
+        file_path: payload.file_path || null
+    };
+
+    await performFetch(endpoint, requestPayload, sendResponse);
 }
 
 async function performFetch(endpoint: string, payload: any, sendResponse: (res: ChromeResponse) => void) {

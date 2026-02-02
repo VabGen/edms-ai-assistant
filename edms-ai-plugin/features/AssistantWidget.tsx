@@ -15,39 +15,41 @@ import {
 import dayjs from "dayjs";
 import 'dayjs/locale/ru';
 
+import { extractDocIdFromUrl, getAuthToken } from "~utils/edms-helpers"
+
 import {ChatMessage} from './ChatMessage';
 import LiquidGlassFilter from './LiquidGlassFilter';
 
 dayjs.locale('ru');
 
-const extractDocIdFromUrl = (): string => {
-    try {
-        const pathParts = window.location.pathname.split('/');
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const foundId = pathParts.find(part => uuidRegex.test(part));
-        if (foundId) return foundId;
-    } catch (e) {
-        console.error("Ошибка парсинга URL:", e);
-    }
-    return "main_assistant";
-};
-
-const getAuthToken = (): string | null => {
-    try {
-        const directToken = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token');
-        if (directToken) return directToken;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.includes('auth') || key.includes('user') || key.includes('oidc'))) {
-                const value = localStorage.getItem(key);
-                if (value?.includes('eyJ')) return value.startsWith('{') ? JSON.parse(value).access_token : value;
-            }
-        }
-    } catch (e) {
-        console.error("Ошибка поиска токена:", e);
-    }
-    return null;
-};
+// const extractDocIdFromUrl = (): string => {
+//     try {
+//         const pathParts = window.location.pathname.split('/');
+//         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+//         const foundId = pathParts.find(part => uuidRegex.test(part));
+//         if (foundId) return foundId;
+//     } catch (e) {
+//         console.error("Ошибка парсинга URL:", e);
+//     }
+//     return "main_assistant";
+// };
+//
+// const getAuthToken = (): string | null => {
+//     try {
+//         const directToken = localStorage.getItem('token') || localStorage.getItem('access_token') || sessionStorage.getItem('token');
+//         if (directToken) return directToken;
+//         for (let i = 0; i < localStorage.length; i++) {
+//             const key = localStorage.key(i);
+//             if (key && (key.includes('auth') || key.includes('user') || key.includes('oidc'))) {
+//                 const value = localStorage.getItem(key);
+//                 if (value?.includes('eyJ')) return value.startsWith('{') ? JSON.parse(value).access_token : value;
+//             }
+//         }
+//     } catch (e) {
+//         console.error("Ошибка поиска токена:", e);
+//     }
+//     return null;
+// };
 
 const SoundWaveIndicator = () => (
     <div className="flex items-end justify-center space-x-1 h-3 mb-2">
@@ -222,7 +224,7 @@ export const AssistantWidget = () => {
         }
 
         const userToken = getAuthToken() || "no_token_found";
-        const currentDocId = extractDocIdFromUrl();
+        const currentDocId = extractDocIdFromUrl()
         const requestId = Math.random().toString(36).substring(7);
         currentRequestIdRef.current = requestId;
 

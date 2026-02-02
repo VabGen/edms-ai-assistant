@@ -67,7 +67,7 @@ def run_datamodel_codegen(input_file: str, output_file: str) -> bool:
         "3.13",
         "--use-annotated",
         "--use-union-operator",
-        "--reuse-model",
+        "--reuse-models",
         "--use-standard-collections",
         "--use-schema-description",
         "--collapse-root-models",

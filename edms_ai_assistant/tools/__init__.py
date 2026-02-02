@@ -4,6 +4,7 @@ from .attachment import doc_get_file_content
 from .summarization import doc_summarize_text
 from .local_file_tool import read_local_file_content
 from .employee import employee_search_tool
+from .appeal_autofill import autofill_appeal_document
 
 all_tools = [
     doc_get_details,
@@ -11,4 +12,5 @@ all_tools = [
     doc_summarize_text,
     read_local_file_content,
     employee_search_tool,
+    autofill_appeal_document,
 ]
