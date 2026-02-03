@@ -36,7 +36,7 @@ class CustomJSONEncoder(json.JSONEncoder):
                 return obj.isoformat()
             else:
                 # Naive datetime → добавляем 'Z' (UTC timezone)
-                return obj.isoformat() + 'Z'
+                return obj.isoformat() + "Z"
 
         # Enum → value
         if isinstance(obj, Enum):

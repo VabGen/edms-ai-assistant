@@ -1,221 +1,202 @@
 # edms_ai_assistant/models/appeal_fields.py
+"""
+Модели данных для автоматического заполнения карточек обращений граждан (APPEAL).
+Соответствует структуре DocMainFieldsAppeal в Java-сервере СЭД.
+"""
 import re
+import logging
 from datetime import datetime
 from enum import StrEnum
 from typing import Optional
-
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class DeclarantType(StrEnum):
-    """Тип заявителя: физическое или юридическое лицо"""
-    PHYSICAL = "PHYSICAL"
-    LEGAL = "LEGAL"
+    """
+    Тип заявителя согласно справочнику СЭД.
+
+    Attributes:
+        INDIVIDUAL: Физическое лицо (гражданин)
+        ENTITY: Юридическое лицо (организация, госорган)
+    """
+
+    INDIVIDUAL = "INDIVIDUAL"
+    ENTITY = "ENTITY"
 
 
 class AppealFields(BaseModel):
     """
-    Модель данных для автозаполнения полей документа категории APPEAL.
-    Соответствует Java-классу DocumentAppealFields.
+    Структура данных для извлечения информации из текста обращения с помощью LLM.
+
+    Используется в качестве Pydantic-схемы для JsonOutputParser в AppealExtractionService.
+    Все поля опциональны, так как LLM может не найти информацию в тексте.
+
+    Attributes:
+        deliveryMethod: Способ доставки обращения (например, "Почта", "Email", "Курьер")
+        shortSummary: Краткое содержание обращения (до 200 символов)
+        receiptDate: Дата поступления/написания обращения
+        declarantType: Тип заявителя (INDIVIDUAL или ENTITY)
+        citizenType: Категория/вид обращения (например, "Жалоба", "Заявление")
+        collective: Признак коллективного обращения (подписано группой лиц)
+        anonymous: Признак анонимного обращения (без указания ФИО)
+        reasonably: Признак обоснованности (наличие фактов, ссылок на законы)
+        fioApplicant: ФИО заявителя (для INDIVIDUAL)
+        organizationName: Наименование организации-заявителя (для ENTITY)
+        signed: ФИО лица, подписавшего документ (для ENTITY)
+        correspondentOrgNumber: Исходящий номер документа (для ENTITY)
+        dateDocCorrespondentOrg: Дата исходящего номера (для ENTITY)
+        country: Название страны
+        regionName: Название региона/области
+        districtName: Название района
+        cityName: Название города
+        index: Почтовый индекс (6 цифр)
+        fullAddress: Полный почтовый адрес
+        phone: Контактный телефон
+        email: Email для связи
+        correspondentAppeal: Название организации, которая переслала обращение
+        indexDateCoverLetter: Индекс и дата сопроводительного письма
+        reviewProgress: Информация о ходе рассмотрения
     """
 
-    # === ОСНОВНЫЕ ПОЛЯ ===
-    deliveryMethod: Optional[str] = Field(
-        None,
-        description="Способ доставки обращения (например, 'Почта России', 'Электронная почта', 'Курьер')"
-    )
-
+    # --- Основные поля ---
+    deliveryMethod: Optional[str] = Field(None, description="Способ доставки обращения")
     shortSummary: Optional[str] = Field(
-        None,
-        max_length=200,
-        description="Краткое содержание обращения (максимум 200 символов)"
+        None, max_length=200, description="Краткое содержание (до 200 символов)"
     )
-
-    # === ИНФОРМАЦИЯ О ЗАЯВИТЕЛЕ ===
-    fioApplicant: Optional[str] = Field(
-        None,
-        description="Ф.И.О. заявителя в формате 'Фамилия Имя Отчество'"
-    )
-
     receiptDate: Optional[datetime] = Field(
-        None,
-        description="Дата поступления обращения"
+        None, description="Дата поступления обращения"
     )
-
     declarantType: Optional[DeclarantType] = Field(
-        None,
-        description="Признак, является заявитель физическим или юридическим лицом"
+        None, description="Тип заявителя: INDIVIDUAL (физлицо) или ENTITY (юрлицо)"
     )
-
-    # === ПРИЗНАКИ ОБРАЩЕНИЯ ===
-    collective: Optional[bool] = Field(
-        None,
-        description="Признак коллективного обращения"
-    )
-
-    anonymous: Optional[bool] = Field(
-        None,
-        description="Признак анонимного обращения"
-    )
-
-    reasonably: Optional[bool] = Field(
-        None,
-        description="Признак обоснованности обращения"
-    )
-
-    # === КАТЕГОРИЗАЦИЯ ===
     citizenType: Optional[str] = Field(
-        None,
-        description="Вид обращения (Жалоба, Благодарность, Предложение, Заявление и т.д.)"
+        None, description="Категория обращения (Жалоба, Заявление, Предложение)"
     )
 
-    themeName: Optional[str] = Field(
-        None,
-        description="Тематика обращения"
+    # --- Логические признаки ---
+    collective: Optional[bool] = Field(
+        None, description="Коллективное обращение (true/false)"
+    )
+    anonymous: Optional[bool] = Field(
+        None, description="Анонимное обращение (true/false)"
+    )
+    reasonably: Optional[bool] = Field(
+        None, description="Обоснованность обращения (есть факты/аргументы)"
     )
 
-    subThemeName: Optional[str] = Field(
-        None,
-        description="Подтематика обращения"
-    )
+    # --- Заявитель (Физическое лицо) ---
+    fioApplicant: Optional[str] = Field(None, description="ФИО заявителя")
 
-    # === ГЕОГРАФИЧЕСКИЕ ДАННЫЕ ===
-    country: Optional[str] = Field(
-        None,
-        description="Страна заявителя"
-    )
-
-    regionName: Optional[str] = Field(
-        None,
-        description="Область проживания заявителя"
-    )
-
-    districtName: Optional[str] = Field(
-        None,
-        description="Район проживания заявителя"
-    )
-
-    cityName: Optional[str] = Field(
-        None,
-        description="Город проживания заявителя"
-    )
-
-    index: Optional[str] = Field(
-        None,
-        description="Почтовый индекс (6 цифр)"
-    )
-
-    fullAddress: Optional[str] = Field(
-        None,
-        description="Полный адрес: улица, дом, корпус, квартира"
-    )
-
-    # === КОНТАКТНЫЕ ДАННЫЕ ===
-    phone: Optional[str] = Field(
-        None,
-        description="Контактный телефон заявителя"
-    )
-
-    email: Optional[str] = Field(
-        None,
-        description="Электронная почта заявителя"
-    )
-
-    # === ОРГАНИЗАЦИЯ (для юридических лиц) ===
+    # --- Заявитель (Юридическое лицо) ---
     organizationName: Optional[str] = Field(
-        None,
-        description="Наименование организации-заявителя"
+        None, description="Наименование организации-заявителя"
     )
-
-    signed: Optional[str] = Field(
-        None,
-        description="Ф.И.О. лица, подписавшего документ"
-    )
-
-    # === КОРРЕСПОНДЕНТ ===
-    correspondentAppeal: Optional[str] = Field(
-        None,
-        description="Организация, которая приняла обращение или в которую подается обращение"
-    )
-
+    signed: Optional[str] = Field(None, description="ФИО лица, подписавшего документ")
     correspondentOrgNumber: Optional[str] = Field(
-        None,
-        description="Исходящий регистрационный индекс, присвоенный документу организацией-корреспондентом"
+        None, description="Исходящий номер документа организации"
     )
-
     dateDocCorrespondentOrg: Optional[datetime] = Field(
-        None,
-        description="Дата присвоения организацией-корреспондентом документу исходящего регистрационного номера"
+        None, description="Дата исходящего документа организации"
     )
 
-    # === ДОПОЛНИТЕЛЬНЫЕ ПОЛЯ ===
+    # --- География ---
+    country: Optional[str] = Field(None, description="Страна заявителя")
+    regionName: Optional[str] = Field(None, description="Регион/Область")
+    districtName: Optional[str] = Field(None, description="Район")
+    cityName: Optional[str] = Field(None, description="Город/Населенный пункт")
+    index: Optional[str] = Field(None, description="Почтовый индекс (6 цифр)")
+    fullAddress: Optional[str] = Field(
+        None, description="Полный почтовый адрес (улица, дом, квартира)"
+    )
+
+    # --- Контактная информация ---
+    phone: Optional[str] = Field(None, description="Контактный телефон")
+    email: Optional[str] = Field(None, description="Email для связи")
+
+    # --- Дополнительные сведения ---
+    correspondentAppeal: Optional[str] = Field(
+        None, description="Организация, переславшая обращение (если применимо)"
+    )
     indexDateCoverLetter: Optional[str] = Field(
-        None,
-        description="Дата и индекс сопроводительного письма"
+        None, description="Индекс и дата сопроводительного письма"
     )
-
     reviewProgress: Optional[str] = Field(
-        None,
-        description="Ход рассмотрения обращения"
+        None, description="Информация о ходе рассмотрения"
     )
 
-    # === ВАЛИДАТОРЫ ===
-
-    @field_validator('shortSummary')
+    @field_validator("shortSummary")
     @classmethod
     def truncate_summary(cls, v: Optional[str]) -> Optional[str]:
-        """Обрезает краткое содержание до 200 символов"""
+        """
+        Обрезает краткое содержание до 200 символов с добавлением '...'.
+
+        Args:
+            v: Исходное краткое содержание
+
+        Returns:
+            Обрезанная строка или None
+        """
         if v and len(v) > 200:
+            logger.debug(f"Краткое содержание обрезано: {len(v)} → 200 символов")
             return v[:197] + "..."
         return v
 
-    @field_validator('email')
-    @classmethod
-    def validate_email(cls, v: Optional[str]) -> Optional[str]:
-        """Проверяет формат email"""
-        if v and v != "Неизвестно":
-            if '@' not in v or '.' not in v.split('@')[-1]:
-                return None
-        return v
-
-    @field_validator('phone')
-    @classmethod
-    def normalize_phone(cls, v: Optional[str]) -> Optional[str]:
-        """Нормализует номер телефона"""
-        if v and v != "Неизвестно":
-            cleaned = re.sub(r'[^\d+]', '', v)
-            if len(cleaned) >= 10:  # Минимальная длина телефона
-                return cleaned
-        return v
-
-    @field_validator('index')
+    @field_validator("index")
     @classmethod
     def validate_index(cls, v: Optional[str]) -> Optional[str]:
-        """Проверяет формат почтового индекса (6 цифр)"""
-        if v and v != "Неизвестно":
-            cleaned = re.sub(r'\D', '', v)
-            if len(cleaned) == 6:
-                return cleaned
-            return None
+        """
+        Очищает почтовый индекс от нецифровых символов и проверяет длину.
+
+        Для Беларуси/России индекс должен содержать ровно 6 цифр.
+
+        Args:
+            v: Исходный индекс (может содержать пробелы, дефисы)
+
+        Returns:
+            Очищенный 6-значный индекс или None, если формат неверен
+        """
+        if v:
+            cleaned = re.sub(r"\D", "", str(v))
+            if len(cleaned) != 6:
+                logger.warning(f"Некорректный формат индекса: '{v}' (ожидается 6 цифр)")
+                return None
+            return cleaned
         return v
 
-    @model_validator(mode='after')
-    def replace_unknown_with_none(self):
-        """Заменяет значения 'Неизвестно' на None для всех строковых полей"""
-        for field_name, field_value in self.model_dump().items():
-            if isinstance(field_value, str) and field_value.strip().lower() in ['неизвестно', 'unknown', 'н/д', 'n/a']:
-                setattr(self, field_name, None)
-        return self
+    @model_validator(mode="after")
+    def clean_placeholders(self) -> "AppealFields":
+        """
+        Заменяет текстовые заглушки (например, 'неизвестно', 'н/д') на None.
 
-    @model_validator(mode='after')
-    def validate_applicant_info(self):
-        """Проверяет базовую консистентность данных заявителя"""
-        if self.anonymous and self.fioApplicant:
-            # Анонимное обращение не должно содержать ФИО
-            self.fioApplicant = None
+        Это необходимо, так как LLM иногда возвращает подобные значения
+        вместо пустых полей.
 
-        if self.declarantType == DeclarantType.LEGAL and not self.organizationName:
-            # Для юридических лиц желательно указывать название организации
-            pass
+        Returns:
+            Объект с очищенными полями
+        """
+        placeholders = {
+            "неизвестно",
+            "unknown",
+            "н/д",
+            "n/a",
+            "none",
+            "null",
+            "—",
+            "-",
+            "нет данных",
+            "отсутствует",
+            "не указано",
+        }
+
+        for field_name in self.model_fields:
+            value = getattr(self, field_name)
+
+            if isinstance(value, str):
+                trimmed_value = value.strip()
+                if trimmed_value.lower() in placeholders or not trimmed_value:
+                    setattr(self, field_name, None)
+                    logger.debug(f"Поле '{field_name}' очищено от заглушки: '{value}'")
 
         return self

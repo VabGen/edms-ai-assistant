@@ -1,370 +1,265 @@
 # edms_ai_assistant/clients/reference_client.py
-import logging
-from typing import Optional, Dict, Any, List
-from abc import abstractmethod
+"""
+Унифицированный клиент для работы со справочниками EDMS через REST API.
 
-from .base_client import EdmsHttpClient, EdmsBaseClient
+Все справочники используют единый паттерн поиска: GET /api/{entity}/fts-name?fts=...
+Возвращают либо DTO объект, либо 404 ResourceNotFoundException.
+"""
+import logging
+from typing import Optional
+from .base_client import EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 
 
-class EdmsReferenceClient(EdmsBaseClient):
-    """Абстрактный интерфейс для работы со справочниками EDMS"""
-
-    @abstractmethod
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """Поиск справочного значения по имени"""
-        raise NotImplementedError
-
-
-# ==================== КЛИЕНТЫ СПРАВОЧНИКОВ ====================
-
-
-class CitizenTypeClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником видов обращений граждан"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск вида обращения по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск вида обращения: {name}")
-
-            result = await self._make_request(
-                "GET",
-                "api/citizen-type/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                logger.info(f"Найден вид обращения: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Вид обращения '{name}' не найден в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска вида обращения '{name}': {e}")
-            return None
-
-
-class CountryClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником стран"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск страны по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск страны: {name}")
-
-            # Прямой поиск
-            result = await self._make_request(
-                "GET",
-                "api/country/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-
-                logger.info(f"Найдена страна: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Страна '{name}' не найдена в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска страны '{name}': {e}")
-            return None
-
-
-class RegionClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником областей"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск области по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск области: {name}")
-
-            result = await self._make_request(
-                "GET",
-                "api/region/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-
-                logger.info(f"Найдена область: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Область '{name}' не найдена в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска области '{name}': {e}")
-            return None
-
-
-class DistrictClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником районов"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск района по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск района: {name}")
-
-            result = await self._make_request(
-                "GET",
-                "api/district/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-
-                logger.info(f"Найден район: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Район '{name}' не найден в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска района '{name}': {e}")
-            return None
-
-
-class CityClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником городов"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск города по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск города: {name}")
-
-            result = await self._make_request(
-                "GET",
-                "api/city/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-
-                logger.info(f"Найден город: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Город '{name}' не найден в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска города '{name}': {e}")
-            return None
-
-
-class CorrespondentClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником корреспондентов"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск корреспондента по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск корреспондента: {name}")
-
-            result = await self._make_request(
-                "GET",
-                "api/correspondent/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-
-                logger.info(f"Найден корреспондент: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Корреспондент '{name}' не найден в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска корреспондента '{name}': {e}")
-            return None
-
-
-class DeliveryMethodClient(EdmsReferenceClient, EdmsHttpClient):
-    """Клиент для работы со справочником способов доставки"""
-
-    async def find_by_name(
-            self, token: str, name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Поиск способа доставки по наименованию.
-        """
-        try:
-            logger.debug(f"Поиск способа доставки: {name}")
-
-            result = await self._make_request(
-                "GET",
-                "api/delivery-method/fts-name",
-                token=token,
-                params={"fts": name}
-            )
-
-            if result:
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-
-                logger.info(f"Найден способ доставки: {name} → ID: {result.get('id')}")
-                return result
-
-            logger.warning(f"Способ доставки '{name}' не найден в справочнике")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска способа доставки '{name}': {e}")
-            # Fallback на значение по умолчанию
-            return await self.get_default_delivery_method(token)
-
-    async def get_default_delivery_method(
-            self, token: str
-    ) -> Optional[Dict[str, Any]]:
-        """Получить способ доставки по умолчанию (Курьер)"""
-        try:
-            return await self.find_by_name(token, "Курьер")
-        except Exception as e:
-            logger.error(f"Не удалось получить способ доставки по умолчанию: {e}")
-            return None
-
-
 class ReferenceClient(EdmsHttpClient):
     """
-    wrapper для работы со всеми справочниками.
+    Универсальный клиент для поиска записей в справочниках СЭД.
 
-    использование в appeal_autofill.py:
+    Реализует unified interface для всех справочников, используя
+    полнотекстовый поиск (FTS - Full Text Search) по имени.
 
-    async with ReferenceClient() as ref_client:
-        citizen_type_id = await ref_client.find_citizen_type(token, name)
-        country_id = await ref_client.find_country(token, name)
+    Поддерживаемые справочники:
+    - Категории граждан (citizen-type)
+    - География: страна, регион, район, город
+    - Корреспонденты
+    - Способы доставки
+    - Организационная структура: подразделения, группы
+
+    Examples:
+        ...     async with ReferenceClient() as client:
+        ...     country_id = await client.find_country(token, "Беларусь")
+        ...     print(country_id)  # "5bf864db-113d-435d-99ef-b6858323791f"
     """
 
-    def __init__(self):
-        super().__init__()
-        self._citizen_type = None
-        self._country = None
-        self._region = None
-        self._district = None
-        self._city = None
-        self._correspondent = None
-        self._delivery_method = None
+    async def _find_entity_id(
+        self, token: str, endpoint: str, name: str, entity_label: str
+    ) -> Optional[str]:
+        """
+        Универсальный метод поиска ID сущности в справочнике.
 
-    async def __aenter__(self):
-        """Инициализация всех специализированных клиентов"""
-        await super().__aenter__()
+        Выполняет GET-запрос к эндпоинту /api/{endpoint}/fts-name?fts={name}
+        и извлекает ID из первого найденного элемента.
 
-        self._citizen_type = CitizenTypeClient()
-        self._country = CountryClient()
-        self._region = RegionClient()
-        self._district = DistrictClient()
-        self._city = CityClient()
-        self._correspondent = CorrespondentClient()
-        self._delivery_method = DeliveryMethodClient()
+        Args:
+            token: JWT токен авторизации
+            endpoint: Название эндпоинта справочника (напр. 'city', 'country')
+            name: Текстовое наименование для поиска
+            entity_label: Человекочитаемое название для логирования
 
-        # Открываем все клиенты
-        await self._citizen_type.__aenter__()
-        await self._country.__aenter__()
-        await self._region.__aenter__()
-        await self._district.__aenter__()
-        await self._city.__aenter__()
-        await self._correspondent.__aenter__()
-        await self._delivery_method.__aenter__()
+        Returns:
+            UUID сущности в виде строки или None, если не найдено
 
-        return self
+        Raises:
+            Exception: При технических ошибках HTTP-запроса
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Закрытие всех специализированных клиентов"""
-        if self._citizen_type:
-            await self._citizen_type.__aexit__(exc_type, exc_val, exc_tb)
-        if self._country:
-            await self._country.__aexit__(exc_type, exc_val, exc_tb)
-        if self._region:
-            await self._region.__aexit__(exc_type, exc_val, exc_tb)
-        if self._district:
-            await self._district.__aexit__(exc_type, exc_val, exc_tb)
-        if self._city:
-            await self._city.__aexit__(exc_type, exc_val, exc_tb)
-        if self._correspondent:
-            await self._correspondent.__aexit__(exc_type, exc_val, exc_tb)
-        if self._delivery_method:
-            await self._delivery_method.__aexit__(exc_type, exc_val, exc_tb)
+        Note:
+            API может возвращать как одиночный объект, так и массив объектов.
+            Метод обрабатывает оба варианта.
+        """
+        if not name or not name.strip():
+            logger.debug(f"Пропуск поиска {entity_label}: пустое значение")
+            return None
 
-        await super().__aexit__(exc_type, exc_val, exc_tb)
+        search_query = name.strip()
 
-    # ========== МЕТОДЫ ДЛЯ APPEAL AUTOFILL ==========
+        try:
+            logger.debug(f"🔍 Поиск {entity_label} в СЭД: '{search_query}'")
+
+            # Выполнение GET-запроса к справочнику
+            result = await self._make_request(
+                "GET",
+                f"api/{endpoint}/fts-name",
+                token=token,
+                params={"fts": search_query},
+            )
+
+            if not result:
+                logger.warning(
+                    f"❌ {entity_label} по запросу '{search_query}' не найден (пустой ответ)"
+                )
+                return None
+
+            # Обработка ответа (может быть List[DTO] или одиночный DTO)
+            data = None
+            if isinstance(result, list):
+                if len(result) > 0:
+                    data = result[0]
+                    if len(result) > 1:
+                        logger.debug(
+                            f"ℹ️ Найдено несколько совпадений для {entity_label} '{search_query}', "
+                            f"используется первое"
+                        )
+            elif isinstance(result, dict):
+                data = result
+
+            if data and data.get("id"):
+                entity_id = str(data.get("id"))
+                logger.info(
+                    f"✅ Успешное сопоставление {entity_label}: '{search_query}' → ID: {entity_id}"
+                )
+                return entity_id
+
+            logger.warning(
+                f"⚠️ ID для {entity_label} '{search_query}' отсутствует в теле ответа"
+            )
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"❌ Техническая ошибка при поиске {entity_label} '{search_query}': "
+                f"{type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            return None
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # СПРАВОЧНИКИ ДЛЯ КАРТОЧКИ ОБРАЩЕНИЯ (APPEAL)
+    # ══════════════════════════════════════════════════════════════════════════
 
     async def find_citizen_type(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID вида обращения"""
-        result = await self._citizen_type.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск категории/вида обращения гражданина.
+
+        Args:
+            token: JWT токен
+            name: Название категории (например, "Жалоба", "Заявление")
+
+        Returns:
+            UUID категории или None
+
+        Examples:
+            id = await client.find_citizen_type(token, "Жалоба")
+        """
+        return await self._find_entity_id(
+            token, "citizen-type", name, "Категория гражданина"
+        )
 
     async def find_country(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID страны"""
-        result = await self._country.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск страны.
+
+        Args:
+            token: JWT токен
+            name: Название страны (например, "Беларусь", "Россия")
+
+        Returns:
+            UUID страны или None
+        """
+        return await self._find_entity_id(token, "country", name, "Страна")
 
     async def find_region(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID области"""
-        result = await self._region.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск региона/области.
+
+        Args:
+            token: JWT токен
+            name: Название региона (например, "Минская область")
+
+        Returns:
+            UUID региона или None
+        """
+        return await self._find_entity_id(token, "region", name, "Регион")
 
     async def find_district(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID района"""
-        result = await self._district.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск района.
+
+        Args:
+            token: JWT токен
+            name: Название района (например, "Октябрьский район")
+
+        Returns:
+            UUID района или None
+        """
+        return await self._find_entity_id(token, "district", name, "Район")
 
     async def find_city(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID города"""
-        result = await self._city.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск города/населенного пункта.
+
+        Args:
+            token: JWT токен
+            name: Название города (например, "Минск")
+
+        Returns:
+            UUID города или None
+        """
+        return await self._find_entity_id(token, "city", name, "Город")
 
     async def find_correspondent(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID корреспондента"""
-        result = await self._correspondent.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск корреспондента (организации или лица).
+
+        Args:
+            token: JWT токен
+            name: Название корреспондента
+
+        Returns:
+            UUID корреспондента или None
+        """
+        return await self._find_entity_id(token, "correspondent", name, "Корреспондент")
 
     async def find_delivery_method(self, token: str, name: str) -> Optional[str]:
-        """Возвращает ID способа доставки (с fallback на "Курьер")"""
-        result = await self._delivery_method.find_by_name(token, name)
-        return result.get("id") if result else None
+        """
+        Поиск способа доставки с fallback на значение по умолчанию.
+
+        Если указанный способ доставки не найден, автоматически ищет "Курьер"
+        в качестве дефолтного варианта.
+
+        Args:
+            token: JWT токен
+            name: Название способа доставки (например, "Почта", "Email")
+
+        Returns:
+            UUID способа доставки или None
+
+        Note:
+            Это единственный справочник с fallback-логикой, так как
+            deliveryMethodId является обязательным полем в DocMainFields.
+        """
+        result = await self._find_entity_id(
+            token, "delivery-method", name, "Способ доставки"
+        )
+
+        # Fallback
+        if not result and name != "Курьер":
+            logger.info(
+                "⚠️ Специфичный способ доставки не найден. "
+                "Попытка применить 'Курьер' по умолчанию."
+            )
+            return await self._find_entity_id(
+                token, "delivery-method", "Курьер", "Способ доставки (Default)"
+            )
+
+        return result
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # СПРАВОЧНИКИ ОРГАНИЗАЦИОННОЙ СТРУКТУРЫ
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def find_department(self, token: str, name: str) -> Optional[str]:
+        """
+        Поиск подразделения организации.
+
+        Args:
+            token: JWT токен
+            name: Название подразделения
+
+        Returns:
+            UUID подразделения или None
+        """
+        return await self._find_entity_id(token, "department", name, "Подразделение")
+
+    async def find_group(self, token: str, name: str) -> Optional[str]:
+        """
+        Поиск рабочей группы или группы рассылки.
+
+        Args:
+            token: JWT токен
+            name: Название группы
+
+        Returns:
+            UUID группы или None
+        """
+        return await self._find_entity_id(token, "group", name, "Группа")
