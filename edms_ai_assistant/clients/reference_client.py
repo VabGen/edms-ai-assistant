@@ -1,72 +1,48 @@
 # edms_ai_assistant/clients/reference_client.py
 """
-Унифицированный клиент для работы со справочниками EDMS через REST API.
-
-Все справочники используют единый паттерн поиска: GET /api/{entity}/fts-name?fts=...
-Возвращают либо DTO объект, либо 404 ResourceNotFoundException.
+_find_entity_with_name() возвращает {id, name}
 """
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 from .base_client import EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 
 
 class ReferenceClient(EdmsHttpClient):
-    """
-    Универсальный клиент для поиска записей в справочниках СЭД.
 
-    Реализует unified interface для всех справочников, используя
-    полнотекстовый поиск (FTS - Full Text Search) по имени.
-
-    Поддерживаемые справочники:
-    - Категории граждан (citizen-type)
-    - География: страна, регион, район, город
-    - Корреспонденты
-    - Способы доставки
-    - Организационная структура: подразделения, группы
-
-    Examples:
-        ...     async with ReferenceClient() as client:
-        ...     country_id = await client.find_country(token, "Беларусь")
-        ...     print(country_id)  # "5bf864db-113d-435d-99ef-b6858323791f"
-    """
-
-    async def _find_entity_id(
-        self, token: str, endpoint: str, name: str, entity_label: str
-    ) -> Optional[str]:
+    async def _find_entity_with_name(
+        self,
+        token: str,
+        endpoint: str,
+        search_name: str,
+        entity_label: str,
+        name_field: str = "shortName",
+    ) -> Optional[Dict[str, str]]:
         """
-        Универсальный метод поиска ID сущности в справочнике.
-
-        Выполняет GET-запрос к эндпоинту /api/{endpoint}/fts-name?fts={name}
-        и извлекает ID из первого найденного элемента.
+        Универсальный метод поиска сущности с возвратом {id, name}.
 
         Args:
-            token: JWT токен авторизации
-            endpoint: Название эндпоинта справочника (напр. 'city', 'country')
-            name: Текстовое наименование для поиска
-            entity_label: Человекочитаемое название для логирования
+            token: JWT токен
+            endpoint: API endpoint (например, 'country')
+            search_name: Текст для поиска
+            entity_label: Человекочитаемое название для логов
+            name_field: Какое поле DTO использовать для имени ("shortName", "fullName", "name")
 
         Returns:
-            UUID сущности в виде строки или None, если не найдено
-
-        Raises:
-            Exception: При технических ошибках HTTP-запроса
-
-        Note:
-            API может возвращать как одиночный объект, так и массив объектов.
-            Метод обрабатывает оба варианта.
+            {"id": "uuid", "name": "Полное название"} или None
         """
-        if not name or not name.strip():
-            logger.debug(f"Пропуск поиска {entity_label}: пустое значение")
+        if not search_name or not search_name.strip():
+            logger.debug(
+                f"[REFERENCE-CLIENT] Пропуск поиска {entity_label}: пустое значение"
+            )
             return None
 
-        search_query = name.strip()
+        search_query = search_name.strip()
 
         try:
-            logger.debug(f"🔍 Поиск {entity_label} в СЭД: '{search_query}'")
+            # logger.info(f"[REFERENCE-CLIENT] 🔍 Поиск {entity_label}: '{search_query}'")
 
-            # Выполнение GET-запроса к справочнику
             result = await self._make_request(
                 "GET",
                 f"api/{endpoint}/fts-name",
@@ -75,191 +51,255 @@ class ReferenceClient(EdmsHttpClient):
             )
 
             if not result:
+                # logger.warning(f"[REFERENCE-CLIENT] {entity_label} не найден: '{search_query}'")
+                return None
+
+            data = (
+                result[0]
+                if isinstance(result, list) and len(result) > 0
+                else (result if isinstance(result, dict) else None)
+            )
+
+            if not data:
                 logger.warning(
-                    f"❌ {entity_label} по запросу '{search_query}' не найден (пустой ответ)"
+                    f"[REFERENCE-CLIENT] ⚠️ Пустой ответ для {entity_label}: '{search_query}'"
                 )
                 return None
 
-            # Обработка ответа (может быть List[DTO] или одиночный DTO)
-            data = None
-            if isinstance(result, list):
-                if len(result) > 0:
-                    data = result[0]
-                    if len(result) > 1:
-                        logger.debug(
-                            f"ℹ️ Найдено несколько совпадений для {entity_label} '{search_query}', "
-                            f"используется первое"
-                        )
-            elif isinstance(result, dict):
-                data = result
+            entity_id = str(data.get("id"))
 
-            if data and data.get("id"):
-                entity_id = str(data.get("id"))
-                logger.info(
-                    f"✅ Успешное сопоставление {entity_label}: '{search_query}' → ID: {entity_id}"
-                )
-                return entity_id
-
-            logger.warning(
-                f"⚠️ ID для {entity_label} '{search_query}' отсутствует в теле ответа"
+            entity_name = (
+                data.get("fullName")
+                or data.get(name_field)
+                or data.get("name")
+                or search_query
             )
-            return None
+
+            # logger.info(
+            #     f"[REFERENCE-CLIENT] {entity_label}: '{search_query}' → "
+            #     f"ID: {entity_id}, Name: '{entity_name}'"
+            # )
+
+            return {"id": entity_id, "name": entity_name}
 
         except Exception as e:
             logger.error(
-                f"❌ Техническая ошибка при поиске {entity_label} '{search_query}': "
-                f"{type(e).__name__}: {e}",
+                f"[REFERENCE-CLIENT] Ошибка поиска {entity_label} '{search_query}': {e}",
                 exc_info=True,
             )
             return None
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # СПРАВОЧНИКИ ДЛЯ КАРТОЧКИ ОБРАЩЕНИЯ (APPEAL)
-    # ══════════════════════════════════════════════════════════════════════════
+    async def _find_entity_id(
+        self, token: str, endpoint: str, name: str, entity_label: str
+    ) -> Optional[str]:
+        result = await self._find_entity_with_name(token, endpoint, name, entity_label)
+        return result["id"] if result else None
 
-    async def find_citizen_type(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск категории/вида обращения гражданина.
+    # ══════════════════════════════════════════════════════════════════
+    # СПРАВОЧНИКИ С ПОДДЕРЖКОЙ {ID, NAME}
+    # ══════════════════════════════════════════════════════════════════
 
-        Args:
-            token: JWT токен
-            name: Название категории (например, "Жалоба", "Заявление")
-
-        Returns:
-            UUID категории или None
-
-        Examples:
-            id = await client.find_citizen_type(token, "Жалоба")
-        """
-        return await self._find_entity_id(
-            token, "citizen-type", name, "Категория гражданина"
+    async def find_country_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
+        logger.info(f"[REFERENCE-CLIENT] Справочник стран: {name}")
+        return await self._find_entity_with_name(
+            token, "country", name, "Страна", name_field="fullName"
         )
 
+    async def find_region_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
+        """Поиск региона с возвратом {id, name}."""
+        return await self._find_entity_with_name(token, "region", name, "Регион")
+
+    async def find_district_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
+        """Поиск района с возвратом {id, name}."""
+        return await self._find_entity_with_name(token, "district", name, "Район")
+
+    async def find_city_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
+        """Поиск города с возвратом {id, name}."""
+        return await self._find_entity_with_name(token, "city", name, "Город")
+
+    # ══════════════════════════════════════════════════════════════════
+    # LEGACY API (только ID, для обратной совместимости)
+    # ══════════════════════════════════════════════════════════════════
+
     async def find_country(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск страны.
-
-        Args:
-            token: JWT токен
-            name: Название страны (например, "Беларусь", "Россия")
-
-        Returns:
-            UUID страны или None
-        """
+        """Поиск страны (только ID)."""
         return await self._find_entity_id(token, "country", name, "Страна")
 
     async def find_region(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск региона/области.
-
-        Args:
-            token: JWT токен
-            name: Название региона (например, "Минская область")
-
-        Returns:
-            UUID региона или None
-        """
+        """Поиск региона (только ID)."""
         return await self._find_entity_id(token, "region", name, "Регион")
 
     async def find_district(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск района.
-
-        Args:
-            token: JWT токен
-            name: Название района (например, "Октябрьский район")
-
-        Returns:
-            UUID района или None
-        """
+        """Поиск района (только ID)."""
         return await self._find_entity_id(token, "district", name, "Район")
 
     async def find_city(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск города/населенного пункта.
-
-        Args:
-            token: JWT токен
-            name: Название города (например, "Минск")
-
-        Returns:
-            UUID города или None
-        """
+        """Поиск города (только ID)."""
         return await self._find_entity_id(token, "city", name, "Город")
 
+    async def find_citizen_type(self, token: str, name: str) -> Optional[str]:
+        """Поиск вида обращения (только ID)."""
+        return await self._find_entity_id(token, "citizen-type", name, "Вид обращения")
+
     async def find_correspondent(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск корреспондента (организации или лица).
-
-        Args:
-            token: JWT токен
-            name: Название корреспондента
-
-        Returns:
-            UUID корреспондента или None
-        """
+        """Поиск корреспондента (только ID)."""
         return await self._find_entity_id(token, "correspondent", name, "Корреспондент")
 
     async def find_delivery_method(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск способа доставки с fallback на значение по умолчанию.
-
-        Если указанный способ доставки не найден, автоматически ищет "Курьер"
-        в качестве дефолтного варианта.
-
-        Args:
-            token: JWT токен
-            name: Название способа доставки (например, "Почта", "Email")
-
-        Returns:
-            UUID способа доставки или None
-
-        Note:
-            Это единственный справочник с fallback-логикой, так как
-            deliveryMethodId является обязательным полем в DocMainFields.
-        """
+        """Поиск способа доставки с fallback на "Курьер"."""
         result = await self._find_entity_id(
             token, "delivery-method", name, "Способ доставки"
         )
 
-        # Fallback
         if not result and name != "Курьер":
-            logger.info(
-                "⚠️ Специфичный способ доставки не найден. "
-                "Попытка применить 'Курьер' по умолчанию."
-            )
+            logger.info("[REFERENCE-CLIENT] Fallback: используем 'Курьер'")
             return await self._find_entity_id(
-                token, "delivery-method", "Курьер", "Способ доставки (Default)"
+                token, "delivery-method", "Курьер", "Способ доставки"
             )
 
         return result
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # СПРАВОЧНИКИ ОРГАНИЗАЦИОННОЙ СТРУКТУРЫ
-    # ══════════════════════════════════════════════════════════════════════════
-
     async def find_department(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск подразделения организации.
-
-        Args:
-            token: JWT токен
-            name: Название подразделения
-
-        Returns:
-            UUID подразделения или None
-        """
+        """Поиск подразделения (только ID)."""
         return await self._find_entity_id(token, "department", name, "Подразделение")
 
     async def find_group(self, token: str, name: str) -> Optional[str]:
-        """
-        Поиск рабочей группы или группы рассылки.
-
-        Args:
-            token: JWT токен
-            name: Название группы
-
-        Returns:
-            UUID группы или None
-        """
+        """Поиск группы (только ID)."""
         return await self._find_entity_id(token, "group", name, "Группа")
+
+    # ══════════════════════════════════════════════════════════════════
+    # ТЕМАТИКИ (SUBJECT)
+    # ══════════════════════════════════════════════════════════════════
+
+    async def get_parent_subjects(self, token: str):
+        try:
+            result = await self._make_request(
+                "GET",
+                "api/subject/parents",
+                token=token,
+                params={"listAttribute": "true"},
+            )
+            logger.info(
+                f"[REFERENCE-CLIENT] Загружено родительских тем: {len(result) if isinstance(result, list) else 0}"
+            )
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.error(f"[REFERENCE-CLIENT] Ошибка получения родительских тем: {e}")
+            return []
+
+    async def get_child_subjects(self, token: str, parent_id: str):
+        try:
+            result = await self._make_request(
+                "GET", f"api/subject/parent/{parent_id}", token=token
+            )
+            logger.info(
+                f"[REFERENCE-CLIENT] Дочерних тем для {parent_id}: {len(result) if isinstance(result, list) else 0}"
+            )
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.error(f"[REFERENCE-CLIENT] Ошибка получения дочерних тем: {e}")
+            return []
+
+    async def find_best_subject(self, token: str, text: str):
+        from edms_ai_assistant.llm import get_chat_model
+
+        parents = await self.get_parent_subjects(token)
+        if not parents:
+            logger.warning("[REFERENCE-CLIENT] Родительские темы не загружены")
+            return None
+
+        themes_text = "\n".join(
+            [f"{i + 1}. {s['name']}" for i, s in enumerate(parents)]
+        )
+        llm = get_chat_model()
+
+        prompt = f"""Выбери ОДНУ наиболее подходящую тему для обращения.
+
+                      СПИСОК ТЕМ:
+                      {themes_text}
+                        
+                      ТЕКСТ ОБРАЩЕНИЯ (фрагмент):
+                      {text[:800]}
+                        
+                      Ответь ТОЛЬКО номером (например: 3)
+                   """
+
+        try:
+            response = await llm.ainvoke(prompt)
+            choice_text = response.content.strip()
+
+            import re
+
+            match = re.search(r"\d+", choice_text)
+            if not match:
+                logger.warning(
+                    f"[REFERENCE-CLIENT] LLM не вернула номер: {choice_text}"
+                )
+                return None
+
+            index = int(match.group(0)) - 1
+            if index < 0 or index >= len(parents):
+                logger.warning(f"[REFERENCE-CLIENT] Неверный индекс: {index}")
+                return None
+
+            parent = parents[index]
+            parent_id = str(parent["id"])
+            logger.info(
+                f"[REFERENCE-CLIENT] Родительская тема: {parent['name']} (ID: {parent_id})"
+            )
+
+            children = await self.get_child_subjects(token, parent_id)
+            if not children:
+                return parent_id
+
+            children_text = "\n".join(
+                [f"{i + 1}. {c['name']}" for i, c in enumerate(children)]
+            )
+
+            prompt2 = f"""Выбери ОДНУ наиболее подходящую подтему.
+
+                          СПИСОК ПОДТЕМ:
+                          {children_text}
+                            
+                          ТЕКСТ ОБРАЩЕНИЯ (фрагмент):
+                          {text[:800]}
+                            
+                          Ответь ТОЛЬКО номером (например: 2)
+                       """
+
+            response2 = await llm.ainvoke(prompt2)
+            choice2_text = response2.content.strip()
+
+            match2 = re.search(r"\d+", choice2_text)
+            if not match2:
+                logger.warning(
+                    f"[REFERENCE-CLIENT] LLM не вернула номер подтемы: {choice2_text}"
+                )
+                return parent_id
+
+            child_index = int(match2.group(0)) - 1
+            if child_index < 0 or child_index >= len(children):
+                logger.warning(
+                    f"[REFERENCE-CLIENT] Неверный индекс подтемы: {child_index}"
+                )
+                return parent_id
+
+            child = children[child_index]
+            child_id = str(child["id"])
+            logger.info(
+                f"[REFERENCE-CLIENT] Дочерняя тема: {child['name']} (ID: {child_id})"
+            )
+
+            return child_id
+
+        except Exception as e:
+            logger.error(f"[REFERENCE-CLIENT] Ошибка выбора темы: {e}", exc_info=True)
+            return None

@@ -1,7 +1,6 @@
 # edms_ai_assistant/models/appeal_fields.py
 """
 Модели данных для автоматического заполнения карточек обращений граждан (APPEAL).
-Соответствует структуре DocMainFieldsAppeal в Java-сервере СЭД.
 """
 import re
 import logging
@@ -29,9 +28,6 @@ class DeclarantType(StrEnum):
 class AppealFields(BaseModel):
     """
     Структура данных для извлечения информации из текста обращения с помощью LLM.
-
-    Используется в качестве Pydantic-схемы для JsonOutputParser в AppealExtractionService.
-    Все поля опциональны, так как LLM может не найти информацию в тексте.
 
     Attributes:
         deliveryMethod: Способ доставки обращения (например, "Почта", "Email", "Курьер")
@@ -129,15 +125,6 @@ class AppealFields(BaseModel):
     @field_validator("shortSummary")
     @classmethod
     def truncate_summary(cls, v: Optional[str]) -> Optional[str]:
-        """
-        Обрезает краткое содержание до 200 символов с добавлением '...'.
-
-        Args:
-            v: Исходное краткое содержание
-
-        Returns:
-            Обрезанная строка или None
-        """
         if v and len(v) > 200:
             logger.debug(f"Краткое содержание обрезано: {len(v)} → 200 символов")
             return v[:197] + "..."
@@ -146,48 +133,36 @@ class AppealFields(BaseModel):
     @field_validator("index")
     @classmethod
     def validate_index(cls, v: Optional[str]) -> Optional[str]:
-        """
-        Очищает почтовый индекс от нецифровых символов и проверяет длину.
-
-        Для Беларуси/России индекс должен содержать ровно 6 цифр.
-
-        Args:
-            v: Исходный индекс (может содержать пробелы, дефисы)
-
-        Returns:
-            Очищенный 6-значный индекс или None, если формат неверен
-        """
         if v:
             cleaned = re.sub(r"\D", "", str(v))
             if len(cleaned) != 6:
-                logger.warning(f"Некорректный формат индекса: '{v}' (ожидается 6 цифр)")
                 return None
             return cleaned
         return v
 
     @model_validator(mode="after")
     def clean_placeholders(self) -> "AppealFields":
-        """
-        Заменяет текстовые заглушки (например, 'неизвестно', 'н/д') на None.
-
-        Это необходимо, так как LLM иногда возвращает подобные значения
-        вместо пустых полей.
-
-        Returns:
-            Объект с очищенными полями
-        """
         placeholders = {
-            "неизвестно",
-            "unknown",
-            "н/д",
-            "n/a",
             "none",
             "null",
-            "—",
-            "-",
+            "nil",
+            "unknown",
+            "n/a",
+            "na",
+            "no",
+            "not specified",
+            "not available",
+            "неизвестно",
+            "н/д",
             "нет данных",
             "отсутствует",
             "не указано",
+            "нет",
+            "—",
+            "-",
+            "–",
+            "...",
+            "___",
         }
 
         for field_name in self.model_fields:
@@ -195,8 +170,8 @@ class AppealFields(BaseModel):
 
             if isinstance(value, str):
                 trimmed_value = value.strip()
+
                 if trimmed_value.lower() in placeholders or not trimmed_value:
                     setattr(self, field_name, None)
-                    logger.debug(f"Поле '{field_name}' очищено от заглушки: '{value}'")
 
         return self

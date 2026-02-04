@@ -1,8 +1,6 @@
 # edms_ai_assistant/tools/appeal_autofill.py
 """
 Инструмент автоматического заполнения карточки обращения APPEAL.
-
-Реализация строго следует логике Java:
 - DocumentTool.updateDocumentAppealFields()
 - DocumentMainFieldsAppealOperationExecutor.doAccept()
 """
@@ -28,11 +26,6 @@ from edms_ai_assistant.generated.resources_openapi import (
 logger = logging.getLogger(__name__)
 
 
-# ========================================
-# MODELS
-# ========================================
-
-
 class AppealAutofillInput(BaseModel):
     """Входные параметры для автозаполнения обращения."""
 
@@ -43,39 +36,40 @@ class AppealAutofillInput(BaseModel):
     )
 
 
-# ========================================
-# UTILITY FUNCTIONS
-# ========================================
-
-
 def is_empty(value: Any) -> bool:
-    """
-    Проверка на пустое значение (аналог Java StringUtils.isEmpty).
-
-    Returns:
-        True если value == None или value == "" (пустая строка/только пробелы)
-    """
     if value is None:
         return True
+
     if isinstance(value, str):
-        return not value.strip()
+        trimmed = value.strip()
+
+        if not trimmed:
+            return True
+
+        placeholders = {
+            "none",
+            "null",
+            "nil",
+            "n/a",
+            "na",
+            "unknown",
+            "not specified",
+            "no",
+            "нет",
+            "неизвестно",
+            "н/д",
+        }
+
+        if trimmed.lower() in placeholders:
+            return True
+
     return False
 
 
 def sanitize_string(value: Optional[str]) -> Optional[str]:
-    """
-    Очистка строк от типографских кавычек и лишних пробелов.
-
-    Args:
-        value: Исходная строка
-
-    Returns:
-        Очищенная строка или None
-    """
     if is_empty(value):
         return None
 
-    # Замена типографских кавычек на обычные ASCII
     cleaned = (
         value.replace('"', '"')
         .replace('"', '"')
@@ -89,22 +83,11 @@ def sanitize_string(value: Optional[str]) -> Optional[str]:
 
 
 def fix_datetime_format(dt: Any) -> Optional[str]:
-    """
-    Конвертация datetime в формат Java Instant (ISO 8601 с timezone).
-
-    Args:
-        dt: Datetime object, строка или None
-
-    Returns:
-        ISO 8601 строка с 'T' и 'Z', например: "2025-05-14T16:07:34Z"
-    """
     if dt is None:
         return None
 
     if isinstance(dt, str):
-        # Исправление формата: пробел → T
         dt = dt.replace(" ", "T")
-        # Добавление 'Z' если отсутствует
         if not dt.endswith("Z") and "+00:00" in dt:
             dt = dt.replace("+00:00", "Z")
         return dt
@@ -154,17 +137,10 @@ async def execute_document_operation(
             token=token,
             json=json_safe_payload,
         )
-        logger.info(f"[APPEAL-AUTOFILL] ✅ {operation_type} — успешно выполнена")
+        logger.info(f"[APPEAL-AUTOFILL] {operation_type} — успешно выполнена")
     except Exception as e:
-        logger.error(
-            f"[APPEAL-AUTOFILL] ❌ {operation_type} — ошибка: {e}", exc_info=True
-        )
+        logger.error(f"[APPEAL-AUTOFILL] {operation_type} — ошибка: {e}", exc_info=True)
         raise
-
-
-# ========================================
-# MAIN TOOL
-# ========================================
 
 
 @tool("autofill_appeal_document", args_schema=AppealAutofillInput)
@@ -256,13 +232,14 @@ async def autofill_appeal_document(
         extraction_service = AppealExtractionService()
         fields = await extraction_service.extract_appeal_fields(extracted_text)
 
-        logger.info(f"[APPEAL-AUTOFILL] LLM результаты:")
-        logger.info(f"  - declarantType: {fields.declarantType or 'н/д'}")
-        logger.info(f"  - fioApplicant: {fields.fioApplicant or 'н/д'}")
-        logger.info(f"  - organizationName: {fields.organizationName or 'н/д'}")
-        logger.info(
-            f"  - shortSummary: {(fields.shortSummary[:50] + '...') if fields.shortSummary else 'н/д'}"
-        )
+        # logger.info(f"[APPEAL-AUTOFILL] ========== LLM РЕЗУЛЬТАТЫ ==========")
+        # logger.info(f"[APPEAL-AUTOFILL]   - declarantType: {fields.declarantType or 'н/д'}")
+        # logger.info(f"[APPEAL-AUTOFILL]   - fioApplicant: {fields.fioApplicant or 'н/д'}")
+        # logger.info(f"[APPEAL-AUTOFILL]   - organizationName: {fields.organizationName or 'н/д'}")
+        # logger.info(f"[APPEAL-AUTOFILL]   - signed: {fields.signed or 'н/д'}")
+        # logger.info(
+        #     f"[APPEAL-AUTOFILL]   - shortSummary: {(fields.shortSummary[:50] + '...') if fields.shortSummary else 'н/д'}")
+        # logger.info(f"[APPEAL-AUTOFILL] ==========================================")
 
         # ========== 5. ПОДГОТОВКА ДАННЫХ ==========
         async with ReferenceClient() as ref_client:
@@ -299,7 +276,6 @@ async def autofill_appeal_document(
                 "investProgramId": document.investProgramId,
             }
 
-            # Удаляем None
             main_payload = {k: v for k, v in main_payload.items() if v is not None}
 
             await execute_document_operation(
@@ -312,8 +288,17 @@ async def autofill_appeal_document(
 
             # ===== 5.2. ОПЕРАЦИЯ 2: DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE =====
             d = document.documentAppeal
+
+            # logger.info(f"[APPEAL-AUTOFILL] ========== СОСТОЯНИЕ БД ==========")
+            # if d:
+            #     logger.info(f"[APPEAL-AUTOFILL]   - declarantType (БД): {d.declarantType or 'н/д'}")
+            #     logger.info(f"[APPEAL-AUTOFILL]   - fioApplicant (БД): {d.fioApplicant or 'н/д'}")
+            #     logger.info(f"[APPEAL-AUTOFILL]   - organizationName (БД): {d.organizationName or 'н/д'}")
+            # else:
+            #     logger.info(f"[APPEAL-AUTOFILL]   - documentAppeal: NULL (будет создан)")
+            # logger.info(f"[APPEAL-AUTOFILL] ==========================================")
+
             if d is None:
-                # Создаем пустой объект если documentAppeal == null
                 d = type(
                     "EmptyDocumentAppeal",
                     (),
@@ -354,66 +339,78 @@ async def autofill_appeal_document(
             f = {}
 
             # ========== ГЕОГРАФИЯ ==========
-
             # Country
             if d.countryAppealId:
                 f["countryAppealId"] = str(d.countryAppealId)
                 f["countryAppealName"] = sanitize_string(d.countryAppealName)
             elif not is_empty(d.countryAppealName):
-                country_id = await ref_client.find_country(token, d.countryAppealName)
-                if country_id:
-                    f["countryAppealId"] = country_id
-                    f["countryAppealName"] = sanitize_string(d.countryAppealName)
+                country_data = await ref_client.find_country_with_name(
+                    token, d.countryAppealName
+                )
+                if country_data:
+                    f["countryAppealId"] = country_data["id"]
+                    f["countryAppealName"] = country_data["name"]
             elif not is_empty(fields.country):
-                country_id = await ref_client.find_country(token, fields.country)
-                if country_id:
-                    f["countryAppealId"] = country_id
-                    f["countryAppealName"] = sanitize_string(fields.country)
+                # LLM извлек название -> ищем ID и fullName
+                country_data = await ref_client.find_country_with_name(
+                    token, fields.country
+                )
+                if country_data:
+                    f["countryAppealId"] = country_data["id"]
+                    f["countryAppealName"] = country_data["name"]
 
             # Region
             if d.regionId:
                 f["regionId"] = str(d.regionId)
                 f["regionName"] = sanitize_string(d.regionName)
             elif not is_empty(d.regionName):
-                region_id = await ref_client.find_region(token, d.regionName)
-                if region_id:
-                    f["regionId"] = region_id
-                    f["regionName"] = sanitize_string(d.regionName)
+                region_data = await ref_client.find_region_with_name(
+                    token, d.regionName
+                )
+                if region_data:
+                    f["regionId"] = region_data["id"]
+                    f["regionName"] = region_data["name"]
             elif not is_empty(fields.regionName):
-                region_id = await ref_client.find_region(token, fields.regionName)
-                if region_id:
-                    f["regionId"] = region_id
-                    f["regionName"] = sanitize_string(fields.regionName)
+                region_data = await ref_client.find_region_with_name(
+                    token, fields.regionName
+                )
+                if region_data:
+                    f["regionId"] = region_data["id"]
+                    f["regionName"] = region_data["name"]
 
             # District
             if d.districtId:
                 f["districtId"] = str(d.districtId)
                 f["districtName"] = sanitize_string(d.districtName)
             elif not is_empty(d.districtName):
-                district_id = await ref_client.find_district(token, d.districtName)
-                if district_id:
-                    f["districtId"] = district_id
-                    f["districtName"] = sanitize_string(d.districtName)
+                district_data = await ref_client.find_district_with_name(
+                    token, d.districtName
+                )
+                if district_data:
+                    f["districtId"] = district_data["id"]
+                    f["districtName"] = district_data["name"]
             elif not is_empty(fields.districtName):
-                district_id = await ref_client.find_district(token, fields.districtName)
-                if district_id:
-                    f["districtId"] = district_id
-                    f["districtName"] = sanitize_string(fields.districtName)
+                district_data = await ref_client.find_district_with_name(
+                    token, fields.districtName
+                )
+                if district_data:
+                    f["districtId"] = district_data["id"]
+                    f["districtName"] = district_data["name"]
 
             # City
             if d.cityId:
                 f["cityId"] = str(d.cityId)
                 f["cityName"] = sanitize_string(d.cityName)
             elif not is_empty(d.cityName):
-                city_id = await ref_client.find_city(token, d.cityName)
-                if city_id:
-                    f["cityId"] = city_id
-                    f["cityName"] = sanitize_string(d.cityName)
+                city_data = await ref_client.find_city_with_name(token, d.cityName)
+                if city_data:
+                    f["cityId"] = city_data["id"]
+                    f["cityName"] = city_data["name"]
             elif not is_empty(fields.cityName):
-                city_id = await ref_client.find_city(token, fields.cityName)
-                if city_id:
-                    f["cityId"] = city_id
-                    f["cityName"] = sanitize_string(fields.cityName)
+                city_data = await ref_client.find_city_with_name(token, fields.cityName)
+                if city_data:
+                    f["cityId"] = city_data["id"]
+                    f["cityName"] = city_data["name"]
 
             # ========== КОРРЕСПОНДЕНТ ==========
             if d.correspondentAppealId:
@@ -436,7 +433,6 @@ async def autofill_appeal_document(
                         fields.correspondentAppeal
                     )
 
-            # Java-логика: если ID == null, то имя тоже null
             if (
                 "correspondentAppealId" not in f
                 or f.get("correspondentAppealId") is None
@@ -444,8 +440,7 @@ async def autofill_appeal_document(
                 f["correspondentAppealId"] = None
                 f["correspondentAppeal"] = None
 
-            # ========== ОСНОВНЫЕ ПОЛЯ (JAVA FALLBACK) ==========
-
+            # ========== ОСНОВНЫЕ ПОЛЯ ==========
             # fioApplicant
             if not is_empty(d.fioApplicant):
                 f["fioApplicant"] = sanitize_string(d.fioApplicant)
@@ -462,24 +457,49 @@ async def autofill_appeal_document(
                 if citizen_type_id:
                     f["citizenTypeId"] = citizen_type_id
 
-            # declarantType (КРИТИЧЕСКОЕ ПОЛЕ - ОБЯЗАТЕЛЬНО!)
-            if d.declarantType:
-                f["declarantType"] = d.declarantType
-            elif fields.declarantType:
-                f["declarantType"] = fields.declarantType
-            else:
-                # FALLBACK: если LLM не определил, ставим INDIVIDUAL
-                f["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
-                warnings.append(
-                    "declarantType не определен LLM, установлен INDIVIDUAL по умолчанию"
+            # dateDocCorrespondentOrg (для ENTITY)
+            if d.dateDocCorrespondentOrg:
+                f["dateDocCorrespondentOrg"] = fix_datetime_format(
+                    d.dateDocCorrespondentOrg
+                )
+            elif not is_empty(fields.dateDocCorrespondentOrg):
+                f["dateDocCorrespondentOrg"] = fix_datetime_format(
+                    fields.dateDocCorrespondentOrg
                 )
 
-            # ========== JAVA-ЛОГИКА: CONDITIONAL FIELDS ==========
-            # Java: if (operation.getDeclarantType() != null)
+            # ========== ТЕМАТИКА (SUBJECT) ==========
+            if d.subjectId:
+                f["subjectId"] = str(d.subjectId)
+            else:
+                subject_id = await ref_client.find_best_subject(token, extracted_text)
+                if subject_id:
+                    f["subjectId"] = subject_id
+                    logger.info(f"[APPEAL-AUTOFILL] Тема определена LLM: {subject_id}")
+                else:
+                    logger.warning("[APPEAL-AUTOFILL] Тема не определена LLM")
+
+            if fields.declarantType:
+                f["declarantType"] = fields.declarantType
+                logger.info(
+                    f"[APPEAL-AUTOFILL] declarantType из LLM: {fields.declarantType}"
+                )
+            elif d.declarantType:
+                f["declarantType"] = d.declarantType
+                logger.info(f"[APPEAL-AUTOFILL] declarantType из БД: {d.declarantType}")
+            else:
+                # FALLBACK
+                f["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
+                warnings.append(
+                    "declarantType не определен автоматически, установлен INDIVIDUAL по умолчанию"
+                )
+                logger.warning(
+                    "[APPEAL-AUTOFILL] declarantType установлен INDIVIDUAL (fallback)"
+                )
+
+            # ========== CONDITIONAL FIELDS ==========
             if f.get("declarantType"):
                 current_declarant_type = f["declarantType"]
 
-                # Java: if (operation.getDeclarantType().equals(DeclarantType.ENTITY))
                 if current_declarant_type == GeneratedDeclarantType.ENTITY:
                     # Поля для ENTITY
                     f["organizationName"] = sanitize_string(
@@ -495,13 +515,10 @@ async def autofill_appeal_document(
                         if not is_empty(d.correspondentOrgNumber)
                         else fields.correspondentOrgNumber
                     )
-                    f["dateDocCorrespondentOrg"] = fix_datetime_format(
-                        d.dateDocCorrespondentOrg
-                        if d.dateDocCorrespondentOrg
-                        else fields.dateDocCorrespondentOrg
-                    )
+                    # f["dateDocCorrespondentOrg"] = fix_datetime_format(
+                    #     d.dateDocCorrespondentOrg if d.dateDocCorrespondentOrg else fields.dateDocCorrespondentOrg
+                    # )
 
-                # Java: if (operation.getDeclarantType().equals(DeclarantType.INDIVIDUAL))
                 elif current_declarant_type == GeneratedDeclarantType.INDIVIDUAL:
                     # Поля организации = null для INDIVIDUAL
                     f["organizationName"] = None
@@ -509,7 +526,7 @@ async def autofill_appeal_document(
                     f["correspondentOrgNumber"] = None
                     f["dateDocCorrespondentOrg"] = None
 
-            # Boolean поля (как в Java)
+            # Boolean
             f["collective"] = (
                 True
                 if (fields.collective is True)
@@ -555,7 +572,7 @@ async def autofill_appeal_document(
                 else fields.reviewProgress
             )
 
-            # Поля только из БД (не из LLM)
+            # Поля только из БД
             if d.subjectId:
                 f["subjectId"] = str(d.subjectId)
             if d.solutionResultId:
@@ -574,7 +591,6 @@ async def autofill_appeal_document(
             appeal_payload = {}
             for k, v in f.items():
                 if k in ["correspondentAppeal", "correspondentAppealId"]:
-                    # Всегда включаем (даже если None)
                     appeal_payload[k] = v
                 elif v is not None and not is_empty(v):
                     appeal_payload[k] = v
@@ -594,7 +610,7 @@ async def autofill_appeal_document(
                 appeal_payload,
             )
 
-        logger.info(f"[APPEAL-AUTOFILL] ========== ✅ УСПЕХ ==========")
+        # logger.info(f"[APPEAL-AUTOFILL] ========== УСПЕХ ==========")
 
         return {
             "status": "success",
@@ -604,7 +620,5 @@ async def autofill_appeal_document(
         }
 
     except Exception as e:
-        logger.error(
-            f"[APPEAL-AUTOFILL] ========== ❌ ОШИБКА ==========", exc_info=True
-        )
+        logger.error(f"[APPEAL-AUTOFILL] ========== ОШИБКА ==========", exc_info=True)
         return {"status": "error", "message": f"Ошибка автозаполнения: {str(e)}"}
