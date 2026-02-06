@@ -46,7 +46,7 @@ class AppealExtractionService:
 
             appeal_data = AppealFields.model_validate(result)
 
-            # logger.info(f" Данные успешно извлечены: {appeal_data}")
+            logger.info(f" Данные успешно извлечены: {appeal_data}")
 
             return appeal_data
 
@@ -194,14 +194,13 @@ class AppealExtractionService:
     ❗ НЕ ПРИДУМЫВАЙ данные
     ❗ НЕ ВЫВОДИ информацию логически (например, область из города)
     ❗ Ответ ТОЛЬКО в формате JSON (без текста, комментариев, markdown)
-    ❗ Все даты должны строго соответствовать формату ISO 8601 с указанием времени и миллисекунд (UTC).
+    ❗ Все даты в формате ISO 8601
     ❗ Если поле пустое/неизвестно → используй null, а НЕ "None", "Unknown", "N/A", "Неизвестно"
 
     ПРИМЕРЫ ПРАВИЛЬНОГО ЗАПОЛНЕНИЯ:
     - "fioApplicant": null (НЕ "None")
     - "regionName": null (если не указана в тексте явно)
     - "organizationName": "МБОО \\"Доброе дело. Помощь людям с аутизмом\\""
-    - "receiptDate, dateDocCorrespondentOrg: 26 марта 2018 года" -> "2018-03-26T00:00:00.000000Z"
 
     ПРИМЕРЫ НЕПРАВИЛЬНОГО ЗАПОЛНЕНИЯ (НЕ ДЕЛАЙ ТАК!):
     - "fioApplicant": "None" (НЕПРАВИЛЬНО!)
@@ -218,9 +217,10 @@ class AppealExtractionService:
     {format_instructions}
     """
 
-        return ChatPromptTemplate.from_messages(
-            [("system", system_message), ("user", user_message)]
-        )
+        return ChatPromptTemplate.from_messages([
+            ("system", system_message),
+            ("user", user_message)
+        ])
 
     async def extract_with_retry(
         self, text: str, max_attempts: int = 3

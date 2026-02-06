@@ -5,6 +5,8 @@ from .summarization import doc_summarize_text
 from .local_file_tool import read_local_file_content
 from .employee import employee_search_tool
 from .appeal_autofill import autofill_appeal_document
+from .introduction import introduction_create_tool
+from .task import task_create_tool
 
 all_tools = [
     doc_get_details,
@@ -13,4 +15,7 @@ all_tools = [
     read_local_file_content,
     employee_search_tool,
     autofill_appeal_document,
+    introduction_create_tool,
+    task_create_tool,
+    
 ]

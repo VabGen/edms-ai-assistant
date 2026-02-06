@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 class AppealAutofillInput(BaseModel):
-    """Входные параметры для автозаполнения обращения."""
 
     document_id: str = Field(..., description="UUID документа категории APPEAL")
     token: str = Field(..., description="JWT токен авторизации пользователя")
@@ -109,19 +108,6 @@ async def execute_document_operation(
     operation_type: str,
     body: Dict[str, Any],
 ) -> None:
-    """
-    Выполняет операцию обновления документа через EDMS API.
-
-    Args:
-        client: Асинхронный HTTP-клиент
-        token: JWT токен
-        document_id: UUID документа
-        operation_type: Тип операции (DOCUMENT_MAIN_FIELDS_UPDATE / DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE)
-        body: Тело запроса (payload)
-
-    Raises:
-        Exception: При HTTP-ошибках (400, 403, 500)
-    """
     payload = [{"operationType": operation_type, "body": body}]
     json_safe_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
 
@@ -406,11 +392,23 @@ async def autofill_appeal_document(
                 if city_data:
                     f["cityId"] = city_data["id"]
                     f["cityName"] = city_data["name"]
+
             elif not is_empty(fields.cityName):
-                city_data = await ref_client.find_city_with_name(token, fields.cityName)
+                city_data = await ref_client.find_city_with_hierarchy(token, fields.cityName)
                 if city_data:
                     f["cityId"] = city_data["id"]
                     f["cityName"] = city_data["name"]
+
+                    # Автозаполнение region/district если не были заполнены ранее
+                    if not f.get("regionId") and city_data.get("regionId"):
+                        f["regionId"] = city_data["regionId"]
+                        f["regionName"] = city_data["regionName"]
+                        logger.info(f"[APPEAL-AUTOFILL] ✅ Регион автоопределен: {city_data['regionName']}")
+
+                    if not f.get("districtId") and city_data.get("districtId"):
+                        f["districtId"] = city_data["districtId"]
+                        f["districtName"] = city_data["districtName"]
+                        logger.info(f"[APPEAL-AUTOFILL] ✅ Район автоопределен: {city_data['districtName']}")
 
             # ========== КОРРЕСПОНДЕНТ ==========
             if d.correspondentAppealId:
@@ -459,13 +457,9 @@ async def autofill_appeal_document(
 
             # dateDocCorrespondentOrg (для ENTITY)
             if d.dateDocCorrespondentOrg:
-                f["dateDocCorrespondentOrg"] = fix_datetime_format(
-                    d.dateDocCorrespondentOrg
-                )
+                f["dateDocCorrespondentOrg"] = fix_datetime_format(d.dateDocCorrespondentOrg)
             elif not is_empty(fields.dateDocCorrespondentOrg):
-                f["dateDocCorrespondentOrg"] = fix_datetime_format(
-                    fields.dateDocCorrespondentOrg
-                )
+                f["dateDocCorrespondentOrg"] = fix_datetime_format(fields.dateDocCorrespondentOrg)
 
             # ========== ТЕМАТИКА (SUBJECT) ==========
             if d.subjectId:
@@ -478,53 +472,55 @@ async def autofill_appeal_document(
                 else:
                     logger.warning("[APPEAL-AUTOFILL] Тема не определена LLM")
 
+            # ========== КАТЕГОРИЯ ЗАЯВИТЕЛЯ (declarantType) ==========
             if fields.declarantType:
-                f["declarantType"] = fields.declarantType
-                logger.info(
-                    f"[APPEAL-AUTOFILL] declarantType из LLM: {fields.declarantType}"
-                )
+                declarant_value = fields.declarantType
+
+                # Преобразуем строку в enum если нужно
+                if isinstance(declarant_value, str):
+                    try:
+                        f["declarantType"] = GeneratedDeclarantType[declarant_value.upper()]
+                        logger.info(
+                            f"[APPEAL-AUTOFILL] ✅ declarantType из LLM (str→enum): {declarant_value} → {f['declarantType']}")
+                    except KeyError:
+                        logger.warning(
+                            f"[APPEAL-AUTOFILL] ⚠️ Неизвестное значение declarantType от LLM: '{declarant_value}', используем fallback")
+                        f["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
+                else:
+                    f["declarantType"] = declarant_value
+                    logger.info(f"[APPEAL-AUTOFILL] ✅ declarantType из LLM (enum): {f['declarantType']}")
+
             elif d.declarantType:
+                # Берем из БД только если LLM не определил
                 f["declarantType"] = d.declarantType
                 logger.info(f"[APPEAL-AUTOFILL] declarantType из БД: {d.declarantType}")
+
             else:
-                # FALLBACK
+                # FALLBACK: если ни LLM, ни БД не определили
                 f["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
-                warnings.append(
-                    "declarantType не определен автоматически, установлен INDIVIDUAL по умолчанию"
-                )
-                logger.warning(
-                    "[APPEAL-AUTOFILL] declarantType установлен INDIVIDUAL (fallback)"
-                )
+                warnings.append("declarantType не определен автоматически, установлен INDIVIDUAL по умолчанию")
+                logger.warning("[APPEAL-AUTOFILL] ⚠️ declarantType установлен INDIVIDUAL (fallback)")
 
             # ========== CONDITIONAL FIELDS ==========
             if f.get("declarantType"):
                 current_declarant_type = f["declarantType"]
 
                 if current_declarant_type == GeneratedDeclarantType.ENTITY:
-                    # Поля для ENTITY
                     f["organizationName"] = sanitize_string(
-                        d.organizationName
-                        if not is_empty(d.organizationName)
-                        else fields.organizationName
+                        d.organizationName if not is_empty(d.organizationName) else fields.organizationName
                     )
                     f["signed"] = sanitize_string(
                         d.signed if not is_empty(d.signed) else fields.signed
                     )
                     f["correspondentOrgNumber"] = sanitize_string(
-                        d.correspondentOrgNumber
-                        if not is_empty(d.correspondentOrgNumber)
-                        else fields.correspondentOrgNumber
+                        d.correspondentOrgNumber if not is_empty(
+                            d.correspondentOrgNumber) else fields.correspondentOrgNumber
                     )
-                    # f["dateDocCorrespondentOrg"] = fix_datetime_format(
-                    #     d.dateDocCorrespondentOrg if d.dateDocCorrespondentOrg else fields.dateDocCorrespondentOrg
-                    # )
 
                 elif current_declarant_type == GeneratedDeclarantType.INDIVIDUAL:
-                    # Поля организации = null для INDIVIDUAL
                     f["organizationName"] = None
                     f["signed"] = None
                     f["correspondentOrgNumber"] = None
-                    f["dateDocCorrespondentOrg"] = None
 
             # Boolean
             f["collective"] = (
@@ -610,7 +606,7 @@ async def autofill_appeal_document(
                 appeal_payload,
             )
 
-        # logger.info(f"[APPEAL-AUTOFILL] ========== УСПЕХ ==========")
+        logger.info(f"[APPEAL-AUTOFILL] ========== УСПЕХ ==========")
 
         return {
             "status": "success",
