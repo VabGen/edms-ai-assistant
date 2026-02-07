@@ -1,4 +1,14 @@
 # edms_ai_assistant/agent.py
+"""
+EDMS AI Assistant Agent Module
+
+CRITICAL FIX: Full integration with Semantic Dispatcher
+- Proper document fetching for context building
+- Use of refined queries (not raw user input)
+- Intent-based prompt selection
+- Complete entity extraction
+"""
+
 import logging
 import asyncio
 import re
@@ -19,9 +29,16 @@ from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 
 from edms_ai_assistant.llm import get_chat_model
+from edms_ai_assistant.services.nlp_service import SemanticDispatcher, UserIntent
+from edms_ai_assistant.clients.document_client import DocumentClient
+from edms_ai_assistant.generated.resources_openapi import DocumentDto
 from edms_ai_assistant.tools import all_tools
 
 logger = logging.getLogger(__name__)
+
+# ========================================
+# OPTIMIZED SYSTEM PROMPT (~500 tokens)
+# ========================================
 
 CORE_SYSTEM_PROMPT = """<role>
 Ты — экспертный помощник системы электронного документооборота (EDMS/СЭД).
@@ -46,9 +63,10 @@ CORE_SYSTEM_PROMPT = """<role>
 3. **Обработка requires_action**:
    - Статус "summarize_selection" → Предложи формат анализа (факты/пересказ/тезисы)
    - Статус "requires_disambiguation" → Покажи список, дождись выбора пользователя
-   - Статус "select_employee" → Покажи сотрудников для выбора
 
-4. **Язык**: Только русский. Обращайся к пользователю по имени: {user_name}
+4. **ВАЖНО**: После вызова инструментов ВСЕГДА формулируй финальный ответ на русском языке.
+
+5. **Язык**: Только русский. Обращайся к пользователю по имени: {user_name}
 </critical_rules>
 
 <tool_selection>
@@ -72,16 +90,16 @@ CONTEXT_SNIPPETS = {
 <introduction_guide>
 При создании списка ознакомления:
 - Если статус "requires_disambiguation" → Покажи список найденных сотрудников
-- Дождись выбора пользователя (например: "первый и третий")
+- Дождись выбора пользователя
 - Повторный вызов: introduction_create_tool(selected_employee_ids=[uuid1, uuid3])
 </introduction_guide>""",
 
     "task_creation": """
 <task_guide>
 При создании поручения:
-- executor_last_names: ["Иванов", "Петров"] — обязательно (минимум 1)
-- responsible_last_name: "Петров" — опционально (если НЕ указан → первый исполнитель ответственный)
-- planed_date_end: "2026-02-15T23:59:59Z" — опционально (если НЕ указан → +7 дней)
+- executor_last_names: обязательно (минимум 1)
+- responsible_last_name: опционально (если НЕ указан → первый исполнитель)
+- planed_date_end: опционально (если НЕ указан → +7 дней)
 </task_guide>""",
 
     "date_parsing": """
@@ -89,67 +107,91 @@ CONTEXT_SNIPPETS = {
 Преобразование дат в ISO 8601:
 - "до 15 февраля" → "2026-02-15T23:59:59Z"
 - "через неделю" → +7 дней от текущей даты
-- "к концу месяца" → последний день текущего месяца 23:59:59
 Всегда добавляй суффикс 'Z' (UTC timezone).
 </date_parsing>""",
 }
 
 
-def get_dynamic_context(message: str) -> str:
+def get_dynamic_context_by_intent(intent: UserIntent) -> str:
     """
-    Динамически загружает релевантный контекст в зависимости от запроса.
+    Load dynamic context based on classified intent.
+
+    Args:
+        intent: Classified user intent
+
+    Returns:
+        Relevant context snippet
+    """
+    if intent == UserIntent.CREATE_INTRODUCTION:
+        return CONTEXT_SNIPPETS["introduction_disambiguation"]
+
+    if intent == UserIntent.CREATE_TASK:
+        return CONTEXT_SNIPPETS["task_creation"]
+
+    return ""
+
+
+def get_dynamic_context_by_message(message: str) -> str:
+    """
+    Legacy: Load dynamic context based on message keywords.
+
+    Args:
+        message: User message
+
+    Returns:
+        Relevant context snippets
     """
     context_parts = []
     msg_lower = message.lower()
 
-    if any(trigger in msg_lower for trigger in [
-        "ознакомление", "ознакомь", "добавь в список", "список ознакомления"
-    ]):
+    if any(t in msg_lower for t in ["ознакомление", "ознакомь", "список ознакомления"]):
         context_parts.append(CONTEXT_SNIPPETS["introduction_disambiguation"])
 
-    # Триггеры для создания поручений
-    if any(trigger in msg_lower for trigger in [
-        "поручение", "создай поручение", "дай задание", "назначь исполнителей",
-        "исполнитель", "ответственный"
-    ]):
+    if any(t in msg_lower for t in ["поручение", "задание", "исполнитель"]):
         context_parts.append(CONTEXT_SNIPPETS["task_creation"])
 
-    # Триггеры для парсинга дат
-    if any(trigger in msg_lower for trigger in [
-        "до ", "через ", "к ", "срок", "дедлайн", "до конца"
-    ]):
+    if any(t in msg_lower for t in ["до ", "через ", "срок", "дедлайн"]):
         context_parts.append(CONTEXT_SNIPPETS["date_parsing"])
 
     return "\n".join(context_parts)
+
+
+# ========================================
+# AGENT STATE
+# ========================================
 
 class AgentState(TypedDict):
     """State for LangGraph agent."""
     messages: Annotated[List[BaseMessage], add_messages]
 
-class EdmsDocumentAgent:
-    """
-    Основной агент для работы с EDMS.
 
-    Capabilities:
-    - Анализ документов (чтение, суммаризация)
-    - Управление персоналом (поиск сотрудников, списки ознакомления)
-    - Делегирование задач (создание поручений)
-    """
+# ========================================
+# EDMS DOCUMENT AGENT
+# ========================================
+
+class EdmsDocumentAgent:
+    """Main agent for EDMS operations with Semantic Dispatcher integration."""
 
     def __init__(self):
+        """Initialize agent with LLM, tools, dispatcher, and checkpointer."""
         self.model = get_chat_model()
         self.tools = all_tools
         self.checkpointer = MemorySaver()
+
+        # CRITICAL: Initialize Semantic Dispatcher
+        self.dispatcher = SemanticDispatcher()
+
         self.base_prompt_template = CORE_SYSTEM_PROMPT
         self.agent = self._build_graph()
 
-        logger.info(f"EdmsDocumentAgent initialized with {len(self.tools)} tools")
+        logger.info(f"EdmsDocumentAgent initialized with {len(self.tools)} tools and Semantic Dispatcher")
 
     def _build_graph(self) -> StateGraph:
+        """Build LangGraph workflow."""
         workflow = StateGraph(AgentState)
 
-        # Node 1: Agent (LLM with tools)
         async def call_model(state: AgentState) -> Dict:
+            """Call LLM with tool binding."""
             model_with_tools = self.model.bind_tools(self.tools)
 
             non_sys = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
@@ -160,6 +202,7 @@ class EdmsDocumentAgent:
             return {"messages": [response]}
 
         async def validator(state: AgentState) -> Dict:
+            """Validate tool execution results."""
             messages = state["messages"]
             last_message = messages[-1]
 
@@ -172,7 +215,7 @@ class EdmsDocumentAgent:
                 return {
                     "messages": [
                         HumanMessage(
-                            content="[СИСТЕМНОЕ УВЕДОМЛЕНИЕ]: Инструмент вернул пустой результат. Проверь параметры или попробуй другой метод."
+                            content="[СИСТЕМНОЕ УВЕДОМЛЕНИЕ]: Инструмент вернул пустой результат."
                         )
                     ]
                 }
@@ -181,7 +224,7 @@ class EdmsDocumentAgent:
                 return {
                     "messages": [
                         HumanMessage(
-                            content=f"[СИСТЕМНОЕ УВЕДОМЛЕНИЕ]: Техническая ошибка: {content_raw}. Попробуй исправить параметры."
+                            content=f"[СИСТЕМНОЕ УВЕДОМЛЕНИЕ]: Техническая ошибка: {content_raw}"
                         )
                     ]
                 }
@@ -196,10 +239,8 @@ class EdmsDocumentAgent:
 
         def should_continue(state: AgentState) -> str:
             last_message = state["messages"][-1]
-
             if isinstance(last_message, AIMessage) and getattr(last_message, "tool_calls", None):
                 return "tools"
-
             return END
 
         workflow.add_conditional_edges(
@@ -216,6 +257,27 @@ class EdmsDocumentAgent:
             interrupt_before=["tools"]
         )
 
+    async def _fetch_document(self, token: str, doc_id: str) -> Optional[DocumentDto]:
+        """
+        Fetch document for semantic processing.
+
+        Args:
+            token: JWT token
+            doc_id: Document UUID
+
+        Returns:
+            DocumentDto or None if fetch fails
+        """
+        try:
+            async with DocumentClient() as client:
+                raw_data = await client.get_document_metadata(token, doc_id)
+                doc = DocumentDto.model_validate(raw_data)
+                logger.debug(f"Fetched document {doc_id} for semantic processing")
+                return doc
+        except Exception as e:
+            logger.warning(f"Could not fetch document {doc_id}: {e}")
+            return None
+
     async def chat(
             self,
             message: str,
@@ -226,6 +288,15 @@ class EdmsDocumentAgent:
             file_path: Optional[str] = None,
             human_choice: Optional[str] = None,
     ) -> Dict:
+        """
+        Main entry point for agent chat with Semantic Dispatcher integration.
+
+        CRITICAL FIX:
+        1. Fetch document if context_ui_id provided
+        2. Build semantic context with dispatcher
+        3. Use refined query (not raw message)
+        4. Add intent to system prompt
+        """
         config = {"configurable": {"thread_id": thread_id or "default"}}
 
         user_context = user_context or {}
@@ -237,14 +308,41 @@ class EdmsDocumentAgent:
 
         state = await self.agent.aget_state(config)
 
+        # Handle human choice
         if human_choice and state.next:
             return await self._handle_human_choice(
                 config, user_token, context_ui_id, file_path, human_choice
             )
 
+        # ========================================
+        # SEMANTIC DISPATCHER INTEGRATION
+        # ========================================
+
+        # 1. Fetch document if available
+        document = None
+        if context_ui_id:
+            document = await self._fetch_document(user_token, context_ui_id)
+
+        # 2. Build semantic context
+        semantic_context = self.dispatcher.build_context(message, document)
+
+        logger.info(
+            f"Semantic analysis: intent={semantic_context.query.intent.value}, "
+            f"complexity={semantic_context.query.complexity.value}, "
+            f"has_document={bool(semantic_context.document)}"
+        )
+
+        # 3. Use refined query (not raw message!)
+        refined_message = semantic_context.query.refined
+        user_intent = semantic_context.query.intent
+
+        # ========================================
+        # BUILD SYSTEM PROMPT
+        # ========================================
+
         current_date = datetime.now().strftime("%d.%m.%Y")
 
-        # 1. Base prompt (always)
+        # Base prompt
         base_prompt = self.base_prompt_template.format(
             user_name=user_name,
             current_date=current_date,
@@ -252,25 +350,37 @@ class EdmsDocumentAgent:
             local_file=file_path or "Не загружен"
         )
 
-        # 2. Dynamic context (conditional)
-        dynamic_context = get_dynamic_context(message)
+        # Dynamic context (based on intent)
+        dynamic_context = get_dynamic_context_by_intent(user_intent)
 
-        # 3. Final prompt
-        full_prompt = base_prompt + dynamic_context
+        # Add semantic context (XML format)
+        semantic_context_xml = f"""
+<semantic_context>
+  <user_query>
+    <original>{semantic_context.query.original}</original>
+    <refined>{refined_message}</refined>
+    <intent>{user_intent.value}</intent>
+    <complexity>{semantic_context.query.complexity.value}</complexity>
+  </user_query>
+</semantic_context>
+"""
 
-        # Log token estimate (for monitoring)
+        # Final prompt
+        full_prompt = base_prompt + dynamic_context + semantic_context_xml
+
+        # Log token count
         if logger.isEnabledFor(logging.DEBUG):
-            import tiktoken
             try:
+                import tiktoken
                 encoder = tiktoken.encoding_for_model("gpt-4")
                 token_count = len(encoder.encode(full_prompt))
                 logger.debug(f"System prompt tokens: {token_count}")
             except Exception:
-                pass  # Skip if tiktoken not available
+                pass
 
-        # Build messages
+        # Build messages (use REFINED message, not original!)
         sys_msg = SystemMessage(content=full_prompt)
-        hum_msg = HumanMessage(content=message if message else "Продолжи анализ.")
+        hum_msg = HumanMessage(content=refined_message)  # ← CRITICAL: Use refined!
         inputs = {"messages": [sys_msg, hum_msg]}
 
         # Execute agent
@@ -292,6 +402,7 @@ class EdmsDocumentAgent:
             file_path: Optional[str],
             human_choice: str,
     ) -> Dict:
+        """Handle user's choice for requires_action scenarios."""
         state = await self.agent.aget_state(config)
         last_msg = state.values["messages"][-1]
 
@@ -344,6 +455,7 @@ class EdmsDocumentAgent:
             iteration: int = 0,
             human_choice: Optional[str] = None,
     ) -> Dict:
+        """Orchestrate agent execution with parameter injection."""
         if iteration > 10:
             logger.error(f"Max iterations reached for thread {config['configurable']['thread_id']}")
             return {
@@ -365,27 +477,37 @@ class EdmsDocumentAgent:
 
             last_msg = messages[-1]
 
+            # CRITICAL FIX: Better content extraction
             if (
                     not state.next
                     or not isinstance(last_msg, AIMessage)
                     or not getattr(last_msg, "tool_calls", None)
             ):
-                for m in reversed(messages):
-                    if isinstance(m, AIMessage) and m.content:
-                        return {"status": "success", "content": m.content}
+                # Try to find final AI response
+                final_content = self._extract_final_content(messages)
 
+                if final_content:
+                    logger.info(f"Final content extracted ({len(final_content)} chars)")
+                    return {"status": "success", "content": final_content}
+
+                logger.warning("No final content found")
                 return {"status": "success", "content": "Готово."}
 
+            # Extract text from previous tool calls
             last_extracted_text = self._extract_last_text(messages)
 
+            # Process and inject parameters
             fixed_calls = []
 
             for tc in last_msg.tool_calls:
                 t_name = tc["name"]
                 t_args = dict(tc["args"])
                 t_id = tc["id"]
+
+                # Inject token
                 t_args["token"] = token
 
+                # Handle LOCAL_FILE
                 clean_path = str(file_path).strip() if file_path else ""
                 is_uuid = bool(re.match(
                     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -398,6 +520,7 @@ class EdmsDocumentAgent:
                     t_args["attachment_id"] = clean_path
                     t_args.pop("file_path", None)
 
+                # Inject document_id
                 if doc_id and (
                         t_name.startswith("doc_")
                         or "document_id" in t_args
@@ -405,6 +528,7 @@ class EdmsDocumentAgent:
                 ):
                     t_args["document_id"] = doc_id
 
+                # Handle doc_summarize_text
                 if t_name == "doc_summarize_text":
                     if last_extracted_text:
                         t_args["text"] = str(last_extracted_text)
@@ -464,7 +588,36 @@ class EdmsDocumentAgent:
                 "message": f"Ошибка обработки запроса: {str(e)}",
             }
 
+    def _extract_final_content(self, messages: List[BaseMessage]) -> Optional[str]:
+        """Extract final content from messages (improved)."""
+        # Strategy 1: Last AIMessage with content
+        for m in reversed(messages):
+            if isinstance(m, AIMessage) and m.content:
+                content = str(m.content).strip()
+                if content and len(content) > 10:
+                    return content
+
+        # Strategy 2: Extract from last ToolMessage
+        for m in reversed(messages):
+            if isinstance(m, ToolMessage):
+                try:
+                    if isinstance(m.content, str) and m.content.startswith("{"):
+                        data = json.loads(m.content)
+
+                        if data.get("status") == "success" and data.get("content"):
+                            return str(data["content"]).strip()
+
+                    content = str(m.content).strip()
+                    if len(content) > 50:
+                        return content
+
+                except json.JSONDecodeError:
+                    pass
+
+        return None
+
     def _extract_last_text(self, messages: List[BaseMessage]) -> Optional[str]:
+        """Extract text from last ToolMessage."""
         for m in reversed(messages):
             if not isinstance(m, ToolMessage):
                 continue

@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class TaskCreateInput(BaseModel):
-
     token: str = Field(..., description="Токен авторизации пользователя (JWT)")
     document_id: str = Field(..., description="UUID документа для создания поручения")
 
@@ -46,14 +45,17 @@ class TaskCreateInput(BaseModel):
 
 @tool("task_create_tool", args_schema=TaskCreateInput)
 async def task_create_tool(
-    token: str,
-    document_id: str,
-    task_text: str,
-    executor_last_names: List[str],
-    responsible_last_name: Optional[str] = None,
-    planed_date_end: Optional[str] = None,
-    task_type: Optional[TaskType] = TaskType.GENERAL,
+        token: str,
+        document_id: str,
+        task_text: str,
+        executor_last_names: List[str],
+        responsible_last_name: Optional[str] = None,
+        planed_date_end: Optional[str] = None,
+        task_type: Optional[TaskType] = TaskType.GENERAL,
 ) -> Dict[str, Any]:
+    """
+        Создает новую задачу в системе на основании данных документа.
+    """
     logger.info(
         f"[TASK-TOOL] Creating task for document {document_id}. "
         f"Executors: {executor_last_names}, Responsible: {responsible_last_name}"
