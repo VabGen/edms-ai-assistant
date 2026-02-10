@@ -62,3 +62,14 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
             "GET", "api/document", token=token, params=params
         )
         return result if isinstance(result, list) else []
+
+    async def get_document_versions(
+        self, token: str, document_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Получить все версии документа (GET api/document/{id}/version).
+        """
+        result = await self._make_request(
+            "GET", f"api/document/{document_id}/version", token=token
+        )
+        return result if isinstance(result, list) else []

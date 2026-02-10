@@ -16,8 +16,7 @@ class CreateTaskRequestExecutor(BaseModel):
 
     employeeId: UUID = Field(..., description="UUID сотрудника-исполнителя")
     responsible: bool = Field(
-        default=False,
-        description="Является ли сотрудник ответственным за поручение"
+        default=False, description="Является ли сотрудник ответственным за поручение"
     )
 
     model_config = ConfigDict(
@@ -30,20 +29,20 @@ class CreateTaskRequest(BaseModel):
     """Request model for creating a single task."""
 
     taskText: str = Field(..., description="Текст поручения")
-    planedDateEnd: datetime = Field(..., description="Плановая дата окончания (ISO 8601)")
+    planedDateEnd: datetime = Field(
+        ..., description="Плановая дата окончания (ISO 8601)"
+    )
     type: TaskType = Field(default=TaskType.GENERAL, description="Тип поручения")
     periodTask: bool = Field(default=False, description="Периодическое поручение")
     endless: bool = Field(default=False, description="Бессрочное поручение")
     executors: List[CreateTaskRequestExecutor] = Field(
-        ...,
-        min_length=1,
-        description="Список исполнителей (минимум 1)"
+        ..., min_length=1, description="Список исполнителей (минимум 1)"
     )
 
     model_config = ConfigDict(
         json_encoders={
             UUID: str,
-            datetime: lambda dt: dt.isoformat() if dt.tzinfo else dt.isoformat() + "Z"
+            datetime: lambda dt: dt.isoformat() if dt.tzinfo else dt.isoformat() + "Z",
         },
         use_enum_values=True,
     )

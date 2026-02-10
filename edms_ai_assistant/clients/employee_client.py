@@ -77,9 +77,7 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
     ) -> List[Dict[str, Any]]:
         endpoint = "api/employee/search?page=0&size=10&sort=lastName,ASC"
 
-        search_query = (
-            filter_data.get("lastName") or filter_data.get("firstName") or ""
-        )
+        search_query = filter_data.get("lastName") or filter_data.get("firstName") or ""
 
         payload = {
             "active": True,

@@ -7,6 +7,8 @@ from .employee import employee_search_tool
 from .appeal_autofill import autofill_appeal_document
 from .introduction import introduction_create_tool
 from .task import task_create_tool
+from .document_versions import doc_get_versions
+from .document_comparison import doc_compare
 
 all_tools = [
     doc_get_details,
@@ -17,5 +19,6 @@ all_tools = [
     autofill_appeal_document,
     introduction_create_tool,
     task_create_tool,
-    
+    doc_get_versions,
+    doc_compare,
 ]

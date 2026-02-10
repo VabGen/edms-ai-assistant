@@ -325,90 +325,178 @@ async def autofill_appeal_document(
             f = {}
 
             # ========== ГЕОГРАФИЯ ==========
-            # Country
-            if d.countryAppealId:
-                f["countryAppealId"] = str(d.countryAppealId)
-                f["countryAppealName"] = sanitize_string(d.countryAppealName)
-            elif not is_empty(d.countryAppealName):
-                country_data = await ref_client.find_country_with_name(
-                    token, d.countryAppealName
-                )
-                if country_data:
-                    f["countryAppealId"] = country_data["id"]
-                    f["countryAppealName"] = country_data["name"]
+
+            # ===== COUNTRY =====
+            country_to_search = None
+
+            if d.countryAppealName and not is_empty(d.countryAppealName):
+                country_to_search = d.countryAppealName
             elif not is_empty(fields.country):
-                # LLM извлек название -> ищем ID и fullName
-                country_data = await ref_client.find_country_with_name(
-                    token, fields.country
-                )
-                if country_data:
-                    f["countryAppealId"] = country_data["id"]
-                    f["countryAppealName"] = country_data["name"]
+                country_to_search = fields.country
 
-            # Region
-            if d.regionId:
-                f["regionId"] = str(d.regionId)
-                f["regionName"] = sanitize_string(d.regionName)
-            elif not is_empty(d.regionName):
-                region_data = await ref_client.find_region_with_name(
-                    token, d.regionName
-                )
-                if region_data:
-                    f["regionId"] = region_data["id"]
-                    f["regionName"] = region_data["name"]
-            elif not is_empty(fields.regionName):
-                region_data = await ref_client.find_region_with_name(
-                    token, fields.regionName
-                )
-                if region_data:
-                    f["regionId"] = region_data["id"]
-                    f["regionName"] = region_data["name"]
+            if country_to_search:
+                try:
+                    country_data = await ref_client.find_country_with_name(
+                        token, country_to_search
+                    )
+                    if country_data:
+                        f["countryAppealId"] = country_data["id"]
+                        f["countryAppealName"] = country_data["name"]
+                        logger.info(
+                            f"[APPEAL-AUTOFILL] Страна: '{country_to_search}' → '{country_data['name']}' (ID: {country_data['id']})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[APPEAL-AUTOFILL] Страна '{country_to_search}' не найдена в справочнике"
+                        )
+                except Exception as e:
+                    logger.error(f"[APPEAL-AUTOFILL] Ошибка поиска страны: {e}")
 
-            # District
-            if d.districtId:
-                f["districtId"] = str(d.districtId)
-                f["districtName"] = sanitize_string(d.districtName)
-            elif not is_empty(d.districtName):
-                district_data = await ref_client.find_district_with_name(
-                    token, d.districtName
+            elif d.countryAppealId:
+                f["countryAppealId"] = str(d.countryAppealId)
+                logger.warning(
+                    f"[APPEAL-AUTOFILL] Страна: есть только ID={d.countryAppealId}, название не найдено"
                 )
-                if district_data:
-                    f["districtId"] = district_data["id"]
-                    f["districtName"] = district_data["name"]
-            elif not is_empty(fields.districtName):
-                district_data = await ref_client.find_district_with_name(
-                    token, fields.districtName
-                )
-                if district_data:
-                    f["districtId"] = district_data["id"]
-                    f["districtName"] = district_data["name"]
 
-            # City
-            if d.cityId:
-                f["cityId"] = str(d.cityId)
-                f["cityName"] = sanitize_string(d.cityName)
-            elif not is_empty(d.cityName):
-                city_data = await ref_client.find_city_with_name(token, d.cityName)
-                if city_data:
-                    f["cityId"] = city_data["id"]
-                    f["cityName"] = city_data["name"]
+            # ===== CITY =====
+            city_to_search = None
 
+            if d.cityName and not is_empty(d.cityName):
+                city_to_search = d.cityName
             elif not is_empty(fields.cityName):
-                city_data = await ref_client.find_city_with_hierarchy(token, fields.cityName)
-                if city_data:
-                    f["cityId"] = city_data["id"]
-                    f["cityName"] = city_data["name"]
+                city_to_search = fields.cityName
 
-                    # Автозаполнение region/district если не были заполнены ранее
-                    if not f.get("regionId") and city_data.get("regionId"):
-                        f["regionId"] = city_data["regionId"]
-                        f["regionName"] = city_data["regionName"]
-                        logger.info(f"[APPEAL-AUTOFILL] ✅ Регион автоопределен: {city_data['regionName']}")
+            if city_to_search:
+                try:
+                    city_data = await ref_client.find_city_with_hierarchy(
+                        token, city_to_search
+                    )
 
-                    if not f.get("districtId") and city_data.get("districtId"):
-                        f["districtId"] = city_data["districtId"]
-                        f["districtName"] = city_data["districtName"]
-                        logger.info(f"[APPEAL-AUTOFILL] ✅ Район автоопределен: {city_data['districtName']}")
+                    if city_data:
+                        # Сохраняем город
+                        f["cityId"] = city_data["id"]
+                        f["cityName"] = city_data["name"]
+                        logger.info(
+                            f"[APPEAL-AUTOFILL] Город: '{city_to_search}' → '{city_data['name']}' (ID: {city_data['id']})"
+                        )
+
+                        if city_data.get("regionId") and city_data.get("regionName"):
+                            has_explicit_region = (
+                                d.regionName and not is_empty(d.regionName)
+                            ) or (fields.regionName and not is_empty(fields.regionName))
+
+                            if not has_explicit_region:
+                                # Автозаполнение из иерархии
+                                f["regionId"] = city_data["regionId"]
+                                f["regionName"] = city_data["regionName"]
+                                logger.info(
+                                    f"[APPEAL-AUTOFILL] ✅ Регион автоопределен из иерархии города: {city_data['regionName']}"
+                                )
+                            else:
+                                logger.debug(
+                                    f"[APPEAL-AUTOFILL] Регион явно указан в документе, пропускаем автозаполнение"
+                                )
+
+                        if city_data.get("districtId") and city_data.get(
+                            "districtName"
+                        ):
+                            # Проверяем: есть ли уже явно указанный район?
+                            has_explicit_district = (
+                                d.districtName and not is_empty(d.districtName)
+                            ) or (
+                                fields.districtName
+                                and not is_empty(fields.districtName)
+                            )
+
+                            if not has_explicit_district:
+                                # Автозаполнение из иерархии
+                                f["districtId"] = city_data["districtId"]
+                                f["districtName"] = city_data["districtName"]
+                                logger.info(
+                                    f"[APPEAL-AUTOFILL] Район автоопределен из иерархии города: {city_data['districtName']}"
+                                )
+                            else:
+                                logger.debug(
+                                    f"[APPEAL-AUTOFILL] Район явно указан в документе, пропускаем автозаполнение"
+                                )
+                    else:
+                        logger.warning(
+                            f"[APPEAL-AUTOFILL] Город '{city_to_search}' не найден в справочнике"
+                        )
+                except Exception as e:
+                    logger.error(f"[APPEAL-AUTOFILL] Ошибка поиска города: {e}")
+
+            elif d.cityId:
+                f["cityId"] = str(d.cityId)
+                logger.warning(
+                    f"[APPEAL-AUTOFILL] Город: есть только ID={d.cityId}, название не найдено"
+                )
+
+            # ===== REGION =====
+            if "regionId" not in f:
+                region_to_search = None
+
+                if d.regionName and not is_empty(d.regionName):
+                    region_to_search = d.regionName
+                elif not is_empty(fields.regionName):
+                    region_to_search = fields.regionName
+
+                if region_to_search:
+                    try:
+                        region_data = await ref_client.find_region_with_name(
+                            token, region_to_search
+                        )
+                        if region_data:
+                            f["regionId"] = region_data["id"]
+                            f["regionName"] = region_data["name"]
+                            logger.info(
+                                f"[APPEAL-AUTOFILL] Регион (явно указан): '{region_to_search}' → '{region_data['name']}' (ID: {region_data['id']})"
+                            )
+                        else:
+                            logger.warning(
+                                f"[APPEAL-AUTOFILL] Регион '{region_to_search}' не найден в справочнике"
+                            )
+                    except Exception as e:
+                        logger.error(f"[APPEAL-AUTOFILL] Ошибка поиска региона: {e}")
+
+                elif d.regionId:
+                    f["regionId"] = str(d.regionId)
+                    logger.warning(
+                        f"[APPEAL-AUTOFILL] Регион: есть только ID={d.regionId}, название не найдено"
+                    )
+
+            # ===== DISTRICT =====
+            if "districtId" not in f:
+                district_to_search = None
+
+                if d.districtName and not is_empty(d.districtName):
+                    district_to_search = d.districtName
+                elif not is_empty(fields.districtName):
+                    district_to_search = fields.districtName
+
+                if district_to_search:
+                    try:
+                        district_data = await ref_client.find_district_with_name(
+                            token, district_to_search
+                        )
+                        if district_data:
+                            f["districtId"] = district_data["id"]
+                            f["districtName"] = district_data["name"]
+                            logger.info(
+                                f"[APPEAL-AUTOFILL] Район (явно указан): '{district_to_search}' → '{district_data['name']}' (ID: {district_data['id']})"
+                            )
+                        else:
+                            logger.warning(
+                                f"[APPEAL-AUTOFILL] Район '{district_to_search}' не найден в справочнике"
+                            )
+                    except Exception as e:
+                        logger.error(f"[APPEAL-AUTOFILL] Ошибка поиска района: {e}")
+
+                elif d.districtId:
+                    f["districtId"] = str(d.districtId)
+                    logger.warning(
+                        f"[APPEAL-AUTOFILL] Район: есть только ID={d.districtId}, название не найдено"
+                    )
 
             # ========== КОРРЕСПОНДЕНТ ==========
             if d.correspondentAppealId:
@@ -457,9 +545,13 @@ async def autofill_appeal_document(
 
             # dateDocCorrespondentOrg (для ENTITY)
             if d.dateDocCorrespondentOrg:
-                f["dateDocCorrespondentOrg"] = fix_datetime_format(d.dateDocCorrespondentOrg)
+                f["dateDocCorrespondentOrg"] = fix_datetime_format(
+                    d.dateDocCorrespondentOrg
+                )
             elif not is_empty(fields.dateDocCorrespondentOrg):
-                f["dateDocCorrespondentOrg"] = fix_datetime_format(fields.dateDocCorrespondentOrg)
+                f["dateDocCorrespondentOrg"] = fix_datetime_format(
+                    fields.dateDocCorrespondentOrg
+                )
 
             # ========== ТЕМАТИКА (SUBJECT) ==========
             if d.subjectId:
@@ -476,19 +568,24 @@ async def autofill_appeal_document(
             if fields.declarantType:
                 declarant_value = fields.declarantType
 
-                # Преобразуем строку в enum если нужно
                 if isinstance(declarant_value, str):
                     try:
-                        f["declarantType"] = GeneratedDeclarantType[declarant_value.upper()]
+                        f["declarantType"] = GeneratedDeclarantType[
+                            declarant_value.upper()
+                        ]
                         logger.info(
-                            f"[APPEAL-AUTOFILL] ✅ declarantType из LLM (str→enum): {declarant_value} → {f['declarantType']}")
+                            f"[APPEAL-AUTOFILL] declarantType из LLM (str→enum): {declarant_value} → {f['declarantType']}"
+                        )
                     except KeyError:
                         logger.warning(
-                            f"[APPEAL-AUTOFILL] ⚠️ Неизвестное значение declarantType от LLM: '{declarant_value}', используем fallback")
+                            f"[APPEAL-AUTOFILL] Неизвестное значение declarantType от LLM: '{declarant_value}', используем fallback"
+                        )
                         f["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
                 else:
                     f["declarantType"] = declarant_value
-                    logger.info(f"[APPEAL-AUTOFILL] ✅ declarantType из LLM (enum): {f['declarantType']}")
+                    logger.info(
+                        f"[APPEAL-AUTOFILL] declarantType из LLM (enum): {f['declarantType']}"
+                    )
 
             elif d.declarantType:
                 # Берем из БД только если LLM не определил
@@ -498,8 +595,12 @@ async def autofill_appeal_document(
             else:
                 # FALLBACK: если ни LLM, ни БД не определили
                 f["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
-                warnings.append("declarantType не определен автоматически, установлен INDIVIDUAL по умолчанию")
-                logger.warning("[APPEAL-AUTOFILL] ⚠️ declarantType установлен INDIVIDUAL (fallback)")
+                warnings.append(
+                    "declarantType не определен автоматически, установлен INDIVIDUAL по умолчанию"
+                )
+                logger.warning(
+                    "[APPEAL-AUTOFILL] declarantType установлен INDIVIDUAL (fallback)"
+                )
 
             # ========== CONDITIONAL FIELDS ==========
             if f.get("declarantType"):
@@ -507,14 +608,17 @@ async def autofill_appeal_document(
 
                 if current_declarant_type == GeneratedDeclarantType.ENTITY:
                     f["organizationName"] = sanitize_string(
-                        d.organizationName if not is_empty(d.organizationName) else fields.organizationName
+                        d.organizationName
+                        if not is_empty(d.organizationName)
+                        else fields.organizationName
                     )
                     f["signed"] = sanitize_string(
                         d.signed if not is_empty(d.signed) else fields.signed
                     )
                     f["correspondentOrgNumber"] = sanitize_string(
-                        d.correspondentOrgNumber if not is_empty(
-                            d.correspondentOrgNumber) else fields.correspondentOrgNumber
+                        d.correspondentOrgNumber
+                        if not is_empty(d.correspondentOrgNumber)
+                        else fields.correspondentOrgNumber
                     )
 
                 elif current_declarant_type == GeneratedDeclarantType.INDIVIDUAL:

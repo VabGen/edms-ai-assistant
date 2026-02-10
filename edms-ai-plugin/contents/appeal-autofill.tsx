@@ -27,10 +27,6 @@
 //     return style
 // }
 //
-// /**
-//  * ✅ Единственная привязка к кнопке "Закрыть"
-//  * Ищем кнопку один раз при загрузке страницы
-//  */
 // export const getInlineAnchor: () => Promise<null | HTMLButtonElement> = async () => {
 //     // Проверяем что это страница обращения
 //     if (!window.location.pathname.includes('/document-form/')) {

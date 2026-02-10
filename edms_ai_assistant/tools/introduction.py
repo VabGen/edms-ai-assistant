@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 class IntroductionInput(BaseModel):
 
     token: str = Field(..., description="Токен авторизации пользователя (JWT)")
-    document_id: str = Field(..., description="UUID документа для создания ознакомления")
+    document_id: str = Field(
+        ..., description="UUID документа для создания ознакомления"
+    )
 
     last_names: Optional[List[str]] = Field(
         None,
@@ -35,19 +37,19 @@ class IntroductionInput(BaseModel):
 
     selected_employee_ids: Optional[List[str]] = Field(
         None,
-        description="UUID сотрудников, выбранных пользователем для разрешения неоднозначности"
+        description="UUID сотрудников, выбранных пользователем для разрешения неоднозначности",
     )
 
 
 @tool("introduction_create_tool", args_schema=IntroductionInput)
 async def introduction_create_tool(
-        token: str,
-        document_id: str,
-        last_names: Optional[List[str]] = None,
-        department_names: Optional[List[str]] = None,
-        group_names: Optional[List[str]] = None,
-        comment: Optional[str] = None,
-        selected_employee_ids: Optional[List[str]] = None,
+    token: str,
+    document_id: str,
+    last_names: Optional[List[str]] = None,
+    department_names: Optional[List[str]] = None,
+    group_names: Optional[List[str]] = None,
+    comment: Optional[str] = None,
+    selected_employee_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Создает список ознакомления с документом.
@@ -109,11 +111,13 @@ async def introduction_create_tool(
                         "message": "Не удалось создать ознакомление. Проверьте права доступа или корректность данных.",
                     }
 
-            employee_ids, not_found, ambiguous_results = await service.collect_employees(
-                token=token,
-                last_names=last_names,
-                department_names=department_names,
-                group_names=group_names,
+            employee_ids, not_found, ambiguous_results = (
+                await service.collect_employees(
+                    token=token,
+                    last_names=last_names,
+                    department_names=department_names,
+                    group_names=group_names,
+                )
             )
 
             if ambiguous_results:
@@ -124,7 +128,7 @@ async def introduction_create_tool(
                     "instruction": (
                         "Пожалуйста, выберите конкретных сотрудников из списка. "
                         "Затем вызовите инструмент повторно с параметром selected_employee_ids."
-                    )
+                    ),
                 }
 
             if not employee_ids:

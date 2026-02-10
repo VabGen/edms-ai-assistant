@@ -21,7 +21,7 @@ class PostIntroductionRequest(BaseModel):
     # CRITICAL FIX: Java requires non-null comment, use empty string as default
     comment: str = Field(
         default="",  # ← CHANGED from Optional[str] = None
-        description="Comment for introduction (empty string if not provided)"
+        description="Comment for introduction (empty string if not provided)",
     )
 
     model_config = ConfigDict(
@@ -57,11 +57,11 @@ class IntroductionService:
         await self.group_client.__aexit__(exc_type, exc_val, exc_tb)
 
     async def collect_employees(
-            self,
-            token: str,
-            last_names: Optional[List[str]] = None,
-            department_names: Optional[List[str]] = None,
-            group_names: Optional[List[str]] = None,
+        self,
+        token: str,
+        last_names: Optional[List[str]] = None,
+        department_names: Optional[List[str]] = None,
+        group_names: Optional[List[str]] = None,
     ) -> tuple[Set[UUID], List[str], List[Dict[str, Any]]]:
         found_ids: Set[UUID] = set()
         not_found: List[str] = []
@@ -79,27 +79,42 @@ class IntroductionService:
 
                 elif len(employees) == 1:
                     emp = employees[0]
-                    emp_id = UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    emp_id = (
+                        UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    )
                     found_ids.add(emp_id)
                     logger.debug(f"Found single employee: {last_name} -> {emp_id}")
 
                 else:
                     logger.info(
-                        f"Found {len(employees)} employees with last name '{last_name}' - requires disambiguation")
-                    ambiguous_results.append({
-                        "search_query": last_name,
-                        "matches": [
-                            {
-                                "id": str(emp["id"]),
-                                "full_name": f"{emp.get('lastName', '')} {emp.get('firstName', '')} {emp.get('middleName', '') or ''}".strip(),
-                                "post": emp.get("post", {}).get("postName", "Не указана") if isinstance(emp.get("post"),
-                                                                                                        dict) else "Не указана",
-                                "department": emp.get("department", {}).get("name", "Не указан") if isinstance(
-                                    emp.get("department"), dict) else "Не указан",
-                            }
-                            for emp in employees
-                        ]
-                    })
+                        f"Found {len(employees)} employees with last name '{last_name}' - requires disambiguation"
+                    )
+                    ambiguous_results.append(
+                        {
+                            "search_query": last_name,
+                            "matches": [
+                                {
+                                    "id": str(emp["id"]),
+                                    "full_name": f"{emp.get('lastName', '')} {emp.get('firstName', '')} {emp.get('middleName', '') or ''}".strip(),
+                                    "post": (
+                                        emp.get("post", {}).get(
+                                            "postName", "Не указана"
+                                        )
+                                        if isinstance(emp.get("post"), dict)
+                                        else "Не указана"
+                                    ),
+                                    "department": (
+                                        emp.get("department", {}).get(
+                                            "name", "Не указан"
+                                        )
+                                        if isinstance(emp.get("department"), dict)
+                                        else "Не указан"
+                                    ),
+                                }
+                                for emp in employees
+                            ],
+                        }
+                    )
 
         if department_names:
             for dept_name in department_names:
@@ -109,13 +124,19 @@ class IntroductionService:
                     not_found.append(f"Департамент: {dept_name}")
                     logger.warning(f"Department not found: {dept_name}")
                 else:
-                    dept_id = UUID(dept["id"]) if isinstance(dept["id"], str) else dept["id"]
-                    employees = await self.department_client.get_employees_by_department_id(
-                        token, dept_id
+                    dept_id = (
+                        UUID(dept["id"]) if isinstance(dept["id"], str) else dept["id"]
+                    )
+                    employees = (
+                        await self.department_client.get_employees_by_department_id(
+                            token, dept_id
+                        )
                     )
 
                     for emp in employees:
-                        emp_id = UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                        emp_id = (
+                            UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                        )
                         found_ids.add(emp_id)
 
                     logger.info(
@@ -131,7 +152,11 @@ class IntroductionService:
                     not_found.append(f"Группа: {group_name}")
                     logger.warning(f"Group not found: {group_name}")
                 else:
-                    group_id = UUID(group["id"]) if isinstance(group["id"], str) else group["id"]
+                    group_id = (
+                        UUID(group["id"])
+                        if isinstance(group["id"], str)
+                        else group["id"]
+                    )
                     group_ids.append(group_id)
 
             if group_ids:
@@ -140,19 +165,23 @@ class IntroductionService:
                 )
 
                 for emp in employees:
-                    emp_id = UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    emp_id = (
+                        UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    )
                     found_ids.add(emp_id)
 
-                logger.info(f"Added {len(employees)} employees from {len(group_ids)} groups")
+                logger.info(
+                    f"Added {len(employees)} employees from {len(group_ids)} groups"
+                )
 
         return found_ids, not_found, ambiguous_results
 
     async def create_introduction(
-            self,
-            token: str,
-            document_id: str,
-            employee_ids: List[UUID],
-            comment: Optional[str] = None,
+        self,
+        token: str,
+        document_id: str,
+        employee_ids: List[UUID],
+        comment: Optional[str] = None,
     ) -> bool:
         if not employee_ids:
             logger.warning("No employees to add to introduction")
@@ -166,12 +195,13 @@ class IntroductionService:
             comment = ""
 
         if comment and comment.strip():
-            comment = comment[0].upper() + comment[1:] if len(comment) > 1 else comment.upper()
+            comment = (
+                comment[0].upper() + comment[1:]
+                if len(comment) > 1
+                else comment.upper()
+            )
 
-        request = PostIntroductionRequest(
-            executorListIds=employee_ids,
-            comment=comment
-        )
+        request = PostIntroductionRequest(executorListIds=employee_ids, comment=comment)
 
         try:
             async with EdmsHttpClient() as client:
@@ -180,9 +210,7 @@ class IntroductionService:
                 payload = request.model_dump(mode="json")
                 logger.debug(f"Introduction request payload: {payload}")
 
-                await client._make_request(
-                    "POST", endpoint, token=token, json=payload
-                )
+                await client._make_request("POST", endpoint, token=token, json=payload)
 
             logger.info(
                 f"Successfully created introduction for {len(employee_ids)} employees"

@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 class BaseGroupClient(EdmsBaseClient):
 
     @abstractmethod
-    async def find_by_name(self, token: str, group_name: str) -> Optional[Dict[str, Any]]:
+    async def find_by_name(
+        self, token: str, group_name: str
+    ) -> Optional[Dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -61,7 +63,9 @@ class GroupClient(BaseGroupClient, EdmsHttpClient):
                     if isinstance(item, dict) and "employee" in item:
                         employees.append(item["employee"])
 
-                logger.info(f"Found {len(employees)} employees in {len(group_ids)} groups")
+                logger.info(
+                    f"Found {len(employees)} employees in {len(group_ids)} groups"
+                )
                 return employees
             return []
         except Exception as e:

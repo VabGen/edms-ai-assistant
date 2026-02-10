@@ -1,7 +1,7 @@
 # edms_ai_assistant/tools/task.py
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
@@ -45,16 +45,16 @@ class TaskCreateInput(BaseModel):
 
 @tool("task_create_tool", args_schema=TaskCreateInput)
 async def task_create_tool(
-        token: str,
-        document_id: str,
-        task_text: str,
-        executor_last_names: List[str],
-        responsible_last_name: Optional[str] = None,
-        planed_date_end: Optional[str] = None,
-        task_type: Optional[TaskType] = TaskType.GENERAL,
+    token: str,
+    document_id: str,
+    task_text: str,
+    executor_last_names: List[str],
+    responsible_last_name: Optional[str] = None,
+    planed_date_end: Optional[str] = None,
+    task_type: Optional[TaskType] = TaskType.GENERAL,
 ) -> Dict[str, Any]:
     """
-        Создает новую задачу в системе на основании данных документа.
+    Создает новую задачу в системе на основании данных документа.
     """
     logger.info(
         f"[TASK-TOOL] Creating task for document {document_id}. "

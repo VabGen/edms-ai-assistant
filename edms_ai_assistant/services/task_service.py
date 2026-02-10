@@ -130,7 +130,8 @@ class TaskService:
 
         if not executor_last_names:
             return TaskCreationResult(
-                success=False, error_message="Необходимо указать хотя бы одного исполнителя."
+                success=False,
+                error_message="Необходимо указать хотя бы одного исполнителя.",
             )
 
         if not task_text or not task_text.strip():
@@ -163,7 +164,9 @@ class TaskService:
             planed_date_end = planed_date_end.replace(tzinfo=timezone.utc)
 
         task_text_formatted = (
-            task_text[0].upper() + task_text[1:] if len(task_text) > 1 else task_text.upper()
+            task_text[0].upper() + task_text[1:]
+            if len(task_text) > 1
+            else task_text.upper()
         )
 
         task_request = CreateTaskRequest(
