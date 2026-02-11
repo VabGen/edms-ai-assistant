@@ -1,4 +1,4 @@
-# edms_ai_assistant/services/introduction_service.py (FIXED VERSION)
+# edms_ai_assistant/services/introduction_service.py
 import logging
 from typing import List, Dict, Any, Optional, Set
 from uuid import UUID
@@ -18,9 +18,8 @@ class PostIntroductionRequest(BaseModel):
     executorListIds: List[UUID] = Field(
         ..., description="List of employee UUIDs to add to introduction"
     )
-    # CRITICAL FIX: Java requires non-null comment, use empty string as default
     comment: str = Field(
-        default="",  # ← CHANGED from Optional[str] = None
+        default="",
         description="Comment for introduction (empty string if not provided)",
     )
 

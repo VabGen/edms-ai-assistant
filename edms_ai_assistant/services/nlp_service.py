@@ -581,6 +581,10 @@ class SemanticDispatcher:
             "primary": ["проанализируй", "подробно", "детали"],
             "secondary": ["разбор", "структура"],
         },
+        UserIntent.QUESTION: {
+            "primary": ["какая", "какой", "сколько", "когда", "почему"],
+            "secondary": ["расскажи", "объясни", "что"],
+        },
     }
 
     def __init__(self):
@@ -632,9 +636,8 @@ class SemanticDispatcher:
         ]
 
         # Уверенность: нормализуем от 0 до 1
-        max_possible_score = len(
-            self.INTENT_KEYWORDS[primary_intent]["primary"]
-        ) * 2 + len(self.INTENT_KEYWORDS[primary_intent]["secondary"])
+        intent_keywords = self.INTENT_KEYWORDS.get(primary_intent, {})
+        max_possible_score = len(intent_keywords.get("primary", [])) * 2 + len(intent_keywords.get("secondary", []))
         confidence = min(primary_score / max(max_possible_score, 1), 1.0)
 
         # Если несколько намерений с высоким score — композитное
@@ -1152,17 +1155,18 @@ class EDMSNaturalLanguageService:
 
             # 6.1 ДОГОВОРЫ
             if getattr(doc, "contractNumber", None) or category == "CONTRACT":
+                currency_code = self.get_safe(doc, "currency.code", "BYN")
                 specialized["договор"] = {
                     "номер": getattr(doc, "contractNumber", None),
                     "дата": self.format_date(getattr(doc, "contractDate", None)),
                     "сумма": (
-                        f"{doc.contractSum} {self.get_safe(doc, 'currency.currencyName', 'BYN')}"
-                        if getattr(doc, "contractSum", None)
+                        f"{doc.contractSum} {currency_code}"
+                        if getattr(doc, "contractSum", None) is not None
                         else None
                     ),
                     "валюта_id": (
                         str(doc.currencyId)
-                        if getattr(doc, "currencyId", None)
+                        if getattr(doc, "currencyId", None) is not None
                         else None
                     ),
                     "дата_подписания": self.format_date(
@@ -1232,27 +1236,29 @@ class EDMSNaturalLanguageService:
                 }
 
             # 6.3 ОБРАЩЕНИЯ
-            if getattr(doc, "documentAppeal", None):
-                app = doc.documentAppeal
-                specialized["обращение"] = {
-                    "заявитель": getattr(app, "fioApplicant", None),
-                    "тип": (
-                        "Коллективное"
-                        if getattr(app, "collective", False)
-                        else "Индивидуальное"
-                    ),
-                    "адрес": f"{getattr(app, 'regionName', None) or ''}, {getattr(app, 'cityName', None) or ''}, {getattr(app, 'fullAddress', None) or ''}".strip(
-                        ", "
-                    ),
-                    "тематика": self.get_safe(app, "subject.name"),
-                    "результат_решения": self.get_safe(app, "solutionResult.name"),
-                    "дата_поступления": self.format_date(
-                        self.get_safe(app, "receiptDate")
-                    ),
-                    "срок_рассмотрения": self.format_date(
-                        self.get_safe(app, "considerationDeadline")
-                    ),
-                }
+            if category == "APPEAL":
+                app = getattr(doc, "documentAppeal", None)
+                if app and (getattr(app, "fioApplicant", None) or getattr(app, "organizationName", None)):
+                    specialized["обращение"] = {
+                        "заявитель": getattr(app, "fioApplicant", None),
+                        "организация": getattr(app, "organizationName", None),
+                        "тип": (
+                            "Коллективное"
+                            if getattr(app, "collective", False)
+                            else "Индивидуальное"
+                        ),
+                        "адрес": f"{getattr(app, 'regionName', None) or ''}, {getattr(app, 'cityName', None) or ''}, {getattr(app, 'fullAddress', None) or ''}".strip(
+                            ", "
+                        ),
+                        "тематика": self.get_safe(app, "subject.name"),
+                        "результат_решения": self.get_safe(app, "solutionResult.name"),
+                        "дата_поступления": self.format_date(
+                            self.get_safe(app, "receiptDate")
+                        ),
+                        "срок_рассмотрения": self.format_date(
+                            self.get_safe(app, "considerationDeadline")
+                        ),
+                    }
 
             # ========== 7. ПОРУЧЕНИЯ И ЗАДАЧИ ==========
             tasks_info = {

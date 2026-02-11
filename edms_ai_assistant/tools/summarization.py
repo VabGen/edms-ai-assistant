@@ -49,10 +49,11 @@ async def doc_summarize_text(
             pass
 
     if summary_type is None:
+        logger.info("[SUMMARIZE] summary_type не указан - возвращаем requires_choice")
         analysis = nlp.suggest_summarize_format(clean_text)
         return {
             "status": "requires_choice",
-            "message": "Выберите формат анализа документа.",
+            "message": "Выберите формат анализа документа:",
             "suggestion": analysis,
         }
 
