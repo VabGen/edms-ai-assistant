@@ -122,52 +122,206 @@ class ReferenceClient(EdmsHttpClient):
     ) -> Optional[Dict[str, Any]]:
         """
         Поиск города с автоматическим извлечением региона/района.
-        """
-        result = await self._make_request(
-            "GET", f"api/city/fts-name", token=token, params={"fts": city_name.strip()}
-        )
 
-        if not result:
+        Workflow:
+        1. FTS поиск города → получаем ID
+        2. GET /api/city/{id}?district=true → получаем city + embedded district
+        3. district.regionId → GET /api/region/{id} → получаем область
+
+        Returns:
+            Dict: {id, name, regionId, regionName, districtId, districtName}
+        """
+        logger.info(f"[REFERENCE-CLIENT] 🔍 Finding city with hierarchy: '{city_name}'")
+
+        # ШАГ 1: FTS поиск города
+        try:
+            fts_result = await self._make_request(
+                "GET",
+                "api/city/fts-name",
+                token=token,
+                params={"fts": city_name.strip()},
+            )
+
+            if not fts_result:
+                logger.warning(
+                    f"[REFERENCE-CLIENT] ⚠️ City not found via FTS: '{city_name}'"
+                )
+                return None
+
+            fts_city = fts_result[0] if isinstance(fts_result, list) else fts_result
+            city_id = str(fts_city.get("id"))
+
+            logger.debug(f"[REFERENCE-CLIENT] City FTS result: ID={city_id}")
+
+        except Exception as e:
+            logger.error(
+                f"[REFERENCE-CLIENT] City FTS search error: {e}", exc_info=True
+            )
             return None
 
-        city_dto = result[0] if isinstance(result, list) else result
+        # ШАГ 2: Получаем ПОЛНЫЕ данные города с district И region
+        try:
+            logger.debug(
+                f"[REFERENCE-CLIENT] 📡 Fetching city data: GET /api/city/{city_id}?district=true"
+            )
 
+            city_dto = await self._make_request(
+                "GET",
+                f"api/city/{city_id}",
+                token=token,
+                params={"district": "true"},  # Загружаем district с region
+            )
+
+            if not city_dto:
+                logger.warning(
+                    f"[REFERENCE-CLIENT] City GET returned empty: {city_id}"
+                )
+                return None
+
+            logger.debug(f"[REFERENCE-CLIENT] City DTO keys: {list(city_dto.keys())}")
+
+        except Exception as e:
+            logger.error(f"[REFERENCE-CLIENT] City GET error: {e}", exc_info=True)
+            return None
+
+        # ШАГ 3: Формируем базовый response (API использует nameCity!)
         response = {
-            "id": str(city_dto.get("id")),
-            "name": city_dto.get("cityName") or city_dto.get("name") or city_name,
+            "id": city_id,
+            "name": city_dto.get("nameCity") or city_dto.get("cityName") or city_name,
         }
 
-        region_id = city_dto.get("regionId")
-        if region_id:
-            try:
-                region_dto = await self._make_request(
-                    "GET", f"api/region/{region_id}", token=token
-                )
-                response["regionId"] = str(region_id)
-                response["regionName"] = region_dto.get("regionName") or region_dto.get(
-                    "name"
-                )
-                logger.info(
-                    f"[REFERENCE-CLIENT] Регион для '{city_name}': {response['regionName']}"
-                )
-            except Exception as e:
-                logger.warning(f"[REFERENCE-CLIENT] Не удалось получить регион: {e}")
-
+        # ШАГ 4: Извлекаем DISTRICT и REGION
         district_id = city_dto.get("districtId")
+        district_obj = city_dto.get("district")
+
         if district_id:
             try:
-                district_dto = await self._make_request(
-                    "GET", f"api/district/{district_id}", token=token
-                )
-                response["districtId"] = str(district_id)
-                response["districtName"] = district_dto.get(
-                    "districtName"
-                ) or district_dto.get("name")
-                logger.info(
-                    f"[REFERENCE-CLIENT] Район для '{city_name}': {response['districtName']}"
-                )
+                # Если district уже загружен как объект - используем его
+                if district_obj and isinstance(district_obj, dict):
+                    response["districtId"] = str(district_id)
+                    response["districtName"] = (
+                        district_obj.get("nameDistrict")
+                        or district_obj.get("districtName")
+                        or district_obj.get("name")
+                    )
+                    logger.info(
+                        f"[REFERENCE-CLIENT] District from embedded object: "
+                        f"{response['districtName']} (ID: {district_id})"
+                    )
+
+                    # Получаем REGION из district (может быть объект или ID)
+                    district_region_obj = district_obj.get(
+                        "region"
+                    )  # Embedded region object?
+                    district_region_id = district_obj.get("regionId")
+
+                    if district_region_obj and isinstance(district_region_obj, dict):
+                        # Region уже загружен как объект внутри district
+                        response["regionId"] = str(district_region_obj.get("id"))
+                        response["regionName"] = district_region_obj.get(
+                            "regionName"
+                        ) or district_region_obj.get("name")
+                        logger.info(
+                            f"[REFERENCE-CLIENT] Region from district.region embedded object: "
+                            f"{response['regionName']} (ID: {response['regionId']})"
+                        )
+                    elif district_region_id:
+                        # Fallback: запрашиваем region
+                        response["regionId"] = str(district_region_id)
+
+                        # Делаем запрос на получение полного имени региона
+                        try:
+                            region_dto = await self._make_request(
+                                "GET", f"api/region/{district_region_id}", token=token
+                            )
+                            if region_dto:
+                                response["regionName"] = region_dto.get(
+                                    "regionName"
+                                ) or region_dto.get("name")
+                                logger.info(
+                                    f"[REFERENCE-CLIENT] Region via fallback request: "
+                                    f"{response['regionName']} (ID: {district_region_id})"
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                f"[REFERENCE-CLIENT] ️ Failed to fetch region: {e}"
+                            )
+                else:
+                    # Fallback: делаем отдельный запрос на district С REGION
+                    logger.debug(
+                        f"[REFERENCE-CLIENT] 📡 Fetching district with region: GET /api/district/{district_id}?region=true"
+                    )
+
+                    district_dto = await self._make_request(
+                        "GET",
+                        f"api/district/{district_id}",
+                        token=token,
+                        params={"region": "true"},
+                    )
+
+                    if district_dto:
+                        response["districtId"] = str(district_id)
+                        response["districtName"] = (
+                            district_dto.get("nameDistrict")
+                            or district_dto.get("districtName")
+                            or district_dto.get("name")
+                        )
+                        logger.info(
+                            f"[REFERENCE-CLIENT] District via separate request: "
+                            f"{response['districtName']} (ID: {district_id})"
+                        )
+
+                        # Получаем REGION из district (может быть объект или ID)
+                        district_region_obj = district_dto.get(
+                            "region"
+                        )  # Embedded object?
+                        district_region_id = district_dto.get("regionId")
+
+                        if district_region_obj and isinstance(
+                            district_region_obj, dict
+                        ):
+                            # Region уже загружен как объект
+                            response["regionId"] = str(district_region_obj.get("id"))
+                            response["regionName"] = district_region_obj.get(
+                                "regionName"
+                            ) or district_region_obj.get("name")
+                            logger.info(
+                                f"[REFERENCE-CLIENT] ✅ Region from district.region embedded object: "
+                                f"{response['regionName']} (ID: {response['regionId']})"
+                            )
+                        elif district_region_id:
+                            # Fallback: запрашиваем region отдельно
+                            response["regionId"] = str(district_region_id)
+                            try:
+                                region_dto = await self._make_request(
+                                    "GET",
+                                    f"api/region/{district_region_id}",
+                                    token=token,
+                                )
+                                if region_dto:
+                                    response["regionName"] = region_dto.get(
+                                        "regionName"
+                                    ) or region_dto.get("name")
+                                    logger.info(
+                                        f"[REFERENCE-CLIENT] ✅ Region via fallback request: "
+                                        f"{response['regionName']} (ID: {district_region_id})"
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    f"[REFERENCE-CLIENT] ⚠️ Failed to fetch region: {e}"
+                                )
+
             except Exception as e:
-                logger.warning(f"[REFERENCE-CLIENT] Не удалось получить район: {e}")
+                logger.warning(f"[REFERENCE-CLIENT] ⚠️ District resolution error: {e}")
+        else:
+            logger.debug(f"[REFERENCE-CLIENT] ℹ️ City has no districtId")
+
+        logger.info(
+            f"[REFERENCE-CLIENT] ✅ City hierarchy complete: "
+            f"city={response.get('name')}, "
+            f"region={response.get('regionName', 'N/A')}, "
+            f"district={response.get('districtName', 'N/A')}"
+        )
 
         return response
 

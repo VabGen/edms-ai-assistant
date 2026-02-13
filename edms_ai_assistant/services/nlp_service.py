@@ -637,7 +637,9 @@ class SemanticDispatcher:
 
         # Уверенность: нормализуем от 0 до 1
         intent_keywords = self.INTENT_KEYWORDS.get(primary_intent, {})
-        max_possible_score = len(intent_keywords.get("primary", [])) * 2 + len(intent_keywords.get("secondary", []))
+        max_possible_score = len(intent_keywords.get("primary", [])) * 2 + len(
+            intent_keywords.get("secondary", [])
+        )
         confidence = min(primary_score / max(max_possible_score, 1), 1.0)
 
         # Если несколько намерений с высоким score — композитное
@@ -1238,7 +1240,10 @@ class EDMSNaturalLanguageService:
             # 6.3 ОБРАЩЕНИЯ
             if category == "APPEAL":
                 app = getattr(doc, "documentAppeal", None)
-                if app and (getattr(app, "fioApplicant", None) or getattr(app, "organizationName", None)):
+                if app and (
+                    getattr(app, "fioApplicant", None)
+                    or getattr(app, "organizationName", None)
+                ):
                     specialized["обращение"] = {
                         "заявитель": getattr(app, "fioApplicant", None),
                         "организация": getattr(app, "organizationName", None),

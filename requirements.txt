@@ -11,6 +11,8 @@ jsonpath-ng==1.7.0
 typing-extensions==4.15.0
 pypdf2==3.0.1
 docx2txt==0.9
+openpyxl==3.1.5
+xlrd==2.0.2
 langgraph-prebuilt==1.0.5
 httpx
 
