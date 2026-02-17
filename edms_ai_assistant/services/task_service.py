@@ -1,291 +1,155 @@
+# edms_ai_assistant/services/task_service.py
 """
-EDMS AI Assistant - Task Service.
+Task Service with Disambiguation Support.
 """
 import logging
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple, Dict, Any
 from uuid import UUID
+from datetime import datetime, timezone, timedelta
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.clients.task_client import TaskClient
 from edms_ai_assistant.models.task_models import (
     CreateTaskRequest,
     CreateTaskRequestExecutor,
-    TaskCreationResult,
     TaskType,
+    TaskCreationResult,
 )
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ExecutorResolutionResult:
-    """Immutable результат резолвинга исполнителей."""
-
-    executors: List[CreateTaskRequestExecutor]
-    not_found: List[str]
-
-
 class TaskService:
     """
-    Сервисный слой для управления поручениями к документам.
-
-    Responsibilities:
-    - Резолвинг исполнителей по фамилиям
-    - Назначение ответственного исполнителя
-    - Обработка дубликатов
-    - Создание поручений через API
-    - Валидация и нормализация данных
-
-    Бизнес-правила:
-    - Если ответственный не указан → первый исполнитель становится ответственным
-    - Если срок не указан → +7 дней от текущей даты
-    - Дубликаты исполнителей удаляются автоматически
-    - Текст поручения капитализируется
+    Service for managing document tasks (поручения) with Disambiguation.
     """
 
-    DEFAULT_DEADLINE_DAYS = 7
-
     def __init__(self):
-        """Инициализация с созданием клиентов для внешних API."""
         self.employee_client = EmployeeClient()
         self.task_client = TaskClient()
 
     async def __aenter__(self):
-        """Async context manager entry."""
         await self.employee_client.__aenter__()
         await self.task_client.__aenter__()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit с корректным закрытием клиентов."""
         await self.employee_client.__aexit__(exc_type, exc_val, exc_tb)
         await self.task_client.__aexit__(exc_type, exc_val, exc_tb)
 
-    async def create_task(
+    async def collect_executors(
         self,
         token: str,
-        document_id: str,
-        task_text: str,
-        executor_last_names: List[str],
-        planed_date_end: Optional[datetime] = None,
+        last_names: List[str],
         responsible_last_name: Optional[str] = None,
-        task_type: TaskType = TaskType.GENERAL,
-    ) -> TaskCreationResult:
+    ) -> Tuple[
+        Optional[List[CreateTaskRequestExecutor]], List[str], List[Dict[str, Any]]
+    ]:
         """
-        Создает поручение к документу с назначением исполнителей.
-
-        Args:
-            token: JWT токен авторизации
-            document_id: UUID документа
-            task_text: Текст поручения
-            executor_last_names: Список фамилий исполнителей
-            planed_date_end: Срок выполнения (опционально, default: +7 дней)
-            responsible_last_name: Фамилия ответственного (опционально)
-            task_type: Тип поручения
+        Собирает исполнителей с проверкой на неоднозначность.
 
         Returns:
-            TaskCreationResult с информацией об успехе операции
-        """
-        if not executor_last_names:
-            return TaskCreationResult(
-                success=False,
-                error_message="Необходимо указать хотя бы одного исполнителя.",
-            )
-
-        task_text_cleaned = task_text.strip()
-        if not task_text_cleaned:
-            return TaskCreationResult(
-                success=False, error_message="Текст поручения не может быть пустым."
-            )
-
-        resolution_result = await self._resolve_executors(
-            token=token,
-            executor_last_names=executor_last_names,
-            responsible_last_name=responsible_last_name,
-        )
-
-        if resolution_result.not_found:
-            return TaskCreationResult(
-                success=False,
-                error_message=f"❌ Не найдены сотрудники: {', '.join(resolution_result.not_found)}",
-                not_found_employees=resolution_result.not_found,
-            )
-
-        if not resolution_result.executors:
-            return TaskCreationResult(
-                success=False,
-                error_message="Не удалось найти ни одного исполнителя.",
-            )
-
-        deadline = self._prepare_deadline(planed_date_end)
-        normalized_text = self._normalize_task_text(task_text_cleaned)
-
-        task_request = CreateTaskRequest(
-            taskText=normalized_text,
-            planedDateEnd=deadline,
-            type=task_type,
-            periodTask=False,
-            endless=False,
-            executors=resolution_result.executors,
-        )
-
-        logger.info(
-            "Creating task via API",
-            extra={
-                "document_id": document_id,
-                "executors_count": len(resolution_result.executors),
-                "deadline": deadline.isoformat(),
-            },
-        )
-
-        success = await self.task_client.create_tasks_batch(
-            token, document_id, [task_request]
-        )
-
-        if success:
-            logger.info(
-                "Task created successfully",
-                extra={"document_id": document_id},
-            )
-            return TaskCreationResult(success=True, created_count=1)
-
-        logger.error(
-            "Failed to create task via API",
-            extra={"document_id": document_id},
-        )
-        return TaskCreationResult(
-            success=False,
-            error_message=(
-                "❌ Не удалось создать поручение. "
-                "Проверьте права доступа или корректность данных."
-            ),
-        )
-
-    async def _resolve_executors(
-        self,
-        token: str,
-        executor_last_names: List[str],
-        responsible_last_name: Optional[str],
-    ) -> ExecutorResolutionResult:
-        """
-        Резолвит исполнителей по фамилиям с обработкой дубликатов.
-
-        Strategy:
-        1. Поиск всех исполнителей по фамилиям
-        2. Поиск ответственного исполнителя (если указан)
-        3. Удаление дубликатов
-        4. Назначение флага responsible
-
-        Returns:
-            ExecutorResolutionResult с найденными исполнителями
+            Tuple из:
+            - executors: Список исполнителей (или None если ambiguous)
+            - not_found: Список не найденных фамилий
+            - ambiguous_results: Список неоднозначных совпадений
         """
         found_employees = []
         not_found = []
+        ambiguous_results = []  # ← ДОБАВЛЕНО!
 
-        for last_name in executor_last_names:
-            employee = await self._find_employee_by_last_name(token, last_name)
+        for last_name in last_names:
+            # Пробуем FTS поиск
+            employee = await self.employee_client.find_by_last_name_fts(
+                token, last_name
+            )
 
-            if employee:
-                found_employees.append(employee)
-            else:
-                not_found.append(last_name)
-                logger.warning(
-                    f"Employee not found: {last_name}",
-                    extra={"last_name": last_name},
+            # Если FTS не нашел → полный поиск
+            if not employee:
+                employees = await self.employee_client.search_employees(
+                    token, {"lastName": last_name, "includes": ["POST", "DEPARTMENT"]}
                 )
 
-        if not_found:
-            return ExecutorResolutionResult(executors=[], not_found=not_found)
+                if not employees:
+                    not_found.append(last_name)
+                    logger.warning(f"[TASK-SERVICE] Employee not found: {last_name}")
+                    continue
 
+                # ═══════════════════════════════════════════════════════
+                # КРИТИЧЕСКАЯ ПРОВЕРКА
+                # ═══════════════════════════════════════════════════════
+                if len(employees) > 1:
+                    logger.info(
+                        f"[TASK-SERVICE] Found {len(employees)} employees with last name '{last_name}' - requires disambiguation"
+                    )
+
+                    # ФОРМИРУЕМ СПИСОК ДЛЯ ВЫБОРА
+                    ambiguous_results.append(
+                        {
+                            "search_query": last_name,
+                            "matches": [
+                                {
+                                    "id": str(emp["id"]),
+                                    "full_name": (
+                                        f"{emp.get('lastName', '')} "
+                                        f"{emp.get('firstName', '')} "
+                                        f"{emp.get('middleName', '') or ''}"
+                                    ).strip(),
+                                    "post": (
+                                        emp.get("post", {}).get(
+                                            "postName", "Не указана"
+                                        )
+                                        if isinstance(emp.get("post"), dict)
+                                        else "Не указана"
+                                    ),
+                                    "department": (
+                                        emp.get("department", {}).get(
+                                            "name", "Не указан"
+                                        )
+                                        if isinstance(emp.get("department"), dict)
+                                        else "Не указан"
+                                    ),
+                                }
+                                for emp in employees
+                            ],
+                        }
+                    )
+                    continue  # ← НЕ добавляем в found_employees!
+
+                # Только одно совпадение → OK
+                employee = employees[0]
+                logger.debug(
+                    f"[TASK-SERVICE] Found single employee: {last_name} -> {employee.get('id')}"
+                )
+
+            found_employees.append(employee)
+
+        # ═══════════════════════════════════════════════════════
+        # ЕСЛИ ЕСТЬ НЕОДНОЗНАЧНОСТИ → ВОЗВРАЩАЕМ ДЛЯ ВЫБОРА!
+        # ═══════════════════════════════════════════════════════
+        if ambiguous_results:
+            return None, not_found, ambiguous_results
+
+        # Если никто не найден
+        if not found_employees:
+            return None, not_found, []
+
+        # ═══════════════════════════════════════════════════════
+        # ВСЕ НАЙДЕНЫ ОДНОЗНАЧНО → ФОРМИРУЕМ EXECUTORS
+        # ═══════════════════════════════════════════════════════
         responsible_employee = None
         if responsible_last_name:
-            responsible_employee = await self._find_employee_by_last_name(
+            responsible_employee = await self.employee_client.find_by_last_name_fts(
                 token, responsible_last_name
             )
 
             if not responsible_employee:
                 logger.warning(
-                    f"Responsible employee '{responsible_last_name}' not found, "
+                    f"[TASK-SERVICE] Responsible employee '{responsible_last_name}' not found, "
                     f"will use first executor as responsible"
                 )
 
-        executors = self._build_executor_list(
-            found_employees=found_employees,
-            responsible_employee=responsible_employee,
-        )
-
-        logger.info(
-            "Executors resolved",
-            extra={
-                "total_count": len(executors),
-                "has_responsible": any(e.responsible for e in executors),
-            },
-        )
-
-        return ExecutorResolutionResult(executors=executors, not_found=[])
-
-    async def _find_employee_by_last_name(
-        self, token: str, last_name: str
-    ) -> Optional[dict]:
-        """
-        Поиск сотрудника по фамилии с fallback стратегией.
-
-        Strategy:
-        1. FTS поиск (быстрый, точный)
-        2. Fallback на обычный поиск
-        3. При множественных совпадениях → первый результат + warning
-
-        Returns:
-            Dict с данными сотрудника или None
-        """
-        employee = await self.employee_client.find_by_last_name_fts(token, last_name)
-
-        if employee:
-            return employee
-
-        employees = await self.employee_client.search_employees(
-            token, {"lastName": last_name}
-        )
-
-        if not employees:
-            return None
-
-        if len(employees) > 1:
-            logger.info(
-                f"Multiple employees found for '{last_name}', using first match",
-                extra={
-                    "last_name": last_name,
-                    "matches_count": len(employees),
-                    "selected": f"{employees[0].get('firstName', '')} {employees[0].get('lastName', '')}",
-                },
-            )
-
-        return employees[0]
-
-    @staticmethod
-    def _build_executor_list(
-        found_employees: List[dict],
-        responsible_employee: Optional[dict],
-    ) -> List[CreateTaskRequestExecutor]:
-        """
-        Строит список исполнителей с удалением дубликатов и назначением ответственного.
-
-        Логика:
-        1. Если есть responsible_employee → он первый в списке с флагом responsible=True
-        2. Остальные исполнители добавляются с флагом responsible=False
-        3. Если responsible_employee не найден → первый исполнитель становится ответственным
-        4. Дубликаты удаляются через Set[UUID]
-
-        Args:
-            found_employees: Найденные сотрудники-исполнители
-            responsible_employee: Назначенный ответственный (опционально)
-
-        Returns:
-            Список CreateTaskRequestExecutor без дубликатов
-        """
-        executors: List[CreateTaskRequestExecutor] = []
+        executors = []
         seen_ids: Set[UUID] = set()
 
         if responsible_employee:
@@ -294,7 +158,6 @@ class TaskService:
                 if isinstance(responsible_employee["id"], str)
                 else responsible_employee["id"]
             )
-
             executors.append(
                 CreateTaskRequestExecutor(employeeId=resp_id, responsible=True)
             )
@@ -313,52 +176,219 @@ class TaskService:
             )
             seen_ids.add(emp_id)
 
-        return executors
+        return executors, not_found, []
 
-    @classmethod
-    def _prepare_deadline(cls, planed_date_end: Optional[datetime]) -> datetime:
+    async def create_task(
+        self,
+        token: str,
+        document_id: str,
+        task_text: str,
+        executor_last_names: List[str],
+        planed_date_end: Optional[datetime] = None,
+        responsible_last_name: Optional[str] = None,
+        task_type: TaskType = TaskType.GENERAL,
+    ) -> TaskCreationResult:
         """
-        Подготавливает deadline с обработкой timezone и default значения.
-
-        Rules:
-        - Если не указан → +7 дней от текущей даты
-        - Если указан без timezone → добавляется UTC
-        - Всегда возвращает datetime с timezone
-
-        Args:
-            planed_date_end: Опциональная дата окончания
+        Создает поручение с проверкой на неоднозначность.
 
         Returns:
-            datetime с UTC timezone
+            TaskCreationResult с одним из статусов:
+            - "success" - поручение создано
+            - "requires_disambiguation" - нужен выбор из списка
+            - "error" - ошибка
         """
-        if not planed_date_end:
-            return datetime.now(timezone.utc) + timedelta(
-                days=cls.DEFAULT_DEADLINE_DAYS
+        logger.info(f"[TASK-SERVICE] Creating task. Executors: {executor_last_names}")
+
+        if not executor_last_names:
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message="Необходимо указать хотя бы одного исполнителя.",
             )
 
-        if planed_date_end.tzinfo is None:
-            return planed_date_end.replace(tzinfo=timezone.utc)
+        if not task_text or not task_text.strip():
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message="Текст поручения не может быть пустым.",
+            )
 
-        return planed_date_end
+        # ═══════════════════════════════════════════════════════
+        # СБОР ИСПОЛНИТЕЛЕЙ С ПРОВЕРКОЙ НЕОДНОЗНАЧНОСТИ
+        # ═══════════════════════════════════════════════════════
+        executors, not_found, ambiguous_results = await self.collect_executors(
+            token, executor_last_names, responsible_last_name
+        )
 
-    @staticmethod
-    def _normalize_task_text(task_text: str) -> str:
+        # НЕОДНОЗНАЧНОСТЬ ОБНАРУЖЕНА!
+        if ambiguous_results:
+            logger.info(
+                f"[TASK-SERVICE] Disambiguation required. "
+                f"Ambiguous: {len(ambiguous_results)}, Not found: {len(not_found)}"
+            )
+
+            return TaskCreationResult(
+                success=False,
+                status="requires_disambiguation",
+                ambiguous_matches=ambiguous_results,
+                not_found_employees=not_found if not_found else [],
+            )
+
+        # Никто не найден
+        if not executors:
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message=f"Не найдены сотрудники: {', '.join(not_found)}",
+                not_found_employees=not_found,
+            )
+
+        # ═══════════════════════════════════════════════════════
+        # ВСЕ НАЙДЕНЫ ОДНОЗНАЧНО → СОЗДАЕМ ПОРУЧЕНИЕ
+        # ═══════════════════════════════════════════════════════
+
+        # Устанавливаем дедлайн
+        if not planed_date_end:
+            planed_date_end = datetime.now(timezone.utc) + timedelta(days=7)
+        elif planed_date_end.tzinfo is None:
+            planed_date_end = planed_date_end.replace(tzinfo=timezone.utc)
+
+        # Форматируем текст
+        task_text_formatted = (
+            task_text[0].upper() + task_text[1:]
+            if len(task_text) > 1
+            else task_text.upper()
+        )
+
+        task_request = CreateTaskRequest(
+            taskText=task_text_formatted,
+            planedDateEnd=planed_date_end,
+            type=task_type,
+            periodTask=False,
+            endless=False,
+            executors=executors,
+        )
+
+        try:
+            success = await self.task_client.create_tasks_batch(
+                token, document_id, [task_request]
+            )
+
+            if success:
+                logger.info(
+                    f"[TASK-SERVICE] Task created successfully. Executors: {len(executors)}"
+                )
+                return TaskCreationResult(
+                    success=True,
+                    status="success",
+                    created_count=1,
+                )
+            else:
+                return TaskCreationResult(
+                    success=False,
+                    status="error",
+                    error_message=(
+                        "Не удалось создать поручение. "
+                        "Проверьте права доступа или корректность данных."
+                    ),
+                )
+
+        except Exception as e:
+            logger.error(f"[TASK-SERVICE] Task creation failed: {e}", exc_info=True)
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message=f"Ошибка создания поручения: {str(e)}",
+            )
+
+    async def create_task_by_employee_ids(
+        self,
+        token: str,
+        document_id: str,
+        task_text: str,
+        employee_ids: List[UUID],
+        planed_date_end: Optional[datetime] = None,
+        responsible_employee_id: Optional[UUID] = None,
+        task_type: TaskType = TaskType.GENERAL,
+    ) -> TaskCreationResult:
         """
-        Нормализует текст поручения.
+        Создает поручение для конкретных сотрудников (по UUID).
 
-        Rules:
-        - Капитализация первой буквы
-        - Удаление лишних пробелов
-
-        Args:
-            task_text: Исходный текст
-
-        Returns:
-            Нормализованный текст
+        Используется ПОСЛЕ выбора пользователем из списка.
         """
-        cleaned = task_text.strip()
+        logger.info(
+            f"[TASK-SERVICE] Creating task with pre-selected employees: {len(employee_ids)}"
+        )
 
-        if len(cleaned) > 1:
-            return cleaned[0].upper() + cleaned[1:]
+        if not employee_ids:
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message="Необходимо указать хотя бы одного исполнителя.",
+            )
 
-        return cleaned.upper()
+        # Определяем ответственного
+        responsible_id = responsible_employee_id or employee_ids[0]
+
+        # Формируем список исполнителей
+        executors = []
+        seen_ids: Set[UUID] = set()
+
+        for emp_id in employee_ids:
+            if emp_id in seen_ids:
+                continue
+
+            executors.append(
+                CreateTaskRequestExecutor(
+                    employeeId=emp_id, responsible=(emp_id == responsible_id)
+                )
+            )
+            seen_ids.add(emp_id)
+
+        # Устанавливаем дедлайн
+        if not planed_date_end:
+            planed_date_end = datetime.now(timezone.utc) + timedelta(days=7)
+        elif planed_date_end.tzinfo is None:
+            planed_date_end = planed_date_end.replace(tzinfo=timezone.utc)
+
+        # Форматируем текст
+        task_text_formatted = (
+            task_text[0].upper() + task_text[1:]
+            if len(task_text) > 1
+            else task_text.upper()
+        )
+
+        task_request = CreateTaskRequest(
+            taskText=task_text_formatted,
+            planedDateEnd=planed_date_end,
+            type=task_type,
+            periodTask=False,
+            endless=False,
+            executors=executors,
+        )
+
+        try:
+            success = await self.task_client.create_tasks_batch(
+                token, document_id, [task_request]
+            )
+
+            if success:
+                return TaskCreationResult(
+                    success=True,
+                    status="success",
+                    created_count=1,
+                )
+            else:
+                return TaskCreationResult(
+                    success=False,
+                    status="error",
+                    error_message="Не удалось создать поручение.",
+                )
+
+        except Exception as e:
+            logger.error(f"[TASK-SERVICE] Task creation failed: {e}", exc_info=True)
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message=f"Ошибка создания поручения: {str(e)}",
+            )

@@ -1,5 +1,8 @@
 # edms_ai_assistant/models/task_models.py
-from typing import List, Optional
+"""
+Task models with Disambiguation support.
+"""
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
 from enum import Enum
@@ -7,12 +10,15 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class TaskType(str, Enum):
+    """Типы поручений в системе."""
+
     GENERAL = "GENERAL"
     PROJECT = "PROJECT"
     CONTROL = "CONTROL"
 
 
 class CreateTaskRequestExecutor(BaseModel):
+    """Исполнитель поручения."""
 
     employeeId: UUID = Field(..., description="UUID сотрудника-исполнителя")
     responsible: bool = Field(
@@ -60,9 +66,24 @@ class CreateTaskBatchRequest(BaseModel):
 
 
 class TaskCreationResult(BaseModel):
-    """Result of task creation operation."""
+    """
+    Result of task creation operation with disambiguation support.
+
+    Fields:
+        success: Флаг успешности операции
+        status: "success" | "requires_disambiguation" | "error"
+        created_count: Количество созданных поручений
+        not_found_employees: Список не найденных сотрудников
+        error_message: Сообщение об ошибке
+        ambiguous_matches: Неоднозначные совпадения (для disambiguation)
+    """
 
     success: bool
+    status: str = "success"  # "success" | "requires_disambiguation" | "error"
     created_count: int = 0
     not_found_employees: List[str] = Field(default_factory=list)
     error_message: Optional[str] = None
+    ambiguous_matches: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of ambiguous employee matches requiring user selection",
+    )
