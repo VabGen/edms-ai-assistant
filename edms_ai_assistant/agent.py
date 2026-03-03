@@ -187,6 +187,7 @@ class PromptBuilder:
 - Поиск сотрудника: employee_search_tool
 - Список ознакомления: introduction_create_tool
 - Создание поручения: task_create_tool
+- Создание обращения: autofill_appeal_document
 </tool_selection>
 
 <response_format>

@@ -4,10 +4,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    llm__generative: str = "http://model-generative.shared.du.iba/v1"
-    llm__generative_model: str = "default-llm-model"
-    llm__embedding: str = "http://model-embedding.shared.du.iba/v1"
-    llm__embedding_model: str = "default-embedding-model"
+    llm__generative: str = "http://model-embedding.shared.du.iba/v1"
+    llm__generative_model: str = "generative-model"
+    llm__embedding: str = "http://model-generative.shared.du.iba/v1"
+    llm__embedding_model: str = "embedding-model"
     llm_api_key: str | None = None
     openai_api_key: str | None = None
 

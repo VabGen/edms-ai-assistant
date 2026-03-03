@@ -1,45 +1,36 @@
-# test_llm_invoke.py
+# test/test_llm_invoke.py
 import sys
 import os
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-print("Импорт конфигурации и LLM...")
+from langchain_core.messages import HumanMessage
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.llm import get_chat_model
+
+print("=== Тест вызова LLM ===\n")
 
 print("--- Конфигурация ---")
 print(f"LLM Endpoint: {settings.LLM_ENDPOINT}")
 print(f"LLM Model: {settings.LLM_MODEL_NAME}")
-print(f"Temperature: {settings.LLM_TEMPERATURE}")
-
-print("\n--- Инициализация и вызов ChatModel ---")
+print(f"Temperature: {settings.LLM_TEMPERATURE}\n")
 
 try:
     print("Инициализация ChatModel...")
     llm = get_chat_model()
-    print(f"ChatModel успешно инициализирован: {type(llm).__name__}")
+    print(f"ChatModel инициализирован: {type(llm).__name__}\n")
 
     test_message = "Привет! кто ты?"
-    print(f"\nОтправка сообщения: '{test_message}'")
+    print(f"Отправка: '{test_message}'")
+    print("Вызов LLM...")
 
-    print("Выполняется вызов LLM...")
-    response = llm.invoke(test_message)
+    response = llm.invoke([HumanMessage(content=test_message)])
 
-    print(f"\nПолучен ответ от LLM:")
-    print(f"Тип ответа: {type(response)}")
-    print(f"Содержимое: {response}")
-
-    if hasattr(response, 'content'):
-        print(f"Текст ответа: {response.content}")
-    elif hasattr(response, 'text'):
-        print(f"Текст ответа: {response.text}")
-    else:
-        print(f"Текст ответа (str): {str(response)}")
+    print(f"\nОтвет получен:")
+    print(f"   {response.content}")
 
 except Exception as e:
-    print(f"Ошибка при инициализации или вызове ChatModel: {e}")
+    print(f"\nОшибка: {e}")
     import traceback
     traceback.print_exc()
 
-print("\n--- Тест вызова LLM завершен ---")
+print("\n=== Тест завершён ===")
