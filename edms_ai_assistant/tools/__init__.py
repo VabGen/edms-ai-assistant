@@ -3,6 +3,7 @@ from .document import doc_get_details
 from .attachment import doc_get_file_content
 from .summarization import doc_summarize_text
 from .local_file_tool import read_local_file_content
+from .file_compare_tool import doc_compare_with_local
 from .employee import employee_search_tool
 from .appeal_autofill import autofill_appeal_document
 from .introduction import introduction_create_tool
@@ -15,6 +16,7 @@ all_tools = [
     doc_get_file_content,
     doc_summarize_text,
     read_local_file_content,
+    doc_compare_with_local,
     employee_search_tool,
     autofill_appeal_document,
     introduction_create_tool,

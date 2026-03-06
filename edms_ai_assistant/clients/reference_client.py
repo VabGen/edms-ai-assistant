@@ -173,9 +173,7 @@ class ReferenceClient(EdmsHttpClient):
             )
 
             if not city_dto:
-                logger.warning(
-                    f"[REFERENCE-CLIENT] City GET returned empty: {city_id}"
-                )
+                logger.warning(f"[REFERENCE-CLIENT] City GET returned empty: {city_id}")
                 return None
 
             logger.debug(f"[REFERENCE-CLIENT] City DTO keys: {list(city_dto.keys())}")

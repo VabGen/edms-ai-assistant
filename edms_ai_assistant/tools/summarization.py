@@ -1,8 +1,4 @@
-"""
-EDMS AI Assistant - Document Summarization Tool.
-
-LLM-powered инструмент для интеллектуального анализа и сжатия текстов.
-"""
+from __future__ import annotations
 
 import json
 import logging
@@ -15,13 +11,30 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 
 logger = logging.getLogger(__name__)
 
+_CHOICE_NORM: dict[str, str] = {
+    "факты": "extractive",
+    "ключевые факты": "extractive",
+    "extractive": "extractive",
+    "1": "extractive",
+    "пересказ": "abstractive",
+    "краткий пересказ": "abstractive",
+    "abstractive": "abstractive",
+    "2": "abstractive",
+    "тезисы": "thesis",
+    "тезисный план": "thesis",
+    "thesis": "thesis",
+    "3": "thesis",
+}
+
+_MAX_TEXT_LENGTH = 12000
+_HEAD_FRACTION = 0.67
+
 
 class SummarizeType(StrEnum):
-    """Типы суммаризации документов."""
+    """Supported document summarisation formats."""
 
     EXTRACTIVE = "extractive"
     ABSTRACTIVE = "abstractive"
@@ -29,7 +42,12 @@ class SummarizeType(StrEnum):
 
 
 class SummarizeInput(BaseModel):
-    """Валидированная схема входных данных для суммаризации."""
+    """Validated input schema for the doc_summarize_text tool.
+
+    Attributes:
+        text: Document text to summarise (1 – 50 000 chars).
+        summary_type: Optional format; if None the tool asks the user to choose.
+    """
 
     text: str = Field(
         ...,
@@ -40,62 +58,63 @@ class SummarizeInput(BaseModel):
     summary_type: Optional[SummarizeType] = Field(
         None,
         description=(
-            "ОБЯЗАТЕЛЬНО оставь это поле пустым (null), если пользователь "
-            "не указал конкретный формат (например, 'тезисы' или 'факты'). "
-            "Если поле пустое, система предложит пользователю выбрать формат."
+            "Формат суммаризации: extractive (ключевые факты), "
+            "abstractive (краткий пересказ), thesis (тезисный план). "
+            "Оставь None только если пользователь действительно не указал формат — "
+            "система спросит у него сама."
         ),
     )
 
     @field_validator("text")
     @classmethod
     def validate_text(cls, v: str) -> str:
-        """Валидация и очистка входного текста."""
-        if not v or not v.strip():
+        """Strip and validate text.
+
+        Args:
+            v: Raw text value.
+
+        Returns:
+            Stripped text.
+
+        Raises:
+            ValueError: If text is blank.
+        """
+        stripped = v.strip()
+        if not stripped:
             raise ValueError("Текст не может быть пустым")
-        return v.strip()
+        return stripped
 
 
 @tool("doc_summarize_text", args_schema=SummarizeInput)
 async def doc_summarize_text(
-    text: str, summary_type: Optional[SummarizeType] = None
+    text: str,
+    summary_type: Optional[SummarizeType] = None,
 ) -> Dict[str, Any]:
-    """
-    Выполняет интеллектуальный анализ и сжатие текста документа.
+    """Perform intelligent summarisation of document text using the LLM.
 
-    Поддерживаемые форматы:
-    - EXTRACTIVE: Ключевые факты, даты, суммы (список)
-    - ABSTRACTIVE: Краткий пересказ (1-2 абзаца)
-    - THESIS: Структурированный тезисный план
+    Supported formats:
+    - extractive : Key facts, dates, amounts as a structured list.
+    - abstractive: Concise 1-2 paragraph plain-language summary.
+    - thesis     : Numbered thesis plan with sub-items.
 
     Workflow:
-    1. Если summary_type=None → возврат requires_choice с рекомендацией
-    2. Если summary_type указан → выполнение суммаризации
-    3. Автоматическая очистка JSON-артефактов из входного текста
-    4. Truncation больших документов (8K начало + 4K конец)
+    1. Clean JSON wrappers if text arrived wrapped in a JSON envelope.
+    2. Normalise summary_type aliases (e.g. «факты» → extractive).
+    3. If summary_type is still None → return requires_choice so the UI
+       can show the selection dropdown to the user.
+    4. If summary_type is provided → execute and return the summary.
 
     Args:
-        text: Текст документа для анализа
-        summary_type: Тип суммаризации (опционально)
+        text: Document text (may be JSON-wrapped content from doc_get_file_content).
+        summary_type: Desired summarisation format or None.
 
     Returns:
-        Dict с ключами:
-        - status: "success" | "requires_choice" | "error"
-        - content: Результат суммаризации (для success)
-        - message: Информационное сообщение
-        - suggestion: Рекомендация формата (для requires_choice)
-        - meta: Метаданные обработки
-
-    Examples:
-         # Без указания типа (требует выбора)
-         result = await doc_summarize_text(text="Длинный текст...")
-         # {"status": "requires_choice", "suggestion": {...}, ...}
-
-         # С указанием типа
-         result = await doc_summarize_text(
-             text="Длинный текст...",
-             summary_type=SummarizeType.EXTRACTIVE
-         )
-         # {"status": "success", "content": "Ключевые факты:...", ...}
+        Dict with keys:
+        - status  : «success» | «requires_choice» | «error»
+        - content : Result string (for success).
+        - message : Human-readable message.
+        - suggestion: Recommended format hint (for requires_choice).
+        - meta    : Processing metadata.
     """
     logger.info(
         "Summarization requested",
@@ -111,113 +130,171 @@ async def doc_summarize_text(
         if summary_type is None:
             return _handle_format_selection(clean_text)
 
-        return await _perform_summarization(clean_text, summary_type)
+        normalised = _normalise_summary_type(summary_type)
+        return await _perform_summarization(clean_text, normalised)
 
-    except ValueError as e:
-        logger.warning(f"Validation error: {e}")
+    except ValueError as exc:
+        logger.warning("Validation error in summarization: %s", exc)
+        return {"status": "error", "message": f"Ошибка валидации: {exc}"}
+    except Exception as exc:
+        logger.error("Summarization failed: %s", exc, exc_info=True)
         return {
             "status": "error",
-            "message": f"Ошибка валидации: {str(e)}",
+            "message": f"Не удалось проанализировать текст: {exc}",
         }
-    except Exception as e:
-        logger.error(
-            f"Summarization failed: {e}",
-            exc_info=True,
-            extra={"summary_type": summary_type},
-        )
-        return {
-            "status": "error",
-            "message": f"Не удалось проанализировать текст: {str(e)}",
-        }
+
+
+def _normalise_summary_type(value: Any) -> SummarizeType:
+    """Resolve aliases and string values to a canonical SummarizeType.
+
+    Args:
+        value: Raw summary_type value (str, SummarizeType, or None).
+
+    Returns:
+        Canonical SummarizeType, defaulting to EXTRACTIVE for unknowns.
+    """
+    if isinstance(value, SummarizeType):
+        return value
+    raw = str(value).strip().lower() if value else ""
+    mapped = _CHOICE_NORM.get(raw, raw)
+    try:
+        return SummarizeType(mapped)
+    except ValueError:
+        logger.warning("Unknown summary_type '%s' – defaulting to extractive", value)
+        return SummarizeType.EXTRACTIVE
 
 
 def _extract_text_from_json(text: str) -> str:
-    """
-    Извлекает чистый текст из JSON-обернутого контента.
+    """Extract plain text from a JSON-wrapped content envelope.
 
-    Обрабатывает случаи, когда текст приходит в формате:
-    {"content": "...", ...} или {"document_info": "...", ...}
+    Some tools return content as ``{"content": "...", ...}`` — this function
+    unwraps it transparently.
 
     Args:
-        text: Исходный текст (может быть JSON)
+        text: Raw text, potentially JSON-encoded.
 
     Returns:
-        Очищенный текст
+        Clean plain-text string.
     """
-    clean_text = text.strip()
-
-    if clean_text.startswith("{") and clean_text.endswith("}"):
+    clean = text.strip()
+    if clean.startswith("{") and clean.endswith("}"):
         try:
-            data = json.loads(clean_text)
-            clean_text = data.get("content") or data.get("document_info") or clean_text
-            logger.debug("Extracted text from JSON wrapper")
-        except json.JSONDecodeError:
+            data = json.loads(clean)
+            extracted = (
+                data.get("content")
+                or data.get("text")
+                or data.get("document_info")
+                or data.get("text_preview")
+            )
+            if extracted and isinstance(extracted, str):
+                logger.debug(
+                    "Extracted text from JSON wrapper (%d chars)", len(extracted)
+                )
+                return extracted.strip()
+        except (json.JSONDecodeError, TypeError):
             pass
-
-    return clean_text
+    return clean
 
 
 def _handle_format_selection(text: str) -> Dict[str, Any]:
-    """
-    Обрабатывает случай, когда пользователь не выбрал формат суммаризации.
-
-    Анализирует текст и предлагает оптимальный формат на основе характеристик.
+    """Return a requires_choice response with format recommendations.
 
     Args:
-        text: Текст для анализа
+        text: The document text to analyse for format hints.
 
     Returns:
-        Dict со статусом requires_choice и рекомендацией
+        Dict with status=requires_choice and recommendation.
     """
-    logger.info("Summary type not specified - returning format suggestion")
-
-    nlp = EDMSNaturalLanguageService()
-    analysis = nlp.suggest_summarize_format(text)
-
+    logger.info("summary_type not specified – returning format suggestion")
+    recommendation = _recommend_format(text)
     return {
         "status": "requires_choice",
         "message": "Выберите формат анализа документа:",
-        "suggestion": analysis,
+        "suggestion": recommendation,
+    }
+
+
+def _recommend_format(text: str) -> Dict[str, Any]:
+    """Heuristically recommend a summarisation format for the given text.
+
+    Args:
+        text: Source text to analyse.
+
+    Returns:
+        Dict with recommended format, reason and stats.
+    """
+    if not text:
+        return {
+            "recommended": "abstractive",
+            "reason": "Текст пуст",
+            "stats": {"chars": 0, "lines": 0},
+        }
+    import re as _re
+
+    chars = len(text)
+    lines = text.count("\n")
+    digit_groups = len(_re.findall(r"\d+", text))
+
+    if chars > 5000 or digit_groups > 20:
+        return {
+            "recommended": "thesis",
+            "reason": "Объёмный текст или много данных – тезисный план удобнее.",
+            "stats": {"chars": chars, "lines": lines},
+        }
+    if lines < 5:
+        return {
+            "recommended": "abstractive",
+            "reason": "Компактный текст – краткий пересказ достаточен.",
+            "stats": {"chars": chars, "lines": lines},
+        }
+    return {
+        "recommended": "extractive",
+        "reason": "Много конкретики – ключевые факты будут полезнее.",
+        "stats": {"chars": chars, "lines": lines},
     }
 
 
 async def _perform_summarization(
-    text: str, summary_type: SummarizeType
+    text: str,
+    summary_type: SummarizeType,
 ) -> Dict[str, Any]:
-    """
-    Выполняет суммаризацию текста с использованием LLM.
+    """Execute LLM-powered summarisation.
 
     Args:
-        text: Очищенный текст для суммаризации
-        summary_type: Тип суммаризации
+        text: Pre-cleaned document text.
+        summary_type: Canonical summarisation format.
 
     Returns:
-        Dict с результатом суммаризации
+        Dict with status=success and the summary content.
     """
     if len(text) < 50:
-        logger.info("Text too short for deep analysis")
         return {
             "status": "success",
             "content": "Текст слишком мал для глубокого анализа.",
+            "meta": {"format_used": summary_type.value, "text_length": len(text)},
         }
 
     processing_text = _truncate_large_text(text)
-
     llm = get_chat_model()
-    summ_llm = llm.copy(update={"parallel_tool_calls": None}).bind_tools([])
+
+    try:
+        summ_llm = llm.bind_tools([])
+    except Exception:
+        summ_llm = llm
 
     prompt = _build_summarization_prompt(summary_type)
     chain = prompt | summ_llm | StrOutputParser()
 
-    logger.debug(
+    logger.info(
         "Invoking LLM for summarization",
         extra={
             "summary_type": summary_type.value,
             "text_length": len(processing_text),
+            "was_truncated": len(text) > _MAX_TEXT_LENGTH,
         },
     )
 
-    summary = await chain.ainvoke({"text": processing_text})
+    summary: str = await chain.ainvoke({"text": processing_text})
 
     logger.info(
         "Summarization completed",
@@ -233,73 +310,72 @@ async def _perform_summarization(
         "meta": {
             "format_used": summary_type.value,
             "text_length": len(text),
-            "was_truncated": len(text) > 12000,
+            "was_truncated": len(text) > _MAX_TEXT_LENGTH,
         },
     }
 
 
-def _truncate_large_text(text: str, max_length: int = 12000) -> str:
-    """
-    Обрезает большие тексты с сохранением начала и конца.
+def _truncate_large_text(text: str, max_length: int = _MAX_TEXT_LENGTH) -> str:
+    """Truncate large texts while preserving head and tail for context.
 
-    Strategy: Первые 8K символов + последние 4K символов для контекста.
+    Strategy: first 67 % + last 33 % of max_length characters.
 
     Args:
-        text: Исходный текст
-        max_length: Максимальная длина (default: 12000)
+        text: Source text.
+        max_length: Maximum character budget.
 
     Returns:
-        Обрезанный текст или исходный если длина в пределах лимита
+        Original text if within budget, otherwise head + separator + tail.
     """
     if len(text) <= max_length:
         return text
 
-    head_length = int(max_length * 0.67)
-    tail_length = int(max_length * 0.33)
-
+    head = int(max_length * _HEAD_FRACTION)
+    tail = max_length - head
     truncated = (
-        text[:head_length]
+        text[:head]
         + "\n\n[... контент пропущен для оптимизации ...]\n\n"
-        + text[-tail_length:]
+        + text[-tail:]
     )
-
     logger.debug(
-        f"Text truncated: {len(text)} → {len(truncated)} chars "
-        f"(head: {head_length}, tail: {tail_length})"
+        "Text truncated: %d → %d chars (head=%d, tail=%d)",
+        len(text),
+        len(truncated),
+        head,
+        tail,
     )
-
     return truncated
 
 
 def _build_summarization_prompt(summary_type: SummarizeType) -> ChatPromptTemplate:
-    """
-    Строит prompt template для суммаризации с учетом типа.
+    """Build a ChatPromptTemplate tailored for the requested format.
 
     Args:
-        summary_type: Тип суммаризации
+        summary_type: Canonical summarisation format.
 
     Returns:
-        ChatPromptTemplate с инструкциями для LLM
+        Ready-to-use ChatPromptTemplate.
     """
-    instructions = {
+    instructions: dict[SummarizeType, str] = {
         SummarizeType.EXTRACTIVE: (
-            "Выдели ключевые факты, даты, суммы и конкретные обязательства. "
-            "Оформи списком с краткими пояснениями."
+            "Выдели ключевые факты, конкретные даты, суммы, имена и обязательства. "
+            "Оформи нумерованным списком. Каждый пункт — одна конкретная мысль."
         ),
         SummarizeType.ABSTRACTIVE: (
             "Напиши связный краткий пересказ сути документа своими словами "
-            "(1-2 абзаца). Сохрани ключевую информацию, но перефразируй."
+            "(1–2 абзаца). Сохрани ключевую информацию, перефразируй без технических деталей."
         ),
         SummarizeType.THESIS: (
-            "Сформируй структурированный тезисный план документа с выделением "
-            "главных мыслей. Используй нумерацию и подпункты."
+            "Сформируй структурированный тезисный план документа. "
+            "Используй нумерацию разделов и подпункты. Каждый тезис — 1 предложение."
         ),
     }
 
     system_message = (
-        f"Ты — ведущий аналитик СЭД. "
+        "Ты — ведущий аналитик системы электронного документооборота (СЭД). "
         f"Задача: {instructions[summary_type]} "
-        f"Пиши строго по делу, на русском языке."
+        "Пиши строго по делу, на русском языке. "
+        "НЕ добавляй фраз типа «В данном документе», «Данный текст» — сразу к сути."
     )
 
     return ChatPromptTemplate.from_messages(

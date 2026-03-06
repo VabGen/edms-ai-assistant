@@ -6,17 +6,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 print("Импорт конфигурации и LLM...")
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.llm import get_embedding_model_to_use
+from edms_ai_assistant.llm import get_embedding_model
 
 print("--- Конфигурация эмбеддингов ---")
-print(f"Embedding Endpoint: {settings.EMBEDDING_ENDPOINT}")
-print(f"Embedding Model: {settings.EMBEDDING_MODEL_NAME}")
+print(f"Embedding Endpoint: {settings.LLM_EMBEDDING_URL}")
+print(f"Embedding Model: {settings.LLM_EMBEDDING_MODEL}")
 
 print("\n--- Инициализация и вызов EmbeddingModel ---")
 
 try:
     print("Инициализация EmbeddingModel...")
-    embedding_model = get_embedding_model_to_use()
+    embedding_model = get_embedding_model()
     print(f"EmbeddingModel успешно инициализирован: {type(embedding_model).__name__}")
 
     test_text = ["Тестовая строка для получения эмбеддинга."]

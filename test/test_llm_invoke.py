@@ -10,8 +10,8 @@ from edms_ai_assistant.llm import get_chat_model
 print("=== Тест вызова LLM ===\n")
 
 print("--- Конфигурация ---")
-print(f"LLM Endpoint: {settings.LLM_ENDPOINT}")
-print(f"LLM Model: {settings.LLM_MODEL_NAME}")
+print(f"LLM Endpoint: {settings.LLM_GENERATIVE_URL}")
+print(f"LLM Model: {settings.LLM_GENERATIVE_MODEL}")
 print(f"Temperature: {settings.LLM_TEMPERATURE}\n")
 
 try:
