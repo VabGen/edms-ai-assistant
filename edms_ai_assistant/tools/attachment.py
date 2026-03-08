@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -27,6 +28,11 @@ _SUPPORTED_TEXT_EXTENSIONS = {
 _SUPPORTED_TABLE_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 _ALL_SUPPORTED = _SUPPORTED_TEXT_EXTENSIONS | _SUPPORTED_TABLE_EXTENSIONS
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
 
 class AttachmentFetchInput(BaseModel):
     """Input schema for the doc_get_file_content tool.
@@ -34,7 +40,7 @@ class AttachmentFetchInput(BaseModel):
     Attributes:
         document_id: EDMS document UUID.
         token: User bearer token.
-        attachment_id: Specific attachment UUID; if omitted the first attachment is used.
+        attachment_id: Attachment UUID or filename; if omitted the first attachment is used.
         analysis_mode: Extraction mode – text | tables | metadata | full.
         summary_type: Summarisation format to pass downstream (extractive | abstractive | thesis).
     """
@@ -43,7 +49,10 @@ class AttachmentFetchInput(BaseModel):
     token: str = Field(..., description="Токен авторизации пользователя")
     attachment_id: Optional[str] = Field(
         None,
-        description="UUID вложения. Если не указан — берётся первое вложение.",
+        description=(
+            "UUID вложения или имя файла (например: 'Шаблон обложки.docx'). "
+            "Если не указан — берётся первое вложение."
+        ),
     )
     analysis_mode: Optional[str] = Field(
         "text",
@@ -61,6 +70,69 @@ class AttachmentFetchInput(BaseModel):
     )
 
 
+def _get_attachment_name(attachment: Any) -> str:
+    """Extract display name from an attachment object.
+
+    Args:
+        attachment: Attachment domain object.
+
+    Returns:
+        Name string or empty string.
+    """
+    return (
+        getattr(attachment, "name", None)
+        or getattr(attachment, "fileName", None)
+        or ""
+    )
+
+
+def _resolve_attachment(attachments: List[Any], hint: str) -> Optional[Any]:
+    """Resolve an attachment by UUID or by filename.
+
+    Search order:
+    1. Exact UUID match against attachment.id
+    2. Exact case-insensitive filename match
+    3. Case-insensitive filename stem (name without extension) partial match
+
+    Args:
+        attachments: List of attachment objects from DocumentDto.
+        hint: UUID string or filename string provided by the caller.
+
+    Returns:
+        Matching attachment object or None.
+    """
+    hint_stripped = hint.strip()
+
+    if _UUID_RE.match(hint_stripped):
+        found = next(
+            (a for a in attachments if str(getattr(a, "id", "")) == hint_stripped),
+            None,
+        )
+        if found is not None:
+            return found
+
+    hint_lower = hint_stripped.lower()
+    for att in attachments:
+        att_name = _get_attachment_name(att).lower()
+        if att_name == hint_lower:
+            logger.info("Resolved attachment by exact name: '%s'", hint_stripped)
+            return att
+
+    hint_stem = os.path.splitext(hint_lower)[0]
+    for att in attachments:
+        att_name = _get_attachment_name(att).lower()
+        att_stem = os.path.splitext(att_name)[0]
+        if hint_stem and (hint_stem in att_stem or att_stem in hint_stem):
+            logger.info(
+                "Resolved attachment by name stem: '%s' -> '%s'",
+                hint_stripped,
+                _get_attachment_name(att),
+            )
+            return att
+
+    return None
+
+
 def _build_attachment_meta(attachment: Any) -> Dict[str, Any]:
     """Build a metadata dict from an attachment domain object.
 
@@ -70,11 +142,7 @@ def _build_attachment_meta(attachment: Any) -> Dict[str, Any]:
     Returns:
         Dict with human-readable attachment metadata.
     """
-    name = (
-        getattr(attachment, "name", None)
-        or getattr(attachment, "fileName", None)
-        or "unknown"
-    )
+    name = _get_attachment_name(attachment) or "unknown"
     size_bytes = getattr(attachment, "size", None) or 0
     upload_date = getattr(attachment, "uploadDate", None)
     signs = getattr(attachment, "signs", None) or []
@@ -121,6 +189,11 @@ async def doc_get_file_content(
     - metadata : Return only file metadata without downloading.
     - full     : Return text + tables + metadata together.
 
+    The ``attachment_id`` parameter accepts both a UUID and a filename string
+    (e.g. "Шаблон обложки.docx"). When a filename is provided, the tool performs
+    a case-insensitive name lookup against all available attachments before
+    falling back to the first attachment if no match is found.
+
     The ``summary_type`` parameter is forwarded in the response so the next
     tool in the pipeline (doc_summarize_text) can use it without the agent
     needing to rediscover it.
@@ -128,7 +201,7 @@ async def doc_get_file_content(
     Args:
         document_id: EDMS document UUID.
         token: User bearer JWT token.
-        attachment_id: Specific attachment UUID to read.
+        attachment_id: Attachment UUID or filename to read.
         analysis_mode: One of text | tables | metadata | full.
         summary_type: Summarisation format to forward downstream.
 
@@ -159,33 +232,32 @@ async def doc_get_file_content(
             }
 
         if attachment_id:
-            target = next(
-                (a for a in attachments if str(getattr(a, "id", "")) == attachment_id),
-                None,
-            )
+            target = _resolve_attachment(attachments, attachment_id)
             if target is None:
-                names = [
-                    getattr(a, "name", None)
-                    or getattr(a, "fileName", None)
-                    or str(getattr(a, "id", ""))
+                available = [
+                    {
+                        "id": str(getattr(a, "id", "")),
+                        "name": _get_attachment_name(a),
+                    }
                     for a in attachments
                 ]
+                names_str = ", ".join(item["name"] for item in available)
                 return {
                     "status": "error",
                     "message": (
-                        f"Вложение с ID '{attachment_id}' не найдено. "
-                        f"Доступные вложения: {', '.join(names)}"
+                        f"Вложение '{attachment_id}' не найдено. "
+                        f"Доступные вложения: {names_str}"
                     ),
-                    "available_attachments": [
-                        {
-                            "id": str(getattr(a, "id", "")),
-                            "name": getattr(a, "name", None)
-                            or getattr(a, "fileName", None),
-                        }
-                        for a in attachments
-                    ],
+                    "available_attachments": available,
                     "summary_type": summary_type,
                 }
+            resolved_id = str(getattr(target, "id", ""))
+            logger.info(
+                "Attachment resolved: '%s' -> %s",
+                attachment_id,
+                resolved_id,
+            )
+            attachment_id = resolved_id
         else:
             target = attachments[0]
             attachment_id = str(getattr(target, "id", ""))
