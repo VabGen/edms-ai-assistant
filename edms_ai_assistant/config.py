@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     openai_api_key: str | None = None
 
-    llm_temperature: float = 0.6
+    llm_temperature: float = 0
     llm_max_tokens: int | None = None
     llm_timeout: int = 120
     llm_max_retries: int = 3

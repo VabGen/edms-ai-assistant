@@ -7,12 +7,23 @@ from langchain_core.messages import HumanMessage
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.llm import get_chat_model
 
+import requests
+
+headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
+response = requests.get("https://api.proxyapi.ru/openai/v1/models", headers=headers)
+
+if response.status_code == 200:
+    models = [m['id'] for m in response.json()['data']]
+    print("Доступные модели:", "\n".join(models))
+else:
+    print(f"Ошибка: {response.status_code}, {response.text}")
+
 print("=== Тест вызова LLM ===\n")
 
 print("--- Конфигурация ---")
-print(f"LLM Endpoint: {settings.LLM_ENDPOINT}")
-print(f"LLM Model: {settings.LLM_MODEL_NAME}")
-print(f"Temperature: {settings.LLM_TEMPERATURE}\n")
+# print(f"LLM Endpoint: {settings.LLM_ENDPOINT}")
+# print(f"LLM Model: {settings.LLM_MODEL_NAME}")
+# print(f"Temperature: {settings.LLM_TEMPERATURE}\n")
 
 try:
     print("Инициализация ChatModel...")
