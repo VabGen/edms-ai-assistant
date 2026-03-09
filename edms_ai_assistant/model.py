@@ -27,6 +27,7 @@ class AssistantResponse(BaseModel):
     action_type: Optional[str] = None
     message: Optional[str] = None
     thread_id: Optional[str] = None
+    requires_reload: bool = False
 
 
 class FileUploadResponse(BaseModel):

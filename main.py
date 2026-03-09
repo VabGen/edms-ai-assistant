@@ -70,6 +70,28 @@ def _cleanup_file(file_path: str):
         logger.warning(f"Не удалось удалить временный файл {file_path}: {e}")
 
 
+
+_MUTATION_PHRASES = (
+    "успешно добавлен",
+    "успешно создан",
+    "список ознакомления",
+    "поручение создано",
+    "поручение успешно",
+    "обращение заполнено",
+    "обращение успешно",
+    "карточка заполнена",
+    "добавлено в список",
+    "добавлен в список",
+)
+
+def _is_mutation_response(content: Optional[str]) -> bool:
+    """Returns True if agent response describes a successful mutating operation."""
+    if not content:
+        return False
+    lower = content.lower()
+    return any(phrase in lower for phrase in _MUTATION_PHRASES)
+
+
 @app.post("/chat", response_model=AssistantResponse)
 async def chat_endpoint(user_input: UserInput, background_tasks: BackgroundTasks,
                         agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]):
@@ -94,6 +116,12 @@ async def chat_endpoint(user_input: UserInput, background_tasks: BackgroundTasks
         human_choice=user_input.human_choice
     )
 
+    content = result.get("content")
+    requires_reload = (
+            result.get("status") == "success"
+            and _is_mutation_response(content)
+    )
+
     if user_input.file_path:
         is_system_attachment = bool(UUID_PATTERN.match(str(user_input.file_path)))
 
@@ -106,7 +134,8 @@ async def chat_endpoint(user_input: UserInput, background_tasks: BackgroundTasks
         response=result.get("content"),
         action_type=result.get("action_type"),
         message=result.get("message"),
-        thread_id=thread_id
+        thread_id=thread_id,
+        requires_reload=requires_reload,
     )
 
 
@@ -132,13 +161,22 @@ async def api_direct_summarize(
                 logger.warning(f"Локальный файл {current_path} не найден, сброс.")
                 current_path = None
 
+        _TYPE_LABELS = {
+            "extractive": "факты (ключевые факты, даты, суммы)",
+            "abstractive": "пересказ (краткое изложение своими словами)",
+            "thesis": "тезисы (структурированный тезисный план)",
+        }
+
+        summary_type = user_input.human_choice or "extractive"
+        type_label = _TYPE_LABELS.get(summary_type, summary_type)
+
         agent_result = await agent.chat(
-            message=f"Проанализируй вложение: {user_input.message}",
+            message=f"Проанализируй вложение «{user_input.message}» в формате: {type_label}.",
             user_token=user_input.user_token,
             context_ui_id=user_input.context_ui_id,
             thread_id=new_thread_id,
             file_path=current_path,
-            human_choice=user_input.human_choice
+            human_choice=summary_type,
         )
 
         if current_path and not is_uuid:
@@ -161,7 +199,7 @@ async def api_direct_summarize(
 @app.get("/chat/history/{thread_id}")
 async def get_history(thread_id: str, agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]):
     try:
-        state = await agent.agent.aget_state({"configurable": {"thread_id": thread_id}})
+        state = await agent.state_manager.get_state(thread_id)
         messages = state.values.get("messages", [])
         filtered = []
         for m in messages:

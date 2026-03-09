@@ -39,68 +39,68 @@ logger = logging.getLogger(__name__)
 #     return llm
 
 
-@functools.lru_cache(maxsize=1)
-def get_chat_model() -> BaseLanguageModel:
-    logger.info(
-        f"Инициализация ChatModel: endpoint={settings.LLM_ENDPOINT}, "
-        f"model={settings.LLM_MODEL_NAME}, temperature={settings.LLM_TEMPERATURE}"
-    )
-
-    llm_params = {
-        "base_url": settings.LLM_ENDPOINT.rstrip("/"),
-        "api_key": settings.LLM_API_KEY or "placeholder-key",
-        "model": settings.LLM_MODEL_NAME,
-        "temperature": settings.LLM_TEMPERATURE,
-        "timeout": settings.LLM_TIMEOUT,
-        "max_retries": settings.LLM_MAX_RETRIES,
-        "streaming": False,
-    }
-
-    optional = {
-        "max_tokens": settings.LLM_MAX_TOKENS,
-        "request_timeout": getattr(settings, "LLM_REQUEST_TIMEOUT", None),
-        "default_headers": getattr(settings, "LLM_DEFAULT_HEADERS", None),
-        "default_query": getattr(settings, "LLM_DEFAULT_QUERY", None),
-    }
-    for key, value in optional.items():
-        if value is not None:
-            llm_params[key] = value
-
-    llm_params = {k: v for k, v in llm_params.items() if v is not None}
-
-    logger.debug(f" Параметры ChatOpenAI: {llm_params}")
-
-    try:
-        llm = ChatOpenAI(**llm_params)
-        logger.info(f"ChatModel инициализирован: {type(llm).__name__}")
-        return llm
-    except Exception as e:
-        logger.error(f"Ошибка инициализации ChatModel: {e}", exc_info=True)
-        raise
-
-
 # @functools.lru_cache(maxsize=1)
-# def get_chat_model():
-#     settings_kwargs = {
-#         "model": "gpt-4o-mini",
-#         "temperature": 0.6,
-#         "openai_api_base": "https://api.proxyapi.ru/openai/v1",
-#         "openai_api_key": settings.OPENAI_API_KEY,
-#         "max_retries": 5,
-#         "timeout": 90,
-#         "streaming": True,
-#         "max_tokens": 4096,
-#         "seed": 42,
-#         "top_p": 0.0000001,
+# def get_chat_model() -> BaseLanguageModel:
+#     logger.info(
+#         f"Инициализация ChatModel: endpoint={settings.LLM_ENDPOINT}, "
+#         f"model={settings.LLM_MODEL_NAME}, temperature={settings.LLM_TEMPERATURE}"
+#     )
+#
+#     llm_params = {
+#         "base_url": settings.LLM_ENDPOINT.rstrip("/"),
+#         "api_key": settings.LLM_API_KEY or "placeholder-key",
+#         "model": settings.LLM_MODEL_NAME,
+#         "temperature": settings.LLM_TEMPERATURE,
+#         "timeout": settings.LLM_TIMEOUT,
+#         "max_retries": settings.LLM_MAX_RETRIES,
+#         "streaming": False,
 #     }
 #
+#     optional = {
+#         "max_tokens": settings.LLM_MAX_TOKENS,
+#         "request_timeout": getattr(settings, "LLM_REQUEST_TIMEOUT", None),
+#         "default_headers": getattr(settings, "LLM_DEFAULT_HEADERS", None),
+#         "default_query": getattr(settings, "LLM_DEFAULT_QUERY", None),
+#     }
+#     for key, value in optional.items():
+#         if value is not None:
+#             llm_params[key] = value
+#
+#     llm_params = {k: v for k, v in llm_params.items() if v is not None}
+#
+#     logger.debug(f" Параметры ChatOpenAI: {llm_params}")
+#
 #     try:
-#         model = ChatOpenAI(**settings_kwargs)
-#         logger.info(f"LLM Model '{settings_kwargs['model']}' успешно инициализирована.")
-#         return model
+#         llm = ChatOpenAI(**llm_params)
+#         logger.info(f"ChatModel инициализирован: {type(llm).__name__}")
+#         return llm
 #     except Exception as e:
-#         logger.error(f"Ошибка при инициализации LLM: {e}")
+#         logger.error(f"Ошибка инициализации ChatModel: {e}", exc_info=True)
 #         raise
+
+
+@functools.lru_cache(maxsize=1)
+def get_chat_model():
+    settings_kwargs = {
+        "model": "gpt-4o-mini",
+        "temperature": 0.6,
+        "openai_api_base": "https://api.proxyapi.ru/openai/v1",
+        "openai_api_key": settings.OPENAI_API_KEY,
+        "max_retries": 5,
+        "timeout": 90,
+        "streaming": True,
+        "max_tokens": 4096,
+        "seed": 42,
+        "top_p": 0.0000001,
+    }
+
+    try:
+        model = ChatOpenAI(**settings_kwargs)
+        logger.info(f"LLM Model '{settings_kwargs['model']}' успешно инициализирована.")
+        return model
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации LLM: {e}")
+        raise
 
 
 @functools.lru_cache(maxsize=1)
