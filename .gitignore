@@ -1,0 +1,17 @@
+.gitlab-ci.yml
+package-lock.json
+
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### vs code
+/.idea/
+/.vscode/
+target/
+*.class
+*.ear
+.vscode

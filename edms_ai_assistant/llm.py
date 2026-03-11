@@ -23,7 +23,31 @@ def _normalize_url(url) -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def get_chat_model() -> BaseLanguageModel:
+def get_chat_model():
+    settings_kwargs = {
+        "model": "gpt-4o-mini",
+        "temperature": 0.6,
+        "openai_api_base": "https://api.proxyapi.ru/openai/v1",
+        "openai_api_key": settings.OPENAI_API_KEY,
+        "max_retries": 5,
+        "timeout": 90,
+        "streaming": True,
+        "max_tokens": 4096,
+        "seed": 42,
+        "top_p": 0.0000001,
+    }
+
+    try:
+        model = ChatOpenAI(**settings_kwargs)
+        logger.info(f"LLM Model '{settings_kwargs['model']}' успешно инициализирована.")
+        return model
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации LLM: {e}")
+        raise
+
+
+@functools.lru_cache(maxsize=1)
+def get_chat_modell() -> BaseLanguageModel:
     """
     Initialize and cache the chat model instance.
     """
@@ -44,6 +68,7 @@ def get_chat_model() -> BaseLanguageModel:
         "timeout": settings.LLM_TIMEOUT,
         "max_retries": settings.LLM_MAX_RETRIES,
         "streaming": False,
+        "model_kwargs": {"extra_body": {"skip_special_tokens": False}},
     }
 
     optional = {

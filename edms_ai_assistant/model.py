@@ -1,117 +1,134 @@
 # edms_ai_assistant/model.py
 """
-Pydantic models for EDMS AI Assistant API.
+EDMS AI Assistant — Public data contracts (Pydantic v2).
 """
-from typing import List, Optional, Annotated, Literal
-from pydantic import BaseModel, Field, field_validator
-from typing_extensions import TypedDict
+from __future__ import annotations
+
+from typing import Annotated, List, Literal, Optional
+
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+from pydantic import BaseModel, Field, field_validator
+from typing_extensions import TypedDict
 
 
-# ── User Context & Input ─────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# LangGraph state
+# ─────────────────────────────────────────────────────────────
+
+
+class AgentState(TypedDict):
+    """
+    Состояние LangGraph графа.
+
+    Единственное каноническое определение — используется
+    как в _build_graph, так и везде, где нужен тип состояния.
+    Reducer add_messages обеспечивает корректное слияние.
+    """
+
+    messages: Annotated[List[BaseMessage], add_messages]
+
+
+# ─────────────────────────────────────────────────────────────
+# Input models
+# ─────────────────────────────────────────────────────────────
+
+
 class UserContext(BaseModel):
-    """User context from EDMS Employee API."""
+    """Профиль пользователя из EDMS."""
 
-    firstName: Optional[str] = None
-    lastName: Optional[str] = None
-    middleName: Optional[str] = None
-    departmentName: Optional[str] = None
-    postName: Optional[str] = None
-    role: Optional[str] = None
+    firstName: Optional[str] = Field(None, max_length=100)
+    lastName: Optional[str] = Field(None, max_length=100)
+    middleName: Optional[str] = Field(None, max_length=100)
+    role: Optional[str] = Field(None, max_length=100)
+    post: Optional[str] = Field(None, max_length=200)
 
 
 class UserInput(BaseModel):
     """
-    Validated user input for chat/summarize endpoints.
+    Входное сообщение от клиента к /chat эндпоинту.
 
-    Fields:
-        message: User message text (1-8000 chars)
-        user_token: JWT bearer token (min 20 chars)
-        context_ui_id: Document UUID (optional)
-        context: User context from Employee API (optional)
-        file_path: Local file path or attachment UUID (optional)
-        human_choice: Summary type: "факты"|"пересказ"|"тезисы"|"1"|"2"|"3"
-        thread_id: LangGraph session ID for conversation history (optional)
+    Валидация здесь минимальна — детальная валидация
+    делегируется AgentRequest в agent.py (Service Layer).
     """
 
     message: str = Field(..., min_length=1, max_length=8000)
-    user_token: str = Field(..., min_length=20)
-    context_ui_id: Optional[str] = Field(None, pattern=r"^[0-9a-f-]{36}$|^$")
+    user_token: str = Field(..., min_length=10)
+    context_ui_id: Optional[str] = Field(
+        None,
+        description="UUID активного документа в UI EDMS",
+    )
     context: Optional[UserContext] = None
-    file_path: Optional[str] = Field(None, max_length=500)
-    human_choice: Optional[str] = Field(None, max_length=100)
+    file_path: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="UUID вложения EDMS или путь к локальному файлу",
+    )
+    human_choice: Optional[str] = Field(
+        None,
+        max_length=200,
+        description=(
+            "Выбор пользователя: тип суммаризации (extractive/abstractive/thesis) "
+            "или UUID сотрудников через запятую для disambiguation"
+        ),
+    )
     thread_id: Optional[str] = Field(None, max_length=255)
 
     @field_validator("message")
     @classmethod
-    def sanitize_message(cls, v: str) -> str:
+    def strip_message(cls, v: str) -> str:
+        """Removes surrounding whitespace from the message."""
         return v.strip()
 
-    @field_validator("human_choice")
-    @classmethod
-    def normalize_human_choice(cls, v: Optional[str]) -> Optional[str]:
-        """Normalize human_choice to canonical summary type."""
-        if not v:
-            return None
-        v_lower = v.strip().lower()
-        mapping = {
-            "1": "extractive",
-            "факты": "extractive",
-            "ключевые факты": "extractive",
-            "2": "abstractive",
-            "пересказ": "abstractive",
-            "краткий пересказ": "abstractive",
-            "3": "thesis",
-            "тезисы": "thesis",
-            "тезисный план": "thesis",
-        }
-        return mapping.get(v_lower, v_lower)
+
+# ─────────────────────────────────────────────────────────────
+# Response models
+# ─────────────────────────────────────────────────────────────
+
+ResponseStatus = Literal["success", "error", "requires_action", "processing"]
 
 
-# ── API Responses ────────────────────────────────────────────────────────────
 class AssistantResponse(BaseModel):
     """
-    Standardized API response for chat/summarize endpoints.
+    Стандартизированный ответ агента клиенту.
+
+    Fields:
+        status: Машиночитаемый статус выполнения.
+        response: Текстовый ответ для отображения пользователю.
+        action_type: Тип требуемого действия (если requires_action).
+        message: Системное или пользовательское сообщение.
+        thread_id: ID треда для продолжения диалога.
+        requires_reload: True если EDMS нужно перезагрузить страницу
+                         (после мутирующих операций: ознакомление, поручение и т.д.)
     """
 
-    status: Literal["success", "error", "requires_action", "requires_choice"]
+    status: ResponseStatus = "success"
     response: Optional[str] = None
     action_type: Optional[str] = None
     message: Optional[str] = None
     thread_id: Optional[str] = None
+    requires_reload: bool = Field(
+        default=False,
+        description=(
+            "Сигнал фронтенду перезагрузить страницу EDMS "
+            "после успешного выполнения мутирующих операций"
+        ),
+    )
 
-    elapsed_ms: Optional[float] = None
-    iterations: Optional[int] = None
+
+# ─────────────────────────────────────────────────────────────
+# Auxiliary request/response models
+# ─────────────────────────────────────────────────────────────
 
 
 class FileUploadResponse(BaseModel):
-    """Response for file upload endpoint."""
+    """Ответ на загрузку файла."""
 
     file_path: str
     file_name: str
-    size_bytes: Optional[int] = None
 
 
 class NewChatRequest(BaseModel):
-    """Request to create a new conversation thread."""
+    """Запрос на создание нового треда диалога."""
 
-    user_token: str = Field(..., min_length=20)
-
-
-# ── LangGraph State ─────────────────────────────────────────────────────────
-class AgentState(TypedDict):
-    """
-    LangGraph state with message reducer and iteration counter.
-
-    Fields:
-        messages: Accumulated message list (add_messages reducer)
-        graph_iterations: Counter to prevent infinite loops
-        total_tokens: Optional token usage tracking
-        start_time: Optional timestamp for performance metrics
-    """
-
-    messages: Annotated[List[BaseMessage], add_messages]
-    graph_iterations: int
-    total_tokens: Optional[int]
-    start_time: Optional[float]
+    user_token: str = Field(..., min_length=10)

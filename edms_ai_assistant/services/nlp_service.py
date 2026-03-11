@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.utils.regex_utils import _UUID_RE
+from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ class UserIntent(Enum):
     COMPOSITE = "composite"
     UNKNOWN = "unknown"
     FILE_ANALYSIS = "file_analysis"
+    RESOLUTION = "resolution"
+    NOTIFICATION = "notification"
 
 
 class QueryComplexity(Enum):
@@ -583,6 +585,30 @@ class SemanticDispatcher:
                 "тезисы",
             ],
         },
+        UserIntent.RESOLUTION: {
+            "primary": [
+                "резолюция",
+                "резолюцию",
+                "резолюции",
+                "добавь резолюцию",
+                "напиши резолюцию",
+                "поставь резолюцию",
+                "покажи резолюции",
+            ],
+            "secondary": ["решение", "поручение руководителя", "написать"],
+        },
+        UserIntent.NOTIFICATION: {
+            "primary": [
+                "уведоми",
+                "напомни",
+                "отправь напоминание",
+                "уведомление",
+                "напоминание",
+                "предупреди",
+                "сообщи",
+            ],
+            "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+        },
     }
 
     def __init__(self) -> None:
@@ -617,7 +643,7 @@ class SemanticDispatcher:
         message_lower = message.lower()
         scores: Counter[UserIntent] = Counter()
 
-        if file_path and not _UUID_RE.match(file_path):
+        if file_path and not UUID_RE.match(file_path):
             scores[UserIntent.FILE_ANALYSIS] += 3
             scores[UserIntent.SUMMARIZE] += 2
 
@@ -836,7 +862,7 @@ class SemanticDispatcher:
         if file_path:
             metadata["is_local_file"] = True
             metadata["ctx_file_path"] = file_path
-            if not _UUID_RE.match(file_path):
+            if not UUID_RE.match(file_path):
                 metadata["file_type"] = "local"
                 is_valid, error = self._validate_file_path(file_path)
                 if not is_valid:

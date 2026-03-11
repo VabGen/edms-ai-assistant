@@ -1,12 +1,37 @@
 # edms_ai_assistant/clients/reference_client.py
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from .base_client import EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 
 
 class ReferenceClient(EdmsHttpClient):
+    """
+    Client for EDMS reference book (справочники) API.
+
+    Geography lookup protocol (two-step):
+      Step 1: GET /api/{endpoint}/fts-name?fts={name}  → list → [0].id
+      Step 2: GET /api/{endpoint}/{id}                 → canonical name from DB
+    """
+
+    # Маппинг endpoint → приоритет полей имени в GET /{id} ответе
+    _CANONICAL_NAME_FIELDS: Dict[str, tuple] = {
+        "country": ("fullName", "name", "shortName"),
+        "region": ("regionName", "name", "shortName"),
+        "district": ("districtName", "nameDistrict", "name", "shortName"),
+        "city": ("cityName", "nameCity", "name", "shortName"),
+        "citizen-type": ("name", "shortName"),
+        "correspondent": ("name", "fullName", "shortName"),
+        "delivery-method": ("name", "shortName"),
+        "department": ("name", "fullName", "shortName"),
+        "group": ("name", "shortName"),
+    }
+
+    # ─────────────────────────────────────────────────────────────────
+    # Базовые методы (два шага)
+    # ─────────────────────────────────────────────────────────────────
 
     async def _find_entity_with_name(
         self,
@@ -16,316 +41,301 @@ class ReferenceClient(EdmsHttpClient):
         entity_label: str,
         name_field: str = "shortName",
     ) -> Optional[Dict[str, str]]:
+        """
+        Two-step reference lookup: fts-name → GET /{id} → canonical name.
+
+        Step 1: POST fts-name → получаем id из поискового индекса.
+        Step 2: GET /{id}     → получаем эталонное name из справочника.
+
+        Fallback: если GET /{id} недоступен — используем name из fts-ответа.
+
+        Args:
+            token: JWT authorization token.
+            endpoint: API endpoint prefix (e.g. "region", "district", "city").
+            search_name: Human-readable name to search for.
+            entity_label: Русское название для логов (e.g. "Район").
+            name_field: Ignored — kept for backward-compatible callers.
+
+        Returns:
+            {"id": str, "name": str} из справочника, или None.
+        """
         if not search_name or not search_name.strip():
             logger.debug(
-                f"[REFERENCE-CLIENT] Пропуск поиска {entity_label}: пустое значение"
+                "[REFERENCE-CLIENT] Пропуск поиска %s: пустое значение", entity_label
             )
             return None
 
         search_query = search_name.strip()
 
+        # ── Шаг 1: FTS-поиск → получаем id ──────────────────────────────────
         try:
-            logger.info(f"[REFERENCE-CLIENT] Поиск {entity_label}: '{search_query}'")
-
-            result = await self._make_request(
+            logger.info("[REFERENCE-CLIENT] Поиск %s: '%s'", entity_label, search_query)
+            fts_result = await self._make_request(
                 "GET",
                 f"api/{endpoint}/fts-name",
                 token=token,
                 params={"fts": search_query},
             )
-
-            if not result:
-                logger.warning(
-                    f"[REFERENCE-CLIENT] {entity_label} не найден: '{search_query}'"
-                )
-                return None
-
-            data = (
-                result[0]
-                if isinstance(result, list) and len(result) > 0
-                else (result if isinstance(result, dict) else None)
-            )
-
-            if not data:
-                logger.warning(
-                    f"[REFERENCE-CLIENT] Пустой ответ для {entity_label}: '{search_query}'"
-                )
-                return None
-
-            entity_id = str(data.get("id"))
-
-            entity_name = (
-                data.get(name_field)
-                or data.get("fullName")
-                or data.get("name")
-                or data.get("shortName")
-                or search_query
-            )
-
-            logger.info(
-                f"[REFERENCE-CLIENT] {entity_label}: '{search_query}' → "
-                f"ID: {entity_id}, Name: '{entity_name}'"
-            )
-
-            return {"id": entity_id, "name": entity_name}
-
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"[REFERENCE-CLIENT] Ошибка поиска {entity_label} '{search_query}': {e}",
+                "[REFERENCE-CLIENT] FTS ошибка %s '%s': %s",
+                entity_label,
+                search_query,
+                exc,
                 exc_info=True,
             )
             return None
 
+        if not fts_result:
+            logger.warning(
+                "[REFERENCE-CLIENT] %s не найден по FTS: '%s'",
+                entity_label,
+                search_query,
+            )
+            return None
+
+        fts_data = (
+            fts_result[0]
+            if isinstance(fts_result, list) and fts_result
+            else (fts_result if isinstance(fts_result, dict) else None)
+        )
+
+        if not fts_data or not isinstance(fts_data, dict):
+            logger.warning(
+                "[REFERENCE-CLIENT] Пустой FTS-ответ для %s: '%s'",
+                entity_label,
+                search_query,
+            )
+            return None
+
+        entity_id = str(fts_data.get("id", "")).strip()
+        if not entity_id or entity_id == "None":
+            logger.warning(
+                "[REFERENCE-CLIENT] FTS не вернул id для %s: '%s'",
+                entity_label,
+                search_query,
+            )
+            return None
+
+        logger.debug("[REFERENCE-CLIENT] %s FTS → id=%s", entity_label, entity_id)
+
+        # ── Шаг 2: GET /{id} → канонический name из справочника ─────────────
+        try:
+            record = await self._make_request(
+                "GET",
+                f"api/{endpoint}/{entity_id}",
+                token=token,
+            )
+        except Exception as exc:
+            # Fallback: используем name из FTS-ответа
+            logger.warning(
+                "[REFERENCE-CLIENT] GET /%s/%s ошибка: %s — используем FTS name",
+                endpoint,
+                entity_id,
+                exc,
+            )
+            fts_name = self._extract_canonical_name(fts_data, endpoint) or search_query
+            logger.info(
+                "[REFERENCE-CLIENT] %s (FTS fallback): '%s' → id=%s, name='%s'",
+                entity_label,
+                search_query,
+                entity_id,
+                fts_name,
+            )
+            return {"id": entity_id, "name": fts_name}
+
+        if not record or not isinstance(record, dict):
+            logger.warning(
+                "[REFERENCE-CLIENT] GET /%s/%s вернул пустой ответ — используем FTS name",
+                endpoint,
+                entity_id,
+            )
+            fts_name = self._extract_canonical_name(fts_data, endpoint) or search_query
+            return {"id": entity_id, "name": fts_name}
+
+        canonical_name = self._extract_canonical_name(record, endpoint) or search_query
+        logger.info(
+            "[REFERENCE-CLIENT] %s: '%s' → id=%s, name='%s' (canonical)",
+            entity_label,
+            search_query,
+            entity_id,
+            canonical_name,
+        )
+        return {"id": entity_id, "name": canonical_name}
+
+    def _extract_canonical_name(
+        self, record: Dict[str, Any], endpoint: str
+    ) -> Optional[str]:
+        """
+        Extracts the canonical name from a DB record using endpoint-specific
+        field priority from _CANONICAL_NAME_FIELDS.
+
+        Args:
+            record: Raw dict returned by the API (fts or GET /{id}).
+            endpoint: API endpoint prefix used as lookup key.
+
+        Returns:
+            First non-empty string value found, or None.
+        """
+        priority_fields = self._CANONICAL_NAME_FIELDS.get(
+            endpoint, ("name", "shortName", "fullName")
+        )
+        for field in priority_fields:
+            val = record.get(field)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+        return None
+
     async def _find_entity_id(
         self, token: str, endpoint: str, name: str, entity_label: str
     ) -> Optional[str]:
+        """Legacy helper: возвращает только id (без name)."""
         result = await self._find_entity_with_name(token, endpoint, name, entity_label)
         return result["id"] if result else None
 
-    # ══════════════════════════════════════════════════════════════════
-    # СПРАВОЧНИКИ С ПОДДЕРЖКОЙ {ID, NAME}
-    # ══════════════════════════════════════════════════════════════════
+    # ─────────────────────────────────────────────────────────────────
+    # Гео-справочники: {id, canonical name}
+    # ─────────────────────────────────────────────────────────────────
 
     async def find_country_with_name(
         self, token: str, name: str
     ) -> Optional[Dict[str, str]]:
-        return await self._find_entity_with_name(
-            token, "country", name, "Страна", name_field="fullName"
-        )
+        """Two-step country lookup → {id, canonical name}."""
+        return await self._find_entity_with_name(token, "country", name, "Страна")
 
     async def find_region_with_name(
         self, token: str, name: str
     ) -> Optional[Dict[str, str]]:
-        """Поиск региона с возвратом {id, name}."""
-        return await self._find_entity_with_name(
-            token, "region", name, "Регион", name_field="regionName"
-        )
+        """Two-step region lookup → {id, canonical name}."""
+        return await self._find_entity_with_name(token, "region", name, "Регион")
 
     async def find_district_with_name(
         self, token: str, name: str
     ) -> Optional[Dict[str, str]]:
-        """Поиск района с возвратом {id, name}."""
-        return await self._find_entity_with_name(
-            token, "district", name, "Район", name_field="districtName"
-        )
+        """Two-step district lookup → {id, canonical name}."""
+        return await self._find_entity_with_name(token, "district", name, "Район")
 
     async def find_city_with_name(
         self, token: str, name: str
     ) -> Optional[Dict[str, str]]:
-        """Поиск города с возвратом {id, name}."""
-        return await self._find_entity_with_name(
-            token, "city", name, "Город", name_field="cityName"
-        )
+        """Two-step city lookup → {id, canonical name}."""
+        return await self._find_entity_with_name(token, "city", name, "Город")
 
     async def find_city_with_hierarchy(
         self, token: str, city_name: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Поиск города с автоматическим извлечением региона/района.
+        City lookup with full geo hierarchy (city → district → region).
 
-        Workflow:
-        1. FTS поиск города → получаем ID
-        2. GET /api/city/{id}?district=true → получаем city + embedded district
-        3. district.regionId → GET /api/region/{id} → получаем область
+        Protocol:
+          1. GET /api/city/fts-name?fts={name}  → city id
+          2. GET /api/city/{id}                 → canonical city name + districtId
+          3. GET /api/district/{districtId}     → canonical district name + regionId
+          4. GET /api/region/{regionId}         → canonical region name
+
+        Each step uses canonical name from GET /{id}, not from fts response.
 
         Returns:
-            Dict: {id, name, regionId, regionName, districtId, districtName}
+            Dict with id, name, regionId, regionName, districtId, districtName.
         """
-        logger.info(f"[REFERENCE-CLIENT] 🔍 Finding city with hierarchy: '{city_name}'")
+        logger.info("[REFERENCE-CLIENT] City hierarchy lookup: '%s'", city_name)
 
-        # ШАГ 1: FTS поиск города
+        # ── Шаг 1+2: fts-name → GET /city/{id} ──────────────────────────────
+        if not city_name or not city_name.strip():
+            return None
+
+        query = city_name.strip()
+
         try:
             fts_result = await self._make_request(
-                "GET",
-                "api/city/fts-name",
-                token=token,
-                params={"fts": city_name.strip()},
+                "GET", "api/city/fts-name", token=token, params={"fts": query}
             )
-
-            if not fts_result:
-                logger.warning(
-                    f"[REFERENCE-CLIENT] ⚠️ City not found via FTS: '{city_name}'"
-                )
-                return None
-
-            fts_city = fts_result[0] if isinstance(fts_result, list) else fts_result
-            city_id = str(fts_city.get("id"))
-
-            logger.debug(f"[REFERENCE-CLIENT] City FTS result: ID={city_id}")
-
-        except Exception as e:
-            logger.error(
-                f"[REFERENCE-CLIENT] City FTS search error: {e}", exc_info=True
-            )
+        except Exception as exc:
+            logger.error("[REFERENCE-CLIENT] City FTS error: %s", exc, exc_info=True)
             return None
 
-        # ШАГ 2: Получаем ПОЛНЫЕ данные города с district И region
+        if not fts_result:
+            logger.warning("[REFERENCE-CLIENT] City not found via FTS: '%s'", query)
+            return None
+
+        fts_city = fts_result[0] if isinstance(fts_result, list) else fts_result
+        city_id = str(fts_city.get("id", "")).strip()
+        if not city_id or city_id == "None":
+            return None
+
         try:
-            logger.debug(
-                f"[REFERENCE-CLIENT] 📡 Fetching city data: GET /api/city/{city_id}?district=true"
-            )
-
             city_dto = await self._make_request(
-                "GET",
-                f"api/city/{city_id}",
-                token=token,
-                params={"district": "true"},  # Загружаем district с region
+                "GET", f"api/city/{city_id}", token=token
             )
-
-            if not city_dto:
-                logger.warning(f"[REFERENCE-CLIENT] City GET returned empty: {city_id}")
-                return None
-
-            logger.debug(f"[REFERENCE-CLIENT] City DTO keys: {list(city_dto.keys())}")
-
-        except Exception as e:
-            logger.error(f"[REFERENCE-CLIENT] City GET error: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error("[REFERENCE-CLIENT] City GET error: %s", exc, exc_info=True)
             return None
 
-        # ШАГ 3: Формируем базовый response (API использует nameCity!)
-        response = {
+        if not city_dto or not isinstance(city_dto, dict):
+            return None
+
+        response: Dict[str, Any] = {
             "id": city_id,
-            "name": city_dto.get("nameCity") or city_dto.get("cityName") or city_name,
+            "name": self._extract_canonical_name(city_dto, "city") or query,
         }
+        logger.info("[REFERENCE-CLIENT] City: %s (ID: %s)", response["name"], city_id)
 
-        # ШАГ 4: Извлекаем DISTRICT и REGION
-        district_id = city_dto.get("districtId")
-        district_obj = city_dto.get("district")
+        # ── Шаг 3: GET /district/{id} ─────────────────────────────────────────
+        district_id = str(city_dto.get("districtId", "")).strip()
+        if not district_id or district_id == "None":
+            logger.debug("[REFERENCE-CLIENT] City %s has no districtId", city_id)
+            return response
 
-        if district_id:
-            try:
-                # Если district уже загружен как объект - используем его
-                if district_obj and isinstance(district_obj, dict):
-                    response["districtId"] = str(district_id)
-                    response["districtName"] = (
-                        district_obj.get("nameDistrict")
-                        or district_obj.get("districtName")
-                        or district_obj.get("name")
+        try:
+            district_dto = await self._make_request(
+                "GET", f"api/district/{district_id}", token=token
+            )
+        except Exception as exc:
+            logger.warning(
+                "[REFERENCE-CLIENT] District GET/%s error: %s", district_id, exc
+            )
+            return response
+
+        if district_dto and isinstance(district_dto, dict):
+            district_name = self._extract_canonical_name(district_dto, "district")
+            response["districtId"] = district_id
+            response["districtName"] = district_name
+            logger.info(
+                "[REFERENCE-CLIENT] District: %s (ID: %s)", district_name, district_id
+            )
+
+            # ── Шаг 4: GET /region/{id} ───────────────────────────────────────
+            region_id = str(district_dto.get("regionId", "")).strip()
+            if region_id and region_id != "None":
+                try:
+                    region_dto = await self._make_request(
+                        "GET", f"api/region/{region_id}", token=token
                     )
-                    logger.info(
-                        f"[REFERENCE-CLIENT] District from embedded object: "
-                        f"{response['districtName']} (ID: {district_id})"
-                    )
-
-                    # Получаем REGION из district (может быть объект или ID)
-                    district_region_obj = district_obj.get(
-                        "region"
-                    )  # Embedded region object?
-                    district_region_id = district_obj.get("regionId")
-
-                    if district_region_obj and isinstance(district_region_obj, dict):
-                        # Region уже загружен как объект внутри district
-                        response["regionId"] = str(district_region_obj.get("id"))
-                        response["regionName"] = district_region_obj.get(
-                            "regionName"
-                        ) or district_region_obj.get("name")
+                    if region_dto and isinstance(region_dto, dict):
+                        region_name = self._extract_canonical_name(region_dto, "region")
+                        response["regionId"] = region_id
+                        response["regionName"] = region_name
                         logger.info(
-                            f"[REFERENCE-CLIENT] Region from district.region embedded object: "
-                            f"{response['regionName']} (ID: {response['regionId']})"
+                            "[REFERENCE-CLIENT] Region: %s (ID: %s)",
+                            region_name,
+                            region_id,
                         )
-                    elif district_region_id:
-                        # Fallback: запрашиваем region
-                        response["regionId"] = str(district_region_id)
-
-                        # Делаем запрос на получение полного имени региона
-                        try:
-                            region_dto = await self._make_request(
-                                "GET", f"api/region/{district_region_id}", token=token
-                            )
-                            if region_dto:
-                                response["regionName"] = region_dto.get(
-                                    "regionName"
-                                ) or region_dto.get("name")
-                                logger.info(
-                                    f"[REFERENCE-CLIENT] Region via fallback request: "
-                                    f"{response['regionName']} (ID: {district_region_id})"
-                                )
-                        except Exception as e:
-                            logger.warning(
-                                f"[REFERENCE-CLIENT] ️ Failed to fetch region: {e}"
-                            )
-                else:
-                    # Fallback: делаем отдельный запрос на district С REGION
-                    logger.debug(
-                        f"[REFERENCE-CLIENT] 📡 Fetching district with region: GET /api/district/{district_id}?region=true"
+                except Exception as exc:
+                    logger.warning(
+                        "[REFERENCE-CLIENT] Region GET/%s error: %s", region_id, exc
                     )
-
-                    district_dto = await self._make_request(
-                        "GET",
-                        f"api/district/{district_id}",
-                        token=token,
-                        params={"region": "true"},
-                    )
-
-                    if district_dto:
-                        response["districtId"] = str(district_id)
-                        response["districtName"] = (
-                            district_dto.get("nameDistrict")
-                            or district_dto.get("districtName")
-                            or district_dto.get("name")
-                        )
-                        logger.info(
-                            f"[REFERENCE-CLIENT] District via separate request: "
-                            f"{response['districtName']} (ID: {district_id})"
-                        )
-
-                        # Получаем REGION из district (может быть объект или ID)
-                        district_region_obj = district_dto.get(
-                            "region"
-                        )  # Embedded object?
-                        district_region_id = district_dto.get("regionId")
-
-                        if district_region_obj and isinstance(
-                            district_region_obj, dict
-                        ):
-                            # Region уже загружен как объект
-                            response["regionId"] = str(district_region_obj.get("id"))
-                            response["regionName"] = district_region_obj.get(
-                                "regionName"
-                            ) or district_region_obj.get("name")
-                            logger.info(
-                                f"[REFERENCE-CLIENT] ✅ Region from district.region embedded object: "
-                                f"{response['regionName']} (ID: {response['regionId']})"
-                            )
-                        elif district_region_id:
-                            # Fallback: запрашиваем region отдельно
-                            response["regionId"] = str(district_region_id)
-                            try:
-                                region_dto = await self._make_request(
-                                    "GET",
-                                    f"api/region/{district_region_id}",
-                                    token=token,
-                                )
-                                if region_dto:
-                                    response["regionName"] = region_dto.get(
-                                        "regionName"
-                                    ) or region_dto.get("name")
-                                    logger.info(
-                                        f"[REFERENCE-CLIENT] ✅ Region via fallback request: "
-                                        f"{response['regionName']} (ID: {district_region_id})"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    f"[REFERENCE-CLIENT] ⚠️ Failed to fetch region: {e}"
-                                )
-
-            except Exception as e:
-                logger.warning(f"[REFERENCE-CLIENT] ⚠️ District resolution error: {e}")
-        else:
-            logger.debug(f"[REFERENCE-CLIENT] ℹ️ City has no districtId")
 
         logger.info(
-            f"[REFERENCE-CLIENT] ✅ City hierarchy complete: "
-            f"city={response.get('name')}, "
-            f"region={response.get('regionName', 'N/A')}, "
-            f"district={response.get('districtName', 'N/A')}"
+            "[REFERENCE-CLIENT] Hierarchy complete: city=%s, district=%s, region=%s",
+            response.get("name"),
+            response.get("districtName", "—"),
+            response.get("regionName", "—"),
         )
-
         return response
 
-    # ══════════════════════════════════════════════════════════════════
-    # LEGACY API (только ID, для обратной совместимости)
-    # ══════════════════════════════════════════════════════════════════
+    # ─────────────────────────────────────────────────────────────────
+    # Legacy API (только id, обратная совместимость)
+    # ─────────────────────────────────────────────────────────────────
 
     async def find_country(self, token: str, name: str) -> Optional[str]:
         """Поиск страны (только ID)."""
@@ -352,17 +362,15 @@ class ReferenceClient(EdmsHttpClient):
         return await self._find_entity_id(token, "correspondent", name, "Корреспондент")
 
     async def find_delivery_method(self, token: str, name: str) -> Optional[str]:
-        """Поиск способа доставки с fallback на "Курьер"."""
+        """Поиск способа доставки с fallback на 'Курьер'."""
         result = await self._find_entity_id(
             token, "delivery-method", name, "Способ доставки"
         )
-
         if not result and name != "Курьер":
             logger.info("[REFERENCE-CLIENT] Fallback: используем 'Курьер'")
             return await self._find_entity_id(
                 token, "delivery-method", "Курьер", "Способ доставки"
             )
-
         return result
 
     async def find_department(self, token: str, name: str) -> Optional[str]:
@@ -373,11 +381,11 @@ class ReferenceClient(EdmsHttpClient):
         """Поиск группы (только ID)."""
         return await self._find_entity_id(token, "group", name, "Группа")
 
-    # ══════════════════════════════════════════════════════════════════
-    # ТЕМАТИКИ (SUBJECT)
-    # ══════════════════════════════════════════════════════════════════
+    # ─────────────────────────────────────────────────────────────────
+    # Тематики (Subject)
+    # ─────────────────────────────────────────────────────────────────
 
-    async def get_parent_subjects(self, token: str):
+    async def get_parent_subjects(self, token: str) -> List[Dict]:
         """Получить список родительских тем."""
         try:
             result = await self._make_request(
@@ -386,30 +394,35 @@ class ReferenceClient(EdmsHttpClient):
                 token=token,
                 params={"listAttribute": "true"},
             )
-            logger.info(
-                f"[REFERENCE-CLIENT] Загружено родительских тем: {len(result) if isinstance(result, list) else 0}"
-            )
+            count = len(result) if isinstance(result, list) else 0
+            logger.info("[REFERENCE-CLIENT] Загружено родительских тем: %d", count)
             return result if isinstance(result, list) else []
-        except Exception as e:
-            logger.error(f"[REFERENCE-CLIENT] Ошибка получения родительских тем: {e}")
+        except Exception as exc:
+            logger.error(
+                "[REFERENCE-CLIENT] Ошибка получения родительских тем: %s", exc
+            )
             return []
 
-    async def get_child_subjects(self, token: str, parent_id: str):
-        """Получить дочерние темы."""
+    async def get_child_subjects(self, token: str, parent_id: str) -> List[Dict]:
+        """Получить дочерние темы по parent_id."""
         try:
             result = await self._make_request(
                 "GET", f"api/subject/parent/{parent_id}", token=token
             )
-            logger.info(
-                f"[REFERENCE-CLIENT] Дочерних тем для {parent_id}: {len(result) if isinstance(result, list) else 0}"
-            )
+            count = len(result) if isinstance(result, list) else 0
+            logger.info("[REFERENCE-CLIENT] Дочерних тем для %s: %d", parent_id, count)
             return result if isinstance(result, list) else []
-        except Exception as e:
-            logger.error(f"[REFERENCE-CLIENT] Ошибка получения дочерних тем: {e}")
+        except Exception as exc:
+            logger.error(
+                "[REFERENCE-CLIENT] Ошибка получения дочерних тем для %s: %s",
+                parent_id,
+                exc,
+            )
             return []
 
-    async def find_best_subject(self, token: str, text: str):
-        """Поиск подходящей темы через LLM."""
+    async def find_best_subject(self, token: str, text: str) -> Optional[str]:
+        """LLM-based two-level subject selection (parent → child)."""
+        import re
         from edms_ai_assistant.llm import get_chat_model
 
         parents = await self.get_parent_subjects(token)
@@ -417,43 +430,40 @@ class ReferenceClient(EdmsHttpClient):
             logger.warning("[REFERENCE-CLIENT] Родительские темы не загружены")
             return None
 
-        themes_text = "\n".join(
-            [f"{i + 1}. {s['name']}" for i, s in enumerate(parents)]
-        )
+        themes_text = "\n".join(f"{i + 1}. {s['name']}" for i, s in enumerate(parents))
         llm = get_chat_model()
 
-        prompt = f"""Выбери ОДНУ наиболее подходящую тему для обращения.
-
-СПИСОК ТЕМ:
-{themes_text}
-
-ТЕКСТ ОБРАЩЕНИЯ (фрагмент):
-{text[:800]}
-
-Ответь ТОЛЬКО номером (например: 3)"""
+        prompt = (
+            f"Выбери ОДНУ наиболее подходящую тему для обращения.\n\n"
+            f"СПИСОК ТЕМ:\n{themes_text}\n\n"
+            f"ТЕКСТ ОБРАЩЕНИЯ (фрагмент):\n{text[:800]}\n\n"
+            f"Ответь ТОЛЬКО номером (например: 3)"
+        )
 
         try:
             response = await llm.ainvoke(prompt)
             choice_text = response.content.strip()
 
-            import re
-
             match = re.search(r"\d+", choice_text)
             if not match:
                 logger.warning(
-                    f"[REFERENCE-CLIENT] LLM не вернула номер: {choice_text}"
+                    "[REFERENCE-CLIENT] LLM не вернула номер: %s", choice_text
                 )
                 return None
 
             index = int(match.group(0)) - 1
-            if index < 0 or index >= len(parents):
-                logger.warning(f"[REFERENCE-CLIENT] Неверный индекс: {index}")
+            if not (0 <= index < len(parents)):
+                logger.warning(
+                    "[REFERENCE-CLIENT] Неверный индекс родительской темы: %d", index
+                )
                 return None
 
             parent = parents[index]
             parent_id = str(parent["id"])
             logger.info(
-                f"[REFERENCE-CLIENT] Родительская тема: {parent['name']} (ID: {parent_id})"
+                "[REFERENCE-CLIENT] Родительская тема: %s (ID: %s)",
+                parent["name"],
+                parent_id,
             )
 
             children = await self.get_child_subjects(token, parent_id)
@@ -461,18 +471,14 @@ class ReferenceClient(EdmsHttpClient):
                 return parent_id
 
             children_text = "\n".join(
-                [f"{i + 1}. {c['name']}" for i, c in enumerate(children)]
+                f"{i + 1}. {c['name']}" for i, c in enumerate(children)
             )
-
-            prompt2 = f"""Выбери ОДНУ наиболее подходящую подтему.
-
-СПИСОК ПОДТЕМ:
-{children_text}
-
-ТЕКСТ ОБРАЩЕНИЯ (фрагмент):
-{text[:800]}
-
-Ответь ТОЛЬКО номером (например: 2)"""
+            prompt2 = (
+                f"Выбери ОДНУ наиболее подходящую подтему.\n\n"
+                f"СПИСОК ПОДТЕМ:\n{children_text}\n\n"
+                f"ТЕКСТ ОБРАЩЕНИЯ (фрагмент):\n{text[:800]}\n\n"
+                f"Ответь ТОЛЬКО номером (например: 2)"
+            )
 
             response2 = await llm.ainvoke(prompt2)
             choice2_text = response2.content.strip()
@@ -480,25 +486,29 @@ class ReferenceClient(EdmsHttpClient):
             match2 = re.search(r"\d+", choice2_text)
             if not match2:
                 logger.warning(
-                    f"[REFERENCE-CLIENT] LLM не вернула номер подтемы: {choice2_text}"
+                    "[REFERENCE-CLIENT] LLM не вернула номер подтемы: %s",
+                    choice2_text,
                 )
                 return parent_id
 
             child_index = int(match2.group(0)) - 1
-            if child_index < 0 or child_index >= len(children):
+            if not (0 <= child_index < len(children)):
                 logger.warning(
-                    f"[REFERENCE-CLIENT] Неверный индекс подтемы: {child_index}"
+                    "[REFERENCE-CLIENT] Неверный индекс подтемы: %d", child_index
                 )
                 return parent_id
 
             child = children[child_index]
             child_id = str(child["id"])
             logger.info(
-                f"[REFERENCE-CLIENT] Дочерняя тема: {child['name']} (ID: {child_id})"
+                "[REFERENCE-CLIENT] Дочерняя тема: %s (ID: %s)",
+                child["name"],
+                child_id,
             )
-
             return child_id
 
-        except Exception as e:
-            logger.error(f"[REFERENCE-CLIENT] Ошибка выбора темы: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error(
+                "[REFERENCE-CLIENT] Ошибка выбора темы: %s", exc, exc_info=True
+            )
             return None
