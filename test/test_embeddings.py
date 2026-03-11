@@ -9,8 +9,8 @@ from edms_ai_assistant.config import settings
 from edms_ai_assistant.llm import get_embedding_model
 
 print("--- Конфигурация эмбеддингов ---")
-print(f"Embedding Endpoint: {settings.EMBEDDING_ENDPOINT}")
-print(f"Embedding Model: {settings.EMBEDDING_MODEL_NAME}")
+print(f"Embedding Endpoint: {settings.LLM_EMBEDDING_URL}")
+print(f"Embedding Model: {settings.LLM_EMBEDDING_MODEL}")
 
 print("\n--- Инициализация и вызов EmbeddingModel ---")
 
@@ -25,7 +25,7 @@ try:
     print("Выполняется вызов модели эмбеддингов...")
     embeddings = embedding_model.embed_documents(test_text)
 
-    print(f"\nПолучены эмбеддинги:")
+    print("\nПолучены эмбеддинги:")
     print(f"Количество векторов: {len(embeddings)}")
     if embeddings and len(embeddings[0]) > 0:
         print(f"Размер одного вектора (эмбеддинга): {len(embeddings[0])}")

@@ -1,30 +1,43 @@
-"""
-EDMS AI Assistant - Local File Tool.
-
-Инструмент для извлечения и анализа локальных файлов.
-"""
+from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.services.file_processor import FileProcessorService
-from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 
 logger = logging.getLogger(__name__)
 
+_MAX_CONTENT_CHARS = 15000
+_ALLOWED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".txt",
+    ".rtf",
+    ".odt",
+    ".md",
+    ".xlsx",
+    ".xls",
+    ".csv",
+}
+
 
 class LocalFileInput(BaseModel):
-    """Валидированная схема входных данных для чтения локального файла."""
+    """Validated input for read_local_file_content.
+
+    Attributes:
+        file_path: Absolute path to the local file to read.
+    """
 
     file_path: str = Field(
         ...,
         description=(
             "ПОЛНЫЙ абсолютный путь к локальному файлу. "
-            "Возьми его ИЗ ТЕКСТА ЗАПРОСА в блоке [ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ]."
+            "Берётся из блока <local_file_path> в system prompt."
         ),
         min_length=1,
         max_length=500,
@@ -33,188 +46,127 @@ class LocalFileInput(BaseModel):
     @field_validator("file_path")
     @classmethod
     def validate_file_path(cls, v: str) -> str:
-        """
-        Валидирует путь к файлу.
+        """Reject placeholder strings; require a real path.
 
-        Проверки:
-        - Не является плейсхолдером
-        - Не пустая строка
-        - Валидный путь
+        Args:
+            v: Raw path value.
+
+        Returns:
+            Stripped path string.
 
         Raises:
-            ValueError: Если путь невалиден
+            ValueError: If path looks like a placeholder or is blank.
         """
         cleaned = v.strip()
-
         if not cleaned:
             raise ValueError("Путь к файлу не может быть пустым")
-
-        if "file_path" in cleaned.lower():
+        lower = cleaned.lower()
+        if "file_path" in lower or "<" in cleaned or ">" in cleaned:
             raise ValueError(
                 "Передан плейсхолдер вместо реального пути. "
-                "Найдите путь в блоке [ДОСТУПЕН ЛОКАЛЬНЫЙ ФАЙЛ]."
+                "Используй значение из <local_file_path> в system prompt."
             )
-
         return cleaned
 
 
 @tool("read_local_file_content", args_schema=LocalFileInput)
-def read_local_file_content(file_path: str) -> Dict[str, Any]:
-    """
-    Извлекает текст и метаданные из локального файла.
+async def read_local_file_content(file_path: str) -> Dict[str, Any]:
+    """Extract text and metadata from a local file on disk.
 
-    Поддерживаемые форматы:
-    - PDF (.pdf)
-    - Microsoft Word (.docx, .doc)
-    - Plain Text (.txt)
+    Supported formats: PDF, DOCX, DOC, TXT, RTF, ODT, MD, XLSX, XLS, CSV.
 
-    Workflow:
-    1. Валидация пути к файлу
-    2. Извлечение метаданных через NLP service
-    3. Извлечение текстового содержимого
-    4. Truncation при необходимости (15K chars limit)
+    This is an async tool — it delegates CPU work to a thread-pool executor
+    so the event loop is never blocked.
 
     Args:
-        file_path: Абсолютный путь к файлу
+        file_path: Absolute path to the file (from <local_file_path> in context).
 
     Returns:
-        Dict с ключами:
-        - status: "success" | "error"
-        - meta: Метаданные файла (размер, тип, etc.)
-        - content: Извлеченный текст
-        - is_truncated: bool (был ли обрезан текст)
-        - total_chars: int (полная длина текста)
-        - message: Сообщение об ошибке (для status="error")
-
-    Examples:
-         result = read_local_file_content("/path/to/document.pdf")
-         # {
-         #   "status": "success",
-         #   "meta": {"extension": ".pdf", "size_bytes": 12345, ...},
-         #   "content": "Extracted text...",
-         #   "is_truncated": False,
-         #   "total_chars": 5000
-         # }
-
-         result = read_local_file_content("")
-         # {"status": "error", "message": "Путь к файлу не может быть пустым"}
+        Dict with keys:
+        - status     : «success» | «error»
+        - meta       : File metadata dict.
+        - content    : Extracted text (up to 15 000 chars).
+        - is_truncated: bool — whether text was trimmed.
+        - total_chars: int — full character count before truncation.
+        - message    : Error description (only for status=error).
     """
-    logger.info(
-        "Processing local file",
-        extra={"file_path": file_path},
-    )
+    logger.info("read_local_file_content called", extra={"file_path": file_path})
 
-    try:
-        validation_error = _validate_file_access(file_path)
-        if validation_error:
-            return validation_error
-
-        nlp = EDMSNaturalLanguageService()
-        file_meta = nlp.analyze_local_file(file_path)
-
-        text_content = FileProcessorService.extract_text(file_path)
-
-        if text_content.startswith("Ошибка:") or text_content.startswith(
-            "Формат файла"
-        ):
-            logger.error(
-                "File extraction failed",
-                extra={"file_path": file_path, "error": text_content},
-            )
-            return {
-                "status": "error",
-                "message": text_content,
-            }
-
-        truncated_content, is_truncated = _truncate_content(text_content)
-
-        logger.info(
-            "File processed successfully",
-            extra={
-                "file_path": file_path,
-                "total_chars": len(text_content),
-                "is_truncated": is_truncated,
-            },
-        )
-
-        return {
-            "status": "success",
-            "meta": file_meta,
-            "content": truncated_content,
-            "is_truncated": is_truncated,
-            "total_chars": len(text_content),
-        }
-
-    except ValueError as e:
-        logger.warning(
-            f"Validation error: {e}",
-            extra={"file_path": file_path},
-        )
-        return {
-            "status": "error",
-            "message": str(e),
-        }
-    except Exception as e:
-        logger.error(
-            f"File processing error: {e}",
-            exc_info=True,
-            extra={"file_path": file_path},
-        )
-        return {
-            "status": "error",
-            "message": f"Не удалось извлечь данные из файла: {str(e)}",
-        }
-
-
-def _validate_file_access(file_path: str) -> Optional[Dict[str, Any]]:
-    """
-    Валидирует доступ к файлу перед обработкой.
-
-    Args:
-        file_path: Путь к файлу
-
-    Returns:
-        Dict с ошибкой если валидация не прошла, None если все ок
-    """
     path = Path(file_path)
 
     if not path.exists():
-        logger.error(
-            "File not found",
-            extra={"file_path": file_path},
-        )
+        logger.error("File not found: %s", file_path)
         return {
             "status": "error",
-            "message": "Файл не найден по указанному пути. Проверьте доступность файла.",
+            "message": (
+                f"Файл не найден: '{file_path}'. "
+                "Проверьте, что файл был загружен и путь указан верно."
+            ),
         }
 
     if not path.is_file():
-        logger.error(
-            "Path is not a file",
-            extra={"file_path": file_path},
-        )
         return {
             "status": "error",
-            "message": "Указанный путь не является файлом.",
+            "message": f"Указанный путь не является файлом: '{file_path}'.",
         }
 
-    return None
+    suffix = path.suffix.lower()
+    size_bytes = path.stat().st_size
+    size_mb = round(size_bytes / (1024 * 1024), 2)
 
+    meta = {
+        "имя_файла": path.name,
+        "расширение": suffix,
+        "размер_мб": size_mb,
+        "путь": str(path),
+    }
 
-def _truncate_content(content: str, max_length: int = 15000) -> tuple[str, bool]:
-    """
-    Обрезает контент до максимальной длины.
+    if suffix not in _ALLOWED_EXTENSIONS:
+        return {
+            "status": "error",
+            "message": (
+                f"Формат '{suffix}' не поддерживается. "
+                f"Поддерживаемые форматы: {', '.join(sorted(_ALLOWED_EXTENSIONS))}."
+            ),
+            "meta": meta,
+        }
 
-    Args:
-        content: Исходный текст
-        max_length: Максимальная длина (default: 15000)
+    text_content: str = await FileProcessorService.extract_text_async(str(path))
 
-    Returns:
-        Tuple[str, bool]: (truncated_content, is_truncated)
-    """
-    if len(content) <= max_length:
-        return content, False
+    if (
+        not text_content
+        or text_content.startswith("Ошибка:")
+        or text_content.startswith("Формат файла")
+    ):
+        logger.error("Text extraction failed for %s: %s", file_path, text_content[:200])
+        return {
+            "status": "error",
+            "message": (
+                f"Не удалось извлечь текст из '{path.name}'. "
+                f"Возможно, файл зашифрован, повреждён или является отсканированным изображением. "
+                f"Подробности: {text_content[:300]}"
+            ),
+            "meta": meta,
+        }
 
-    logger.debug(f"Content truncated: {len(content)} → {max_length} chars")
+    total_chars = len(text_content)
+    is_truncated = total_chars > _MAX_CONTENT_CHARS
+    content = text_content[:_MAX_CONTENT_CHARS] if is_truncated else text_content
 
-    return content[:max_length], True
+    logger.info(
+        "local_file_read_success",
+        extra={
+            "file": path.name,
+            "total_chars": total_chars,
+            "is_truncated": is_truncated,
+            "size_mb": size_mb,
+        },
+    )
+
+    return {
+        "status": "success",
+        "meta": meta,
+        "content": content,
+        "is_truncated": is_truncated,
+        "total_chars": total_chars,
+    }

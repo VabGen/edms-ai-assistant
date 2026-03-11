@@ -7,9 +7,9 @@ logger = logging.getLogger(__name__)
 
 try:
     import docx2txt
-    from PyPDF2 import PdfReader
+    from pypdf import PdfReader
 except ImportError:
-    logger.warning("Не удалось импортировать модули docx2txt и PyPDF2")
+    logger.warning("Не удалось импортировать модули docx2txt и PyPDF")
     docx2txt = None
     PdfReader = None
 

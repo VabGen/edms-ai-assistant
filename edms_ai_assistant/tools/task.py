@@ -100,7 +100,7 @@ async def task_create_tool(
         try:
             deadline = datetime.fromisoformat(planed_date_end.replace("Z", "+00:00"))
             if deadline.tzinfo is None:
-                deadline = datetime.replace(tzinfo=timezone.utc)
+                deadline = deadline.replace(tzinfo=timezone.utc)
         except ValueError as e:
             return {
                 "status": "error",
@@ -151,24 +151,34 @@ async def task_create_tool(
                 task_type=task_type or TaskType.GENERAL,
             )
 
-            # НЕОДНОЗНАЧНОСТЬ!
             if result.status == "requires_disambiguation":
                 logger.info(
                     f"[TASK-TOOL] Disambiguation required. "
                     f"Ambiguous matches: {len(result.ambiguous_matches)}"
                 )
 
+                flat_candidates: List[Dict[str, Any]] = []
+                for group in result.ambiguous_matches or []:
+                    for match in group.get("matches", []):
+                        flat_candidates.append(
+                            {
+                                "id": match.get("id", ""),
+                                "full_name": match.get("full_name", "Не указано"),
+                                "post": match.get("post", ""),
+                                "department": match.get("department", ""),
+                            }
+                        )
+
                 return {
                     "status": "requires_disambiguation",
-                    "message": "⚠️ Найдено несколько сотрудников с указанными фамилиями. Выберите нужных из списка:",
-                    "ambiguous_matches": result.ambiguous_matches,
+                    "message": "⚠️ Найдено несколько сотрудников с указанными фамилиями. Выберите нужного из списка:",
+                    "ambiguous_matches": flat_candidates,
                     "instruction": (
-                        "Пожалуйста, выберите конкретных сотрудников из списка. "
+                        "Пожалуйста, выберите конкретного сотрудника из списка. "
                         "Затем вызовите инструмент повторно с параметром selected_employee_ids."
                     ),
                 }
 
-            # УСПЕХ
             if result.success:
                 response = {
                     "status": "success",
@@ -176,7 +186,6 @@ async def task_create_tool(
                     "created_count": result.created_count,
                 }
 
-                # Частичный успех
                 if result.not_found_employees:
                     response["partial_success"] = True
                     response["not_found"] = result.not_found_employees

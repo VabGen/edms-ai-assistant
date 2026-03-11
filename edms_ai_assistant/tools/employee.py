@@ -1,12 +1,11 @@
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
 from edms_ai_assistant.generated.resources_openapi import (
-    EmployeeFilter,
     Include1,
     EmployeeDto,
 )

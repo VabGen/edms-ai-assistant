@@ -3,12 +3,12 @@ import httpx
 from edms_ai_assistant.config import settings
 
 servers = {
-    "generative": settings.LLM_ENDPOINT,
-    "embedding": settings.EMBEDDING_ENDPOINT,
+    "generative": settings.LLM_GENERATIVE_URL,
+    "embedding": settings.LLM_EMBEDDING_URL,
 }
 
 for name, endpoint in servers.items():
-    url = f"{endpoint.rstrip('/')}/models"
+    url = f"{endpoint}/models"
     print(f"\n{'=' * 60}")
     print(f"{name.upper()}: {endpoint}")
     print('=' * 60)

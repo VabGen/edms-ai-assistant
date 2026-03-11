@@ -127,11 +127,14 @@ def _compare_metadata(doc1: Dict, doc2: Dict) -> Dict[str, Any]:
 
 def _compare_attachments(doc1: Dict, doc2: Dict) -> Dict[str, Any]:
     """Сравнивает списки вложений."""
-    att1 = doc1.get("attachmentDocument", [])
-    att2 = doc2.get("attachmentDocument", [])
+    att1 = doc1.get("attachmentDocument") or []
+    att2 = doc2.get("attachmentDocument") or []
 
-    att1_names = {a.get("originalName") for a in att1}
-    att2_names = {a.get("originalName") for a in att2}
+    def _get_att_name(a: dict) -> str:
+        return a.get("name") or a.get("originalName") or a.get("fileName") or ""
+
+    att1_names = {_get_att_name(a) for a in att1 if _get_att_name(a)}
+    att2_names = {_get_att_name(a) for a in att2 if _get_att_name(a)}
 
     return {
         "added_in_doc2": list(att2_names - att1_names),

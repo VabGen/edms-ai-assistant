@@ -1,23 +1,59 @@
-# edms_ai_assistant/services/nlp_service.py
+from __future__ import annotations
+
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple, Set
-from enum import Enum
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from collections import Counter
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from edms_ai_assistant.config import settings
+from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
 
+_RESERVED_LOG_KEYS = {
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "message",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+}
 
-# ========================================
-# ENUMS & DATA CLASSES
-# ========================================
+
+def safe_extra(**kwargs: Any) -> dict[str, Any]:
+    """Prefix reserved LogRecord keys to avoid log-record attribute conflicts.
+
+    Args:
+        **kwargs: Arbitrary key-value pairs for structured logging.
+
+    Returns:
+        Dict safe to pass as ``extra`` to any logger call.
+    """
+    return {f"ctx_{k}" if k in _RESERVED_LOG_KEYS else k: v for k, v in kwargs.items()}
 
 
 class UserIntent(Enum):
-    """Типы намерений пользователя."""
+    """Detected user intention categories."""
 
     SUMMARIZE = "summarize"
     COMPARE = "compare"
@@ -31,10 +67,13 @@ class UserIntent(Enum):
     DELETE = "delete"
     COMPOSITE = "composite"
     UNKNOWN = "unknown"
+    FILE_ANALYSIS = "file_analysis"
+    RESOLUTION = "resolution"
+    NOTIFICATION = "notification"
 
 
 class QueryComplexity(Enum):
-    """Сложность запроса."""
+    """Estimated complexity level of a user query."""
 
     SIMPLE = "simple"
     MEDIUM = "medium"
@@ -43,7 +82,7 @@ class QueryComplexity(Enum):
 
 
 class EntityType(Enum):
-    """Типы извлекаемых сущностей."""
+    """Types of named entities that can be extracted from text."""
 
     DATE = "date"
     DATETIME = "datetime"
@@ -57,7 +96,15 @@ class EntityType(Enum):
 
 @dataclass
 class Entity:
-    """Структура именованной сущности."""
+    """A single extracted named entity.
+
+    Attributes:
+        type: Entity category.
+        value: Raw or parsed entity value.
+        raw_text: Original text span.
+        confidence: Extraction confidence in [0, 1].
+        normalized_value: Canonical representation.
+    """
 
     type: EntityType
     value: Any
@@ -68,7 +115,18 @@ class Entity:
 
 @dataclass
 class UserQuery:
-    """Структура пользовательского запроса."""
+    """Enriched representation of a user query.
+
+    Attributes:
+        original: Unmodified user input.
+        refined: Post-processed query text.
+        intent: Primary detected intent.
+        secondary_intents: Additional detected intents.
+        complexity: Estimated query complexity.
+        entities: Extracted entities grouped by type name.
+        keywords: Significant content words.
+        confidence: Intent classification confidence.
+    """
 
     original: str
     refined: str
@@ -82,7 +140,15 @@ class UserQuery:
 
 @dataclass
 class SemanticContext:
-    """Семантический контекст для обработки запроса."""
+    """Full semantic context produced for one user turn.
+
+    Attributes:
+        query: Enriched query object.
+        document: Active EDMS document (if available).
+        metadata: Computed metadata about the query/document.
+        suggestions: Actionable suggestions for the user.
+        warnings: Potential issues to surface to the user.
+    """
 
     query: UserQuery
     document: Optional[Any] = None
@@ -91,46 +157,27 @@ class SemanticContext:
     warnings: List[str] = field(default_factory=list)
 
 
-# ========================================
-# ENTITY EXTRACTOR
-# ========================================
-
-
 class EntityExtractor:
-    """
-    экстрактор именованных сущностей.
+    """Rule-based named entity extractor for EDMS domain text."""
 
-    Функции:
-    - Извлечение дат с нормализацией
-    - Распознавание ФИО с контекстом
-    - Парсинг денежных сумм
-    - Извлечение UUID документов
-    - Определение временных промежутков
-    """
-
-    DATE_PATTERNS = [
-        # DD.MM.YYYY
+    DATE_PATTERNS: list[tuple[str, Any]] = [
         (
             r"(\d{1,2})\.(\d{1,2})\.(\d{4})",
             lambda m: f"{m[2]}-{int(m[1]):02d}-{int(m[0]):02d}",
         ),
-        # DD месяц YYYY
         (
             r"(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(\d{4}))?",
             "month_name",
         ),
-        # "сегодня", "завтра", "вчера"
         (r"\b(сегодня|завтра|вчера|послезавтра)\b", "relative_day"),
-        # "через N дней/недель"
         (
             r"через\s+(\d+)\s+(день|дня|дней|неделю|недели|недель|месяц|месяца|месяцев)",
             "duration",
         ),
-        # "до DD.MM"
         (r"до\s+(\d{1,2})\.(\d{1,2})", "deadline"),
     ]
 
-    MONTH_NAMES = {
+    MONTH_NAMES: dict[str, int] = {
         "января": 1,
         "февраля": 2,
         "марта": 3,
@@ -146,29 +193,29 @@ class EntityExtractor:
     }
 
     def extract_dates(
-        self, text: str, base_date: Optional[datetime] = None
+        self,
+        text: str,
+        base_date: Optional[datetime] = None,
     ) -> List[Entity]:
-        """
-        Извлекает и нормализует даты из текста.
+        """Extract and normalise date expressions from text.
 
         Args:
-            text: Исходный текст
-            base_date: Базовая дата для относительных выражений
+            text: Source text.
+            base_date: Reference date for relative expressions.
 
         Returns:
-            Список извлеченных дат
+            List of date entities with ISO-formatted normalised values.
         """
         if base_date is None:
             base_date = datetime.now()
 
-        dates = []
+        dates: list[Entity] = []
 
-        # Обработка паттернов
         for pattern, handler in self.DATE_PATTERNS:
             for match in re.finditer(pattern, text, re.IGNORECASE):
                 raw = match.group(0)
-
                 try:
+                    normalized: datetime
                     if handler == "month_name":
                         day = int(match.group(1))
                         month = self.MONTH_NAMES[match.group(2)]
@@ -182,13 +229,13 @@ class EntityExtractor:
                             "послезавтра": 2,
                             "вчера": -1,
                         }
-                        delta = delta_map[match.group(1)]
-                        normalized = base_date + timedelta(days=delta)
+                        normalized = base_date + timedelta(
+                            days=delta_map[match.group(1)]
+                        )
 
                     elif handler == "duration":
                         count = int(match.group(1))
                         unit = match.group(2)
-
                         if "день" in unit or "дня" in unit or "дней" in unit:
                             delta = timedelta(days=count)
                         elif "недел" in unit:
@@ -197,38 +244,19 @@ class EntityExtractor:
                             delta = timedelta(days=count * 30)
                         else:
                             continue
-
                         normalized = base_date + delta
 
                     elif handler == "deadline":
                         day = int(match.group(1))
                         month = int(match.group(2))
-                        year = base_date.year
-                        normalized = datetime(year, month, day)
-
-                        if normalized < base_date:
-                            normalized = datetime(year + 1, month, day)
-
-                    elif handler == "deadline":
-                        try:
-                            day = int(match.group(1))
-                            month = int(match.group(2))
-                            year = base_date.year
-
-                            if month < 1 or month > 12 or day < 1 or day > 31:
-                                logger.debug(f"Invalid date: {day}.{month}")
-                                continue
-                            normalized = datetime(year, month, day)
-
-                            if normalized < base_date:
-                                normalized = datetime(year + 1, month, day)
-                        except ValueError as e:
-                            logger.debug(f"Failed to parse deadline date: {e}")
+                        if not (1 <= month <= 12 and 1 <= day <= 31):
                             continue
+                        normalized = datetime(base_date.year, month, day)
+                        if normalized < base_date:
+                            normalized = datetime(base_date.year + 1, month, day)
 
                     elif callable(handler):
-                        iso_date = handler(match.groups())
-                        normalized = datetime.fromisoformat(iso_date)
+                        normalized = datetime.fromisoformat(handler(match.groups()))
 
                     else:
                         continue
@@ -241,50 +269,41 @@ class EntityExtractor:
                             normalized_value=normalized.isoformat(),
                         )
                     )
-
-                except (ValueError, KeyError) as e:
-                    logger.debug(f"Failed to parse date '{raw}': {e}")
-                    continue
+                except (ValueError, KeyError) as exc:
+                    logger.debug("Failed to parse date '%s': %s", raw, exc)
 
         return dates
 
     def extract_persons(self, text: str) -> List[Entity]:
-        """
-        Извлекает ФИО из текста.
+        """Extract person names (ФИО) from text.
 
         Args:
-            text: Исходный текст
+            text: Source text in Russian.
 
         Returns:
-            Список извлеченных ФИО
+            List of person entities with normalised name dicts.
         """
-        persons = []
-
-        # Паттерн: Фамилия Имя Отчество
+        persons: list[Entity] = []
         pattern = r"\b([А-ЯЁ][а-яё]+)\s+([А-ЯЁ][а-яё]+)(?:\s+([А-ЯЁ][а-яё]+))?\b"
 
         for match in re.finditer(pattern, text):
-            full_match = match.group(0)
             last_name = match.group(1)
             first_name = match.group(2)
-            middle_name = match.group(3) if match.group(3) else None
+            middle_name = match.group(3)
 
-            # Исключаем служебные слова
-            if last_name.lower() in ["через", "после", "перед", "около"]:
+            if last_name.lower() in {"через", "после", "перед", "около"}:
                 continue
-
-            normalized = {
-                "lastName": last_name,
-                "firstName": first_name,
-                "middleName": middle_name,
-            }
 
             persons.append(
                 Entity(
                     type=EntityType.PERSON,
-                    value=full_match,
-                    raw_text=full_match,
-                    normalized_value=normalized,
+                    value=match.group(0),
+                    raw_text=match.group(0),
+                    normalized_value={
+                        "lastName": last_name,
+                        "firstName": first_name,
+                        "middleName": middle_name,
+                    },
                     confidence=0.8 if middle_name else 0.6,
                 )
             )
@@ -292,14 +311,18 @@ class EntityExtractor:
         return persons
 
     def extract_numbers(self, text: str) -> List[Entity]:
-        """Извлекает числовые значения."""
-        numbers = []
+        """Extract numeric values from text.
 
-        # Целые числа и десятичные
+        Args:
+            text: Source text.
+
+        Returns:
+            List of number entities.
+        """
+        numbers: list[Entity] = []
         for match in re.finditer(r"\b(\d+(?:[.,]\d+)?)\b", text):
             raw = match.group(0)
             value = float(raw.replace(",", "."))
-
             numbers.append(
                 Entity(
                     type=EntityType.NUMBER,
@@ -308,130 +331,112 @@ class EntityExtractor:
                     normalized_value=value,
                 )
             )
-
         return numbers
 
     def extract_money(self, text: str) -> List[Entity]:
-        """Извлекает денежные суммы с валютой."""
-        money = []
+        """Extract monetary amounts with currency codes.
 
-        # Паттерны валют
+        Args:
+            text: Source text.
+
+        Returns:
+            List of money entities with amount and currency dicts.
+        """
+        money: list[Entity] = []
         currency_patterns = [
             (r"(\d+(?:[.,]\d+)?)\s*(руб|₽|rub|бел\.руб)", "BYN"),
             (r"(\d+(?:[.,]\d+)?)\s*(\$|usd|долл)", "USD"),
             (r"(\d+(?:[.,]\d+)?)\s*(€|eur|евро)", "EUR"),
             (r"(\d+(?:[.,]\d+)?)\s*(руб|rub)", "RUB"),
         ]
-
         for pattern, currency in currency_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
-                raw = match.group(0)
                 amount = float(match.group(1).replace(",", "."))
-
                 money.append(
                     Entity(
                         type=EntityType.MONEY,
                         value=amount,
-                        raw_text=raw,
+                        raw_text=match.group(0),
                         normalized_value={"amount": amount, "currency": currency},
                     )
                 )
-
         return money
 
     def extract_document_ids(self, text: str) -> List[Entity]:
-        """Извлекает UUID документов."""
-        doc_ids = []
+        """Extract UUID document identifiers from text.
 
-        uuid_pattern = (
-            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
-        )
+        Args:
+            text: Source text.
 
-        for match in re.finditer(uuid_pattern, text, re.IGNORECASE):
+        Returns:
+            List of document ID entities.
+        """
+        doc_ids: list[Entity] = []
+        uuid_re = r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+        for match in re.finditer(uuid_re, text, re.IGNORECASE):
+            raw = match.group(0)
             doc_ids.append(
                 Entity(
                     type=EntityType.DOCUMENT_ID,
-                    value=match.group(0),
-                    raw_text=match.group(0),
-                    normalized_value=match.group(0).lower(),
+                    value=raw,
+                    raw_text=raw,
+                    normalized_value=raw.lower(),
                 )
             )
-
         return doc_ids
 
     def extract_all(
-        self, text: str, base_date: Optional[datetime] = None
+        self,
+        text: str,
+        base_date: Optional[datetime] = None,
     ) -> Dict[str, List[Entity]]:
-        """
-        Извлекает все типы сущностей из текста.
+        """Run all extractors and return a grouped entity dict.
 
         Args:
-            text: Исходный текст
-            base_date: Базовая дата для относительных выражений
+            text: Source text.
+            base_date: Reference date for relative expressions.
 
         Returns:
-            Словарь сущностей по типам
+            Dict mapping entity type names to lists of entities.
         """
-        entities = {}
+        entities: Dict[str, List[Entity]] = {}
 
-        # Даты
-        dates = self.extract_dates(text, base_date)
-        if dates:
-            entities["dates"] = dates
-
-        # Персоны
-        persons = self.extract_persons(text)
-        if persons:
-            entities["persons"] = persons
-
-        # Числа
-        numbers = self.extract_numbers(text)
-        if numbers:
-            entities["numbers"] = numbers
-
-        # Деньги
-        money = self.extract_money(text)
-        if money:
-            entities["money"] = money
-
-        # UUID документов
-        doc_ids = self.extract_document_ids(text)
-        if doc_ids:
-            entities["document_ids"] = doc_ids
+        for key, extractor in [
+            ("dates", lambda: self.extract_dates(text, base_date)),
+            ("persons", lambda: self.extract_persons(text)),
+            ("numbers", lambda: self.extract_numbers(text)),
+            ("money", lambda: self.extract_money(text)),
+            ("document_ids", lambda: self.extract_document_ids(text)),
+        ]:
+            result = extractor()
+            if result:
+                entities[key] = result
 
         return entities
 
 
-# ========================================
-# QUERY REFINER
-# ========================================
-
-
 class QueryRefiner:
-    """
-    Улучшение и нормализация запросов.
+    """Normalises and enriches raw user queries before LLM dispatch."""
 
-    Функции:
-    - Исправление опечаток
-    - Расширение аббревиатур
-    - Нормализация формулировок
-    - Добавление контекста
-    """
-
-    # Словарь аббревиатур EDMS
-    ABBREVIATIONS = {
-        "док": "документ",
+    ABBREVIATIONS: dict[str, str] = {
+        # Общие сокращения
+        "doc": "документ",
+        "dok": "документ",
+        "доки": "документы",
+        "сэд": "СЭД",
+        # EDMS-специфичные
         "ознак": "ознакомление",
         "пор": "поручение",
         "исп": "исполнитель",
         "отв": "ответственный",
         "сов": "совещание",
         "дог": "договор",
-        "сэд": "СЭД",
+        "рег": "регистрационный",
+        "нотиф": "уведомление",
+        "резол": "резолюция",
     }
 
-    # Синонимы действий
-    ACTION_SYNONYMS = {
+    ACTION_SYNONYMS: dict[str, str] = {
         "покажи": "найди",
         "выведи": "найди",
         "дай": "найди",
@@ -440,289 +445,555 @@ class QueryRefiner:
         "объясни": "опиши",
     }
 
+    EDMS_DOMAIN_SYNONYMS: dict[str, str] = {
+        # Версионирование / история (базовые формы + падежи)
+        "история документа": "сравни версии документа",
+        "историю документа": "сравни версии документа",
+        "истории документа": "сравни версии документа",
+        "история изменений": "сравни версии документа",
+        "историю изменений": "сравни версии документа",
+        "истории изменений": "сравни версии документа",
+        "что менялось": "сравни версии документа",
+        "что изменилось": "сравни версии документа",
+        "покажи изменения": "сравни версии документа",
+        "изменения в документе": "сравни версии документа",
+        "посмотреть версии": "сравни версии документа",
+        "какие версии": "сравни версии документа",
+        # Резолюции
+        "наложить резолюцию": "добавь резолюцию",
+        "поставь визу": "добавь резолюцию",
+        "написать резолюцию": "добавь резолюцию",
+        "наложи резолюцию": "добавь резолюцию",
+        "поставить резолюцию": "добавь резолюцию",
+        # Поручения / задачи
+        "дай задачу": "создай поручение",
+        "поставь задачу": "создай поручение",
+        "поставить задачу": "создай поручение",
+        "назначь исполнителя": "создай поручение",
+        "назначить исполнителя": "создай поручение",
+        "поручи выполнить": "создай поручение",
+        # Ознакомление
+        "виза": "ознакомление",
+        "завизировать": "добавить в ознакомление",
+        "завизируй": "добавить в ознакомление",
+        "отправь на визирование": "добавить в ознакомление",
+        "отправить на ознакомление": "добавить в ознакомление",
+        "отправь на ознакомление": "добавить в ознакомление",
+        # Уведомления
+        "напомни о документе": "отправь уведомление",
+        "напомни о сроке": "отправь уведомление",
+        "предупреди исполнителя": "отправь уведомление",
+        "уведомить": "отправь уведомление",
+        # Суммаризация
+        "вкратце": "кратко опиши",
+        "в двух словах": "кратко опиши",
+        "суть документа": "кратко опиши документ",
+        "о чём документ": "кратко опиши документ",
+        "что в документе": "кратко опиши документ",
+        # Поиск
+        "найти документ": "найди документ",
+        "поиск документов": "найди документы",
+        "реестр документов": "найди документы",
+        # Информация о документе
+        "инфо": "информация о документе",
+        "данные документа": "информация о документе",
+        "реквизиты": "информация о документе",
+        "статус документа": "информация о документе",
+        "кто автор": "информация об авторе документа",
+    }
+
+    def normalize_domain_synonyms(self, text: str) -> str:
+        """Replace EDMS domain jargon with canonical phrases before intent detection.
+
+        Применяет замены за ОДИН ПРОХОД слева направо, от длинных фраз к коротким.
+        Уже замененные участки текста помечаются как "использованные" — это предотвращает
+        каскадные двойные замены (например: "история" → "версии" → "версии" снова).
+
+        Args:
+            text: Input user query text.
+
+        Returns:
+            Text with domain jargon replaced by canonical EDMS phrases.
+        """
+        text_lower = text.lower()
+        sorted_pairs = sorted(
+            self.EDMS_DOMAIN_SYNONYMS.items(), key=lambda x: -len(x[0])
+        )
+        if not sorted_pairs:
+            return text_lower
+
+        pattern = re.compile(
+            "|".join(re.escape(jargon) for jargon, _ in sorted_pairs),
+            flags=re.IGNORECASE,
+        )
+        canonical_map = {jargon.lower(): canonical for jargon, canonical in sorted_pairs}
+
+        def _replace(m: re.Match) -> str:
+            return canonical_map.get(m.group(0).lower(), m.group(0))
+
+        return pattern.sub(_replace, text_lower)
+
     def expand_abbreviations(self, text: str) -> str:
-        """Расширяет аббревиатуры до полных слов."""
+        """Replace known abbreviations with full words.
+
+        Args:
+            text: Input text.
+
+        Returns:
+            Text with abbreviations expanded.
+        """
         words = text.split()
-        expanded = []
-
-        for word in words:
-            word_lower = word.lower()
-            if word_lower in self.ABBREVIATIONS:
-                expanded.append(self.ABBREVIATIONS[word_lower])
-            else:
-                expanded.append(word)
-
-        return " ".join(expanded)
+        return " ".join(self.ABBREVIATIONS.get(w.lower(), w) for w in words)
 
     def normalize_actions(self, text: str) -> str:
-        """Нормализует глаголы действий."""
-        text_lower = text.lower()
+        """Canonicalise action verbs.
 
+        Args:
+            text: Input text.
+
+        Returns:
+            Text with synonym verbs replaced by canonical forms.
+        """
+        text_lower = text.lower()
         for synonym, canonical in self.ACTION_SYNONYMS.items():
             text_lower = re.sub(r"\b" + synonym + r"\b", canonical, text_lower)
-
         return text_lower
 
     def add_context(
-        self, text: str, intent: UserIntent, entities: Dict[str, List[Entity]]
+        self,
+        text: str,
+        intent: UserIntent,
+        entities: Dict[str, List[Entity]],
     ) -> str:
-        """
-        Добавляет контекст в запрос на основе намерения и сущностей.
+        """Augment the query with intent-specific structured context hints.
+
+        Формирует структурированный суффикс к запросу — он попадает в HumanMessage
+        и помогает модели сразу выбрать правильный инструмент и параметры.
+        Суффикс пишется в формате [ключ: значение] — короткий и машиночитаемый.
 
         Args:
-            text: Исходный текст
-            intent: Определенное намерение
-            entities: Извлеченные сущности
+            text: Current query text (already normalized).
+            intent: Detected primary intent.
+            entities: Extracted entities grouped by type.
 
         Returns:
-            Обогащенный запрос
+            Augmented query string with structured context suffix.
         """
-        refined = text
+        hints: list[str] = []
 
-        if intent == UserIntent.SEARCH and entities:
+        if intent == UserIntent.SEARCH:
             if "persons" in entities:
-                person = entities["persons"][0]
-                refined = f"Найти документы, связанные с {person.value}"
-            elif "dates" in entities:
-                date = entities["dates"][0]
-                refined = f"Найти документы за {date.raw_text}"
+                hints.append(f"исполнитель: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(f"дата: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
 
-        # Для создания поручения: добавляем срок, если не указан
         elif intent == UserIntent.CREATE_TASK:
-            if "dates" not in entities or not entities["dates"]:
-                refined += " (срок: +7 дней)"
+            if "dates" not in entities:
+                hints.append("срок: +7 дней (не указан)")
+            else:
+                hints.append(f"срок: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
+            if "persons" in entities:
+                hints.append(f"исполнитель: {entities['persons'][0].value}")
 
-        # Для сравнения: уточняем, что сравнивать
         elif intent == UserIntent.COMPARE:
-            if (
-                "версия" in text.lower()
-                and "document_ids" in entities
-                and len(entities["document_ids"]) < 2
-            ):
-                refined += " (требуется указать версии для сравнения)"
+            ids = entities.get("document_ids", [])
+            if len(ids) >= 2:
+                hints.append(f"версия_1: {ids[0].value}")
+                hints.append(f"версия_2: {ids[1].value}")
+            else:
+                hints.append("версии: авто (первая↔последняя)")
 
-        return refined
+        elif intent == UserIntent.NOTIFICATION:
+            if "persons" in entities:
+                hints.append(f"получатель: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
+
+        elif intent == UserIntent.RESOLUTION:
+            if "persons" in entities:
+                hints.append(f"исполнитель резолюции: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(f"срок резолюции: {entities['dates'][0].raw_text}")
+
+        elif intent == UserIntent.SUMMARIZE:
+            if "numbers" in entities:
+                hints.append(f"объём: {entities['numbers'][0].value} слов")
+
+        elif intent == UserIntent.COMPOSITE:
+            hints.append("тип: составной запрос (выполни последовательно)")
+
+        if hints:
+            suffix = " [" + "; ".join(hints) + "]"
+            return text + suffix
+
+        return text
 
     def refine(
-        self, text: str, intent: UserIntent, entities: Dict[str, List[Entity]]
+        self,
+        text: str,
+        intent: UserIntent,
+        entities: Dict[str, List[Entity]],
     ) -> str:
-        """
-        Полное уточнение запроса.
+        """Run the full refinement pipeline on a query.
+
+        Pipeline order (each step feeds into the next):
+        1. normalize_domain_synonyms — EDMS жаргон → канонические фразы
+        2. expand_abbreviations — сокращения → полные слова
+        3. normalize_actions — синонимы действий → канонические глаголы
+        4. add_context — дополняем подсказками из entities/intent
 
         Args:
-            text: Исходный текст
-            intent: Определенное намерение
-            entities: Извлеченные сущности
+            text: Raw user query.
+            intent: Detected primary intent.
+            entities: Extracted entities.
 
         Returns:
-            Уточненный запрос
+            Refined query string ready for LLM prompt injection.
         """
-        # 1. Базовая очистка
         refined = text.strip()
-
-        # 2. Расширение аббревиатур
+        refined = self.normalize_domain_synonyms(refined)  # EDMS-жаргон первым
         refined = self.expand_abbreviations(refined)
-
-        # 3. Нормализация действий
         refined = self.normalize_actions(refined)
-
-        # 4. Добавление контекста
         refined = self.add_context(refined, intent, entities)
-
-        # 5. Удаление лишних пробелов
-        refined = re.sub(r"\s+", " ", refined).strip()
-
-        return refined
-
-
-# ========================================
-# SEMANTIC DISPATCHER
-# ========================================
+        return re.sub(r"\s+", " ", refined).strip()
 
 
 class SemanticDispatcher:
-    """
-    Профессиональный семантический диспетчер запросов.
+    """Central NLP dispatcher: classifies intent, extracts entities, and builds SemanticContext.
 
-    Возможности:
-    - Многоуровневая классификация намерений
-    - Определение сложности с учетом контекста документа
-    - Интеллектуальное извлечение сущностей
-    - Улучшение формулировок запросов
+    Args: None (stateless helpers are instantiated internally).
     """
-
-    INTENT_KEYWORDS = {
+    INTENT_KEYWORDS: Dict[UserIntent, Dict[str, list[str]]] = {
         UserIntent.CREATE_INTRODUCTION: {
             "primary": [
                 "ознакомление",
                 "ознакомь",
                 "список ознакомления",
                 "добавь в ознакомление",
+                "добавить в ознакомление",
+                "отправь на ознакомление",
             ],
-            "secondary": ["виза", "визирование", "согласование"],
+            "secondary": ["виза", "визирование", "согласование", "подпись"],
+            "negative": [],
         },
         UserIntent.CREATE_TASK: {
-            "primary": ["поручение", "создай задачу", "задание", "поручи"],
-            "secondary": ["исполнитель", "срок исполнения", "контроль"],
+            "primary": [
+                "поручение",
+                "создай задачу",
+                "создай поручение",
+                "задание",
+                "поручи",
+                "поставь задачу",
+                "назначь исполнителя",
+            ],
+            "secondary": ["исполнитель", "срок исполнения", "контроль", "выполнить"],
+            "negative": [],
         },
         UserIntent.SUMMARIZE: {
-            "primary": ["суммаризуй", "кратко", "резюме", "опиши", "сводка"],
-            "secondary": ["анализ", "выжимка", "основное"],
+            "primary": [
+                "суммаризуй",
+                "кратко",
+                "резюме",
+                "опиши",
+                "сводка",
+                "кратко опиши",
+                "в двух словах",
+                "суть документа",
+                "о чём документ",
+            ],
+            "secondary": ["анализ", "выжимка", "основное", "тезисы", "пересказ"],
+            "negative": [],
         },
         UserIntent.COMPARE: {
-            "primary": ["сравни", "отличия", "разница", "версия"],
-            "secondary": ["изменения", "что изменилось"],
+            "primary": [
+                "сравни",
+                "сравни версии",
+                "отличия",
+                "разница",
+                "версии документа",
+                "история документа",
+                "что изменилось",
+                "что менялось",
+                "изменения в документе",
+            ],
+            "secondary": ["изменения", "версия", "обновление", "правки"],
+            "negative": [],
         },
         UserIntent.SEARCH: {
-            "primary": ["найди", "поиск", "покажи", "где"],
-            "secondary": ["выведи", "список", "реестр"],
+            "primary": [
+                "найди",
+                "поиск",
+                "найти документ",
+                "поиск документов",
+                "реестр документов",
+            ],
+            "secondary": ["выведи", "список", "реестр", "покажи", "где"],
+            "negative": [],
         },
         UserIntent.ANALYZE: {
-            "primary": ["проанализируй", "подробно", "детали"],
-            "secondary": ["разбор", "структура"],
+            "primary": [
+                "проанализируй",
+                "подробно",
+                "детали",
+                "детальный анализ",
+            ],
+            "secondary": ["разбор", "структура", "состав", "содержание"],
+            "negative": [],
         },
         UserIntent.QUESTION: {
-            "primary": ["какая", "какой", "сколько", "когда", "почему"],
-            "secondary": ["расскажи", "объясни", "что"],
+            "primary": [
+                "какая",
+                "какой",
+                "сколько",
+                "когда",
+                "почему",
+                "зачем",
+                "кто",
+                "чей",
+            ],
+            "secondary": ["расскажи", "объясни", "что", "как"],
+            "negative": [],
+        },
+        UserIntent.FILE_ANALYSIS: {
+            "primary": [
+                "загруженный файл",
+                "локальный файл",
+                "файл на компьютере",
+                "проанализируй файл",
+                "что в файле",
+                "о чем файл",
+                "содержимое файла",
+                "прочитай файл",
+                "открой файл",
+            ],
+            "secondary": [
+                "вложение",
+                "содержимое",
+                "текст файла",
+                "данные из файла",
+                "кратко",
+                "пересказ",
+                "тезисы",
+            ],
+            "negative": [],
+        },
+        UserIntent.RESOLUTION: {
+            "primary": [
+                "резолюция",
+                "резолюцию",
+                "резолюции",
+                "добавь резолюцию",
+                "напиши резолюцию",
+                "поставь резолюцию",
+                "наложи резолюцию",
+                "покажи резолюции",
+            ],
+            "secondary": ["решение", "поручение руководителя", "написать", "наложить"],
+            "negative": [],
+        },
+        UserIntent.NOTIFICATION: {
+            "primary": [
+                "уведоми",
+                "напомни",
+                "отправь напоминание",
+                "уведомление",
+                "напоминание",
+                "предупреди",
+                "сообщи",
+                "отправь уведомление",
+            ],
+            "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+            "negative": [],
         },
     }
 
-    def __init__(self):
-        """Инициализация диспетчера с подкомпонентами."""
+    COMPOSITE_CONNECTORS: tuple[str, ...] = (
+        " и ",
+        " а также ",
+        " плюс ",
+        " потом ",
+        " после этого ",
+        ", а ",
+        " затем ",
+    )
+
+    def __init__(self) -> None:
         self.entity_extractor = EntityExtractor()
         self.query_refiner = QueryRefiner()
-        logger.info("SemanticDispatcher initialized (Professional Edition)")
+        logger.info(
+            "SemanticDispatcher initialised",
+            extra=safe_extra(
+                component="nlp_service",
+                version="3.0.0",
+                features=[
+                    "domain_synonym_normalization",
+                    "composite_intent_detection",
+                    "structured_query_refinement",
+                    "confidence_scoring",
+                    "entity_extraction",
+                    "file_analysis",
+                ],
+            ),
+        )
 
-    def detect_intent(self, message: str) -> Tuple[UserIntent, List[UserIntent], float]:
-        """
-        Определяет основное и дополнительные намерения.
+    def detect_intent(
+        self,
+        message: str,
+        file_path: Optional[str] = None,
+    ) -> Tuple[UserIntent, List[UserIntent], float]:
+        """Classify primary and secondary intents with confidence scoring.
+
+        Scoring rules:
+        - Local file present (non-UUID path): FILE_ANALYSIS +3, SUMMARIZE +2
+        - primary keyword hit: +2 per keyword
+        - secondary keyword hit: +1 per keyword
+        - negative keyword hit: -1 per keyword
+        - Question mark at end: QUESTION +1
+        - COMPOSITE detected via connector heuristic: returns COMPOSITE primary
+
+        Composite detection: если сообщение содержит разделитель между двумя
+        разными интент-маркерами — запрос помечается COMPOSITE, оба интента
+        передаются в secondary_intents для последовательной обработки агентом.
 
         Args:
-            message: Сообщение пользователя
+            message: User message text.
+            file_path: Optional file path or attachment UUID to boost FILE_ANALYSIS.
 
         Returns:
-            (основное_намерение, дополнительные_намерения, уверенность)
+            Tuple of (primary_intent, secondary_intents, confidence).
         """
-        message_lower = message.lower()
-        scores = Counter()
+        if not message or not message.strip():
+            return UserIntent.UNKNOWN, [], 0.0
 
-        # Подсчет совпадений с ключевыми словами
+        message_lower = self.query_refiner.normalize_domain_synonyms(message)
+
+        scores: Counter[UserIntent] = Counter()
+
+        # Буст за наличие локального файла (не UUID)
+        if file_path and not UUID_RE.match(file_path):
+            scores[UserIntent.FILE_ANALYSIS] += 3
+            scores[UserIntent.SUMMARIZE] += 2
+
         for intent, keywords in self.INTENT_KEYWORDS.items():
-            primary_count = sum(1 for kw in keywords["primary"] if kw in message_lower)
-            secondary_count = sum(
-                1 for kw in keywords["secondary"] if kw in message_lower
+            primary_hits = sum(
+                1 for kw in keywords.get("primary", []) if kw in message_lower
             )
+            secondary_hits = sum(
+                1 for kw in keywords.get("secondary", []) if kw in message_lower
+            )
+            negative_hits = sum(
+                1 for kw in keywords.get("negative", []) if kw in message_lower
+            )
+            raw_score = primary_hits * 2 + secondary_hits - negative_hits
+            if raw_score > 0:
+                scores[intent] = scores.get(intent, 0) + raw_score
 
-            # Первичные ключевые слова дают 2 балла, вторичные — 1
-            scores[intent] = primary_count * 2 + secondary_count
-
-        # Дополнительные эвристики
         if message.strip().endswith("?"):
             scores[UserIntent.QUESTION] += 1
 
         if not scores:
             return UserIntent.UNKNOWN, [], 0.0
 
-        # Сортируем по убыванию score
         sorted_intents = scores.most_common()
-
         primary_intent = sorted_intents[0][0]
         primary_score = sorted_intents[0][1]
 
-        # Определяем дополнительные намерения (score >= 50% от основного)
+        intent_kw = self.INTENT_KEYWORDS.get(primary_intent, {})
+        max_possible = (
+            len(intent_kw.get("primary", [])) * 2 + len(intent_kw.get("secondary", []))
+        )
+        confidence = min(primary_score / max(max_possible, 1), 1.0)
+
         threshold = primary_score * 0.5
         secondary_intents = [
-            intent for intent, score in sorted_intents[1:] if score >= threshold
+            intent
+            for intent, score in sorted_intents[1:]
+            if score >= threshold and score > 0
         ]
 
-        # Уверенность: нормализуем от 0 до 1
-        intent_keywords = self.INTENT_KEYWORDS.get(primary_intent, {})
-        max_possible_score = len(intent_keywords.get("primary", [])) * 2 + len(
-            intent_keywords.get("secondary", [])
-        )
-        confidence = min(primary_score / max(max_possible_score, 1), 1.0)
-
-        # Если несколько намерений с высоким score — композитное
-        if len(secondary_intents) > 1:
-            return UserIntent.COMPOSITE, secondary_intents, confidence
+        if secondary_intents:
+            has_connector = any(
+                connector in message_lower
+                for connector in self.COMPOSITE_CONNECTORS
+            )
+            if has_connector and len(secondary_intents) >= 1:
+                # Убеждаемся что у нас реально два разных намерения с ненулевыми scores
+                composite_intents = [primary_intent] + secondary_intents[:2]
+                logger.debug(
+                    "Composite intent detected",
+                    extra=safe_extra(
+                        intents=[i.value for i in composite_intents],
+                        connector_found=True,
+                    ),
+                )
+                return UserIntent.COMPOSITE, composite_intents, confidence
 
         return primary_intent, secondary_intents, confidence
 
     def estimate_complexity(
-        self, message: str, document: Optional[Any] = None
+        self,
+        message: str,
+        document: Optional[Any] = None,
     ) -> QueryComplexity:
-        """
-        Оценивает сложность запроса с учетом документа.
+        """Estimate the processing complexity of a query.
 
         Args:
-            message: Сообщение пользователя
-            document: Документ (если доступен)
+            message: User message text.
+            document: Active EDMS document (if available).
 
         Returns:
-            Уровень сложности
+            QueryComplexity level.
         """
         word_count = len(message.split())
         has_conditions = any(
-            word in message.lower() for word in ["если", "когда", "где", "как", "при"]
+            w in message.lower() for w in ("если", "когда", "где", "как", "при")
         )
         has_multiple_entities = (
             len(re.findall(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\b", message)) > 2
         )
 
-        # Базовая оценка
-        complexity_score = 0
-
+        score = 0
         if word_count > 20:
-            complexity_score += 3
+            score += 3
         elif word_count > 10:
-            complexity_score += 2
+            score += 2
         elif word_count > 5:
-            complexity_score += 1
+            score += 1
 
         if has_conditions:
-            complexity_score += 2
-
+            score += 2
         if has_multiple_entities:
-            complexity_score += 1
+            score += 1
 
-        # Учет документа
         if document:
-            # Безопасное получение атрибутов с обработкой None
             attachments = getattr(document, "attachmentDocument", None) or []
             tasks = getattr(document, "taskList", None) or []
-            process = getattr(document, "process", None)
+            if len(attachments) > 3:
+                score += 1
+            if len(tasks) > 5:
+                score += 1
+            if not getattr(getattr(document, "process", None), "completed", True):
+                score += 1
+            if getattr(document, "docCategoryConstant", None) == "CONTRACT":
+                score += 1
 
-            # Проверяем сложность документа
-            has_attachments = bool(attachments)
-            has_tasks = bool(tasks)
-            has_process = bool(process)
-            is_contract = getattr(document, "docCategoryConstant", None) == "CONTRACT"
-
-            if has_attachments and len(attachments) > 3:
-                complexity_score += 1
-
-            if has_tasks and len(tasks) > 5:
-                complexity_score += 1
-
-            if has_process and not getattr(process, "completed", True):
-                complexity_score += 1
-
-            if is_contract:
-                complexity_score += 1
-
-        # Маппинг score на уровни
-        if complexity_score >= 8:
+        if score >= 8:
             return QueryComplexity.VERY_COMPLEX
-        elif complexity_score >= 5:
+        if score >= 5:
             return QueryComplexity.COMPLEX
-        elif complexity_score >= 2:
+        if score >= 2:
             return QueryComplexity.MEDIUM
-        else:
-            return QueryComplexity.SIMPLE
+        return QueryComplexity.SIMPLE
 
     def extract_keywords(self, message: str) -> Set[str]:
-        """Извлекает ключевые слова из запроса."""
-        # Удаляем стоп-слова
+        """Extract content keywords by removing Russian stop words.
+
+        Args:
+            message: User message text.
+
+        Returns:
+            Set of significant word stems.
+        """
         stop_words = {
             "а",
             "в",
@@ -752,56 +1023,71 @@ class SemanticDispatcher:
             "надо",
             "пожалуйста",
         }
-
         words = re.findall(r"\b[а-яёА-ЯЁ]{3,}\b", message.lower())
-        keywords = {word for word in words if word not in stop_words}
+        return {w for w in words if w not in stop_words}
 
-        return keywords
-
-    def build_context(
-        self, message: str, document: Optional[Any] = None
-    ) -> SemanticContext:
-        """
-        Строит полный семантический контекст для запроса.
+    def _validate_file_path(self, file_path: str) -> Tuple[bool, Optional[str]]:
+        """Check that *file_path* exists and is within the configured upload directory.
 
         Args:
-            message: Сообщение пользователя
-            document: Документ (если доступен)
+            file_path: Path string to validate.
 
         Returns:
-            Семантический контекст с метаданными и предложениями
+            Tuple of (is_valid, error_message_or_none).
         """
-        # 1. Классификация намерений
-        primary_intent, secondary_intents, confidence = self.detect_intent(message)
+        if not file_path:
+            return False, "Путь не указан"
+        try:
+            path = Path(file_path).resolve()
+            upload_dir = getattr(settings, "UPLOAD_DIR", None)
+            if upload_dir:
+                upload_path = Path(upload_dir).resolve()
+                if upload_path not in path.parents and path.parent != upload_path:
+                    return False, "Путь вне разрешённой директории"
+            if not path.exists():
+                return False, "Файл не найден"
+            if not path.is_file():
+                return False, "Указанный путь не является файлом"
+            return True, None
+        except Exception as exc:
+            return False, f"Ошибка валидации: {exc}"
 
-        # 2. Извлечение сущностей
-        entities_dict = self.entity_extractor.extract_all(message)
+    def build_context(
+        self,
+        message: str,
+        document: Optional[Any] = None,
+        file_path: Optional[str] = None,
+    ) -> SemanticContext:
+        """Build a complete SemanticContext for one user turn.
 
-        # 3. Оценка сложности (с учетом документа!)
-        complexity = self.estimate_complexity(message, document)
+        Args:
+            message: Raw user message.
+            document: Active EDMS document (if available).
+            file_path: Local file path or EDMS attachment UUID.
 
-        # 4. Извлечение ключевых слов
-        keywords = self.extract_keywords(message)
-
-        # 5. Уточнение запроса (ИСПОЛЬЗУЕМ ВСЕ ПАРАМЕТРЫ!)
-        refined_message = self.query_refiner.refine(
-            message, primary_intent, entities_dict
+        Returns:
+            Fully populated SemanticContext.
+        """
+        primary_intent, secondary_intents, confidence = self.detect_intent(
+            message, file_path
         )
+        entities = self.entity_extractor.extract_all(message)
+        complexity = self.estimate_complexity(message, document)
+        keywords = self.extract_keywords(message)
+        refined = self.query_refiner.refine(message, primary_intent, entities)
 
-        # 6. Построение UserQuery
         query = UserQuery(
             original=message,
-            refined=refined_message,
+            refined=refined,
             intent=primary_intent,
             secondary_intents=secondary_intents,
             complexity=complexity,
-            entities=entities_dict,
+            entities=entities,
             keywords=keywords,
             confidence=confidence,
         )
 
-        # 7. Метаданные
-        metadata = {
+        metadata: Dict[str, Any] = {
             "word_count": len(message.split()),
             "char_count": len(message),
             "has_question_mark": message.strip().endswith("?"),
@@ -810,7 +1096,6 @@ class SemanticDispatcher:
         if document:
             attachments = getattr(document, "attachmentDocument", None) or []
             tasks = getattr(document, "taskList", None) or []
-
             metadata.update(
                 {
                     "has_document": True,
@@ -824,35 +1109,43 @@ class SemanticDispatcher:
                 }
             )
 
-        # 8. Предложения и предупреждения
-        suggestions = []
-        warnings = []
+        if file_path:
+            metadata["is_local_file"] = True
+            metadata["ctx_file_path"] = file_path
+            if not UUID_RE.match(file_path):
+                metadata["file_type"] = "local"
+                is_valid, error = self._validate_file_path(file_path)
+                if not is_valid:
+                    logger.warning(
+                        "File validation failed",
+                        extra=safe_extra(file_path=file_path, error=error),
+                    )
 
-        # Проверка на отсутствие сущностей для определенных намерений
+        suggestions: list[str] = []
+        warnings: list[str] = []
+
         if primary_intent == UserIntent.CREATE_TASK:
-            if "dates" not in entities_dict:
+            if "dates" not in entities:
                 suggestions.append("Рекомендуется указать срок выполнения поручения")
-            if "persons" not in entities_dict:
+            if "persons" not in entities:
                 warnings.append(
                     "Не указан исполнитель. Будет использован ответственный по умолчанию"
                 )
 
         if primary_intent == UserIntent.COMPARE:
             if (
-                "document_ids" not in entities_dict
-                or len(entities_dict.get("document_ids", [])) < 2
+                "document_ids" not in entities
+                or len(entities.get("document_ids", [])) < 2
             ):
                 warnings.append(
                     "Для сравнения требуется указать два документа или версии"
                 )
 
-        # Проверка сложности
         if complexity == QueryComplexity.VERY_COMPLEX and confidence < 0.7:
             suggestions.append(
                 "Запрос очень сложный. Рекомендуется разбить на несколько более простых"
             )
 
-        # 9. Сборка контекста
         return SemanticContext(
             query=query,
             document=document,
@@ -862,22 +1155,21 @@ class SemanticDispatcher:
         )
 
 
-# ========================================
-# EDMS NATURAL LANGUAGE SERVICE
-# ========================================
-
-
 class EDMSNaturalLanguageService:
-    """
-    Сервис для семантического анализа данных EDMS.
-    """
+    """High-level service for semantic analysis of EDMS domain objects."""
 
     @staticmethod
     def format_user(user: Any) -> Optional[str]:
-        """Универсальное форматирование UserInfoDto или EmployeeDto."""
+        """Format a UserInfoDto or EmployeeDto into a display name string.
+
+        Args:
+            user: Any object with lastName, firstName, middleName attributes.
+
+        Returns:
+            Formatted name string or None.
+        """
         if not user:
             return None
-
         try:
             ln = getattr(user, "lastName", "") or ""
             fn = getattr(user, "firstName", "") or ""
@@ -886,98 +1178,100 @@ class EDMSNaturalLanguageService:
                 getattr(user, "post", None), "name", ""
             )
             name = f"{ln} {fn} {mn}".strip()
-            return f"{name} ({post})" if post else name if name else None
-        except Exception as e:
-            logger.debug(f"Error formatting user: {e}")
+            return f"{name} ({post})" if post else name or None
+        except Exception as exc:
+            logger.debug("Error formatting user: %s", exc)
             return None
 
     @staticmethod
     def format_date(instant: Any) -> Optional[str]:
-        """Форматирование Instant в читаемую дату (DD.MM.YYYY)."""
+        """Format an Instant-like value to DD.MM.YYYY.
+
+        Args:
+            instant: datetime object or ISO string.
+
+        Returns:
+            Formatted date string or None.
+        """
         if not instant:
             return None
-
         try:
             if hasattr(instant, "strftime"):
                 return instant.strftime("%d.%m.%Y")
-
-            str_instant = str(instant)
-            if len(str_instant) >= 10:
-                parts = str_instant[:10].split("-")
+            s = str(instant)
+            if len(s) >= 10:
+                parts = s[:10].split("-")
                 if len(parts) == 3:
                     return f"{parts[2]}.{parts[1]}.{parts[0]}"
-
-            return str_instant[:10] if len(str_instant) >= 10 else str_instant
-        except Exception as e:
-            logger.debug(f"Error formatting date: {e}")
+            return s[:10] if len(s) >= 10 else s
+        except Exception as exc:
+            logger.debug("Error formatting date: %s", exc)
             return None
 
     @staticmethod
     def format_datetime(instant: Any) -> Optional[str]:
-        """Форматирование Instant в дату и время (DD.MM.YYYY HH:MM)."""
+        """Format an Instant-like value to DD.MM.YYYY HH:MM.
+
+        Args:
+            instant: datetime object or ISO string.
+
+        Returns:
+            Formatted datetime string or None.
+        """
         if not instant:
             return None
-
         try:
             if hasattr(instant, "strftime"):
                 return instant.strftime("%d.%m.%Y %H:%M")
-
-            str_instant = str(instant)
-            if len(str_instant) >= 16:
-                date_part = str_instant[:10].split("-")
-                time_part = str_instant[11:16]
-                if len(date_part) == 3:
-                    return f"{date_part[2]}.{date_part[1]}.{date_part[0]} {time_part}"
-
-            return str_instant[:16] if len(str_instant) >= 16 else str_instant
-        except Exception as e:
-            logger.debug(f"Error formatting datetime: {e}")
+            s = str(instant)
+            if len(s) >= 16:
+                parts = s[:10].split("-")
+                time_part = s[11:16]
+                if len(parts) == 3:
+                    return f"{parts[2]}.{parts[1]}.{parts[0]} {time_part}"
+            return s[:16] if len(s) >= 16 else s
+        except Exception as exc:
+            logger.debug("Error formatting datetime: %s", exc)
             return None
 
     def get_safe(self, obj: Any, path: str, default: Any = None) -> Any:
-        """
-        Безопасное извлечение вложенного значения по пути с обработкой всех edge cases.
+        """Safely traverse a dot-separated attribute path.
 
         Args:
-            obj: Объект для извлечения
-            path: Путь к значению (разделенный точками)
-            default: Значение по умолчанию
+            obj: Root object.
+            path: Dot-separated attribute path (e.g. ``"process.completed"``).
+            default: Value returned when any segment is missing.
 
         Returns:
-            Извлеченное значение или default
+            Resolved value or *default*.
         """
         if obj is None:
             return default
-
         val = obj
         try:
             for part in path.split("."):
                 if val is None:
                     return default
-
-                if isinstance(val, dict):
-                    val = val.get(part, default)
-                else:
-                    val = getattr(val, part, default)
-
-            if hasattr(val, "value"):
-                return val.value
-
+                val = (
+                    val.get(part, default)
+                    if isinstance(val, dict)
+                    else getattr(val, part, default)
+                )
+                if hasattr(val, "value"):
+                    return val.value
             return val if val is not None else default
-
-        except (AttributeError, KeyError, TypeError) as e:
-            logger.debug(f"Error accessing path '{path}': {e}")
+        except (AttributeError, KeyError, TypeError) as exc:
+            logger.debug("Error accessing path '%s': %s", path, exc)
             return default
 
     def process_document(self, doc: Any) -> Dict[str, Any]:
-        """
-        Полный анализ документа.
+        """Produce a full structured analysis of a DocumentDto.
 
         Args:
-            doc: Объект DocumentDto
+            doc: DocumentDto instance.
 
         Returns:
-            Структурированный словарь с данными документа
+            Nested dict with all document sections, cleaned of None values.
         """
         if not doc:
             logger.warning("Attempted to process None document")
@@ -985,178 +1279,53 @@ class EDMSNaturalLanguageService:
 
         try:
             category = self.get_safe(doc, "docCategoryConstant")
+            category_value = (
+                category.value if hasattr(category, "value") else str(category or "")
+            )
 
-            # ========== 1. БАЗОВАЯ ИДЕНТИФИКАЦИЯ ==========
             base_info = {
                 "id": str(doc.id) if getattr(doc, "id", None) else None,
-                "категория": category,
-                "профиль": getattr(doc, "profileName", None),
-                "тип_документа": self.get_safe(doc, "documentType.name"),
-                "тип_создания": self.get_safe(doc, "createType"),
+                "категория": category_value,
                 "краткое_содержание": getattr(doc, "shortSummary", None),
                 "полный_текст": getattr(doc, "summary", None),
                 "примечание": getattr(doc, "note", None),
             }
 
-            # ========== 2. РЕГИСТРАЦИЯ И МЕТАДАННЫЕ ==========
             registration = {
                 "рег_номер": getattr(doc, "regNumber", None)
                 or getattr(doc, "reservedRegNumber", None),
                 "дата_регистрации": self.format_date(getattr(doc, "regDate", None)),
                 "дата_создания": self.format_datetime(getattr(doc, "createDate", None)),
-                "зарезервированный_номер": getattr(doc, "reservedRegNumber", None),
-                "дата_резервирования": self.format_datetime(
-                    getattr(doc, "reservedRegDate", None)
-                ),
-                "исходящий_номер": getattr(doc, "outRegNumber", None),
-                "исходящая_дата": self.format_date(getattr(doc, "outRegDate", None)),
-                "журнал_регистрации": (
-                    {
-                        "id": (
-                            str(doc.journalId)
-                            if getattr(doc, "journalId", None)
-                            else None
-                        ),
-                        "номер": getattr(doc, "journalNumber", None),
-                        "название": self.get_safe(doc, "registrationJournal.name"),
-                    }
-                    if (
-                        getattr(doc, "journalId", None)
-                        or getattr(doc, "journalNumber", None)
-                    )
-                    else None
-                ),
-                "формула_номера": getattr(doc, "formula", None),
-                "пропуск_регистрации": getattr(doc, "skipRegistration", None),
             }
 
-            # ========== 3. УЧАСТНИКИ ДОКУМЕНТООБОРОТА ==========
             participants = {
                 "автор": self.format_user(getattr(doc, "author", None)),
                 "инициатор": self.format_user(getattr(doc, "initiator", None)),
                 "ответственный_исполнитель": self.format_user(
                     getattr(doc, "responsibleExecutor", None)
                 ),
-                "кем_подписан": self.format_user(getattr(doc, "whoSigned", None)),
-                "подписанты": [
-                    self.format_user(u)
-                    for u in (getattr(doc, "whoAddressed", None) or [])
-                    if self.format_user(u)
-                ],
-                "внутренние_подписанты": getattr(doc, "inDocSigners", None),
-                "корреспондент": (
-                    {
-                        "название": getattr(doc, "correspondentName", None),
-                        "id": (
-                            str(doc.correspondentId)
-                            if getattr(doc, "correspondentId", None)
-                            else None
-                        ),
-                        "детали": self.get_safe(doc, "correspondent.name"),
-                    }
-                    if (
-                        getattr(doc, "correspondentName", None)
-                        or getattr(doc, "correspondentId", None)
-                    )
-                    else None
-                ),
-                "адресаты": (
-                    [
-                        {
-                            "название": self.get_safe(r, "name"),
-                            "тип": self.get_safe(r, "recipientType"),
-                        }
-                        for r in (getattr(doc, "recipientList", None) or [])
-                    ]
-                    if getattr(doc, "recipientList", None)
-                    else None
-                ),
-                "есть_адресаты": getattr(doc, "recipients", None),
-                "ответственные_за_подготовку": (
-                    [
-                        {
-                            "исполнитель": self.format_user(
-                                self.get_safe(re, "responsibleExecutor")
-                            ),
-                            "срок": self.format_date(self.get_safe(re, "deadline")),
-                        }
-                        for re in (getattr(doc, "responsibleExecutors", None) or [])
-                    ]
-                    if getattr(doc, "responsibleExecutors", None)
-                    else None
-                ),
-                "количество_ответственных": getattr(
-                    doc, "responsibleExecutorsCount", None
-                ),
-                "есть_ответственные": getattr(doc, "hasResponsibleExecutor", None),
+                "корреспондент": getattr(doc, "correspondentName", None),
             }
 
-            # ========== 4. ЖИЗНЕННЫЙ ЦИКЛ И ПРОЦЕССЫ ==========
             lifecycle = {
                 "текущий_статус": self.get_safe(doc, "status"),
-                "предыдущий_статус": self.get_safe(doc, "prevStatus"),
                 "текущий_этап_БП": getattr(doc, "currentBpmnTaskName", None),
                 "процесс": (
                     {
-                        "id": (
-                            str(doc.processId)
-                            if getattr(doc, "processId", None)
-                            else None
-                        ),
                         "завершен": self.get_safe(doc, "process.completed"),
-                        "этапы": [
-                            {
-                                "название": getattr(item, "name", None),
-                                "статус": (
-                                    "Выполнен"
-                                    if getattr(item, "completed", False)
-                                    else "В работе"
-                                ),
-                                "дата_начала": self.format_datetime(
-                                    self.get_safe(item, "startDate")
-                                ),
-                                "дата_окончания": self.format_datetime(
-                                    self.get_safe(item, "endDate")
-                                ),
-                            }
-                            for item in (self.get_safe(doc, "process.items") or [])
-                        ],
                     }
                     if getattr(doc, "process", None)
                     else None
                 ),
-                "автомаршрутизация": getattr(doc, "autoRouting", None),
             }
 
-            # ========== 5. КОНТРОЛЬ И СРОКИ ==========
             control_info = {
                 "на_контроле": getattr(doc, "controlFlag", None),
-                "снят_с_контроля": getattr(doc, "removeControl", None),
                 "дней_на_исполнение": getattr(doc, "daysExecution", None),
-                "автоконтроль": self.get_safe(doc, "autoControl"),
-                "контролер": (
-                    {
-                        "сотрудник": self.format_user(
-                            self.get_safe(doc, "control.controlEmployee")
-                        ),
-                        "срок": self.format_date(
-                            self.get_safe(doc, "control.controlDate")
-                        ),
-                        "дата_постановки": self.format_date(
-                            self.get_safe(doc, "control.dateControl")
-                        ),
-                        "снят": self.get_safe(doc, "control.removeControl"),
-                    }
-                    if getattr(doc, "control", None)
-                    else None
-                ),
             }
 
-            # ========== 6. КАТЕГОРИАЛЬНАЯ СПЕЦИФИКАЦИЯ ==========
-            specialized = {}
-
-            # 6.1 ДОГОВОРЫ
-            if getattr(doc, "contractNumber", None) or category == "CONTRACT":
+            specialized: Dict[str, Any] = {}
+            if getattr(doc, "contractNumber", None) or category_value == "CONTRACT":
                 currency_code = self.get_safe(doc, "currency.code", "BYN")
                 specialized["договор"] = {
                     "номер": getattr(doc, "contractNumber", None),
@@ -1166,157 +1335,21 @@ class EDMSNaturalLanguageService:
                         if getattr(doc, "contractSum", None) is not None
                         else None
                     ),
-                    "валюта_id": (
-                        str(doc.currencyId)
-                        if getattr(doc, "currencyId", None) is not None
-                        else None
-                    ),
-                    "дата_подписания": self.format_date(
-                        getattr(doc, "contractSigningDate", None)
-                    ),
-                    "дата_начала_действия": self.format_date(
-                        getattr(doc, "contractStartDate", None)
-                    ),
-                    "начало_срока": self.format_date(
-                        getattr(doc, "contractDurationStart", None)
-                    ),
-                    "конец_срока": self.format_date(
-                        getattr(doc, "contractDurationEnd", None)
-                    ),
-                    "пролонгация": getattr(doc, "contractAutoProlongation", None),
-                    "согласование": getattr(doc, "contractAgreement", None),
-                    "типовой": getattr(doc, "contractTypical", None),
                 }
 
-            # 6.2 СОВЕЩАНИЯ
-            if getattr(doc, "dateMeeting", None) or category in ["MEETING", "QUESTION"]:
-                specialized["совещание"] = {
-                    "дата": self.format_date(getattr(doc, "dateMeeting", None)),
-                    "дата_заседания": self.format_date(
-                        getattr(doc, "dateMeetingQuestion", None)
-                    ),
-                    "время_начала": self.format_datetime(
-                        getattr(doc, "startMeeting", None)
-                    ),
-                    "время_окончания": self.format_datetime(
-                        getattr(doc, "endMeeting", None)
-                    ),
-                    "место": getattr(doc, "placeMeeting", None),
-                    "председатель": self.format_user(getattr(doc, "chairperson", None)),
-                    "секретарь": self.format_user(getattr(doc, "secretary", None)),
-                    "внешние_приглашенные": getattr(doc, "externalInvitees", None),
-                    "количество_приглашенных": getattr(doc, "inviteesCount", None),
-                    "количество_для_оповещения": getattr(
-                        doc, "meetingQuestionNotifyCount", None
-                    ),
-                    "форма_проведения": self.get_safe(doc, "formMeetingType"),
-                    "номер_вопроса_в_повестке": getattr(doc, "numberQuestion", None),
-                    "есть_вопросы": getattr(doc, "hasQuestion", None),
-                    "дополнение_к_повестке": getattr(doc, "addition", None),
-                    "вопросы_повестки": [
-                        {
-                            "вопрос": getattr(q, "question", None),
-                            "докладчик": self.format_user(self.get_safe(q, "reporter")),
-                            "порядковый_номер": self.get_safe(q, "questionNumber"),
-                        }
-                        for q in (getattr(doc, "documentQuestions", None) or [])
-                    ],
-                    "родительское_заседание_id": (
-                        str(doc.documentMeetingQuestionId)
-                        if getattr(doc, "documentMeetingQuestionId", None)
-                        else None
-                    ),
-                    "дополнительное_заседание_id": (
-                        str(doc.additionMeetingQuestionId)
-                        if getattr(doc, "additionMeetingQuestionId", None)
-                        else None
-                    ),
-                    "дата_проведения_по_вопросу": self.format_date(
-                        getattr(doc, "dateQuestion", None)
-                    ),
-                    "комментарий_руководителя": getattr(doc, "commentQuestion", None),
-                }
-
-            # 6.3 ОБРАЩЕНИЯ
-            if category == "APPEAL":
-                app = getattr(doc, "documentAppeal", None)
-                if app and (
-                    getattr(app, "fioApplicant", None)
-                    or getattr(app, "organizationName", None)
-                ):
-                    specialized["обращение"] = {
-                        "заявитель": getattr(app, "fioApplicant", None),
-                        "организация": getattr(app, "organizationName", None),
-                        "тип": (
-                            "Коллективное"
-                            if getattr(app, "collective", False)
-                            else "Индивидуальное"
-                        ),
-                        "адрес": f"{getattr(app, 'regionName', None) or ''}, {getattr(app, 'cityName', None) or ''}, {getattr(app, 'fullAddress', None) or ''}".strip(
-                            ", "
-                        ),
-                        "тематика": self.get_safe(app, "subject.name"),
-                        "результат_решения": self.get_safe(app, "solutionResult.name"),
-                        "дата_поступления": self.format_date(
-                            self.get_safe(app, "receiptDate")
-                        ),
-                        "срок_рассмотрения": self.format_date(
-                            self.get_safe(app, "considerationDeadline")
-                        ),
-                    }
-
-            # ========== 7. ПОРУЧЕНИЯ И ЗАДАЧИ ==========
             tasks_info = {
                 "общее_количество": getattr(doc, "countTask", None),
-                "проектных": getattr(doc, "taskProjectCount", None),
-                "завершенных": getattr(doc, "completedTaskCount", None),
-                "список": (
-                    [
-                        {
-                            "номер": getattr(t, "taskNumber", None),
-                            "текст": getattr(t, "taskText", None),
-                            "исполнитель": self.format_user(getattr(t, "author", None)),
-                            "срок": (
-                                self.format_date(getattr(t, "planedDateEnd", None))
-                                if getattr(t, "planedDateEnd", None)
-                                else "Бессрочно"
-                            ),
-                            "статус": self.get_safe(t, "taskStatus"),
-                            "на_контроле": getattr(t, "onControl", None),
-                            "создано": self.format_datetime(
-                                self.get_safe(t, "createDate")
-                            ),
-                            "завершено": self.format_datetime(
-                                self.get_safe(t, "factDateEnd")
-                            ),
-                        }
-                        for t in (getattr(doc, "taskList", None) or [])
-                    ]
-                    if getattr(doc, "taskList", None)
-                    else []
-                ),
-            }
-
-            # ========== 8. БЕЗОПАСНОСТЬ И ДОСТУП ==========
-            security = {
-                "гриф_ДСП": getattr(doc, "dspFlag", None),
-                "гриф_доступа_включен": getattr(doc, "enableAccessGrief", None),
-                "гриф_доступа": (
+                "список": [
                     {
-                        "id": (
-                            str(doc.accessGriefId)
-                            if getattr(doc, "accessGriefId", None)
-                            else None
-                        ),
-                        "название": self.get_safe(doc, "accessGrief.name"),
-                        "уровень": self.get_safe(doc, "accessGrief.level"),
+                        "текст": getattr(t, "taskText", None),
+                        "исполнитель": self.format_user(getattr(t, "author", None)),
+                        "срок": self.format_date(getattr(t, "planedDateEnd", None)),
+                        "статус": self.get_safe(t, "taskStatus"),
                     }
-                    if getattr(doc, "accessGrief", None)
-                    else None
-                ),
+                    for t in (getattr(doc, "taskList", None) or [])
+                ],
             }
 
-            # ========== 9. СВЯЗИ И ВЛОЖЕНИЯ ==========
             relations = {
                 "вложения": [
                     {
@@ -1324,193 +1357,11 @@ class EDMSNaturalLanguageService:
                         "id": str(a.id) if getattr(a, "id", None) else None,
                         "тип": self.get_safe(a, "attachmentDocumentType.name"),
                         "размер_байт": getattr(a, "size", None),
-                        "дата_загрузки": self.format_datetime(
-                            getattr(a, "uploadDate", None)
-                        ),
-                        "есть_ЭЦП": bool(
-                            getattr(a, "signs", None) and len(a.signs) > 0
-                        ),
                     }
                     for a in (getattr(doc, "attachmentDocument", None) or [])
                 ],
-                "количество_связей": getattr(doc, "documentLinksCount", None),
-                "связанные_документы": {
-                    "в_ответ_на": (
-                        str(doc.answerDocId)
-                        if getattr(doc, "answerDocId", None)
-                        else None
-                    ),
-                    "получен_в_ответ": (
-                        str(doc.receivedDocId)
-                        if getattr(doc, "receivedDocId", None)
-                        else None
-                    ),
-                    "ссылочный_документ": (
-                        str(doc.refDocId) if getattr(doc, "refDocId", None) else None
-                    ),
-                },
-                "дополнительные_документы": (
-                    [
-                        {
-                            "название": self.get_safe(ad, "name"),
-                            "тип": self.get_safe(ad, "type"),
-                        }
-                        for ad in (getattr(doc, "additionalDocuments", None) or [])
-                    ]
-                    if getattr(doc, "additionalDocuments", None)
-                    else None
-                ),
             }
 
-            # ========== 10. ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ==========
-            additional = {
-                "страниц": getattr(doc, "pages", None),
-                "листов_приложений": getattr(doc, "additionalPages", None),
-                "номер_экземпляра": getattr(doc, "exemplarNumber", None),
-                "количество_экземпляров": getattr(doc, "exemplarCount", None),
-                "способ_получения": (
-                    {
-                        "id": getattr(doc, "deliveryMethodId", None),
-                        "название": self.get_safe(doc, "deliveryMethod.name"),
-                    }
-                    if (
-                        getattr(doc, "deliveryMethod", None)
-                        or getattr(doc, "deliveryMethodId", None)
-                    )
-                    else None
-                ),
-                "страна": (
-                    {
-                        "id": (
-                            str(doc.countryId)
-                            if getattr(doc, "countryId", None)
-                            else None
-                        ),
-                        "название": getattr(doc, "countryName", None),
-                    }
-                    if (
-                        getattr(doc, "countryName", None)
-                        or getattr(doc, "countryId", None)
-                    )
-                    else None
-                ),
-                "инвестиционная_программа": (
-                    {
-                        "id": (
-                            str(doc.investProgramId)
-                            if getattr(doc, "investProgramId", None)
-                            else None
-                        ),
-                        "название": self.get_safe(doc, "investmentProgram.name"),
-                    }
-                    if getattr(doc, "investProgramId", None)
-                    else None
-                ),
-                "версионность": {
-                    "включена": getattr(doc, "versionFlag", None),
-                    "id_версии": (
-                        str(doc.documentVersionId)
-                        if getattr(doc, "documentVersionId", None)
-                        else None
-                    ),
-                    "информация": (
-                        {
-                            "номер": self.get_safe(doc, "version.versionNumber"),
-                            "дата_создания": self.format_datetime(
-                                self.get_safe(doc, "version.createDate")
-                            ),
-                            "автор": self.format_user(
-                                self.get_safe(doc, "version.author")
-                            ),
-                        }
-                        if getattr(doc, "version", None)
-                        else None
-                    ),
-                },
-                "ознакомление": (
-                    {
-                        "количество_визирующих": getattr(
-                            doc, "introductionCount", None
-                        ),
-                        "количество_завизировавших": getattr(
-                            doc, "introductionCompleteCount", None
-                        ),
-                        "список": [
-                            {
-                                "сотрудник": self.format_user(
-                                    self.get_safe(i, "employee")
-                                ),
-                                "дата": self.format_datetime(
-                                    self.get_safe(i, "introductionDate")
-                                ),
-                                "завизировано": self.get_safe(i, "completed"),
-                            }
-                            for i in (getattr(doc, "introduction", None) or [])
-                        ],
-                    }
-                    if getattr(doc, "introduction", None)
-                    else None
-                ),
-                "номенклатура": (
-                    {
-                        "дела_для_списания": getattr(doc, "writeOffAffairCount", None),
-                        "предварительных_дел": getattr(doc, "preAffairCount", None),
-                        "список_предварительных": [
-                            {
-                                "название": self.get_safe(
-                                    pn, "nomenclatureAffair.name"
-                                ),
-                                "индекс": self.get_safe(pn, "nomenclatureAffair.index"),
-                            }
-                            for pn in (
-                                getattr(doc, "preNomenclatureAffairs", None) or []
-                            )
-                        ],
-                    }
-                    if (
-                        getattr(doc, "writeOffAffairCount", None)
-                        or getattr(doc, "preAffairCount", None)
-                        or getattr(doc, "preNomenclatureAffairs", None)
-                    )
-                    else None
-                ),
-                "опись": self.get_safe(doc, "documentInventoryData"),
-                "форма_документа": (
-                    {
-                        "id": (
-                            str(doc.documentFormId)
-                            if getattr(doc, "documentFormId", None)
-                            else None
-                        ),
-                        "определение": self.get_safe(
-                            doc, "documentFormDefinition.name"
-                        ),
-                    }
-                    if (
-                        getattr(doc, "documentFormId", None)
-                        or getattr(doc, "documentFormDefinition", None)
-                    )
-                    else None
-                ),
-                "свойства_пользователя": (
-                    {
-                        "цвет": self.get_safe(doc, "color.colorCode"),
-                        "прочие": self.get_safe(doc, "userProps"),
-                    }
-                    if (getattr(doc, "color", None) or getattr(doc, "userProps", None))
-                    else None
-                ),
-            }
-
-            # ========== 11. ПОЛЬЗОВАТЕЛЬСКИЕ ПОЛЯ ==========
-            custom_fields = {}
-            if getattr(doc, "customFields", None):
-                custom_fields = {
-                    "данные": doc.customFields,
-                    "количество_полей": len(doc.customFields),
-                }
-
-            # ========== СБОРКА ФИНАЛЬНОГО РЕЗУЛЬТАТА ==========
             result = {
                 "базовая_информация": self._clean_dict(base_info),
                 "регистрация": self._clean_dict(registration),
@@ -1518,130 +1369,77 @@ class EDMSNaturalLanguageService:
                 "жизненный_цикл": self._clean_dict(lifecycle),
                 "контроль": self._clean_dict(control_info),
                 "задачи": self._clean_dict(tasks_info),
-                "безопасность": self._clean_dict(security),
                 "связи_и_вложения": self._clean_dict(relations),
-                "дополнительная_информация": self._clean_dict(additional),
             }
 
             if specialized:
                 result["специализированная_информация"] = self._clean_dict(specialized)
 
-            if custom_fields:
-                result["пользовательские_поля"] = custom_fields
-
             return result
 
-        except Exception as e:
-            logger.error(f"Error processing document: {e}", exc_info=True)
-            return {"error": "Ошибка обработки документа", "details": str(e)}
+        except Exception as exc:
+            logger.error("Error processing document: %s", exc, exc_info=True)
+            return {"error": "Ошибка обработки документа", "details": str(exc)}
 
     def _clean_dict(self, d: Any) -> Any:
-        """
-        Рекурсивная очистка словаря от None и пустых значений.
+        """Recursively remove None, empty lists, and empty dicts from *d*.
 
         Args:
-            d: Словарь или список для очистки
+            d: Input data structure (dict, list, or scalar).
 
         Returns:
-            Очищенная структура данных
+            Cleaned data structure, or None if empty after cleaning.
         """
         if isinstance(d, dict):
-            cleaned = {}
-            for k, v in d.items():
-                cleaned_value = self._clean_dict(v)
-                if cleaned_value not in [None, [], {}, ""]:
-                    cleaned[k] = cleaned_value
-            return cleaned if cleaned else None
-
-        elif isinstance(d, list):
-            cleaned = [self._clean_dict(i) for i in d]
-            cleaned = [item for item in cleaned if item not in [None, [], {}, ""]]
-            return cleaned if cleaned else None
-
-        else:
-            return d
-
-    # ========== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ==========
-
-    def analyze_attachment_meta(self, attachment: Any) -> Dict[str, Any]:
-        """
-        Анализирует метаданные конкретного файла.
-
-        Args:
-            attachment: Объект вложения
-
-        Returns:
-            Словарь с метаданными файла
-        """
-        if not attachment:
-            return {}
-
-        try:
-            return {
-                "название": getattr(attachment, "name", None),
-                "тип_вложения": self.get_safe(
-                    attachment, "attachmentDocumentType.name"
-                ),
-                "размер_кб": (
-                    round(attachment.size / 1024, 2)
-                    if getattr(attachment, "size", None)
-                    else 0
-                ),
-                "дата_загрузки": self.format_datetime(
-                    getattr(attachment, "uploadDate", None)
-                ),
-                "есть_эцп": bool(
-                    getattr(attachment, "signs", None) and len(attachment.signs) > 0
-                ),
-                "автор_id": (
-                    str(attachment.authorId)
-                    if getattr(attachment, "authorId", None)
-                    else None
-                ),
-            }
-        except Exception as e:
-            logger.error(f"Error analyzing attachment: {e}")
-            return {"error": str(e)}
+            cleaned = {k: self._clean_dict(v) for k, v in d.items()}
+            cleaned = {k: v for k, v in cleaned.items() if v not in (None, [], {}, "")}
+            return cleaned or None
+        if isinstance(d, list):
+            cleaned_list = [self._clean_dict(i) for i in d]
+            cleaned_list = [i for i in cleaned_list if i not in (None, [], {}, "")]
+            return cleaned_list or None
+        return d
 
     def analyze_local_file(self, file_path: str) -> Dict[str, Any]:
-        """
-        Анализирует параметры локального файла перед чтением.
+        """Return basic metadata for a local file before reading its content.
 
         Args:
-            file_path: Путь к файлу
+            file_path: Absolute path to the file.
 
         Returns:
-            Словарь с параметрами файла
+            Dict with filename, extension, size and content type.
         """
         try:
             if not os.path.exists(file_path):
                 return {"error": "Файл не найден"}
-
             stats = os.stat(file_path)
             ext = os.path.splitext(file_path)[1].lower()
-
             return {
                 "имя_файла": os.path.basename(file_path),
                 "расширение": ext,
                 "размер_мб": round(stats.st_size / (1024 * 1024), 2),
                 "путь": file_path,
                 "тип_контента": (
-                    "Документ" if ext in [".pdf", ".docx", ".doc"] else "Текст/Лог"
+                    "Документ" if ext in {".pdf", ".docx", ".doc"} else "Текст"
                 ),
             }
-        except Exception as e:
-            logger.error(f"Error analyzing file {file_path}: {e}")
-            return {"error": str(e)}
+        except Exception as exc:
+            logger.error(
+                "Error analysing file %s: %s",
+                file_path,
+                exc,
+                extra=safe_extra(file_path=file_path),
+            )
+            return {"error": str(exc)}
 
     def suggest_summarize_format(self, text: str) -> Dict[str, Any]:
-        """
-        Определяет структуру текста и рекомендует формат анализа.
+        """Recommend a summarisation format based on text characteristics.
 
         Args:
-            text: Текст для анализа
+            text: Source text to analyse.
 
         Returns:
-            Рекомендация по формату суммаризации
+            Dict with ``recommended``, ``reason`` and ``stats`` keys.
         """
         if not text:
             return {
@@ -1655,65 +1453,50 @@ class EDMSNaturalLanguageService:
         has_many_digits = len(re.findall(r"\d+", text)) > 20
 
         if length > 5000 or has_many_digits:
-            recommendation = "thesis"
-            reason = (
-                "Текст объемный или содержит много данных, тезисный план будет удобнее."
-            )
-        elif lines < 5:
-            recommendation = "abstractive"
-            reason = "Текст компактный, лучше всего подойдет краткий пересказ сути."
-        else:
-            recommendation = "extractive"
-            reason = "В тексте много конкретики, выделим ключевые факты."
-
+            return {
+                "recommended": "thesis",
+                "reason": "Текст объемный или содержит много данных.",
+                "stats": {"chars": length, "lines": lines},
+            }
+        if lines < 5:
+            return {
+                "recommended": "abstractive",
+                "reason": "Компактный текст — подойдёт краткий пересказ.",
+                "stats": {"chars": length, "lines": lines},
+            }
         return {
-            "recommended": recommendation,
-            "reason": reason,
+            "recommended": "extractive",
+            "reason": "Много конкретики — выделим ключевые факты.",
             "stats": {"chars": length, "lines": lines},
         }
 
     def process_employee_info(self, emp: Any) -> Dict[str, Any]:
-        """
-        Формирует расширенную аналитическую карточку сотрудника.
+        """Build an analytical employee card from an EmployeeDto.
 
         Args:
-            emp: Объект сотрудника
+            emp: EmployeeDto-like object.
 
         Returns:
-            Структурированная карточка сотрудника
+            Nested dict with основное, контакты, структура sections.
         """
         if not emp:
             return {}
-
         try:
-            full_name = self.format_user(emp)
-
             return {
                 "основное": {
-                    "фио": full_name,
+                    "фио": self.format_user(emp),
                     "должность": self.get_safe(emp, "post.postName"),
                     "департамент": self.get_safe(emp, "department.name"),
                     "статус": "Уволен" if getattr(emp, "fired", False) else "Активен",
-                    "является_ио": getattr(emp, "io", None),
                 },
                 "контакты": {
                     "email": getattr(emp, "email", None),
                     "телефон": getattr(emp, "phone", None),
-                    "адрес": getattr(emp, "address", None),
-                    "площадка": getattr(emp, "place", None),
                 },
                 "структура": {
-                    "руководитель_подразделения": getattr(
-                        emp, "currentUserLeader", None
-                    ),
                     "код_департамента": self.get_safe(emp, "department.departmentCode"),
-                    "id_департамента": (
-                        str(emp.departmentId)
-                        if getattr(emp, "departmentId", None)
-                        else None
-                    ),
                 },
             }
-        except Exception as e:
-            logger.error(f"Error processing employee info: {e}")
-            return {"error": str(e)}
+        except Exception as exc:
+            logger.error("Error processing employee info: %s", exc, exc_info=True)
+            return {"error": str(exc)}

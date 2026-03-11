@@ -18,12 +18,13 @@ if response.status_code == 200:
 else:
     print(f"Ошибка: {response.status_code}, {response.text}")
 
+
 print("=== Тест вызова LLM ===\n")
 
 print("--- Конфигурация ---")
-# print(f"LLM Endpoint: {settings.LLM_ENDPOINT}")
-# print(f"LLM Model: {settings.LLM_MODEL_NAME}")
-# print(f"Temperature: {settings.LLM_TEMPERATURE}\n")
+print(f"LLM Endpoint: {settings.LLM_GENERATIVE_URL}")
+print(f"LLM Model: {settings.LLM_GENERATIVE_MODEL}")
+print(f"Temperature: {settings.LLM_TEMPERATURE}\n")
 
 try:
     print("Инициализация ChatModel...")
@@ -36,7 +37,7 @@ try:
 
     response = llm.invoke([HumanMessage(content=test_message)])
 
-    print(f"\nОтвет получен:")
+    print("\nОтвет получен:")
     print(f"   {response.content}")
 
 except Exception as e:

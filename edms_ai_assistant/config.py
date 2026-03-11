@@ -1,217 +1,215 @@
 # edms_ai_assistant/config.py
+"""
+Production-ready configuration with validation, security, and environment separation.
+"""
 import os
-from pydantic_settings import BaseSettings
+from typing import Optional, List
+from pydantic import Field, field_validator, HttpUrl, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    llm__generative: str = "http://model-generative.shared.du.iba/v1"
-    llm__generative_model: str = "generative-model"
-    llm__embedding: str = "http://model-embedding.shared.du.iba/v1"
-    llm__embedding_model: str = "embedding-model"
-    llm_api_key: str | None = None
-    openai_api_key: str | None = None
+    """
+    Application configuration with validation.
 
-    llm_temperature: float = 0
-    llm_max_tokens: int | None = None
-    llm_timeout: int = 120
-    llm_max_retries: int = 3
-    llm_request_timeout: int = 120
-    llm_stream_usage: bool = True
+    Security notes:
+    - Secrets are stored as SecretStr (not printed in logs)
+    - URLs are validated as HttpUrl (optional where applicable)
+    - Environment-specific defaults available
+    """
 
-    embedding_timeout: int = 120
-    embedding_max_retries: int = 3
-    embedding_request_timeout: int = 120
-    embedding_ctx_length: int = 8191
-    embedding_chunk_size: int = 1000
-    embedding_max_retries_per_request: int = 6
+    model_config = SettingsConfigDict(
+        env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
-    ENVIRONMENT: str = "development"
+    # ── Application ──────────────────────────────────────────────────────────
+    ENVIRONMENT: str = Field(
+        default="development", pattern="^(development|staging|production)$"
+    )
+    API_PORT: int = Field(default=8000, ge=1, le=65535)
+    DEBUG: bool = Field(default=False)
+    ALLOWED_ORIGINS: str = Field(default="*")
 
-    chancellor_next_base_url: str = "http://127.0.0.1:8098"
-    edms_timeout: int = 120
-    chroma_persist_dir: str = "./chroma_db"
-    checkpoint_db_url: str = "postgresql://postgres:1234@localhost:5432/postgres"
-    sql_db_url: str = "postgresql://postgres:1234@localhost:5432/postgres"
-    api_port: int = 8000
-    debug: bool = True
-    redis_url: str = "redis://127.0.0.1:6379/0"
-    agent_enable_tracing: bool = True
-    agent_log_level: str = "INFO"
-    agent_max_retries: int = 3
-    logging_level: str = "DEBUG"
-    logging_format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    telemetry_enabled: bool = True
-    telemetry_endpoint: str = "http://127.0.0.1:8098"
-    rag_batch_size: int = 20
-    rag_chunk_size: int = 1200
-    rag_chunk_overlap: int = 300
-    rag_embedding_batch_size: int = 10
-    react_app_api_url: str = "http://model-generative.shared.du.iba/v1"
+    @field_validator("ALLOWED_ORIGINS")
+    @classmethod
+    def parse_origins(cls, v: str) -> List[str]:
+        if v == "*":
+            return ["*"]
+        return [origin.strip() for origin in v.split(",")]
 
-    class Config:
-        env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    # ── Security ─────────────────────────────────────────────────────────────
+    JWT_SECRET_KEY: SecretStr = Field(default="change-me-in-production")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_MINUTES: int = 60
 
-    @property
-    def LOGGING_LEVEL(self) -> str:
-        return getattr(self, "logging_level", self.logging_level)
+    # ── LLM Configuration ────────────────────────────────────────────────────
+    LLM_GENERATIVE_URL: HttpUrl = Field(
+        default="http://model-generative.shared.du.iba/v1"
+    )
+    LLM_GENERATIVE_MODEL: str = "generative-model"
+    LLM_EMBEDDING_URL: HttpUrl = Field(
+        default="http://model-embedding.shared.du.iba/v1"
+    )
+    LLM_EMBEDDING_MODEL: str = "embedding-model"
 
-    @property
-    def LLM_ENDPOINT(self) -> str:
-        return getattr(self, "llm__generative", self.llm__generative)
+    LLM_API_KEY: Optional[SecretStr] = None
+    OPENAI_API_KEY: Optional[SecretStr] = None
 
-    @property
-    def EMBEDDING_ENDPOINT(self) -> str:
-        return getattr(self, "llm__embedding", self.llm__embedding)
+    LLM_TEMPERATURE: float = Field(default=0.0, ge=0.0, le=2.0)
+    LLM_MAX_TOKENS: Optional[int] = Field(default=2048, ge=100, le=8192)
+    LLM_TIMEOUT: int = Field(default=120, ge=10, le=600)
+    LLM_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
+    LLM_REQUEST_TIMEOUT: int = Field(default=120, ge=10, le=600)
+    LLM_STREAM_USAGE: bool = False
 
-    @property
-    def LLM_MODEL_NAME(self) -> str:
-        return getattr(self, "llm__generative_model", self.llm__generative_model)
+    # ── Embedding Configuration ──────────────────────────────────────────────
+    EMBEDDING_TIMEOUT: int = Field(default=120, ge=10, le=600)
+    EMBEDDING_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
+    EMBEDDING_REQUEST_TIMEOUT: int = Field(default=120, ge=10, le=600)
+    EMBEDDING_CTX_LENGTH: int = 8191
+    EMBEDDING_CHUNK_SIZE: int = 1000
+    EMBEDDING_MAX_RETRIES_PER_REQUEST: int = 6
 
-    @property
-    def EMBEDDING_MODEL_NAME(self) -> str:
-        return getattr(self, "llm__embedding_model", self.llm__embedding_model)
+    # ── EDMS Configuration ───────────────────────────────────────────────────
+    EDMS_BASE_URL: HttpUrl = Field(default="http://127.0.0.1:8098")
+    EDMS_TIMEOUT: int = Field(default=120, ge=10, le=600)
+    EDMS_API_VERSION: str = "v1"
 
-    @property
-    def LLM_API_KEY(self) -> str | None:
-        return getattr(self, "llm_api_key", self.llm_api_key)
-
-    @property
-    def OPENAI_API_KEY(self) -> str | None:
-        return getattr(self, "openai_api_key", self.openai_api_key)
-
-    @property
-    def LLM_TEMPERATURE(self) -> float:
-        return getattr(self, "llm_temperature", self.llm_temperature)
-
-    @property
-    def LLM_MAX_TOKENS(self) -> int | None:
-        return getattr(self, "llm_max_tokens", self.llm_max_tokens)
-
-    @property
-    def LLM_TIMEOUT(self) -> int:
-        return getattr(self, "llm_timeout", self.llm_timeout)
-
-    @property
-    def LLM_MAX_RETRIES(self) -> int:
-        return getattr(self, "llm_max_retries", self.llm_max_retries)
-
-    @property
-    def LLM_REQUEST_TIMEOUT(self) -> int:
-        return getattr(self, "llm_request_timeout", self.llm_request_timeout)
-
-    @property
-    def LLM_STREAM_USAGE(self) -> bool:
-        return getattr(self, "llm_stream_usage", self.llm_stream_usage)
-
-    @property
-    def EMBEDDING_TIMEOUT(self) -> int:
-        return getattr(self, "embedding_timeout", self.embedding_timeout)
-
-    @property
-    def EMBEDDING_MAX_RETRIES(self) -> int:
-        return getattr(self, "embedding_max_retries", self.embedding_max_retries)
-
-    @property
-    def EMBEDDING_REQUEST_TIMEOUT(self) -> int:
-        return getattr(
-            self, "embedding_request_timeout", self.embedding_request_timeout
-        )
-
-    @property
-    def EMBEDDING_CTX_LENGTH(self) -> int:
-        return getattr(self, "embedding_ctx_length", self.embedding_ctx_length)
-
-    @property
-    def EMBEDDING_CHUNK_SIZE(self) -> int:
-        return getattr(self, "embedding_chunk_size", self.embedding_chunk_size)
-
-    @property
-    def EMBEDDING_MAX_RETRIES_PER_REQUEST(self) -> int:
-        return getattr(
-            self,
-            "embedding_max_retries_per_request",
-            self.embedding_max_retries_per_request,
-        )
+    # ── Database Configuration ───────────────────────────────────────────────
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: SecretStr = Field(default="change-me-in-production")
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "postgres"
 
     @property
     def CHANCELLOR_NEXT_BASE_URL(self) -> str:
-        return getattr(self, "chancellor_next_base_url", self.chancellor_next_base_url)
+        """Alias for backward compatibility with existing clients."""
+        return str(self.EDMS_BASE_URL)
 
     @property
-    def EDMS_TIMEOUT(self):
-        return getattr(self, "edms_timeout", self.edms_timeout)
+    def DATABASE_URL(self) -> str:
+        return (
+            f"postgresql://{self.POSTGRES_USER}:"
+            f"{self.POSTGRES_PASSWORD.get_secret_value()}@"
+            f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
 
-    @property
-    def CHROMA_PERSIST_DIR(self) -> str:
-        return getattr(self, "chroma_persist_dir", self.chroma_persist_dir)
+    CHECKPOINT_DB_URL: Optional[str] = None
+    SQL_DB_URL: Optional[str] = None
 
-    @property
-    def CHECKPOINT_DB_URL(self) -> str:
-        return getattr(self, "checkpoint_db_url", self.checkpoint_db_url)
-
-    @property
-    def SQL_DB_URL(self) -> str:
-        return getattr(self, "sql_db_url", self.sql_db_url)
-
-    @property
-    def API_PORT(self) -> int:
-        return getattr(self, "api_port", self.api_port)
-
-    @property
-    def DEBUG(self) -> bool:
-        return getattr(self, "debug", self.debug)
+    # ── Redis Configuration ──────────────────────────────────────────────────
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[SecretStr] = None
 
     @property
     def REDIS_URL(self) -> str:
-        return getattr(self, "redis_url", self.redis_url)
+        if self.REDIS_PASSWORD:
+            return (
+                f"redis://:{self.REDIS_PASSWORD.get_secret_value()}@"
+                f"{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            )
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    # ── File Upload Configuration ────────────────────────────────────────────
+    UPLOAD_DIR: str = "./uploads"
+    MAX_FILE_SIZE_MB: int = Field(default=50, ge=1, le=500)
+    ALLOWED_FILE_EXTENSIONS: str = ".docx,.doc,.pdf,.txt,.rtf,.xlsx,.xls,.pptx"
 
     @property
-    def AGENT_ENABLE_TRACING(self) -> bool:
-        return getattr(self, "agent_enable_tracing", self.agent_enable_tracing)
+    def ALLOWED_EXTENSIONS_LIST(self) -> set[str]:
+        return {ext.strip().lower() for ext in self.ALLOWED_FILE_EXTENSIONS.split(",")}
 
     @property
-    def AGENT_LOG_LEVEL(self) -> str:
-        return getattr(self, "agent_log_level", self.agent_log_level)
+    def MAX_FILE_SIZE_BYTES(self) -> int:
+        return self.MAX_FILE_SIZE_MB * 1024 * 1024
 
-    @property
-    def AGENT_MAX_RETRIES(self) -> int:
-        return getattr(self, "agent_max_retries", self.agent_max_retries)
+    # ── Agent Configuration ──────────────────────────────────────────────────
+    AGENT_MAX_ITERATIONS: int = Field(default=10, ge=1, le=50)
+    AGENT_MAX_CONTEXT_MESSAGES: int = Field(default=20, ge=5, le=100)
+    AGENT_TIMEOUT: float = Field(default=120.0, ge=10.0, le=600.0)
+    AGENT_ENABLE_TRACING: bool = False
+    AGENT_LOG_LEVEL: str = "INFO"
+    AGENT_MAX_RETRIES: int = 3
 
-    @property
-    def LOGGING_LEVEL(self) -> str:
-        return getattr(self, "logging_level", self.logging_level)
+    # ── RAG Configuration ────────────────────────────────────────────────────
+    RAG_BATCH_SIZE: int = 20
+    RAG_CHUNK_SIZE: int = 1200
+    RAG_CHUNK_OVERLAP: int = 300
+    RAG_EMBEDDING_BATCH_SIZE: int = 10
+    CHROMA_PERSIST_DIR: str = "./chroma_db"
 
-    @property
-    def LOGGING_FORMAT(self) -> str:
-        return getattr(self, "logging_format", self.logging_format)
+    # ── Rate Limiting ────────────────────────────────────────────────────────
+    RATE_LIMIT_MAX_REQUESTS: int = Field(default=10, ge=1, le=1000)
+    RATE_LIMIT_WINDOW_SECONDS: int = Field(default=60, ge=10, le=3600)
 
-    @property
-    def TELEMETRY_ENABLED(self) -> bool:
-        return getattr(self, "telemetry_enabled", self.telemetry_enabled)
+    # ── Logging Configuration ────────────────────────────────────────────────
+    LOGGING_LEVEL: str = Field(
+        default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"
+    )
+    LOGGING_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    LOGGING_INCLUDE_TRACE_ID: bool = True
 
-    @property
-    def TELEMETRY_ENDPOINT(self) -> str:
-        return getattr(self, "telemetry_endpoint", self.telemetry_endpoint)
+    # ── Telemetry & Monitoring ───────────────────────────────────────────────
+    TELEMETRY_ENABLED: bool = False
+    TELEMETRY_ENDPOINT: Optional[str] = Field(
+        default=None
+    )  # ← ИСПРАВЛЕНО: Optional[str] вместо HttpUrl
+    HEALTH_CHECK_ENABLED: bool = True
 
-    @property
-    def RAG_BATCH_SIZE(self) -> int:
-        return getattr(self, "rag_batch_size", self.rag_batch_size)
+    # ── Environment-specific defaults ────────────────────────────────────────
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def set_debug_default(cls, v: Optional[bool], info) -> bool:
+        if v is not None:
+            return v
+        env = info.data.get("ENVIRONMENT", "development")
+        return env == "development"
 
-    @property
-    def RAG_CHUNK_SIZE(self) -> int:
-        return getattr(self, "rag_chunk_size", self.rag_chunk_size)
+    @field_validator("LOGGING_LEVEL", mode="before")
+    @classmethod
+    def set_log_level_default(cls, v: Optional[str], info) -> str:
+        if v is not None:
+            return v
+        env = info.data.get("ENVIRONMENT", "development")
+        return "DEBUG" if env == "development" else "INFO"
 
-    @property
-    def RAG_CHUNK_OVERLAP(self) -> int:
-        return getattr(self, "rag_chunk_overlap", self.rag_chunk_overlap)
+    @field_validator("TELEMETRY_ENDPOINT", mode="before")
+    @classmethod
+    def validate_telemetry_endpoint(cls, v: Optional[str]) -> Optional[str]:
+        if not v or v.strip() == "":
+            return None
 
-    @property
-    def RAG_EMBEDDING_BATCH_SIZE(self) -> int:
-        return getattr(self, "rag_embedding_batch_size", self.rag_embedding_batch_size)
-
-    @property
-    def REACT_APP_API_URL(self) -> str:
-        return getattr(self, "react_app_api_url", self.react_app_api_url)
+        if not (v.startswith("http://") or v.startswith("https://")):
+            return None
+        return v.strip()
 
 
+# ── Global settings instance ────────────────────────────────────────────────
 settings = Settings()
+
+
+# ── Convenience properties (for backward compatibility) ─────────────────────
+@property
+def LLM_ENDPOINT(self) -> str:
+    return str(settings.LLM_GENERATIVE_URL)
+
+
+@property
+def EMBEDDING_ENDPOINT(self) -> str:
+    return str(settings.LLM_EMBEDDING_URL)
+
+
+@property
+def LLM_MODEL_NAME(self) -> str:
+    return settings.LLM_GENERATIVE_MODEL
+
+
+@property
+def EMBEDDING_MODEL_NAME(self) -> str:
+    return settings.LLM_EMBEDDING_MODEL
