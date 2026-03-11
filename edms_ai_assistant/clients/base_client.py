@@ -2,7 +2,7 @@
 import httpx
 import logging
 import json
-from typing import Dict, Any, Optional, Union, List, Tuple
+from typing import Dict, Any, Optional, Union, List
 from abc import ABC
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.utils.retry_utils import async_retry

@@ -10,7 +10,6 @@ EDMS AI Assistant — FastAPI Application Entry Point.
 from __future__ import annotations
 
 import logging
-import re
 import shutil
 import tempfile
 import uuid
@@ -84,7 +83,7 @@ async def lifespan(app: FastAPI):
             "EDMS AI Assistant started",
             extra={"health": _agent.health_check()},
         )
-    except Exception as exc:
+    except Exception:
         logger.critical(
             "Agent initialization failed — all /chat requests will return 503",
             exc_info=True,
@@ -462,9 +461,10 @@ async def health_check(
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "edms_ai_assistant.main:app",
         host="0.0.0.0",
         port=settings.API_PORT,
         reload=settings.DEBUG,
+        reload_excludes=[".venv", "*.pyc", "__pycache__"],
         log_level=settings.LOGGING_LEVEL.lower(),
     )

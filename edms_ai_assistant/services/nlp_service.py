@@ -419,14 +419,21 @@ class QueryRefiner:
     """Normalises and enriches raw user queries before LLM dispatch."""
 
     ABBREVIATIONS: dict[str, str] = {
-        "док": "документ",
+        # Общие сокращения
+        "doc": "документ",
+        "dok": "документ",
+        "доки": "документы",
+        "сэд": "СЭД",
+        # EDMS-специфичные
         "ознак": "ознакомление",
         "пор": "поручение",
         "исп": "исполнитель",
         "отв": "ответственный",
         "сов": "совещание",
         "дог": "договор",
-        "сэд": "СЭД",
+        "рег": "регистрационный",
+        "нотиф": "уведомление",
+        "резол": "резолюция",
     }
 
     ACTION_SYNONYMS: dict[str, str] = {
@@ -437,6 +444,94 @@ class QueryRefiner:
         "расскажи": "опиши",
         "объясни": "опиши",
     }
+
+    EDMS_DOMAIN_SYNONYMS: dict[str, str] = {
+        # Версионирование / история (базовые формы + падежи)
+        "история документа": "сравни версии документа",
+        "историю документа": "сравни версии документа",
+        "истории документа": "сравни версии документа",
+        "история изменений": "сравни версии документа",
+        "историю изменений": "сравни версии документа",
+        "истории изменений": "сравни версии документа",
+        "что менялось": "сравни версии документа",
+        "что изменилось": "сравни версии документа",
+        "покажи изменения": "сравни версии документа",
+        "изменения в документе": "сравни версии документа",
+        "посмотреть версии": "сравни версии документа",
+        "какие версии": "сравни версии документа",
+        # Резолюции
+        "наложить резолюцию": "добавь резолюцию",
+        "поставь визу": "добавь резолюцию",
+        "написать резолюцию": "добавь резолюцию",
+        "наложи резолюцию": "добавь резолюцию",
+        "поставить резолюцию": "добавь резолюцию",
+        # Поручения / задачи
+        "дай задачу": "создай поручение",
+        "поставь задачу": "создай поручение",
+        "поставить задачу": "создай поручение",
+        "назначь исполнителя": "создай поручение",
+        "назначить исполнителя": "создай поручение",
+        "поручи выполнить": "создай поручение",
+        # Ознакомление
+        "виза": "ознакомление",
+        "завизировать": "добавить в ознакомление",
+        "завизируй": "добавить в ознакомление",
+        "отправь на визирование": "добавить в ознакомление",
+        "отправить на ознакомление": "добавить в ознакомление",
+        "отправь на ознакомление": "добавить в ознакомление",
+        # Уведомления
+        "напомни о документе": "отправь уведомление",
+        "напомни о сроке": "отправь уведомление",
+        "предупреди исполнителя": "отправь уведомление",
+        "уведомить": "отправь уведомление",
+        # Суммаризация
+        "вкратце": "кратко опиши",
+        "в двух словах": "кратко опиши",
+        "суть документа": "кратко опиши документ",
+        "о чём документ": "кратко опиши документ",
+        "что в документе": "кратко опиши документ",
+        # Поиск
+        "найти документ": "найди документ",
+        "поиск документов": "найди документы",
+        "реестр документов": "найди документы",
+        # Информация о документе
+        "инфо": "информация о документе",
+        "данные документа": "информация о документе",
+        "реквизиты": "информация о документе",
+        "статус документа": "информация о документе",
+        "кто автор": "информация об авторе документа",
+    }
+
+    def normalize_domain_synonyms(self, text: str) -> str:
+        """Replace EDMS domain jargon with canonical phrases before intent detection.
+
+        Применяет замены за ОДИН ПРОХОД слева направо, от длинных фраз к коротким.
+        Уже замененные участки текста помечаются как "использованные" — это предотвращает
+        каскадные двойные замены (например: "история" → "версии" → "версии" снова).
+
+        Args:
+            text: Input user query text.
+
+        Returns:
+            Text with domain jargon replaced by canonical EDMS phrases.
+        """
+        text_lower = text.lower()
+        sorted_pairs = sorted(
+            self.EDMS_DOMAIN_SYNONYMS.items(), key=lambda x: -len(x[0])
+        )
+        if not sorted_pairs:
+            return text_lower
+
+        pattern = re.compile(
+            "|".join(re.escape(jargon) for jargon, _ in sorted_pairs),
+            flags=re.IGNORECASE,
+        )
+        canonical_map = {jargon.lower(): canonical for jargon, canonical in sorted_pairs}
+
+        def _replace(m: re.Match) -> str:
+            return canonical_map.get(m.group(0).lower(), m.group(0))
+
+        return pattern.sub(_replace, text_lower)
 
     def expand_abbreviations(self, text: str) -> str:
         """Replace known abbreviations with full words.
@@ -470,36 +565,68 @@ class QueryRefiner:
         intent: UserIntent,
         entities: Dict[str, List[Entity]],
     ) -> str:
-        """Augment the query with intent-specific context hints.
+        """Augment the query with intent-specific structured context hints.
+
+        Формирует структурированный суффикс к запросу — он попадает в HumanMessage
+        и помогает модели сразу выбрать правильный инструмент и параметры.
+        Суффикс пишется в формате [ключ: значение] — короткий и машиночитаемый.
 
         Args:
-            text: Current query text.
+            text: Current query text (already normalized).
             intent: Detected primary intent.
-            entities: Extracted entities.
+            entities: Extracted entities grouped by type.
 
         Returns:
-            Augmented query string.
+            Augmented query string with structured context suffix.
         """
-        refined = text
+        hints: list[str] = []
 
-        if intent == UserIntent.SEARCH and entities:
+        if intent == UserIntent.SEARCH:
             if "persons" in entities:
-                refined = f"Найти документы, связанные с {entities['persons'][0].value}"
-            elif "dates" in entities:
-                refined = f"Найти документы за {entities['dates'][0].raw_text}"
+                hints.append(f"исполнитель: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(f"дата: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
 
         elif intent == UserIntent.CREATE_TASK:
             if "dates" not in entities:
-                refined += " (срок: +7 дней)"
+                hints.append("срок: +7 дней (не указан)")
+            else:
+                hints.append(f"срок: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
+            if "persons" in entities:
+                hints.append(f"исполнитель: {entities['persons'][0].value}")
 
         elif intent == UserIntent.COMPARE:
-            if (
-                "document_ids" not in entities
-                or len(entities.get("document_ids", [])) < 2
-            ):
-                refined += " (требуется указать версии для сравнения)"
+            ids = entities.get("document_ids", [])
+            if len(ids) >= 2:
+                hints.append(f"версия_1: {ids[0].value}")
+                hints.append(f"версия_2: {ids[1].value}")
+            else:
+                hints.append("версии: авто (первая↔последняя)")
 
-        return refined
+        elif intent == UserIntent.NOTIFICATION:
+            if "persons" in entities:
+                hints.append(f"получатель: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
+
+        elif intent == UserIntent.RESOLUTION:
+            if "persons" in entities:
+                hints.append(f"исполнитель резолюции: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(f"срок резолюции: {entities['dates'][0].raw_text}")
+
+        elif intent == UserIntent.SUMMARIZE:
+            if "numbers" in entities:
+                hints.append(f"объём: {entities['numbers'][0].value} слов")
+
+        elif intent == UserIntent.COMPOSITE:
+            hints.append("тип: составной запрос (выполни последовательно)")
+
+        if hints:
+            suffix = " [" + "; ".join(hints) + "]"
+            return text + suffix
+
+        return text
 
     def refine(
         self,
@@ -509,15 +636,22 @@ class QueryRefiner:
     ) -> str:
         """Run the full refinement pipeline on a query.
 
+        Pipeline order (each step feeds into the next):
+        1. normalize_domain_synonyms — EDMS жаргон → канонические фразы
+        2. expand_abbreviations — сокращения → полные слова
+        3. normalize_actions — синонимы действий → канонические глаголы
+        4. add_context — дополняем подсказками из entities/intent
+
         Args:
             text: Raw user query.
             intent: Detected primary intent.
             entities: Extracted entities.
 
         Returns:
-            Refined query string.
+            Refined query string ready for LLM prompt injection.
         """
         refined = text.strip()
+        refined = self.normalize_domain_synonyms(refined)  # EDMS-жаргон первым
         refined = self.expand_abbreviations(refined)
         refined = self.normalize_actions(refined)
         refined = self.add_context(refined, intent, entities)
@@ -529,7 +663,6 @@ class SemanticDispatcher:
 
     Args: None (stateless helpers are instantiated internally).
     """
-
     INTENT_KEYWORDS: Dict[UserIntent, Dict[str, list[str]]] = {
         UserIntent.CREATE_INTRODUCTION: {
             "primary": [
@@ -537,46 +670,104 @@ class SemanticDispatcher:
                 "ознакомь",
                 "список ознакомления",
                 "добавь в ознакомление",
+                "добавить в ознакомление",
+                "отправь на ознакомление",
             ],
-            "secondary": ["виза", "визирование", "согласование"],
+            "secondary": ["виза", "визирование", "согласование", "подпись"],
+            "negative": [],
         },
         UserIntent.CREATE_TASK: {
-            "primary": ["поручение", "создай задачу", "задание", "поручи"],
-            "secondary": ["исполнитель", "срок исполнения", "контроль"],
+            "primary": [
+                "поручение",
+                "создай задачу",
+                "создай поручение",
+                "задание",
+                "поручи",
+                "поставь задачу",
+                "назначь исполнителя",
+            ],
+            "secondary": ["исполнитель", "срок исполнения", "контроль", "выполнить"],
+            "negative": [],
         },
         UserIntent.SUMMARIZE: {
-            "primary": ["суммаризуй", "кратко", "резюме", "опиши", "сводка"],
-            "secondary": ["анализ", "выжимка", "основное"],
+            "primary": [
+                "суммаризуй",
+                "кратко",
+                "резюме",
+                "опиши",
+                "сводка",
+                "кратко опиши",
+                "в двух словах",
+                "суть документа",
+                "о чём документ",
+            ],
+            "secondary": ["анализ", "выжимка", "основное", "тезисы", "пересказ"],
+            "negative": [],
         },
         UserIntent.COMPARE: {
-            "primary": ["сравни", "отличия", "разница", "версия"],
-            "secondary": ["изменения", "что изменилось"],
+            "primary": [
+                "сравни",
+                "сравни версии",
+                "отличия",
+                "разница",
+                "версии документа",
+                "история документа",
+                "что изменилось",
+                "что менялось",
+                "изменения в документе",
+            ],
+            "secondary": ["изменения", "версия", "обновление", "правки"],
+            "negative": [],
         },
         UserIntent.SEARCH: {
-            "primary": ["найди", "поиск", "покажи", "где"],
-            "secondary": ["выведи", "список", "реестр"],
+            "primary": [
+                "найди",
+                "поиск",
+                "найти документ",
+                "поиск документов",
+                "реестр документов",
+            ],
+            "secondary": ["выведи", "список", "реестр", "покажи", "где"],
+            "negative": [],
         },
         UserIntent.ANALYZE: {
-            "primary": ["проанализируй", "подробно", "детали"],
-            "secondary": ["разбор", "структура"],
+            "primary": [
+                "проанализируй",
+                "подробно",
+                "детали",
+                "детальный анализ",
+            ],
+            "secondary": ["разбор", "структура", "состав", "содержание"],
+            "negative": [],
         },
         UserIntent.QUESTION: {
-            "primary": ["какая", "какой", "сколько", "когда", "почему"],
-            "secondary": ["расскажи", "объясни", "что"],
+            "primary": [
+                "какая",
+                "какой",
+                "сколько",
+                "когда",
+                "почему",
+                "зачем",
+                "кто",
+                "чей",
+            ],
+            "secondary": ["расскажи", "объясни", "что", "как"],
+            "negative": [],
         },
         UserIntent.FILE_ANALYSIS: {
             "primary": [
                 "загруженный файл",
                 "локальный файл",
                 "файл на компьютере",
-                "вложение",
-                "attachment",
                 "проанализируй файл",
                 "что в файле",
                 "о чем файл",
                 "содержимое файла",
+                "прочитай файл",
+                "открой файл",
             ],
             "secondary": [
+                "вложение",
                 "содержимое",
                 "текст файла",
                 "данные из файла",
@@ -584,6 +775,7 @@ class SemanticDispatcher:
                 "пересказ",
                 "тезисы",
             ],
+            "negative": [],
         },
         UserIntent.RESOLUTION: {
             "primary": [
@@ -593,9 +785,11 @@ class SemanticDispatcher:
                 "добавь резолюцию",
                 "напиши резолюцию",
                 "поставь резолюцию",
+                "наложи резолюцию",
                 "покажи резолюции",
             ],
-            "secondary": ["решение", "поручение руководителя", "написать"],
+            "secondary": ["решение", "поручение руководителя", "написать", "наложить"],
+            "negative": [],
         },
         UserIntent.NOTIFICATION: {
             "primary": [
@@ -606,10 +800,22 @@ class SemanticDispatcher:
                 "напоминание",
                 "предупреди",
                 "сообщи",
+                "отправь уведомление",
             ],
             "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+            "negative": [],
         },
     }
+
+    COMPOSITE_CONNECTORS: tuple[str, ...] = (
+        " и ",
+        " а также ",
+        " плюс ",
+        " потом ",
+        " после этого ",
+        ", а ",
+        " затем ",
+    )
 
     def __init__(self) -> None:
         self.entity_extractor = EntityExtractor()
@@ -618,8 +824,15 @@ class SemanticDispatcher:
             "SemanticDispatcher initialised",
             extra=safe_extra(
                 component="nlp_service",
-                version="2.1.2",
-                features=["file_analysis", "entity_extraction", "query_refinement"],
+                version="3.0.0",
+                features=[
+                    "domain_synonym_normalization",
+                    "composite_intent_detection",
+                    "structured_query_refinement",
+                    "confidence_scoring",
+                    "entity_extraction",
+                    "file_analysis",
+                ],
             ),
         )
 
@@ -628,7 +841,19 @@ class SemanticDispatcher:
         message: str,
         file_path: Optional[str] = None,
     ) -> Tuple[UserIntent, List[UserIntent], float]:
-        """Classify the primary and secondary intents for a message.
+        """Classify primary and secondary intents with confidence scoring.
+
+        Scoring rules:
+        - Local file present (non-UUID path): FILE_ANALYSIS +3, SUMMARIZE +2
+        - primary keyword hit: +2 per keyword
+        - secondary keyword hit: +1 per keyword
+        - negative keyword hit: -1 per keyword
+        - Question mark at end: QUESTION +1
+        - COMPOSITE detected via connector heuristic: returns COMPOSITE primary
+
+        Composite detection: если сообщение содержит разделитель между двумя
+        разными интент-маркерами — запрос помечается COMPOSITE, оба интента
+        передаются в secondary_intents для последовательной обработки агентом.
 
         Args:
             message: User message text.
@@ -640,19 +865,28 @@ class SemanticDispatcher:
         if not message or not message.strip():
             return UserIntent.UNKNOWN, [], 0.0
 
-        message_lower = message.lower()
+        message_lower = self.query_refiner.normalize_domain_synonyms(message)
+
         scores: Counter[UserIntent] = Counter()
 
+        # Буст за наличие локального файла (не UUID)
         if file_path and not UUID_RE.match(file_path):
             scores[UserIntent.FILE_ANALYSIS] += 3
             scores[UserIntent.SUMMARIZE] += 2
 
         for intent, keywords in self.INTENT_KEYWORDS.items():
-            primary_hits = sum(1 for kw in keywords["primary"] if kw in message_lower)
-            secondary_hits = sum(
-                1 for kw in keywords["secondary"] if kw in message_lower
+            primary_hits = sum(
+                1 for kw in keywords.get("primary", []) if kw in message_lower
             )
-            scores[intent] = scores.get(intent, 0) + primary_hits * 2 + secondary_hits
+            secondary_hits = sum(
+                1 for kw in keywords.get("secondary", []) if kw in message_lower
+            )
+            negative_hits = sum(
+                1 for kw in keywords.get("negative", []) if kw in message_lower
+            )
+            raw_score = primary_hits * 2 + secondary_hits - negative_hits
+            if raw_score > 0:
+                scores[intent] = scores.get(intent, 0) + raw_score
 
         if message.strip().endswith("?"):
             scores[UserIntent.QUESTION] += 1
@@ -664,19 +898,35 @@ class SemanticDispatcher:
         primary_intent = sorted_intents[0][0]
         primary_score = sorted_intents[0][1]
 
-        threshold = primary_score * 0.5
-        secondary_intents = [
-            intent for intent, score in sorted_intents[1:] if score >= threshold
-        ]
-
         intent_kw = self.INTENT_KEYWORDS.get(primary_intent, {})
-        max_possible = len(intent_kw.get("primary", [])) * 2 + len(
-            intent_kw.get("secondary", [])
+        max_possible = (
+            len(intent_kw.get("primary", [])) * 2 + len(intent_kw.get("secondary", []))
         )
         confidence = min(primary_score / max(max_possible, 1), 1.0)
 
-        if len(secondary_intents) > 1:
-            return UserIntent.COMPOSITE, secondary_intents, confidence
+        threshold = primary_score * 0.5
+        secondary_intents = [
+            intent
+            for intent, score in sorted_intents[1:]
+            if score >= threshold and score > 0
+        ]
+
+        if secondary_intents:
+            has_connector = any(
+                connector in message_lower
+                for connector in self.COMPOSITE_CONNECTORS
+            )
+            if has_connector and len(secondary_intents) >= 1:
+                # Убеждаемся что у нас реально два разных намерения с ненулевыми scores
+                composite_intents = [primary_intent] + secondary_intents[:2]
+                logger.debug(
+                    "Composite intent detected",
+                    extra=safe_extra(
+                        intents=[i.value for i in composite_intents],
+                        connector_found=True,
+                    ),
+                )
+                return UserIntent.COMPOSITE, composite_intents, confidence
 
         return primary_intent, secondary_intents, confidence
 

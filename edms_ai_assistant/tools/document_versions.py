@@ -8,7 +8,7 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Set
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field

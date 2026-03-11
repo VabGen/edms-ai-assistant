@@ -4,7 +4,7 @@ Production-ready configuration with validation, security, and environment separa
 """
 import os
 from typing import Optional, List
-from pydantic import Field, field_validator, HttpUrl, SecretStr, model_validator
+from pydantic import Field, field_validator, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

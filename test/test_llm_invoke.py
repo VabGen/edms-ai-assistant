@@ -25,7 +25,7 @@ try:
 
     response = llm.invoke([HumanMessage(content=test_message)])
 
-    print(f"\nОтвет получен:")
+    print("\nОтвет получен:")
     print(f"   {response.content}")
 
 except Exception as e:

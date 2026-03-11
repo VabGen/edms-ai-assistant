@@ -1,19 +1,13 @@
 """
 EDMS AI Assistant - Appeal Autofill Tool
 
-Architecture:
-- AppealAutofillOrchestrator: Главный координатор процесса
-- GeographyResolver: Резолвинг географических сущностей
-- AppealFieldsBuilder: Построение payload для API
-- ValueSanitizer: Очистка и валидация данных
-- DocumentOperationExecutor: Выполнение операций над документами
-
 Geography fill order (required by EDMS UI):
 
   Обычный город (напр. Гомель):
     1. country  — страна (из письма или "Республика Беларусь" по умолчанию)
     2. region   — область (только если ЯВНО указана в письме: "Гомельская область")
-    3. district — административный район города/области (только если ЯВНО указана в письме.)
+    3. district — административный район города/области (только если ЯВНО указан:
+                  "Октябрьский район", "Советский район" и т.п.)
                   ❗ Район улицы (часть почтового адреса) — НЕ является районом EDMS
     4. city     — город (последним, после region и district)
 
@@ -25,7 +19,7 @@ Geography fill order (required by EDMS UI):
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
@@ -45,7 +39,6 @@ from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
 
 logger = logging.getLogger(__name__)
 
-# ─── Столицы (зарезервировано ──────────
 _CAPITAL_CITIES: Set[str] = {"минск"}
 
 
@@ -94,17 +87,8 @@ class ValueSanitizer:
     """Утилиты для очистки и валидации данных."""
 
     EMPTY_PLACEHOLDERS = {
-        "none",
-        "null",
-        "nil",
-        "n/a",
-        "na",
-        "unknown",
-        "not specified",
-        "no",
-        "нет",
-        "неизвестно",
-        "н/д",
+        "none", "null", "nil", "n/a", "na", "unknown",
+        "not specified", "no", "нет", "неизвестно", "н/д",
     }
 
     @classmethod
@@ -122,11 +106,8 @@ class ValueSanitizer:
         if cls.is_empty(value):
             return None
         cleaned = (
-            value.replace("\u201c", '"')
-            .replace("\u201d", '"')
-            .replace("\u201e", '"')
-            .replace("\u00ab", '"')
-            .replace("\u00bb", '"')
+            value.replace("\u201c", '"').replace("\u201d", '"')
+            .replace("\u201e", '"').replace("\u00ab", '"').replace("\u00bb", '"')
             .strip()
         )
         return cleaned if cleaned else None
@@ -203,8 +184,7 @@ class AttachmentSelector:
         if not target:
             target = next(
                 (
-                    a
-                    for a in document.attachmentDocument
+                    a for a in document.attachmentDocument
                     if a.name.lower().endswith(cls.SUPPORTED_EXTENSIONS)
                 ),
                 document.attachmentDocument[0],
@@ -221,6 +201,14 @@ class GeographyResolver:
     Правило заполнения:
       - ВСЕГДА: country → city
       - ТОЛЬКО если явно указаны в документе: region, district
+
+    Если область/район НЕ указаны явно в тексте письма — НЕ отправляем их.
+    EDMS заполняет область и район автоматически на основании города.
+
+    Это исключает путаницу между:
+      - административным районом области (Октябрьский район Гомельской области)
+      - внутригородским районом/микрорайоном (Октябрьский р-н г. Гомель)
+      - районом в названии организации ("суд Октябрьского района")
     """
 
     def __init__(self, ref_client: ReferenceClient, token: str) -> None:
@@ -250,8 +238,8 @@ class GeographyResolver:
         """
         geo_data: Dict[str, Any] = {}
 
-        city_name = self._get_field(document, fields, "cityName")
-        region_name = self._get_field(document, fields, "regionName")
+        city_name     = self._get_field(document, fields, "cityName")
+        region_name   = self._get_field(document, fields, "regionName")
         district_name = self._get_field(document, fields, "districtName")
 
         # ── 1. Страна ─────────────────────────────────────────────────────────
@@ -259,15 +247,11 @@ class GeographyResolver:
 
         # ── 2. Область — только если явно указана ────────────────────────────
         if region_name:
-            await self._lookup(
-                "region", region_name, "regionId", "regionName", geo_data
-            )
+            await self._lookup("region", region_name, "regionId", "regionName", geo_data)
 
         # ── 3. Район — только если явно указан ───────────────────────────────
         if district_name:
-            await self._lookup(
-                "district", district_name, "districtId", "districtName", geo_data
-            )
+            await self._lookup("district", district_name, "districtId", "districtName", geo_data)
 
         # ── 4. Город ─────────────────────────────────────────────────────────
         await self._resolve_city(city_name, document, geo_data)
@@ -321,9 +305,7 @@ class GeographyResolver:
 
         if country_name:
             try:
-                data = await self.ref_client.find_country_with_name(
-                    self.token, country_name
-                )
+                data = await self.ref_client.find_country_with_name(self.token, country_name)
                 if data:
                     geo_data["countryAppealId"] = data["id"]
                     geo_data["countryAppealName"] = data["name"]
@@ -361,9 +343,7 @@ class GeographyResolver:
             if data:
                 geo_data[id_key] = data["id"]
                 geo_data[name_key] = data["name"]
-                logger.info(
-                    "%s: %s → %s (ID: %s)", endpoint, name, data["name"], data["id"]
-                )
+                logger.info("%s: %s → %s (ID: %s)", endpoint, name, data["name"], data["id"])
             else:
                 logger.warning("%s not found in reference: %s", endpoint, name)
         except Exception as exc:
@@ -378,30 +358,57 @@ class GeographyResolver:
         geo_data: Dict,
     ) -> None:
         """
-        Resolves city via fts-name → GET /{id} lookup.
+        Resolves city via find_city_with_hierarchy (fts-name → GET /{id}?includes=DISTRICT_WITH_REGION).
 
-        Does not touch region or district — they are handled separately
-        only when explicitly present in the source document.
+        Hierarchy data (districtId/districtName/regionId/regionName) is written
+        into geo_data ONLY if those keys are not already set — i.e. only when
+        region/district were NOT explicitly stated in the source document and
+        _lookup() has not already resolved them.
+
+        This covers the most common case: applicant writes only city name
+        (e.g. "г. Минск") and EDMS needs all four geo levels filled.
 
         Args:
             city_name: City name from document or LLM.
-            document: DocumentDto (for DB ID fallback).
+            document: DocumentDto (for DB cityId fallback).
             geo_data: Mutable geo dict to update in place.
         """
         d = document.documentAppeal
         if city_name:
             try:
-                data = await self.ref_client.find_city_with_name(self.token, city_name)
+                data = await self.ref_client.find_city_with_hierarchy(self.token, city_name)
                 if data:
-                    geo_data["cityId"] = data["id"]
+                    geo_data["cityId"]   = data["id"]
                     geo_data["cityName"] = data["name"]
                     logger.info(
-                        "City: %s → %s (ID: %s)", city_name, data["name"], data["id"]
+                        "City resolved: %s → '%s' (ID: %s)",
+                        city_name, data["name"], data["id"],
                     )
+
+                    if "districtId" not in geo_data and data.get("districtId"):
+                        geo_data["districtId"] = data["districtId"]
+                        logger.info(
+                            "District from hierarchy: id=%s", data["districtId"]
+                        )
+                    if "districtName" not in geo_data and data.get("districtName"):
+                        geo_data["districtName"] = data["districtName"]
+                        logger.info(
+                            "District name from hierarchy: '%s'", data["districtName"]
+                        )
+                    if "regionId" not in geo_data and data.get("regionId"):
+                        geo_data["regionId"] = data["regionId"]
+                        logger.info(
+                            "Region from hierarchy: id=%s", data["regionId"]
+                        )
+                    if "regionName" not in geo_data and data.get("regionName"):
+                        geo_data["regionName"] = data["regionName"]
+                        logger.info(
+                            "Region name from hierarchy: '%s'", data["regionName"]
+                        )
                 else:
-                    logger.warning("City not found in reference: %s", city_name)
+                    logger.warning("City not found in reference: '%s'", city_name)
             except Exception as exc:
-                logger.error("City resolution error for '%s': %s", city_name, exc)
+                logger.error("City resolution error for '%s': %s", city_name, exc, exc_info=True)
         elif d and d.cityId:
             geo_data["cityId"] = str(d.cityId)
             logger.debug("City fallback: DB cityId=%s", d.cityId)
@@ -439,14 +446,10 @@ class AppealFieldsBuilder:
         payload: Dict[str, Any] = {}
 
         GEO_KEY_ORDER = [
-            "countryAppealId",
-            "countryAppealName",
-            "regionId",
-            "regionName",
-            "districtId",
-            "districtName",
-            "cityId",
-            "cityName",
+            "countryAppealId", "countryAppealName",
+            "regionId",        "regionName",
+            "districtId",      "districtName",
+            "cityId",          "cityName",
         ]
         for key in GEO_KEY_ORDER:
             if key in geo_data:
@@ -463,38 +466,20 @@ class AppealFieldsBuilder:
 
     def _create_empty_appeal(self) -> Any:
         return type(
-            "EmptyDocumentAppeal",
-            (),
+            "EmptyDocumentAppeal", (),
             {
-                "fioApplicant": None,
-                "countryAppealId": None,
-                "countryAppealName": None,
-                "regionId": None,
-                "regionName": None,
-                "districtId": None,
-                "districtName": None,
-                "cityId": None,
-                "cityName": None,
-                "correspondentAppealId": None,
-                "correspondentAppeal": None,
-                "citizenTypeId": None,
-                "declarantType": None,
-                "collective": None,
-                "anonymous": None,
-                "reasonably": None,
-                "receiptDate": None,
-                "dateDocCorrespondentOrg": None,
-                "organizationName": None,
-                "fullAddress": None,
-                "phone": None,
-                "email": None,
-                "index": None,
-                "signed": None,
-                "correspondentOrgNumber": None,
-                "indexDateCoverLetter": None,
-                "reviewProgress": None,
-                "subjectId": None,
-                "solutionResultId": None,
+                "fioApplicant": None, "countryAppealId": None,
+                "countryAppealName": None, "regionId": None, "regionName": None,
+                "districtId": None, "districtName": None, "cityId": None,
+                "cityName": None, "correspondentAppealId": None,
+                "correspondentAppeal": None, "citizenTypeId": None,
+                "declarantType": None, "collective": None, "anonymous": None,
+                "reasonably": None, "receiptDate": None,
+                "dateDocCorrespondentOrg": None, "organizationName": None,
+                "fullAddress": None, "phone": None, "email": None,
+                "index": None, "signed": None, "correspondentOrgNumber": None,
+                "indexDateCoverLetter": None, "reviewProgress": None,
+                "subjectId": None, "solutionResultId": None,
                 "nomenclatureAffairId": None,
             },
         )()
@@ -532,9 +517,7 @@ class AppealFieldsBuilder:
         if not ValueSanitizer.is_empty(d.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fioApplicant)
         elif not ValueSanitizer.is_empty(fields.fioApplicant):
-            payload["fioApplicant"] = ValueSanitizer.sanitize_string(
-                fields.fioApplicant
-            )
+            payload["fioApplicant"] = ValueSanitizer.sanitize_string(fields.fioApplicant)
 
         if d.dateDocCorrespondentOrg:
             payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(
@@ -611,27 +594,22 @@ class AppealFieldsBuilder:
 
     def _add_common_fields(self, d: Any, fields: Any, payload: Dict) -> None:
         payload["collective"] = (
-            True
-            if fields.collective is True
+            True if fields.collective is True
             else (d.collective if d.collective is not None else fields.collective)
         )
         payload["anonymous"] = (
-            True
-            if fields.anonymous is True
+            True if fields.anonymous is True
             else (d.anonymous if d.anonymous is not None else fields.anonymous)
         )
         payload["reasonably"] = (
-            True
-            if fields.reasonably is True
+            True if fields.reasonably is True
             else (d.reasonably if d.reasonably is not None else fields.reasonably)
         )
         payload["receiptDate"] = ValueSanitizer.fix_datetime_format(
             d.receiptDate if d.receiptDate else fields.receiptDate
         )
         payload["fullAddress"] = ValueSanitizer.sanitize_string(
-            d.fullAddress
-            if not ValueSanitizer.is_empty(d.fullAddress)
-            else fields.fullAddress
+            d.fullAddress if not ValueSanitizer.is_empty(d.fullAddress) else fields.fullAddress
         )
         payload["phone"] = ValueSanitizer.sanitize_string(
             d.phone if not ValueSanitizer.is_empty(d.phone) else fields.phone
@@ -750,9 +728,7 @@ class AppealAutofillOrchestrator:
         self, document: DocumentDto, fields: Any, extracted_text: str
     ) -> None:
         async with DocumentClient() as doc_client, ReferenceClient() as ref_client:
-            await self._execute_main_fields_update(
-                doc_client, ref_client, document, fields
-            )
+            await self._execute_main_fields_update(doc_client, ref_client, document, fields)
             await self._execute_appeal_fields_update(
                 doc_client, ref_client, document, fields, extracted_text
             )
@@ -790,11 +766,8 @@ class AppealAutofillOrchestrator:
         main_payload = {k: v for k, v in main_payload.items() if v is not None}
 
         await DocumentOperationExecutor.execute(
-            doc_client,
-            self.token,
-            self.document_id,
-            "DOCUMENT_MAIN_FIELDS_UPDATE",
-            main_payload,
+            doc_client, self.token, self.document_id,
+            "DOCUMENT_MAIN_FIELDS_UPDATE", main_payload,
         )
 
     async def _execute_appeal_fields_update(
@@ -815,11 +788,8 @@ class AppealAutofillOrchestrator:
         self.warnings.extend(fields_builder.warnings)
 
         await DocumentOperationExecutor.execute(
-            doc_client,
-            self.token,
-            self.document_id,
-            "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE",
-            appeal_payload,
+            doc_client, self.token, self.document_id,
+            "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE", appeal_payload,
         )
 
 

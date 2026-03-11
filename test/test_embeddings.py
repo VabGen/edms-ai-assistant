@@ -25,7 +25,7 @@ try:
     print("Выполняется вызов модели эмбеддингов...")
     embeddings = embedding_model.embed_documents(test_text)
 
-    print(f"\nПолучены эмбеддинги:")
+    print("\nПолучены эмбеддинги:")
     print(f"Количество векторов: {len(embeddings)}")
     if embeddings and len(embeddings[0]) > 0:
         print(f"Размер одного вектора (эмбеддинга): {len(embeddings[0])}")
