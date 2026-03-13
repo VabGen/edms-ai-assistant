@@ -1,9 +1,9 @@
 # edms_ai_assistant/utils/api_utils.py
 import json
-
-import httpx
 import logging
 from typing import Dict
+
+import httpx
 
 logger = logging.getLogger(__name__)
 

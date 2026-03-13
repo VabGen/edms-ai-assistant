@@ -1,5 +1,6 @@
 # edms_ai_assistant/clients/attachment_client.py
 import logging
+
 from .base_client import EdmsHttpClient
 
 logger = logging.getLogger(__name__)

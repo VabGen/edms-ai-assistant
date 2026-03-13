@@ -1,10 +1,10 @@
 # edms_ai_assistant/clients/department_client.py
 import logging
-from typing import Optional, Dict, Any, List
 from abc import abstractmethod
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from .base_client import EdmsHttpClient, EdmsBaseClient
+from .base_client import EdmsBaseClient, EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 

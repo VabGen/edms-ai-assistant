@@ -2,12 +2,13 @@
 """
 LLM and Embedding model initialization with caching and error handling.
 """
-import logging
-import functools
 
-from langchain_core.language_models import BaseLanguageModel
+import functools
+import logging
+
 from langchain_core.embeddings import Embeddings
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_core.language_models import BaseLanguageModel
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from edms_ai_assistant.config import settings
 

@@ -4,6 +4,7 @@ EDMS AI Assistant — Document Summarisation Tool.
 
 Выполняет интеллектуальный анализ текста документов через LLM.
 """
+
 from __future__ import annotations
 
 import json

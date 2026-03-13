@@ -1,10 +1,11 @@
 # edms_ai_assistant/tools/document_comparison.py
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.llm import get_chat_model

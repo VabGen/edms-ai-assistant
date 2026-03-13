@@ -5,6 +5,7 @@ EDMS AI Assistant — Document Versions Tool.
 Получает все версии документа и АВТОМАТИЧЕСКИ сравнивает каждую пару
 соседних версий (v1↔v2, v2↔v3, ...) без вопросов к пользователю.
 """
+
 from __future__ import annotations
 
 import logging

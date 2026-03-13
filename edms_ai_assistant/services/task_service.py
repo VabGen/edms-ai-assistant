@@ -1,11 +1,8 @@
 # edms_ai_assistant/services/task_service.py
 """
 EDMS AI Assistant — Task Service with Disambiguation Support.
-
-Слой: Service (Application).
-Оркестрирует создание поручений: поиск исполнителей, разрешение
-неоднозначностей, формирование батч-запроса к EDMS API.
 """
+
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple

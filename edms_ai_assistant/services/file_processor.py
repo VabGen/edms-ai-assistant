@@ -2,11 +2,11 @@
 EDMS AI Assistant - Enhanced File Processor Service.
 """
 
-import logging
-from pathlib import Path
-from typing import Optional, Dict, Any, List
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from langchain_community.document_loaders import (
     Docx2txtLoader,
@@ -80,11 +80,9 @@ class FileProcessorService:
             return warning_msg
 
         try:
-            # Обработка Excel файлов
             if ext in [".xlsx", ".xls"]:
                 return cls._extract_from_excel(file_path, ext)
 
-            # Стандартная обработка через LangChain
             loader_class = cls.SUPPORTED_EXTENSIONS[ext]
             loader = loader_class(file_path)
 
@@ -161,9 +159,7 @@ class FileProcessorService:
                     sheet = wb[sheet_name]
                     extracted_text.append(f"\n{'='*50}\nЛИСТ: {sheet_name}\n{'='*50}\n")
 
-                    # Извлекаем данные с сохранением структуры
                     for row in sheet.iter_rows(values_only=True):
-                        # Пропускаем полностью пустые строки
                         if any(cell is not None for cell in row):
                             row_text = " | ".join(
                                 str(cell) if cell is not None else "" for cell in row

@@ -1,12 +1,14 @@
 # edms_ai_assistant\clients\base_client.py
-import httpx
-import logging
 import json
-from typing import Dict, Any, Optional, Union, List
+import logging
 from abc import ABC
+from typing import Any, Dict, List, Optional, Union
+
+import httpx
+
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.utils.retry_utils import async_retry
 from edms_ai_assistant.utils.api_utils import handle_api_error, prepare_auth_headers
+from edms_ai_assistant.utils.retry_utils import async_retry
 
 logger = logging.getLogger(__name__)
 

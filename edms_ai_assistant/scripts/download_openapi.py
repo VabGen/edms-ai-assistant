@@ -1,11 +1,12 @@
 # edms_ai_assistant\scripts\download_openapi.py
-import httpx
 import json
-import subprocess
-import sys
 import logging
 import re
+import subprocess
+import sys
 from typing import List, Tuple
+
+import httpx
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

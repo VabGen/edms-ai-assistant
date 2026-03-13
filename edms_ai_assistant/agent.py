@@ -2,6 +2,7 @@
 """
 EDMS AI Assistant — Core Agent Module.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -56,10 +57,6 @@ _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "добавлен в список",
     "ознакомление создано",
     "задача создана",
-    # Резолюции
-    "резолюция успешно добавлена",
-    "резолюция добавлена",
-    "резолюция создана",
     # Уведомления
     "уведомление отправлено",
     "напоминание отправлено",
@@ -84,8 +81,6 @@ _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset(
         "doc_search_tool",
         "introduction_create_tool",
         "task_create_tool",
-        "doc_get_resolutions",
-        "doc_create_resolution",
         "doc_send_notification",
     }
 )
@@ -110,7 +105,6 @@ _DISAMBIGUATION_TOOLS: frozenset[str] = frozenset(
     {
         "introduction_create_tool",
         "task_create_tool",
-        "doc_create_resolution",
         "doc_send_notification",
     }
 )
@@ -221,6 +215,7 @@ class AgentRequest(BaseModel):
     thread_id: Optional[str] = Field(None, max_length=255)
     user_context: Dict[str, Any] = Field(default_factory=dict)
     file_path: Optional[str] = Field(None, max_length=500)
+    file_name: Optional[str] = Field(None, max_length=260)
     human_choice: Optional[str] = Field(None, max_length=200)
 
     @field_validator("message")
@@ -371,7 +366,8 @@ class PromptBuilder:
 - Текущая дата: {current_date} (год: {current_year})
 - Активный документ в EDMS: {context_ui_id}
 - Загруженный файл/вложение: {local_file}
-- Имя загруженного файла: {uploaded_file_name}
+- Имя загруженного файла (показывай пользователю): {uploaded_file_name}
+<local_file_path>{local_file}</local_file_path>
 </context>
 
 <current_user_rules>
@@ -435,8 +431,6 @@ class PromptBuilder:
 | Добавление в лист ознакомления    | introduction_create_tool                                     |
 | Создание поручения                | task_create_tool                                             |
 | Автозаполнение обращения          | autofill_appeal_document                                     |
-| Просмотр резолюций                | doc_get_resolutions                                          |
-| Создание резолюции                | [employee_search_tool →] doc_create_resolution               |
 | Уведомление / напоминание         | employee_search_tool → doc_send_notification                 |
 | Вопрос без документа              | Ответь напрямую из контекста                                 |
 </available_tools_guide>
@@ -589,16 +583,6 @@ Workflow суммаризации документа:
 - Вопросы о сотрудниках: employee_search_tool
 - Общие вопросы без документа: отвечай напрямую из контекста
 </question_guide>""",
-        UserIntent.RESOLUTION: """
-<resolution_guide>
-При работе с резолюциями документа:
-- Просмотр резолюций: doc_get_resolutions(document_id=..., token=...)
-- Создание резолюции: doc_create_resolution(document_id=..., resolution_text=..., executor_ids=[], deadline=...)
-  - executor_ids — опциональный список UUID исполнителей (получи через employee_search_tool)
-  - deadline — опциональная дата в ISO 8601 (например: "2026-04-01T23:59:59Z")
-- Если в запросе упоминаются исполнители по фамилии → сначала employee_search_tool → затем doc_create_resolution
-Резолюция — это официальное решение руководителя на документ.
-</resolution_guide>""",
         UserIntent.NOTIFICATION: """
 <notification_guide>
 При отправке уведомлений и напоминаний:
@@ -644,7 +628,7 @@ Workflow суммаризации документа:
             current_date=context.current_date,
             current_year=context.current_year,
             context_ui_id=context.document_id or "Не указан",
-            local_file=context.uploaded_file_name or context.file_path or "Не загружен",
+            local_file=context.file_path or "Не загружен",
             uploaded_file_name=context.uploaded_file_name or "Не определено",
         )
         snippet = cls._SNIPPETS.get(intent, "")
@@ -1165,6 +1149,7 @@ class EdmsDocumentAgent:
         thread_id: Optional[str] = None,
         user_context: Optional[Dict[str, Any]] = None,
         file_path: Optional[str] = None,
+        file_name: Optional[str] = None,
         human_choice: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -1193,6 +1178,7 @@ class EdmsDocumentAgent:
                 thread_id=thread_id,
                 user_context=user_context or {},
                 file_path=file_path,
+                file_name=file_name,
                 human_choice=human_choice,
             )
             context = await self._build_context(request)
@@ -1314,7 +1300,6 @@ class EdmsDocumentAgent:
                     _TOOL_ID_FIELD: Dict[str, str] = {
                         "introduction_create_tool": "selected_employee_ids",
                         "task_create_tool": "selected_employee_ids",
-                        "doc_create_resolution": "executor_ids",
                         "doc_send_notification": "recipient_ids",
                     }
                     id_field = _TOOL_ID_FIELD.get(t_name, "selected_employee_ids")
@@ -2245,6 +2230,7 @@ class EdmsDocumentAgent:
             user_token=request.user_token,
             document_id=request.context_ui_id,
             file_path=request.file_path,
+            uploaded_file_name=request.file_name or None,
             thread_id=request.thread_id or "default",
             user_name=display_name,
             user_first_name=first_name or None,

@@ -1,6 +1,6 @@
 # edms_ai_assistant/security.py
-import json
 import base64
+import json
 import logging
 
 logger = logging.getLogger(__name__)

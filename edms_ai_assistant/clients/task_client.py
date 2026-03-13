@@ -5,8 +5,9 @@ import logging
 from abc import abstractmethod
 from typing import List
 
-from .base_client import EdmsHttpClient, EdmsBaseClient
 from edms_ai_assistant.models.task_models import CreateTaskRequest
+
+from .base_client import EdmsBaseClient, EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 

@@ -2,15 +2,15 @@
 """
 EDMS AI Assistant — Public data contracts (Pydantic v2).
 """
+
 from __future__ import annotations
 
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import TypedDict
-
 
 # ─────────────────────────────────────────────────────────────
 # LangGraph state
@@ -64,6 +64,7 @@ class UserInput(BaseModel):
         max_length=500,
         description="UUID вложения EDMS или путь к локальному файлу",
     )
+    file_name: Optional[str] = None
     human_choice: Optional[str] = Field(
         None,
         max_length=200,
@@ -114,6 +115,7 @@ class AssistantResponse(BaseModel):
             "после успешного выполнения мутирующих операций"
         ),
     )
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────

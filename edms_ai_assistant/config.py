@@ -2,9 +2,11 @@
 """
 Production-ready configuration with validation, security, and environment separation.
 """
+
 import os
-from typing import Optional, List
-from pydantic import Field, field_validator, HttpUrl, SecretStr
+from typing import List, Optional
+
+from pydantic import Field, HttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -106,6 +108,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[SecretStr] = None
+    CACHE_TTL_SECONDS: int = Field(default=300, ge=30, le=86400)
 
     @property
     def REDIS_URL(self) -> str:

@@ -2,11 +2,13 @@
 """
 Модели данных для автоматического заполнения карточек обращений граждан (APPEAL).
 """
-import re
+
 import logging
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Optional
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
