@@ -28,7 +28,7 @@ EDMS AI Assistant — Document Search Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -90,7 +90,7 @@ class DocSearchInput(BaseModel):
 
     # ── Идентификация документа ───────────────────────────────────────────────
 
-    short_summary: Optional[str] = Field(
+    short_summary: str | None = Field(
         None,
         max_length=500,
         description=(
@@ -98,17 +98,17 @@ class DocSearchInput(BaseModel):
             "Пример: 'договор с ООО Альфа', 'обращение по вопросу аренды'."
         ),
     )
-    reg_number: Optional[str] = Field(
+    reg_number: str | None = Field(
         None,
         max_length=100,
         description="Регистрационный номер (входящий). Пример: 'ВХ-2026-001'.",
     )
-    out_reg_number: Optional[str] = Field(
+    out_reg_number: str | None = Field(
         None,
         max_length=100,
         description="Исходящий регистрационный номер. Пример: 'ИСХ-2025-042'.",
     )
-    doc_category: Optional[str] = Field(
+    doc_category: str | None = Field(
         None,
         description=(
             "Категория документа. Допустимые значения: "
@@ -118,7 +118,7 @@ class DocSearchInput(BaseModel):
             "MEETING_QUESTION (вопросы заседания), CUSTOM (произвольные)."
         ),
     )
-    status: Optional[List[str]] = Field(
+    status: list[str] | None = Field(
         None,
         description=(
             "Статусы документов для фильтрации (список). Допустимые значения: "
@@ -129,12 +129,12 @@ class DocSearchInput(BaseModel):
 
     # ── Даты регистрации ──────────────────────────────────────────────────────
 
-    date_from: Optional[str] = Field(
+    date_from: str | None = Field(
         None,
         description="Начало диапазона дат регистрации (включительно). Формат: YYYY-MM-DD.",
         pattern=_DATE_PATTERN,
     )
-    date_to: Optional[str] = Field(
+    date_to: str | None = Field(
         None,
         description="Конец диапазона дат регистрации (включительно). Формат: YYYY-MM-DD.",
         pattern=_DATE_PATTERN,
@@ -142,7 +142,7 @@ class DocSearchInput(BaseModel):
 
     # ── Даты контроля ─────────────────────────────────────────────────────────
 
-    date_control_start: Optional[str] = Field(
+    date_control_start: str | None = Field(
         None,
         description=(
             "Начало диапазона дат постановки на контроль. Формат: YYYY-MM-DD. "
@@ -150,7 +150,7 @@ class DocSearchInput(BaseModel):
         ),
         pattern=_DATE_PATTERN,
     )
-    date_control_end: Optional[str] = Field(
+    date_control_end: str | None = Field(
         None,
         description="Конец диапазона дат контроля. Формат: YYYY-MM-DD.",
         pattern=_DATE_PATTERN,
@@ -158,7 +158,7 @@ class DocSearchInput(BaseModel):
 
     # ── Участники документа ───────────────────────────────────────────────────
 
-    author_last_name: Optional[str] = Field(
+    author_last_name: str | None = Field(
         None,
         max_length=150,
         description=(
@@ -166,7 +166,7 @@ class DocSearchInput(BaseModel):
             "Пример: 'Иванов'. Используй когда ищут документы конкретного сотрудника."
         ),
     )
-    correspondent_name: Optional[str] = Field(
+    correspondent_name: str | None = Field(
         None,
         max_length=300,
         description=(
@@ -174,14 +174,14 @@ class DocSearchInput(BaseModel):
             "Пример: 'ООО Альфа', 'Министерство финансов'."
         ),
     )
-    recipient_name: Optional[str] = Field(
+    recipient_name: str | None = Field(
         None,
         max_length=300,
         description=(
             "Наименование адресата документа. " "Пример: 'Акимат города', 'ТОО Бета'."
         ),
     )
-    task_executor_last_name: Optional[str] = Field(
+    task_executor_last_name: str | None = Field(
         None,
         max_length=150,
         description=(
@@ -192,35 +192,35 @@ class DocSearchInput(BaseModel):
 
     # ── Флаги текущего пользователя ──────────────────────────────────────────
 
-    author_current_user: Optional[bool] = Field(
+    author_current_user: bool | None = Field(
         None,
         description=(
             "True — только документы, где автор = текущий пользователь. "
             "Используй для: 'мои документы', 'документы которые я создал'."
         ),
     )
-    process_executor_current_user: Optional[bool] = Field(
+    process_executor_current_user: bool | None = Field(
         None,
         description=(
             "True — документы, где текущий пользователь участник активного процесса. "
             "Используй для: 'документы на моём рассмотрении', 'что мне нужно обработать'."
         ),
     )
-    task_executor_current_user: Optional[bool] = Field(
+    task_executor_current_user: bool | None = Field(
         None,
         description=(
             "True — документы, по которым текущий пользователь является исполнителем поручения. "
             "Используй для: 'мои поручения', 'документы по которым я исполнитель'."
         ),
     )
-    control_user_current_user: Optional[bool] = Field(
+    control_user_current_user: bool | None = Field(
         None,
         description=(
             "True — документы, где текущий пользователь является контролёром. "
             "Используй для: 'документы на моём контроле'."
         ),
     )
-    introduction_current_user: Optional[bool] = Field(
+    introduction_current_user: bool | None = Field(
         None,
         description=(
             "True — документы на ознакомлении у текущего пользователя. "
@@ -241,7 +241,7 @@ class DocSearchInput(BaseModel):
         mode="before",
     )
     @classmethod
-    def strip_and_none(cls, v: Optional[str]) -> Optional[str]:
+    def strip_and_none(cls, v: str | None) -> str | None:
         """Strips surrounding whitespace; converts empty string to None."""
         if v is None:
             return None
@@ -250,7 +250,7 @@ class DocSearchInput(BaseModel):
 
     @field_validator("doc_category", mode="before")
     @classmethod
-    def validate_category(cls, v: Optional[str]) -> Optional[str]:
+    def validate_category(cls, v: str | None) -> str | None:
         """Uppercases and validates category against DocCategory enum.
 
         Raises:
@@ -270,7 +270,7 @@ class DocSearchInput(BaseModel):
 
     @field_validator("status", mode="before")
     @classmethod
-    def validate_statuses(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_statuses(cls, v: list[str] | None) -> list[str] | None:
         """Uppercases and validates each status value against Status2 enum.
 
         Raises:
@@ -278,7 +278,7 @@ class DocSearchInput(BaseModel):
         """
         if not v:
             return None
-        result: List[str] = []
+        result: list[str] = []
         for item in v:
             upper = item.strip().upper()
             if upper not in _VALID_STATUSES:
@@ -290,7 +290,7 @@ class DocSearchInput(BaseModel):
         return result if result else None
 
     @model_validator(mode="after")
-    def at_least_one_search_param(self) -> "DocSearchInput":
+    def at_least_one_search_param(self) -> DocSearchInput:
         """Ensures that at least one meaningful filter parameter is provided.
 
         token не считается фильтром — проверяем все остальные поля.
@@ -330,25 +330,25 @@ class DocSearchInput(BaseModel):
 @tool("doc_search_tool", args_schema=DocSearchInput)
 async def doc_search_tool(
     token: str,
-    short_summary: Optional[str] = None,
-    reg_number: Optional[str] = None,
-    out_reg_number: Optional[str] = None,
-    doc_category: Optional[str] = None,
-    status: Optional[List[str]] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    date_control_start: Optional[str] = None,
-    date_control_end: Optional[str] = None,
-    author_last_name: Optional[str] = None,
-    correspondent_name: Optional[str] = None,
-    recipient_name: Optional[str] = None,
-    task_executor_last_name: Optional[str] = None,
-    author_current_user: Optional[bool] = None,
-    process_executor_current_user: Optional[bool] = None,
-    task_executor_current_user: Optional[bool] = None,
-    control_user_current_user: Optional[bool] = None,
-    introduction_current_user: Optional[bool] = None,
-) -> Dict[str, Any]:
+    short_summary: str | None = None,
+    reg_number: str | None = None,
+    out_reg_number: str | None = None,
+    doc_category: str | None = None,
+    status: list[str] | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    date_control_start: str | None = None,
+    date_control_end: str | None = None,
+    author_last_name: str | None = None,
+    correspondent_name: str | None = None,
+    recipient_name: str | None = None,
+    task_executor_last_name: str | None = None,
+    author_current_user: bool | None = None,
+    process_executor_current_user: bool | None = None,
+    task_executor_current_user: bool | None = None,
+    control_user_current_user: bool | None = None,
+    introduction_current_user: bool | None = None,
+) -> dict[str, Any]:
     """
     Searches documents in EDMS by a wide range of filter criteria.
 
@@ -368,7 +368,7 @@ async def doc_search_tool(
     short summary, category, author, and status.
     """
     # Формируем DocumentFilter согласно полной модели из resources_openapi.py
-    doc_filter: Dict[str, Any] = {}
+    doc_filter: dict[str, Any] = {}
 
     # ── Идентификация документа ───────────────────────────────────────────────
     if short_summary:
@@ -419,7 +419,7 @@ async def doc_search_tool(
     if introduction_current_user is True:
         doc_filter["introductionCurrentUser"] = True
 
-    pageable: Dict[str, Any] = {"page": 0, "size": _MAX_RESULTS}
+    pageable: dict[str, Any] = {"page": 0, "size": _MAX_RESULTS}
 
     logger.info(
         "Document search requested",
@@ -442,7 +442,7 @@ async def doc_search_tool(
                 "total": 0,
             }
 
-        documents: List[Dict[str, Any]] = [
+        documents: list[dict[str, Any]] = [
             _serialize_document(d) for d in raw_docs[:_MAX_RESULTS]
         ]
 
@@ -497,7 +497,7 @@ def _to_iso_end(date_str: str) -> str:
     return f"{date_str}T23:59:59"
 
 
-def _serialize_document(d: Dict[str, Any]) -> Dict[str, Any]:
+def _serialize_document(d: dict[str, Any]) -> dict[str, Any]:
     """Converts a raw DocumentDto dict into a compact agent-friendly representation.
 
     Keeps only fields relevant for the user-facing response.
@@ -535,7 +535,7 @@ def _extract_date(raw: Any) -> str:
     return str(raw)[:10]
 
 
-def _format_author(author: Optional[Dict[str, Any]]) -> str:
+def _format_author(author: dict[str, Any] | None) -> str:
     """Formats an author dict into a human-readable full name string.
 
     Args:

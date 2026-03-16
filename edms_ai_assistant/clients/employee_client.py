@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base_client import EdmsBaseClient, EdmsHttpClient
 
@@ -57,7 +57,7 @@ _DEFAULT_PAGE: int = 0
 _DEFAULT_SIZE: int = 20
 
 # Дефолтные includes для большинства сценариев агента
-_DEFAULT_INCLUDES: List[str] = ["POST", "DEPARTMENT"]
+_DEFAULT_INCLUDES: list[str] = ["POST", "DEPARTMENT"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -78,9 +78,9 @@ class BaseEmployeeClient(EdmsBaseClient):
     async def search_employees(
         self,
         token: str,
-        employee_filter: Optional[Dict[str, Any]] = None,
-        pageable: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        employee_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Searches employees via GET api/employee (EmployeeFilter as query params)."""
         raise NotImplementedError
 
@@ -88,28 +88,26 @@ class BaseEmployeeClient(EdmsBaseClient):
     async def search_employees_post(
         self,
         token: str,
-        employee_filter: Optional[Dict[str, Any]] = None,
-        pageable: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        employee_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Searches employees via POST api/employee/search (EmployeeFilter as JSON body)."""
         raise NotImplementedError
 
     @abstractmethod
-    async def get_employee(
-        self, token: str, employee_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_employee(self, token: str, employee_id: str) -> dict[str, Any] | None:
         """Fetches a single EmployeeDto by UUID."""
         raise NotImplementedError
 
     @abstractmethod
-    async def get_current_user(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_current_user(self, token: str) -> dict[str, Any] | None:
         """Fetches CurrentUser info for the authenticated user (GET /me)."""
         raise NotImplementedError
 
     @abstractmethod
     async def find_by_last_name_fts(
         self, token: str, last_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Full-text search by last name, returns top-1 EmployeeDto."""
         raise NotImplementedError
 
@@ -166,9 +164,9 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
     async def search_employees(
         self,
         token: str,
-        employee_filter: Optional[Dict[str, Any]] = None,
-        pageable: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        employee_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Searches employees using EmployeeFilter as GET query params.
 
         Calls GET api/employee.
@@ -208,9 +206,9 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
     async def search_employees_post(
         self,
         token: str,
-        employee_filter: Optional[Dict[str, Any]] = None,
-        pageable: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        employee_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Searches employees using EmployeeFilter as POST JSON body.
 
         Calls POST api/employee/search.
@@ -245,9 +243,7 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
         )
         return _extract_slice_content(result, endpoint="POST api/employee/search")
 
-    async def get_employee(
-        self, token: str, employee_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_employee(self, token: str, employee_id: str) -> dict[str, Any] | None:
         """Fetches a single employee by UUID.
 
         Calls GET api/employee/{id}.
@@ -264,7 +260,7 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
         )
         return result if isinstance(result, dict) and result else None
 
-    async def get_current_user(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_current_user(self, token: str) -> dict[str, Any] | None:
         """Fetches CurrentUser info for the authenticated user.
 
         Calls GET api/employee/me.
@@ -284,7 +280,7 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
 
     async def find_by_last_name_fts(
         self, token: str, last_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Full-text search by last name, returns top-1 EmployeeDto.
 
         Calls GET api/employee/fts-lastname?fts={last_name}.
@@ -432,8 +428,8 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
         method: str,
         endpoint: str,
         token: str,
-        json: Dict[str, Any],
-        log_context: Dict[str, Any],
+        json: dict[str, Any],
+        log_context: dict[str, Any],
     ) -> bool:
         """Executes a write action that returns 204 No Content.
 
@@ -482,8 +478,8 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
 
 
 def _ensure_includes(
-    employee_filter: Dict[str, Any],
-) -> Dict[str, Any]:
+    employee_filter: dict[str, Any],
+) -> dict[str, Any]:
     """Adds default includes if caller did not specify any.
 
     Without includes=[POST, DEPARTMENT], the API response will not contain
@@ -501,8 +497,8 @@ def _ensure_includes(
 
 
 def _build_pageable_params(
-    pageable: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
+    pageable: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Builds Spring Pageable query params dict from optional input.
 
     Args:
@@ -511,16 +507,16 @@ def _build_pageable_params(
     Returns:
         Pageable params dict with defaults applied.
     """
-    effective: Dict[str, Any] = {"page": _DEFAULT_PAGE, "size": _DEFAULT_SIZE}
+    effective: dict[str, Any] = {"page": _DEFAULT_PAGE, "size": _DEFAULT_SIZE}
     if pageable:
         effective.update(pageable)
     return effective
 
 
 def _build_params(
-    employee_filter: Dict[str, Any],
-    pageable: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
+    employee_filter: dict[str, Any],
+    pageable: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Merges EmployeeFilter and Pageable into a single query params dict.
 
     Args:
@@ -536,7 +532,7 @@ def _build_params(
 def _extract_slice_content(
     result: Any,
     endpoint: str = "api/employee",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Extracts content list from Spring Slice<EmployeeDto> response.
 
     Spring Slice structure:

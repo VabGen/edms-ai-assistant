@@ -5,7 +5,7 @@ Task models with Disambiguation support.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,7 +43,7 @@ class CreateTaskRequest(BaseModel):
     type: TaskType = Field(default=TaskType.GENERAL, description="Тип поручения")
     periodTask: bool = Field(default=False, description="Периодическое поручение")
     endless: bool = Field(default=False, description="Бессрочное поручение")
-    executors: List[CreateTaskRequestExecutor] = Field(
+    executors: list[CreateTaskRequestExecutor] = Field(
         ..., min_length=1, description="Список исполнителей (минимум 1)"
     )
 
@@ -59,7 +59,7 @@ class CreateTaskRequest(BaseModel):
 class CreateTaskBatchRequest(BaseModel):
     """Batch request for creating multiple tasks."""
 
-    tasks: List[CreateTaskRequest] = Field(..., min_length=1)
+    tasks: list[CreateTaskRequest] = Field(..., min_length=1)
 
     model_config = ConfigDict(
         json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()},
@@ -83,9 +83,9 @@ class TaskCreationResult(BaseModel):
     success: bool
     status: str = "success"  # "success" | "requires_disambiguation" | "error"
     created_count: int = 0
-    not_found_employees: List[str] = Field(default_factory=list)
-    error_message: Optional[str] = None
-    ambiguous_matches: Optional[List[Dict[str, Any]]] = Field(
+    not_found_employees: list[str] = Field(default_factory=list)
+    error_message: str | None = None
+    ambiguous_matches: list[dict[str, Any]] | None = Field(
         default=None,
         description="List of ambiguous employee matches requiring user selection",
     )

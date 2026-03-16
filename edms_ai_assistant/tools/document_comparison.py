@@ -1,6 +1,6 @@
 # edms_ai_assistant/tools/document_comparison.py
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -19,7 +19,7 @@ class DocumentComparisonInput(BaseModel):
     document_id_1: str = Field(..., description="UUID первого документа/версии")
     document_id_2: str = Field(..., description="UUID второго документа/версии")
     token: str = Field(..., description="Токен авторизации")
-    comparison_focus: Optional[str] = Field(
+    comparison_focus: str | None = Field(
         None,
         description="Конкретный аспект сравнения (metadata, attachments, content, all)",
     )
@@ -30,8 +30,8 @@ async def doc_compare(
     document_id_1: str,
     document_id_2: str,
     token: str,
-    comparison_focus: Optional[str] = "all",
-) -> Dict[str, Any]:
+    comparison_focus: str | None = "all",
+) -> dict[str, Any]:
     """
     Сравнивает два документа или версии документа.
 
@@ -99,10 +99,10 @@ async def doc_compare(
 
     except Exception as e:
         logger.error(f"[DOC-COMPARE-TOOL] Error: {e}", exc_info=True)
-        return {"status": "error", "message": f"Ошибка сравнения: {str(e)}"}
+        return {"status": "error", "message": f"Ошибка сравнения: {e!s}"}
 
 
-def _compare_metadata(doc1: Dict, doc2: Dict) -> Dict[str, Any]:
+def _compare_metadata(doc1: dict, doc2: dict) -> dict[str, Any]:
     """Сравнивает метаданные двух документов."""
     fields_to_compare = [
         "regNumber",
@@ -126,7 +126,7 @@ def _compare_metadata(doc1: Dict, doc2: Dict) -> Dict[str, Any]:
     return differences
 
 
-def _compare_attachments(doc1: Dict, doc2: Dict) -> Dict[str, Any]:
+def _compare_attachments(doc1: dict, doc2: dict) -> dict[str, Any]:
     """Сравнивает списки вложений."""
     att1 = doc1.get("attachmentDocument") or []
     att2 = doc2.get("attachmentDocument") or []

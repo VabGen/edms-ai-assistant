@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -105,7 +104,7 @@ class AppealExtractionService:
 
         return fields
 
-    def _parse_date_from_number(self, number: str) -> Optional[str]:
+    def _parse_date_from_number(self, number: str) -> str | None:
         """
         Парсит дату из исходящего номера документа.
 
@@ -162,7 +161,7 @@ class AppealExtractionService:
 
         return None
 
-    def _extract_city_from_address(self, address: str) -> Optional[str]:
+    def _extract_city_from_address(self, address: str) -> str | None:
         """
         Извлекает город из адреса.
 
@@ -189,7 +188,7 @@ class AppealExtractionService:
     async def extract_with_retry(
         self,
         text: str,
-        max_attempts: Optional[int] = None,
+        max_attempts: int | None = None,
     ) -> AppealFields:
         max_attempts = max_attempts or self.DEFAULT_MAX_RETRIES
 

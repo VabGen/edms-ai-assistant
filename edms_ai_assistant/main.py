@@ -17,7 +17,7 @@ import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import aiofiles
 import uvicorn
@@ -34,6 +34,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent import EdmsDocumentAgent
+from edms_ai_assistant.api.routes.settings import router as settings_router
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.model import (
@@ -58,7 +59,7 @@ UPLOAD_DIR = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 # Application state (singleton agent)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_agent: Optional[EdmsDocumentAgent] = None
+_agent: EdmsDocumentAgent | None = None
 
 
 def get_agent() -> EdmsDocumentAgent:
@@ -147,13 +148,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(settings_router)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Утилиты
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _is_system_attachment(file_path: Optional[str]) -> bool:
+def _is_system_attachment(file_path: str | None) -> bool:
     """Returns True if *file_path* is an EDMS attachment UUID (not a local file)."""
     return bool(file_path and UUID_RE.match(str(file_path)))
 
@@ -281,10 +284,15 @@ async def chat_endpoint(
 
     if user_input.file_path and not _is_system_attachment(user_input.file_path):
         result_status = result.get("status", "success")
+        _is_disambiguation = result.get("action_type") in (
+            "requires_disambiguation",
+            "summarize_selection",
+        )
         _should_cleanup = (
             result_status not in ("requires_action",)
             and not _is_file_operation
             and not _is_continuation
+            and not _is_disambiguation
             and result.get("requires_reload", False)
         )
         if _should_cleanup:

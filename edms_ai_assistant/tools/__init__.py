@@ -20,7 +20,6 @@ from .attachment import doc_get_file_content
 
 # Notifications
 from .doc_notification import doc_send_notification
-from .doc_resolution import doc_create_resolution, doc_get_resolutions
 from .doc_search import doc_search_tool
 
 # Documents

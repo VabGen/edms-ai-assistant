@@ -7,7 +7,6 @@ import logging
 import re
 from datetime import datetime
 from enum import StrEnum
-from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -59,74 +58,70 @@ class AppealFields(BaseModel):
     """
 
     # --- Основные поля ---
-    deliveryMethod: Optional[str] = Field(None, description="Способ доставки обращения")
-    shortSummary: Optional[str] = Field(
+    deliveryMethod: str | None = Field(None, description="Способ доставки обращения")
+    shortSummary: str | None = Field(
         None, max_length=200, description="Краткое содержание (до 200 символов)"
     )
-    receiptDate: Optional[datetime] = Field(
-        None, description="Дата поступления обращения"
-    )
-    declarantType: Optional[DeclarantType] = Field(
+    receiptDate: datetime | None = Field(None, description="Дата поступления обращения")
+    declarantType: DeclarantType | None = Field(
         None, description="Тип заявителя: INDIVIDUAL (физлицо) или ENTITY (юрлицо)"
     )
-    citizenType: Optional[str] = Field(
+    citizenType: str | None = Field(
         None, description="Категория обращения (Жалоба, Заявление, Предложение)"
     )
 
     # --- Логические признаки ---
-    collective: Optional[bool] = Field(
+    collective: bool | None = Field(
         None, description="Коллективное обращение (true/false)"
     )
-    anonymous: Optional[bool] = Field(
-        None, description="Анонимное обращение (true/false)"
-    )
-    reasonably: Optional[bool] = Field(
+    anonymous: bool | None = Field(None, description="Анонимное обращение (true/false)")
+    reasonably: bool | None = Field(
         None, description="Обоснованность обращения (есть факты/аргументы)"
     )
 
     # --- Заявитель (Физическое лицо) ---
-    fioApplicant: Optional[str] = Field(None, description="ФИО заявителя")
+    fioApplicant: str | None = Field(None, description="ФИО заявителя")
 
     # --- Заявитель (Юридическое лицо) ---
-    organizationName: Optional[str] = Field(
+    organizationName: str | None = Field(
         None, description="Наименование организации-заявителя"
     )
-    signed: Optional[str] = Field(None, description="ФИО лица, подписавшего документ")
-    correspondentOrgNumber: Optional[str] = Field(
+    signed: str | None = Field(None, description="ФИО лица, подписавшего документ")
+    correspondentOrgNumber: str | None = Field(
         None, description="Исходящий номер документа организации"
     )
-    dateDocCorrespondentOrg: Optional[datetime] = Field(
+    dateDocCorrespondentOrg: datetime | None = Field(
         None, description="Дата исходящего документа организации"
     )
 
     # --- География ---
-    country: Optional[str] = Field(None, description="Страна заявителя")
-    regionName: Optional[str] = Field(None, description="Регион/Область")
-    districtName: Optional[str] = Field(None, description="Район")
-    cityName: Optional[str] = Field(None, description="Город/Населенный пункт")
-    index: Optional[str] = Field(None, description="Почтовый индекс (6 цифр)")
-    fullAddress: Optional[str] = Field(
+    country: str | None = Field(None, description="Страна заявителя")
+    regionName: str | None = Field(None, description="Регион/Область")
+    districtName: str | None = Field(None, description="Район")
+    cityName: str | None = Field(None, description="Город/Населенный пункт")
+    index: str | None = Field(None, description="Почтовый индекс (6 цифр)")
+    fullAddress: str | None = Field(
         None, description="Полный почтовый адрес (улица, дом, квартира)"
     )
 
     # --- Контактная информация ---
-    phone: Optional[str] = Field(None, description="Контактный телефон")
-    email: Optional[str] = Field(None, description="Email для связи")
+    phone: str | None = Field(None, description="Контактный телефон")
+    email: str | None = Field(None, description="Email для связи")
 
     # --- Дополнительные сведения ---
-    correspondentAppeal: Optional[str] = Field(
+    correspondentAppeal: str | None = Field(
         None, description="Организация, переславшая обращение (если применимо)"
     )
-    indexDateCoverLetter: Optional[str] = Field(
+    indexDateCoverLetter: str | None = Field(
         None, description="Индекс и дата сопроводительного письма"
     )
-    reviewProgress: Optional[str] = Field(
+    reviewProgress: str | None = Field(
         None, description="Информация о ходе рассмотрения"
     )
 
     @field_validator("shortSummary")
     @classmethod
-    def truncate_summary(cls, v: Optional[str]) -> Optional[str]:
+    def truncate_summary(cls, v: str | None) -> str | None:
         if v and len(v) > 200:
             logger.debug(f"Краткое содержание обрезано: {len(v)} → 200 символов")
             return v[:197] + "..."
@@ -134,7 +129,7 @@ class AppealFields(BaseModel):
 
     @field_validator("index")
     @classmethod
-    def validate_index(cls, v: Optional[str]) -> Optional[str]:
+    def validate_index(cls, v: str | None) -> str | None:
         if v:
             cleaned = re.sub(r"\D", "", str(v))
             if len(cleaned) != 6:

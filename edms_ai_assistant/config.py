@@ -4,7 +4,6 @@ Production-ready configuration with validation, security, and environment separa
 """
 
 import os
-from typing import List, Optional
 
 from pydantic import Field, HttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,7 +36,7 @@ class Settings(BaseSettings):
 
     @field_validator("ALLOWED_ORIGINS")
     @classmethod
-    def parse_origins(cls, v: str) -> List[str]:
+    def parse_origins(cls, v: str) -> list[str]:
         if v == "*":
             return ["*"]
         return [origin.strip() for origin in v.split(",")]
@@ -51,17 +50,18 @@ class Settings(BaseSettings):
     LLM_GENERATIVE_URL: HttpUrl = Field(
         default="http://model-generative.shared.du.iba/v1"
     )
-    LLM_GENERATIVE_MODEL: str = "generative-model"
+    LLM_GENERATIVE_MODEL: str = Field(default="generative-model")
+
     LLM_EMBEDDING_URL: HttpUrl = Field(
         default="http://model-embedding.shared.du.iba/v1"
     )
     LLM_EMBEDDING_MODEL: str = "embedding-model"
 
-    LLM_API_KEY: Optional[SecretStr] = None
-    OPENAI_API_KEY: Optional[SecretStr] = None
+    LLM_API_KEY: SecretStr | None = None
+    OPENAI_API_KEY: SecretStr | None = None
 
     LLM_TEMPERATURE: float = Field(default=0.0, ge=0.0, le=2.0)
-    LLM_MAX_TOKENS: Optional[int] = Field(default=2048, ge=100, le=8192)
+    LLM_MAX_TOKENS: int | None = Field(default=2048, ge=100, le=8192)
     LLM_TIMEOUT: int = Field(default=120, ge=10, le=600)
     LLM_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
     LLM_REQUEST_TIMEOUT: int = Field(default=120, ge=10, le=600)
@@ -100,14 +100,14 @@ class Settings(BaseSettings):
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
-    CHECKPOINT_DB_URL: Optional[str] = None
-    SQL_DB_URL: Optional[str] = None
+    CHECKPOINT_DB_URL: str | None = None
+    SQL_DB_URL: str | None = None
 
     # ── Redis Configuration ──────────────────────────────────────────────────
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
-    REDIS_PASSWORD: Optional[SecretStr] = None
+    REDIS_PASSWORD: SecretStr | None = None
     CACHE_TTL_SECONDS: int = Field(default=300, ge=30, le=86400)
 
     @property
@@ -140,6 +140,15 @@ class Settings(BaseSettings):
     AGENT_LOG_LEVEL: str = "INFO"
     AGENT_MAX_RETRIES: int = 3
 
+    SETTINGS_PANEL_SHOW_TECHNICAL: bool = Field(
+        default=True,
+        description=(
+            "Показывать технический раздел настроек в Chrome-плагине. "
+            "false = скрыт (production default). "
+            "true = виден (dev/admin)."
+        ),
+    )
+
     # ── RAG Configuration ────────────────────────────────────────────────────
     RAG_BATCH_SIZE: int = 20
     RAG_CHUNK_SIZE: int = 1200
@@ -160,15 +169,13 @@ class Settings(BaseSettings):
 
     # ── Telemetry & Monitoring ───────────────────────────────────────────────
     TELEMETRY_ENABLED: bool = False
-    TELEMETRY_ENDPOINT: Optional[str] = Field(
-        default=None
-    )  # ← ИСПРАВЛЕНО: Optional[str] вместо HttpUrl
+    TELEMETRY_ENDPOINT: str | None = Field(default=None)
     HEALTH_CHECK_ENABLED: bool = True
 
     # ── Environment-specific defaults ────────────────────────────────────────
     @field_validator("DEBUG", mode="before")
     @classmethod
-    def set_debug_default(cls, v: Optional[bool], info) -> bool:
+    def set_debug_default(cls, v: bool | None, info) -> bool:
         if v is not None:
             return v
         env = info.data.get("ENVIRONMENT", "development")
@@ -176,7 +183,7 @@ class Settings(BaseSettings):
 
     @field_validator("LOGGING_LEVEL", mode="before")
     @classmethod
-    def set_log_level_default(cls, v: Optional[str], info) -> str:
+    def set_log_level_default(cls, v: str | None, info) -> str:
         if v is not None:
             return v
         env = info.data.get("ENVIRONMENT", "development")
@@ -184,7 +191,7 @@ class Settings(BaseSettings):
 
     @field_validator("TELEMETRY_ENDPOINT", mode="before")
     @classmethod
-    def validate_telemetry_endpoint(cls, v: Optional[str]) -> Optional[str]:
+    def validate_telemetry_endpoint(cls, v: str | None) -> str | None:
         if not v or v.strip() == "":
             return None
 
@@ -194,6 +201,10 @@ class Settings(BaseSettings):
 
 
 # ── Global settings instance ────────────────────────────────────────────────
+model_config = SettingsConfigDict(
+    env_file=".env", env_file_encoding="utf-8", extra="ignore"
+)
+
 settings = Settings()
 
 

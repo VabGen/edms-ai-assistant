@@ -19,9 +19,9 @@ Geography fill order (required by EDMS UI):
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -41,7 +41,7 @@ from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
 
 logger = logging.getLogger(__name__)
 
-_CAPITAL_CITIES: Set[str] = {"минск"}
+_CAPITAL_CITIES: set[str] = {"минск"}
 
 
 class AppealAutofillInput(BaseModel):
@@ -53,7 +53,7 @@ class AppealAutofillInput(BaseModel):
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     )
     token: str = Field(..., description="JWT токен авторизации пользователя")
-    attachment_id: Optional[str] = Field(
+    attachment_id: str | None = Field(
         None,
         description="UUID конкретного вложения для анализа",
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -61,7 +61,7 @@ class AppealAutofillInput(BaseModel):
 
     @field_validator("attachment_id")
     @classmethod
-    def validate_attachment_id(cls, v: Optional[str]) -> Optional[str]:
+    def validate_attachment_id(cls, v: str | None) -> str | None:
         if v and not v.strip():
             return None
         return v
@@ -73,10 +73,10 @@ class AutofillResult:
 
     status: str
     message: str
-    warnings: Optional[List[str]] = None
-    attachment_used: Optional[str] = None
+    warnings: list[str] | None = None
+    attachment_used: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {"status": self.status, "message": self.message}
         if self.warnings:
             result["warnings"] = self.warnings
@@ -113,7 +113,7 @@ class ValueSanitizer:
         return False
 
     @classmethod
-    def sanitize_string(cls, value: Optional[str]) -> Optional[str]:
+    def sanitize_string(cls, value: str | None) -> str | None:
         if cls.is_empty(value):
             return None
         cleaned = (
@@ -127,7 +127,7 @@ class ValueSanitizer:
         return cleaned if cleaned else None
 
     @classmethod
-    def fix_datetime_format(cls, dt: Any) -> Optional[str]:
+    def fix_datetime_format(cls, dt: Any) -> str | None:
         if dt is None:
             return None
         if isinstance(dt, str):
@@ -149,7 +149,7 @@ class DocumentOperationExecutor:
         token: str,
         document_id: str,
         operation_type: str,
-        body: Dict[str, Any],
+        body: dict[str, Any],
     ) -> None:
         payload = [{"operationType": operation_type, "body": body}]
         json_safe_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
@@ -178,7 +178,7 @@ class AttachmentSelector:
     SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".txt", ".doc", ".rtf")
 
     @classmethod
-    def select(cls, document: DocumentDto, attachment_id: Optional[str]) -> tuple:
+    def select(cls, document: DocumentDto, attachment_id: str | None) -> tuple:
         warnings = []
 
         if not document.attachmentDocument:
@@ -230,7 +230,7 @@ class GeographyResolver:
         self.ref_client = ref_client
         self.token = token
 
-    async def resolve_geography(self, document: Any, fields: Any) -> Dict[str, Any]:
+    async def resolve_geography(self, document: Any, fields: Any) -> dict[str, Any]:
         """
         Resolves geo fields with minimal API calls.
 
@@ -251,7 +251,7 @@ class GeographyResolver:
             Ordered dict: country* → [region*] → [district*] → city*
             Region and district are included only when explicitly present.
         """
-        geo_data: Dict[str, Any] = {}
+        geo_data: dict[str, Any] = {}
 
         city_name = self._get_field(document, fields, "cityName")
         region_name = self._get_field(document, fields, "regionName")
@@ -287,7 +287,7 @@ class GeographyResolver:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _get_field(document: Any, fields: Any, attr: str) -> Optional[str]:
+    def _get_field(document: Any, fields: Any, attr: str) -> str | None:
         """
         Returns first non-empty value for attr: DB record → LLM extraction.
 
@@ -311,11 +311,11 @@ class GeographyResolver:
     # ── Country ───────────────────────────────────────────────────────────────
 
     async def _resolve_country(
-        self, document: Any, fields: Any, geo_data: Dict
+        self, document: Any, fields: Any, geo_data: dict
     ) -> None:
         """Resolves country via reference lookup or falls back to existing DB ID."""
         d = document.documentAppeal
-        country_name: Optional[str] = None
+        country_name: str | None = None
 
         if d and not ValueSanitizer.is_empty(d.countryAppealName):
             country_name = d.countryAppealName
@@ -346,7 +346,7 @@ class GeographyResolver:
         name: str,
         id_key: str,
         name_key: str,
-        geo_data: Dict,
+        geo_data: dict,
     ) -> None:
         """
         Two-step reference lookup: fts-name → GET /{id} → canonical name.
@@ -376,9 +376,9 @@ class GeographyResolver:
 
     async def _resolve_city(
         self,
-        city_name: Optional[str],
+        city_name: str | None,
         document: Any,
-        geo_data: Dict,
+        geo_data: dict,
     ) -> None:
         """
         Resolves city via find_city_with_hierarchy (fts-name → GET /{id}?includes=DISTRICT_WITH_REGION).
@@ -447,15 +447,15 @@ class AppealFieldsBuilder:
     def __init__(self, ref_client: ReferenceClient, token: str) -> None:
         self.ref_client = ref_client
         self.token = token
-        self.warnings: List[str] = []
+        self.warnings: list[str] = []
 
     async def build(
         self,
         document: DocumentDto,
         fields: Any,
         extracted_text: str,
-        geo_data: Dict,
-    ) -> Dict[str, Any]:
+        geo_data: dict,
+    ) -> dict[str, Any]:
         """
         Builds the full appeal fields payload by merging geo data with
         personal, classification, and conditional fields.
@@ -470,7 +470,7 @@ class AppealFieldsBuilder:
             Filtered payload dict ready for DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE.
         """
         d = document.documentAppeal or self._create_empty_appeal()
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
 
         GEO_KEY_ORDER = [
             "countryAppealId",
@@ -533,7 +533,7 @@ class AppealFieldsBuilder:
             },
         )()
 
-    async def _add_correspondent(self, d: Any, fields: Any, payload: Dict) -> None:
+    async def _add_correspondent(self, d: Any, fields: Any, payload: dict) -> None:
         if d.correspondentAppealId:
             payload["correspondentAppealId"] = str(d.correspondentAppealId)
             payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
@@ -562,7 +562,7 @@ class AppealFieldsBuilder:
             payload["correspondentAppealId"] = None
             payload["correspondentAppeal"] = None
 
-    def _add_personal_data(self, d: Any, fields: Any, payload: Dict) -> None:
+    def _add_personal_data(self, d: Any, fields: Any, payload: dict) -> None:
         if not ValueSanitizer.is_empty(d.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fioApplicant)
         elif not ValueSanitizer.is_empty(fields.fioApplicant):
@@ -580,7 +580,7 @@ class AppealFieldsBuilder:
             )
 
     async def _add_classification(
-        self, d: Any, fields: Any, extracted_text: str, payload: Dict
+        self, d: Any, fields: Any, extracted_text: str, payload: dict
     ) -> None:
         if d.citizenTypeId:
             payload["citizenTypeId"] = str(d.citizenTypeId)
@@ -601,7 +601,7 @@ class AppealFieldsBuilder:
                 payload["subjectId"] = subject_id
                 logger.info(f"Subject determined by LLM: {subject_id}")
 
-    async def _add_declarant_type(self, d: Any, fields: Any, payload: Dict) -> None:
+    async def _add_declarant_type(self, d: Any, fields: Any, payload: dict) -> None:
         if fields.declarantType:
             if isinstance(fields.declarantType, str):
                 try:
@@ -623,7 +623,7 @@ class AppealFieldsBuilder:
             self.warnings.append("declarantType установлен INDIVIDUAL по умолчанию")
             logger.warning("declarantType set to INDIVIDUAL (fallback)")
 
-    def _add_conditional_fields(self, d: Any, fields: Any, payload: Dict) -> None:
+    def _add_conditional_fields(self, d: Any, fields: Any, payload: dict) -> None:
         if payload.get("declarantType") == GeneratedDeclarantType.ENTITY:
             payload["organizationName"] = ValueSanitizer.sanitize_string(
                 d.organizationName
@@ -643,7 +643,7 @@ class AppealFieldsBuilder:
             payload["signed"] = None
             payload["correspondentOrgNumber"] = None
 
-    def _add_common_fields(self, d: Any, fields: Any, payload: Dict) -> None:
+    def _add_common_fields(self, d: Any, fields: Any, payload: dict) -> None:
         payload["collective"] = (
             True
             if fields.collective is True
@@ -687,7 +687,7 @@ class AppealFieldsBuilder:
             else fields.reviewProgress
         )
 
-    def _add_db_only_fields(self, d: Any, payload: Dict) -> None:
+    def _add_db_only_fields(self, d: Any, payload: dict) -> None:
         if d.subjectId:
             payload["subjectId"] = str(d.subjectId)
         if d.solutionResultId:
@@ -695,12 +695,12 @@ class AppealFieldsBuilder:
         if d.nomenclatureAffairId:
             payload["nomenclatureAffairId"] = str(d.nomenclatureAffairId)
 
-    def _filter_payload(self, payload: Dict) -> Dict[str, Any]:
+    def _filter_payload(self, payload: dict) -> dict[str, Any]:
         filtered = {}
         for k, v in payload.items():
-            if k in ("correspondentAppeal", "correspondentAppealId"):
-                filtered[k] = v
-            elif v is not None and not ValueSanitizer.is_empty(v):
+            if k in ("correspondentAppeal", "correspondentAppealId") or (
+                v is not None and not ValueSanitizer.is_empty(v)
+            ):
                 filtered[k] = v
 
         if not filtered.get("declarantType"):
@@ -718,13 +718,11 @@ class AppealAutofillOrchestrator:
 
     MIN_TEXT_LENGTH = 50
 
-    def __init__(
-        self, document_id: str, token: str, attachment_id: Optional[str]
-    ) -> None:
+    def __init__(self, document_id: str, token: str, attachment_id: str | None) -> None:
         self.document_id = document_id
         self.token = token
         self.attachment_id = attachment_id
-        self.warnings: List[str] = []
+        self.warnings: list[str] = []
 
     async def execute(self) -> AutofillResult:
         document = await self._load_document()
@@ -861,8 +859,8 @@ class AppealAutofillOrchestrator:
 async def autofill_appeal_document(
     document_id: str,
     token: str,
-    attachment_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    attachment_id: str | None = None,
+) -> dict[str, Any]:
     """
     Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ.
 
@@ -891,5 +889,5 @@ async def autofill_appeal_document(
     except Exception as e:
         logger.error("========== APPEAL AUTOFILL ERROR ==========", exc_info=True)
         return AutofillResult(
-            status="error", message=f"Ошибка автозаполнения: {str(e)}"
+            status="error", message=f"Ошибка автозаполнения: {e!s}"
         ).to_dict()

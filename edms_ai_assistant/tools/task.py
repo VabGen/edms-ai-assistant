@@ -4,8 +4,8 @@ Task Creation Tool with Disambiguation Workflow.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -26,17 +26,17 @@ class TaskCreateInput(BaseModel):
 
     task_text: str = Field(..., description="Текст поручения (обязательно)")
 
-    executor_last_names: Optional[List[str]] = Field(
+    executor_last_names: list[str] | None = Field(
         None,
         description="Фамилии исполнителей (например: ['Иванов', 'Петров'])",
     )
 
-    selected_employee_ids: Optional[List[str]] = Field(
+    selected_employee_ids: list[str] | None = Field(
         None,
         description="UUID сотрудников, выбранных пользователем для разрешения неоднозначности",
     )
 
-    responsible_last_name: Optional[str] = Field(
+    responsible_last_name: str | None = Field(
         None,
         description=(
             "Фамилия ответственного исполнителя. "
@@ -44,7 +44,7 @@ class TaskCreateInput(BaseModel):
         ),
     )
 
-    planed_date_end: Optional[str] = Field(
+    planed_date_end: str | None = Field(
         None,
         description=(
             "Плановая дата окончания в ISO 8601 (например: '2026-02-15T23:59:59Z'). "
@@ -52,7 +52,7 @@ class TaskCreateInput(BaseModel):
         ),
     )
 
-    task_type: Optional[TaskType] = Field(
+    task_type: TaskType | None = Field(
         TaskType.GENERAL, description="Тип поручения (по умолчанию: GENERAL)"
     )
 
@@ -62,12 +62,12 @@ async def task_create_tool(
     token: str,
     document_id: str,
     task_text: str,
-    executor_last_names: Optional[List[str]] = None,
-    selected_employee_ids: Optional[List[str]] = None,
-    responsible_last_name: Optional[str] = None,
-    planed_date_end: Optional[str] = None,
-    task_type: Optional[TaskType] = TaskType.GENERAL,
-) -> Dict[str, Any]:
+    executor_last_names: list[str] | None = None,
+    selected_employee_ids: list[str] | None = None,
+    responsible_last_name: str | None = None,
+    planed_date_end: str | None = None,
+    task_type: TaskType | None = TaskType.GENERAL,
+) -> dict[str, Any]:
     """
     Создает поручение с поддержкой disambiguation.
 
@@ -102,7 +102,7 @@ async def task_create_tool(
         try:
             deadline = datetime.fromisoformat(planed_date_end.replace("Z", "+00:00"))
             if deadline.tzinfo is None:
-                deadline = deadline.replace(tzinfo=timezone.utc)
+                deadline = deadline.replace(tzinfo=UTC)
         except ValueError as e:
             return {
                 "status": "error",
@@ -159,7 +159,7 @@ async def task_create_tool(
                     f"Ambiguous matches: {len(result.ambiguous_matches)}"
                 )
 
-                flat_candidates: List[Dict[str, Any]] = []
+                flat_candidates: list[dict[str, Any]] = []
                 for group in result.ambiguous_matches or []:
                     for match in group.get("matches", []):
                         flat_candidates.append(
@@ -207,5 +207,5 @@ async def task_create_tool(
         logger.error(f"[TASK-TOOL] Error: {e}", exc_info=True)
         return {
             "status": "error",
-            "message": f"Произошла ошибка при создании поручения: {str(e)}",
+            "message": f"Произошла ошибка при создании поручения: {e!s}",
         }

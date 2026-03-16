@@ -26,9 +26,9 @@ def _normalize_url(url) -> str:
 @functools.lru_cache(maxsize=1)
 def get_chat_model():
     settings_kwargs = {
-        "model": "gpt-4o-mini",
+        "model": settings.LLM_GENERATIVE_MODEL,
         "temperature": 0.6,
-        "openai_api_base": "https://api.proxyapi.ru/openai/v1",
+        "openai_api_base": str(settings.LLM_GENERATIVE_URL),
         "openai_api_key": settings.OPENAI_API_KEY,
         "max_retries": 5,
         "timeout": 90,

@@ -1,13 +1,14 @@
 # test/test_llm_invoke.py
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import requests
 from langchain_core.messages import HumanMessage
+
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.llm import get_chat_model
-
-import requests
 
 headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
 response = requests.get("https://api.proxyapi.ru/openai/v1/models", headers=headers)

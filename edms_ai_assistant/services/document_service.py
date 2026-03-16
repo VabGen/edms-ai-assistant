@@ -58,7 +58,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import redis.asyncio as aioredis
 from pydantic import BaseModel, ConfigDict, Field
@@ -87,7 +87,7 @@ _DEFAULT_CACHE_TTL: int = 300
 
 
 # Синглтон-клиент Redis — создаётся один раз при старте приложения.
-_redis_client: Optional[aioredis.Redis] = None
+_redis_client: aioredis.Redis | None = None
 
 
 async def init_redis() -> aioredis.Redis:
@@ -171,7 +171,7 @@ class DocumentSearchResult(BaseModel):
 
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
-    items: List[DocumentDto] = Field(default_factory=list)
+    items: list[DocumentDto] = Field(default_factory=list)
     total_elements: int = 0
     total_pages: int = 0
     current_page: int = 0
@@ -183,9 +183,9 @@ class DocumentStats(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    executor: Optional[Dict[str, Any]] = None
-    control: Optional[Dict[str, Any]] = None
-    author: Optional[Dict[str, Any]] = None
+    executor: dict[str, Any] | None = None
+    control: dict[str, Any] | None = None
+    author: dict[str, Any] | None = None
 
 
 class DocumentServiceConfig(BaseModel):
@@ -222,7 +222,7 @@ class DocumentServiceConfig(BaseModel):
 class DocumentServiceError(Exception):
     """Base error for DocumentService operations."""
 
-    def __init__(self, message: str, document_id: Optional[str] = None) -> None:
+    def __init__(self, message: str, document_id: str | None = None) -> None:
         super().__init__(message)
         self.document_id = document_id
 
@@ -258,7 +258,7 @@ class _DocumentCache:
         self._r = redis
         self._ttl = ttl
 
-    async def get_doc(self, doc_id: str) -> Optional[Dict[str, Any]]:
+    async def get_doc(self, doc_id: str) -> dict[str, Any] | None:
         """Get raw document dict from cache.
 
         Args:
@@ -279,7 +279,7 @@ class _DocumentCache:
             )
         return None
 
-    async def set_doc(self, doc_id: str, doc: Dict[str, Any]) -> None:
+    async def set_doc(self, doc_id: str, doc: dict[str, Any]) -> None:
         """Store raw document dict in cache.
 
         Args:
@@ -298,7 +298,7 @@ class _DocumentCache:
                 extra={"document_id": doc_id, "error": str(exc)},
             )
 
-    async def get_analysis(self, doc_id: str) -> Optional[Dict[str, Any]]:
+    async def get_analysis(self, doc_id: str) -> dict[str, Any] | None:
         """Get cached NLP analysis dict.
 
         Args:
@@ -319,7 +319,7 @@ class _DocumentCache:
             )
         return None
 
-    async def set_analysis(self, doc_id: str, analysis: Dict[str, Any]) -> None:
+    async def set_analysis(self, doc_id: str, analysis: dict[str, Any]) -> None:
         """Store NLP analysis dict in cache.
 
         Args:
@@ -396,7 +396,7 @@ class DocumentService:
     def __init__(
         self,
         redis: aioredis.Redis,
-        config: Optional[DocumentServiceConfig] = None,
+        config: DocumentServiceConfig | None = None,
     ) -> None:
         self._config = config or DocumentServiceConfig()
         self._cache = _DocumentCache(redis=redis, ttl=self._config.cache_ttl_seconds)
@@ -439,7 +439,7 @@ class DocumentService:
         token: str,
         document_id: str,
         force_refresh: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch document and run NLP analysis via EDMSNaturalLanguageService.
 
         NLP-анализ кэшируется отдельным ключом (edms:doc_analysis:{id}).
@@ -487,7 +487,7 @@ class DocumentService:
         self,
         token: str,
         document_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetch document movement history (v2 format).
 
         История v2 включает этапы БП, исполнителей и результаты каждого шага.
@@ -513,7 +513,7 @@ class DocumentService:
         self,
         token: str,
         document_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetch document version list.
 
         Args:
@@ -564,11 +564,11 @@ class DocumentService:
     async def search_documents(
         self,
         token: str,
-        doc_filter: Optional[Dict[str, Any]] = None,
+        doc_filter: dict[str, Any] | None = None,
         page: int = 0,
-        size: Optional[int] = None,
-        sort: Optional[str] = None,
-        includes: Optional[List[str]] = None,
+        size: int | None = None,
+        sort: str | None = None,
+        includes: list[str] | None = None,
     ) -> DocumentSearchResult:
         """Search documents with full filter and pagination.
 
@@ -589,20 +589,20 @@ class DocumentService:
             DocumentSearchResult с items (List[DocumentDto]) и метаданными.
         """
         effective_size = size or self._config.search_page_size
-        pageable: Dict[str, Any] = {"page": page, "size": effective_size}
+        pageable: dict[str, Any] = {"page": page, "size": effective_size}
         if sort:
             pageable["sort"] = sort
 
         effective_includes = includes if includes is not None else SEARCH_DOC_INCLUDES
 
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             **(doc_filter or {}),
             **pageable,
             "includes": effective_includes,
         }
 
         async with DocumentClient(base_url=self._config.edms_base_url) as client:
-            raw_page = await client._make_request(  # noqa: SLF001
+            raw_page = await client._make_request(
                 "GET", "api/document", token=token, params=params
             )
 
@@ -613,7 +613,7 @@ class DocumentService:
             )
             return DocumentSearchResult(page_size=effective_size)
 
-        content: List[Dict[str, Any]] = raw_page.get("content") or []
+        content: list[dict[str, Any]] = raw_page.get("content") or []
         items = [DocumentDto.model_validate(d) for d in content]
 
         logger.debug(
@@ -637,15 +637,15 @@ class DocumentService:
     async def search_for_agent(
         self,
         token: str,
-        status: Optional[str] = None,
-        category: Optional[str] = None,
-        reg_number: Optional[str] = None,
-        short_summary: Optional[str] = None,
-        author_id: Optional[str] = None,
-        responsible_executor_id: Optional[str] = None,
-        reg_date_from: Optional[str] = None,
-        reg_date_to: Optional[str] = None,
-        on_control: Optional[bool] = None,
+        status: str | None = None,
+        category: str | None = None,
+        reg_number: str | None = None,
+        short_summary: str | None = None,
+        author_id: str | None = None,
+        responsible_executor_id: str | None = None,
+        reg_date_from: str | None = None,
+        reg_date_to: str | None = None,
+        on_control: bool | None = None,
         page: int = 0,
         size: int = 10,
         sort: str = "regDate,desc",
@@ -673,7 +673,7 @@ class DocumentService:
         Returns:
             DocumentSearchResult.
         """
-        doc_filter: Dict[str, Any] = {}
+        doc_filter: dict[str, Any] = {}
         if status:
             doc_filter["status"] = status
         if category:
@@ -737,7 +737,7 @@ class DocumentService:
         self,
         token: str,
         document_id: str,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> bool:
         """Annul (cancel) a document.
 
@@ -774,7 +774,7 @@ class DocumentService:
         self,
         token: str,
         document_id: str,
-        operations: List[Dict[str, Any]],
+        operations: list[dict[str, Any]],
     ) -> bool:
         """Execute a batch of operations on a document.
 
@@ -838,8 +838,8 @@ class DocumentService:
         document_id: str,
         control_type_id: str,
         date_control_end: str,
-        control_employee_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        control_employee_id: str | None = None,
+    ) -> dict[str, Any]:
         """Put document on control.
 
         Args:
@@ -855,7 +855,7 @@ class DocumentService:
         Raises:
             DocumentOperationError: Control was not set.
         """
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "controlTypeId": control_type_id,
             "dateControlEnd": date_control_end,
         }
@@ -947,7 +947,7 @@ class DocumentService:
         token: str,
         document_id: str,
         force_refresh: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Core document fetch pipeline: cache → API → enrich → cache.
 
         Центральный метод получения сырого DocumentDto dict.

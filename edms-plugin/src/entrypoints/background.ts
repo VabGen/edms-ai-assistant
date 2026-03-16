@@ -50,9 +50,24 @@ export default defineBackground({
                     }, reqId, sendResponse)
                     return true
 
-                // ── Refresh document data ─────────────────────────
+                // ── Refresh document data ──────────────────────────────────────────
                 case 'refreshDocumentData':
                     doRefreshDocument(msg.payload, sendResponse)
+                    return true
+
+                // ── Settings: feature flags ────────────────────────────────────────
+                case 'fetchSettingsMeta':
+                    doFetchSettingsMeta(sendResponse)
+                    return true
+
+                // ── Settings: GET current technical settings ───────────────────────
+                case 'fetchSettings':
+                    doFetchSettings(msg.payload?.user_token, sendResponse)
+                    return true
+
+                // ── Settings: PATCH technical settings ────────────────────────────
+                case 'updateSettings':
+                    doPatchSettings(msg.payload?.user_token, msg.payload?.settings, sendResponse)
                     return true
 
                 default:
@@ -61,6 +76,7 @@ export default defineBackground({
         })
 
         // ── Helpers ─────────────────────────────────────────────────────────────
+
         async function doFetch(
             url: string,
             payload: unknown,
@@ -149,6 +165,92 @@ export default defineBackground({
                 }
 
                 respond({success: false, error: 'Document API endpoint not found'})
+            } catch (e: any) {
+                respond({success: false, error: e.message})
+            }
+        }
+
+        // ── Settings helpers (новые) ─────────────────────────────────────────────
+
+        /**
+         * Fetches settings panel feature flags from backend.
+         *
+         * Reads SETTINGS_PANEL_SHOW_TECHNICAL from server config.
+         * On network error falls back to safe default: show_technical = false.
+         *
+         * @param respond - Chrome message response callback.
+         */
+        async function doFetchSettingsMeta(
+            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
+        ): Promise<void> {
+            try {
+                const res = await fetch(`${API}/api/settings/meta`, {
+                    method: 'GET',
+                    headers: {'Content-Type': 'application/json'},
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.detail ?? `Settings meta error: ${res.status}`)
+                respond({success: true, data})
+            } catch {
+                respond({
+                    success: true,
+                    data: {show_technical: false},
+                })
+            }
+        }
+
+        /**
+         * Fetches current effective technical settings from backend.
+         *
+         * Returns merged .env defaults + any in-memory runtime overrides.
+         *
+         * @param userToken - Optional JWT bearer token.
+         * @param respond   - Chrome message response callback.
+         */
+        async function doFetchSettings(
+            userToken: string | undefined,
+            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
+        ): Promise<void> {
+            try {
+                const headers: Record<string, string> = {'Content-Type': 'application/json'}
+                if (userToken) headers['Authorization'] = `Bearer ${userToken}`
+
+                const res = await fetch(`${API}/api/settings`, {method: 'GET', headers})
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.detail ?? `Settings fetch error: ${res.status}`)
+                respond({success: true, data})
+            } catch (e: any) {
+                respond({success: false, error: e.message})
+            }
+        }
+
+        /**
+         * Sends a PATCH request to update runtime technical settings.
+         *
+         * Backend applies patch in-memory and returns resulting effective settings.
+         * Returns 403 if SETTINGS_PANEL_SHOW_TECHNICAL=false on the server.
+         *
+         * @param userToken - Optional JWT bearer token.
+         * @param settings  - UpdateSettingsRequest body (snake_case groups).
+         * @param respond   - Chrome message response callback.
+         */
+        async function doPatchSettings(
+            userToken: string | undefined,
+            settings: unknown,
+            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
+        ): Promise<void> {
+            try {
+                const headers: Record<string, string> = {'Content-Type': 'application/json'}
+                if (userToken) headers['Authorization'] = `Bearer ${userToken}`
+
+                const res = await fetch(`${API}/api/settings`, {
+                    method: 'PATCH',
+                    headers,
+                    body: JSON.stringify(settings ?? {}),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.detail ?? `Settings update error: ${res.status}`)
+                respond({success: true, data})
             } catch (e: any) {
                 respond({success: false, error: e.message})
             }

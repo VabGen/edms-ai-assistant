@@ -1,5 +1,6 @@
 # debug_all_models.py
 import httpx
+
 from edms_ai_assistant.config import settings
 
 servers = {
@@ -31,9 +32,10 @@ for name, endpoint in servers.items():
 # ------------------------------------------------------------------------------
 
 import logging
-from langchain_openai import ChatOpenAI
-from langchain_core.tools import tool
+
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

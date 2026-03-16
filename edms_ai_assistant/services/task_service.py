@@ -4,8 +4,8 @@ EDMS AI Assistant — Task Service with Disambiguation Support.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -53,12 +53,12 @@ class TaskService:
     async def collect_executors(
         self,
         token: str,
-        last_names: List[str],
-        responsible_last_name: Optional[str] = None,
-    ) -> Tuple[
-        Optional[List[CreateTaskRequestExecutor]],
-        List[str],
-        List[Dict[str, Any]],
+        last_names: list[str],
+        responsible_last_name: str | None = None,
+    ) -> tuple[
+        list[CreateTaskRequestExecutor] | None,
+        list[str],
+        list[dict[str, Any]],
     ]:
         """
         Resolves executor employees by last name with disambiguation support.
@@ -74,9 +74,9 @@ class TaskService:
             - not_found: Last names that yielded no results.
             - ambiguous_results: Disambiguation payloads (one per ambiguous name).
         """
-        found_employees: List[Dict[str, Any]] = []
-        not_found: List[str] = []
-        ambiguous_results: List[Dict[str, Any]] = []
+        found_employees: list[dict[str, Any]] = []
+        not_found: list[str] = []
+        ambiguous_results: list[dict[str, Any]] = []
 
         for last_name in last_names:
             employees = await self.employee_client.search_employees(
@@ -119,7 +119,7 @@ class TaskService:
             return None, not_found, []
 
         # ── Все найдены однозначно → формируем executors ───────────────────
-        responsible_employee: Optional[Dict[str, Any]] = None
+        responsible_employee: dict[str, Any] | None = None
         if responsible_last_name:
             responsible_employee = await self.employee_client.find_by_last_name_fts(
                 token, responsible_last_name
@@ -130,8 +130,8 @@ class TaskService:
                     responsible_last_name,
                 )
 
-        executors: List[CreateTaskRequestExecutor] = []
-        seen_ids: Set[UUID] = set()
+        executors: list[CreateTaskRequestExecutor] = []
+        seen_ids: set[UUID] = set()
 
         if responsible_employee:
             resp_id = _to_uuid(responsible_employee["id"])
@@ -157,9 +157,9 @@ class TaskService:
         token: str,
         document_id: str,
         task_text: str,
-        executor_last_names: List[str],
-        planed_date_end: Optional[datetime] = None,
-        responsible_last_name: Optional[str] = None,
+        executor_last_names: list[str],
+        planed_date_end: datetime | None = None,
+        responsible_last_name: str | None = None,
         task_type: TaskType = TaskType.GENERAL,
     ) -> TaskCreationResult:
         """
@@ -235,9 +235,9 @@ class TaskService:
         token: str,
         document_id: str,
         task_text: str,
-        employee_ids: List[UUID],
-        planed_date_end: Optional[datetime] = None,
-        responsible_employee_id: Optional[UUID] = None,
+        employee_ids: list[UUID],
+        planed_date_end: datetime | None = None,
+        responsible_employee_id: UUID | None = None,
         task_type: TaskType = TaskType.GENERAL,
     ) -> TaskCreationResult:
         """
@@ -269,8 +269,8 @@ class TaskService:
 
         responsible_id = responsible_employee_id or employee_ids[0]
 
-        executors: List[CreateTaskRequestExecutor] = []
-        seen_ids: Set[UUID] = set()
+        executors: list[CreateTaskRequestExecutor] = []
+        seen_ids: set[UUID] = set()
         for emp_id in employee_ids:
             if emp_id in seen_ids:
                 continue
@@ -300,10 +300,10 @@ class TaskService:
         token: str,
         document_id: str,
         task_text: str,
-        executors: List[CreateTaskRequestExecutor],
-        planed_date_end: Optional[datetime],
+        executors: list[CreateTaskRequestExecutor],
+        planed_date_end: datetime | None,
         task_type: TaskType,
-        not_found: Optional[List[str]] = None,
+        not_found: list[str] | None = None,
     ) -> TaskCreationResult:
         """
         Submits the prepared task request to the EDMS API.
@@ -322,9 +322,9 @@ class TaskService:
         """
         # Нормализация дедлайна
         if not planed_date_end:
-            planed_date_end = datetime.now(timezone.utc) + timedelta(days=7)
+            planed_date_end = datetime.now(UTC) + timedelta(days=7)
         elif planed_date_end.tzinfo is None:
-            planed_date_end = planed_date_end.replace(tzinfo=timezone.utc)
+            planed_date_end = planed_date_end.replace(tzinfo=UTC)
 
         # Капитализация первой буквы текста
         formatted_text = (
@@ -378,7 +378,7 @@ class TaskService:
             )
 
     @staticmethod
-    def _format_employee_match(employee: Dict[str, Any]) -> Dict[str, Any]:
+    def _format_employee_match(employee: dict[str, Any]) -> dict[str, Any]:
         """
         Formats a raw employee dict for disambiguation UI payload.
 

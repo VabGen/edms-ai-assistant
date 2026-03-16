@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -70,7 +70,7 @@ class LocalFileInput(BaseModel):
 
 
 @tool("read_local_file_content", args_schema=LocalFileInput)
-async def read_local_file_content(file_path: str) -> Dict[str, Any]:
+async def read_local_file_content(file_path: str) -> dict[str, Any]:
     """Extract text and metadata from a local file on disk.
 
     Supported formats: PDF, DOCX, DOC, TXT, RTF, ODT, MD, XLSX, XLS, CSV.

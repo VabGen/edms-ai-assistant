@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.utils.regex_utils import UUID_RE
@@ -109,7 +109,7 @@ class Entity:
     value: Any
     raw_text: str
     confidence: float = 1.0
-    normalized_value: Optional[Any] = None
+    normalized_value: Any | None = None
 
 
 @dataclass
@@ -130,10 +130,10 @@ class UserQuery:
     original: str
     refined: str
     intent: UserIntent
-    secondary_intents: List[UserIntent] = field(default_factory=list)
+    secondary_intents: list[UserIntent] = field(default_factory=list)
     complexity: QueryComplexity = QueryComplexity.SIMPLE
-    entities: Dict[str, List[Entity]] = field(default_factory=dict)
-    keywords: Set[str] = field(default_factory=set)
+    entities: dict[str, list[Entity]] = field(default_factory=dict)
+    keywords: set[str] = field(default_factory=set)
     confidence: float = 1.0
 
 
@@ -150,10 +150,10 @@ class SemanticContext:
     """
 
     query: UserQuery
-    document: Optional[Any] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    suggestions: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    document: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    suggestions: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 class EntityExtractor:
@@ -194,8 +194,8 @@ class EntityExtractor:
     def extract_dates(
         self,
         text: str,
-        base_date: Optional[datetime] = None,
-    ) -> List[Entity]:
+        base_date: datetime | None = None,
+    ) -> list[Entity]:
         """Extract and normalise date expressions from text.
 
         Args:
@@ -273,7 +273,7 @@ class EntityExtractor:
 
         return dates
 
-    def extract_persons(self, text: str) -> List[Entity]:
+    def extract_persons(self, text: str) -> list[Entity]:
         """Extract person names (ФИО) from text.
 
         Args:
@@ -309,7 +309,7 @@ class EntityExtractor:
 
         return persons
 
-    def extract_numbers(self, text: str) -> List[Entity]:
+    def extract_numbers(self, text: str) -> list[Entity]:
         """Extract numeric values from text.
 
         Args:
@@ -332,7 +332,7 @@ class EntityExtractor:
             )
         return numbers
 
-    def extract_money(self, text: str) -> List[Entity]:
+    def extract_money(self, text: str) -> list[Entity]:
         """Extract monetary amounts with currency codes.
 
         Args:
@@ -361,7 +361,7 @@ class EntityExtractor:
                 )
         return money
 
-    def extract_document_ids(self, text: str) -> List[Entity]:
+    def extract_document_ids(self, text: str) -> list[Entity]:
         """Extract UUID document identifiers from text.
 
         Args:
@@ -387,8 +387,8 @@ class EntityExtractor:
     def extract_all(
         self,
         text: str,
-        base_date: Optional[datetime] = None,
-    ) -> Dict[str, List[Entity]]:
+        base_date: datetime | None = None,
+    ) -> dict[str, list[Entity]]:
         """Run all extractors and return a grouped entity dict.
 
         Args:
@@ -398,7 +398,7 @@ class EntityExtractor:
         Returns:
             Dict mapping entity type names to lists of entities.
         """
-        entities: Dict[str, List[Entity]] = {}
+        entities: dict[str, list[Entity]] = {}
 
         for key, extractor in [
             ("dates", lambda: self.extract_dates(text, base_date)),
@@ -564,7 +564,7 @@ class QueryRefiner:
         self,
         text: str,
         intent: UserIntent,
-        entities: Dict[str, List[Entity]],
+        entities: dict[str, list[Entity]],
     ) -> str:
         """Augment the query with intent-specific structured context hints.
 
@@ -631,7 +631,7 @@ class QueryRefiner:
         self,
         text: str,
         intent: UserIntent,
-        entities: Dict[str, List[Entity]],
+        entities: dict[str, list[Entity]],
     ) -> str:
         """Run the full refinement pipeline on a query.
 
@@ -663,7 +663,7 @@ class SemanticDispatcher:
     Args: None (stateless helpers are instantiated internally).
     """
 
-    INTENT_KEYWORDS: Dict[UserIntent, Dict[str, list[str]]] = {
+    INTENT_KEYWORDS: dict[UserIntent, dict[str, list[str]]] = {
         UserIntent.CREATE_INTRODUCTION: {
             "primary": [
                 "ознакомление",
@@ -825,8 +825,8 @@ class SemanticDispatcher:
     def detect_intent(
         self,
         message: str,
-        file_path: Optional[str] = None,
-    ) -> Tuple[UserIntent, List[UserIntent], float]:
+        file_path: str | None = None,
+    ) -> tuple[UserIntent, list[UserIntent], float]:
         """Classify primary and secondary intents with confidence scoring.
 
         Scoring rules:
@@ -918,7 +918,7 @@ class SemanticDispatcher:
     def estimate_complexity(
         self,
         message: str,
-        document: Optional[Any] = None,
+        document: Any | None = None,
     ) -> QueryComplexity:
         """Estimate the processing complexity of a query.
 
@@ -970,7 +970,7 @@ class SemanticDispatcher:
             return QueryComplexity.MEDIUM
         return QueryComplexity.SIMPLE
 
-    def extract_keywords(self, message: str) -> Set[str]:
+    def extract_keywords(self, message: str) -> set[str]:
         """Extract content keywords by removing Russian stop words.
 
         Args:
@@ -1011,7 +1011,7 @@ class SemanticDispatcher:
         words = re.findall(r"\b[а-яёА-ЯЁ]{3,}\b", message.lower())
         return {w for w in words if w not in stop_words}
 
-    def _validate_file_path(self, file_path: str) -> Tuple[bool, Optional[str]]:
+    def _validate_file_path(self, file_path: str) -> tuple[bool, str | None]:
         """Check that *file_path* exists and is within the configured upload directory.
 
         Args:
@@ -1040,8 +1040,8 @@ class SemanticDispatcher:
     def build_context(
         self,
         message: str,
-        document: Optional[Any] = None,
-        file_path: Optional[str] = None,
+        document: Any | None = None,
+        file_path: str | None = None,
     ) -> SemanticContext:
         """Build a complete SemanticContext for one user turn.
 
@@ -1072,7 +1072,7 @@ class SemanticDispatcher:
             confidence=confidence,
         )
 
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "word_count": len(message.split()),
             "char_count": len(message),
             "has_question_mark": message.strip().endswith("?"),
@@ -1144,7 +1144,7 @@ class EDMSNaturalLanguageService:
     """High-level service for semantic analysis of EDMS domain objects."""
 
     @staticmethod
-    def format_user(user: Any) -> Optional[str]:
+    def format_user(user: Any) -> str | None:
         """Format a UserInfoDto or EmployeeDto into a display name string.
 
         Args:
@@ -1169,7 +1169,7 @@ class EDMSNaturalLanguageService:
             return None
 
     @staticmethod
-    def format_date(instant: Any) -> Optional[str]:
+    def format_date(instant: Any) -> str | None:
         """Format an Instant-like value to DD.MM.YYYY.
 
         Args:
@@ -1194,7 +1194,7 @@ class EDMSNaturalLanguageService:
             return None
 
     @staticmethod
-    def format_datetime(instant: Any) -> Optional[str]:
+    def format_datetime(instant: Any) -> str | None:
         """Format an Instant-like value to DD.MM.YYYY HH:MM.
 
         Args:
@@ -1249,7 +1249,7 @@ class EDMSNaturalLanguageService:
             logger.debug("Error accessing path '%s': %s", path, exc)
             return default
 
-    def process_document(self, doc: Any) -> Dict[str, Any]:
+    def process_document(self, doc: Any) -> dict[str, Any]:
         """Produce a full structured analysis of a DocumentDto.
 
         Covers ALL nested entities defined in the Java EDMS DTO schema:
@@ -1329,7 +1329,7 @@ class EDMSNaturalLanguageService:
             # Ответственные по договору — приходят из contractResponsible (enricher).
             # contractResponsible — list[dict], каждый элемент: {user: UserInfoDto, createDate}
             _contract_responsible_raw = getattr(doc, "contractResponsible", None) or []
-            _contract_responsible_users: Optional[List[str]] = [
+            _contract_responsible_users: list[str] | None = [
                 self.format_user(
                     r.get("user") if isinstance(r, dict) else getattr(r, "user", None)
                 )
@@ -1354,7 +1354,7 @@ class EDMSNaturalLanguageService:
 
             # ── 4. Жизненный цикл ─────────────────────────────────────────────
             process_obj = getattr(doc, "process", None)
-            process_detail: Optional[Dict[str, Any]] = None
+            process_detail: dict[str, Any] | None = None
             if process_obj:
                 items_raw = getattr(process_obj, "items", None) or []
                 process_items = [
@@ -1407,7 +1407,7 @@ class EDMSNaturalLanguageService:
 
             # ── 5. Контроль ───────────────────────────────────────────────────
             control_obj = getattr(doc, "control", None)
-            control_info: Dict[str, Any] = {
+            control_info: dict[str, Any] = {
                 "на_контроле": getattr(doc, "controlFlag", None),
                 "снять_с_контроля": getattr(doc, "removeControl", None),
                 "дней_на_исполнение": getattr(doc, "daysExecution", None),
@@ -1430,7 +1430,7 @@ class EDMSNaturalLanguageService:
 
             # ── 6. Поручения ──────────────────────────────────────────────────
             task_list = getattr(doc, "taskList", None) or []
-            tasks_info: Dict[str, Any] = {
+            tasks_info: dict[str, Any] = {
                 "общее_количество": getattr(doc, "countTask", None) or len(task_list),
                 "выполнено": getattr(doc, "completedTaskCount", None),
                 "список": [
@@ -1465,7 +1465,7 @@ class EDMSNaturalLanguageService:
 
             # ── 7. Вложения ───────────────────────────────────────────────────
             attachments_list = getattr(doc, "attachmentDocument", None) or []
-            relations: Dict[str, Any] = {
+            relations: dict[str, Any] = {
                 "вложения": [
                     {
                         "название": getattr(a, "name", None),
@@ -1546,7 +1546,7 @@ class EDMSNaturalLanguageService:
                 ]
 
             # ── 11. Специализированные секции по категории ───────────────────
-            specialized: Dict[str, Any] = {}
+            specialized: dict[str, Any] = {}
 
             # --- CONTRACT ---------------------------------------------------
             if getattr(doc, "contractNumber", None) or category_value == "CONTRACT":
@@ -1684,7 +1684,7 @@ class EDMSNaturalLanguageService:
                 }
 
             # ── 12. Сборка итогового словаря ──────────────────────────────────
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "базовая_информация": self._clean_dict(base_info),
                 "регистрация": self._clean_dict(registration),
                 "участники": self._clean_dict(participants),
@@ -1722,7 +1722,7 @@ class EDMSNaturalLanguageService:
             return cleaned_list or None
         return d
 
-    def analyze_local_file(self, file_path: str) -> Dict[str, Any]:
+    def analyze_local_file(self, file_path: str) -> dict[str, Any]:
         """Return basic metadata for a local file before reading its content.
 
         Args:
@@ -1754,7 +1754,7 @@ class EDMSNaturalLanguageService:
             )
             return {"error": str(exc)}
 
-    def suggest_summarize_format(self, text: str) -> Dict[str, Any]:
+    def suggest_summarize_format(self, text: str) -> dict[str, Any]:
         """Recommend a summarisation format based on text characteristics.
 
         Args:
@@ -1792,7 +1792,7 @@ class EDMSNaturalLanguageService:
             "stats": {"chars": length, "lines": lines},
         }
 
-    def process_employee_info(self, emp: Any) -> Dict[str, Any]:
+    def process_employee_info(self, emp: Any) -> dict[str, Any]:
         """Build an analytical employee card from an EmployeeDto.
 
         Args:

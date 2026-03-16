@@ -14,7 +14,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -57,7 +57,7 @@ class FileCompareInput(BaseModel):
             "Инжектируется автоматически из контекста агента."
         ),
     )
-    attachment_id: Optional[str] = Field(
+    attachment_id: str | None = Field(
         None,
         description=(
             "UUID вложения или его имя для сравнения. "
@@ -65,7 +65,7 @@ class FileCompareInput(BaseModel):
             "Если совпадение не найдено — возвращается список вложений для выбора."
         ),
     )
-    original_filename: Optional[str] = Field(
+    original_filename: str | None = Field(
         None,
         description=(
             "Оригинальное имя загруженного файла (например: «Шаблон обложки.docx»). "
@@ -96,7 +96,7 @@ def _att_id(attachment: Any) -> str:
     return str(getattr(attachment, "id", "") or "")
 
 
-def _resolve_attachment(attachments: List[Any], hint: str) -> Optional[Any]:
+def _resolve_attachment(attachments: list[Any], hint: str) -> Any | None:
     """Resolve attachment by UUID or filename hint (4-level fallback)."""
     if not hint or not attachments:
         return None
@@ -134,10 +134,10 @@ def _resolve_attachment(attachments: List[Any], hint: str) -> Optional[Any]:
 
 
 def _disambiguation_response(
-    attachments: List[Any],
+    attachments: list[Any],
     local_filename: str,
-    hint: Optional[str] = None,
-) -> Dict[str, Any]:
+    hint: str | None = None,
+) -> dict[str, Any]:
     """Build requires_disambiguation response consumed by _detect_interactive_status."""
     available = [
         {"id": _att_id(a), "name": _att_name(a) or "без имени"}
@@ -169,7 +169,7 @@ def _compute_diff(
     att_text: str,
     local_label: str,
     att_label: str,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     raw_diff = difflib.unified_diff(
         local_text.splitlines(keepends=True),
         att_text.splitlines(keepends=True),
@@ -178,7 +178,7 @@ def _compute_diff(
         lineterm="",
         n=2,
     )
-    changes: List[Dict[str, str]] = []
+    changes: list[dict[str, str]] = []
     for line in raw_diff:
         if line.startswith(("---", "+++", "@@")):
             continue
@@ -197,9 +197,9 @@ def _build_summary(
     similarity: float,
     local_name: str,
     att_name: str,
-    local_stats: Dict[str, int],
-    att_stats: Dict[str, int],
-    diff_result: List[Dict[str, str]],
+    local_stats: dict[str, int],
+    att_stats: dict[str, int],
+    diff_result: list[dict[str, str]],
 ) -> str:
     if are_identical:
         return (
@@ -223,9 +223,9 @@ async def doc_compare_with_local(
     token: str,
     document_id: str,
     local_file_path: str,
-    attachment_id: Optional[str] = None,
-    original_filename: Optional[str] = None,
-) -> Dict[str, Any]:
+    attachment_id: str | None = None,
+    original_filename: str | None = None,
+) -> dict[str, Any]:
     """Compare a locally uploaded file with an EDMS document attachment.
 
     Attachment resolution (in order, first match wins):
@@ -283,7 +283,7 @@ async def doc_compare_with_local(
         async with DocumentClient() as doc_client:
             raw_data = await doc_client.get_document_metadata(token, document_id)
             doc = DocumentDto.model_validate(raw_data)
-            attachments: List[Any] = doc.attachmentDocument or []
+            attachments: list[Any] = doc.attachmentDocument or []
     except Exception as exc:
         logger.error("Document metadata fetch failed: %s", exc, exc_info=True)
         return {
@@ -407,7 +407,7 @@ async def doc_compare_with_local(
         1,
     )
 
-    diff_result: List[Dict[str, str]] = []
+    diff_result: list[dict[str, str]] = []
     if not are_identical:
         diff_result = _compute_diff(
             local_text,

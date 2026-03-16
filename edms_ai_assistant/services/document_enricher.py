@@ -25,14 +25,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from edms_ai_assistant.clients.base_client import EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 
 
-RawDoc = Dict[str, Any]
+RawDoc = dict[str, Any]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -49,7 +49,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_correspondent(
         self, token: str, correspondent_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches CorrespondentDto by UUID.
 
         Args:
@@ -66,7 +66,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_registration_journal(
         self, token: str, journal_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches RegistrationJournalDto by UUID.
 
         Args:
@@ -83,7 +83,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_document_type(
         self, token: str, document_type_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches DocumentTypeDto by ID.
 
         Args:
@@ -98,9 +98,7 @@ class _RefClient(EdmsHttpClient):
         )
         return result if isinstance(result, dict) and result else None
 
-    async def get_currency(
-        self, token: str, currency_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_currency(self, token: str, currency_id: str) -> dict[str, Any] | None:
         """Fetches CurrencyDto by UUID.
 
         Args:
@@ -117,7 +115,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_control_type(
         self, token: str, control_type_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches ControlTypeDto by UUID.
 
         Args:
@@ -134,7 +132,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_introduction_list(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches IntroductionDto list for a document.
 
         Args:
@@ -157,7 +155,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_document_appeal(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches DocumentAppealDto for a document (APPEAL category).
 
         Args:
@@ -174,7 +172,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_document_recipients(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches recipient/contractor list via GET api/document/{id}/recipient.
 
         includes=RECIPIENT не работает в Java — всегда возвращает пустой список.
@@ -201,7 +199,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_document_tasks(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches task list with executors via GET api/document/{id}/task.
 
         Вызывается с параметром fetchExecutors=true (TaskFilter.fetchExecutors)
@@ -235,7 +233,7 @@ class _RefClient(EdmsHttpClient):
 
     async def get_contract_responsible(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches contract responsible persons via GET api/document/{id}/responsible.
 
         Возвращает список ContractResponsibleDto — сотрудников, ответственных
@@ -304,11 +302,11 @@ class DocumentEnricher:
         if not doc:
             return doc
 
-        doc_id: Optional[str] = str(doc.get("id", "")) or None
+        doc_id: str | None = str(doc.get("id", "")) or None
         category: str = str(doc.get("docCategoryConstant", "") or "")
 
         # Планируем задачи — только те поля, у которых есть UUID
-        tasks: Dict[str, Any] = {}
+        tasks: dict[str, Any] = {}
 
         async with _RefClient(base_url=self._base_url) as client:
 
@@ -369,8 +367,8 @@ class DocumentEnricher:
                     token, doc_id
                 )
 
-            recipient_list: List[Dict[str, Any]] = doc.get("recipientList") or []
-            recipient_corr_tasks: List[tuple[int, Any]] = []
+            recipient_list: list[dict[str, Any]] = doc.get("recipientList") or []
+            recipient_corr_tasks: list[tuple[int, Any]] = []
             for idx, recipient in enumerate(recipient_list):
                 if (
                     isinstance(recipient, dict)
@@ -442,7 +440,7 @@ class DocumentEnricher:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _has_nested(obj: Dict[str, Any], key: str) -> bool:
+def _has_nested(obj: dict[str, Any], key: str) -> bool:
     """Return True if *obj* already has a non-empty nested object at *key*.
 
     Prevents redundant API calls when includes already populated the field.

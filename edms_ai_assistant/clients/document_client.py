@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base_client import EdmsBaseClient, EdmsHttpClient
 
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PAGE: int = 0
 _DEFAULT_SIZE: int = 10
 
-FULL_DOC_INCLUDES: List[str] = [
+FULL_DOC_INCLUDES: list[str] = [
     "DOCUMENT_TYPE",
     "DELIVERY_METHOD",
     "CORRESPONDENT",
@@ -72,7 +72,7 @@ FULL_DOC_INCLUDES: List[str] = [
     "ADDITIONAL_DOCUMENT_AND_TYPE",
 ]
 
-SEARCH_DOC_INCLUDES: List[str] = [
+SEARCH_DOC_INCLUDES: list[str] = [
     "DOCUMENT_TYPE",
     "CORRESPONDENT",
     "REGISTRATION_JOURNAL",
@@ -104,10 +104,10 @@ class EdmsDocumentClient(EdmsBaseClient):
     async def search_documents(
         self,
         token: str,
-        doc_filter: Optional[Dict[str, Any]] = None,
-        pageable: Optional[Dict[str, Any]] = None,
-        includes: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        doc_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+        includes: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Searches documents using DocumentFilter and Spring Pageable params."""
         raise NotImplementedError
 
@@ -116,8 +116,8 @@ class EdmsDocumentClient(EdmsBaseClient):
         self,
         token: str,
         document_id: str,
-        includes: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        includes: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         """Fetches full document metadata (DocumentDto) by UUID."""
         raise NotImplementedError
 
@@ -126,22 +126,22 @@ class EdmsDocumentClient(EdmsBaseClient):
         self,
         token: str,
         document_id: str,
-        includes: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        includes: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         """Fetches document + permissions bundle in a single request."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_document_permissions(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches DocPermissionContainer for a document."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_document_properties(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches extended DocumentPropertiesDto by document UUID."""
         raise NotImplementedError
 
@@ -150,28 +150,28 @@ class EdmsDocumentClient(EdmsBaseClient):
     @abstractmethod
     async def get_document_history(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches document processing protocol (history v1)."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_document_history_v2(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches document processing protocol (history v2, preferred)."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_process_activity(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches current BPMN process with active activities."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_tasks_and_projects(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches tasks and task-projects linked to a document."""
         raise NotImplementedError
 
@@ -180,14 +180,14 @@ class EdmsDocumentClient(EdmsBaseClient):
     @abstractmethod
     async def get_document_control(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches current control (ControlDto) for a document."""
         raise NotImplementedError
 
     @abstractmethod
     async def set_document_control(
-        self, token: str, document_id: str, control_request: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+        self, token: str, document_id: str, control_request: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Sets a document on control (ControlRequest.CreateControl)."""
         raise NotImplementedError
 
@@ -206,14 +206,14 @@ class EdmsDocumentClient(EdmsBaseClient):
     @abstractmethod
     async def get_document_recipients(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches list of document recipients (DocumentRecipientDto)."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_contract_responsible(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches responsible employees for a contract document."""
         raise NotImplementedError
 
@@ -222,14 +222,14 @@ class EdmsDocumentClient(EdmsBaseClient):
     @abstractmethod
     async def get_nomenclature_affairs(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches nomenclature affairs linked to a document."""
         raise NotImplementedError
 
     @abstractmethod
     async def get_repeat_identical_appeals(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches repeat and identical appeals linked to a document."""
         raise NotImplementedError
 
@@ -238,7 +238,7 @@ class EdmsDocumentClient(EdmsBaseClient):
     @abstractmethod
     async def get_document_versions(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches all versions of a document."""
         raise NotImplementedError
 
@@ -251,7 +251,7 @@ class EdmsDocumentClient(EdmsBaseClient):
 
     @abstractmethod
     async def cancel_document(
-        self, token: str, document_id: str, comment: Optional[str] = None
+        self, token: str, document_id: str, comment: str | None = None
     ) -> bool:
         """Cancels (annuls) a document."""
         raise NotImplementedError
@@ -261,7 +261,7 @@ class EdmsDocumentClient(EdmsBaseClient):
         self,
         token: str,
         document_id: str,
-        operations: List[Dict[str, Any]],
+        operations: list[dict[str, Any]],
     ) -> bool:
         """Executes a list of operations on a document (sign, agree, etc.)."""
         raise NotImplementedError
@@ -269,17 +269,17 @@ class EdmsDocumentClient(EdmsBaseClient):
     # ── Статистика ────────────────────────────────────────────────────────────
 
     @abstractmethod
-    async def get_stat_user_executor(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_stat_user_executor(self, token: str) -> dict[str, Any] | None:
         """Fetches execution statistics for the current user."""
         raise NotImplementedError
 
     @abstractmethod
-    async def get_stat_user_control(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_stat_user_control(self, token: str) -> dict[str, Any] | None:
         """Fetches control statistics for the current user."""
         raise NotImplementedError
 
     @abstractmethod
-    async def get_stat_user_author(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_stat_user_author(self, token: str) -> dict[str, Any] | None:
         """Fetches authoring statistics for the current user."""
         raise NotImplementedError
 
@@ -289,7 +289,7 @@ class EdmsDocumentClient(EdmsBaseClient):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _build_includes_params(includes: List[str]) -> Dict[str, List[str]]:
+def _build_includes_params(includes: list[str]) -> dict[str, list[str]]:
     """Converts a list of Include names to Spring multi-value query params.
 
     Java-контроллер принимает `includes` как массив enum-значений.
@@ -340,10 +340,10 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
     async def search_documents(
         self,
         token: str,
-        doc_filter: Optional[Dict[str, Any]] = None,
-        pageable: Optional[Dict[str, Any]] = None,
-        includes: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        doc_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+        includes: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Searches documents using DocumentFilter and Spring Pageable params.
 
         Calls GET api/document.
@@ -365,7 +365,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         Returns:
             List of DocumentDto dicts extracted from Page.content.
         """
-        effective_pageable: Dict[str, Any] = {
+        effective_pageable: dict[str, Any] = {
             "page": _DEFAULT_PAGE,
             "size": _DEFAULT_SIZE,
         }
@@ -374,7 +374,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
         effective_includes = includes if includes is not None else SEARCH_DOC_INCLUDES
 
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             **(doc_filter or {}),
             **effective_pageable,
             **_build_includes_params(effective_includes),
@@ -421,8 +421,8 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        includes: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        includes: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         """Fetches full document metadata by UUID with all nested models.
 
         Calls GET api/document/{id}?includes=...
@@ -456,8 +456,8 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        includes: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        includes: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         """Fetches document and its permissions in a single request.
 
         Calls GET api/document/{id}/all?includes=...
@@ -493,7 +493,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_permissions(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches DocPermissionContainer for a document.
 
         Calls GET api/document/{id}/permission.
@@ -512,7 +512,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_properties(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches extended document properties (DocumentPropertiesDto).
 
         Calls GET api/document/{id}/properties.
@@ -533,7 +533,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_history(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches document processing protocol (history v1).
 
         Calls GET api/document/{id}/history.
@@ -563,7 +563,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_history_v2(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches document processing protocol (history v2, preferred).
 
         Calls GET api/document/{id}/history/v2.
@@ -593,7 +593,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_process_activity(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches current BPMN process with active activities.
 
         Calls GET api/document/{id}/bpmn.
@@ -613,7 +613,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_tasks_and_projects(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches tasks and task-projects linked to a document.
 
         Calls GET api/document/{id}/task-task-project.
@@ -635,7 +635,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_control(
         self, token: str, document_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches current control record (ControlDto) for a document.
 
         Calls GET api/document/{documentId}/control.
@@ -660,8 +660,8 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        control_request: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        control_request: dict[str, Any],
+    ) -> dict[str, Any] | None:
         """Sets a document on control.
 
         Calls POST api/document/{docId}/control.
@@ -747,7 +747,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_recipients(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches list of document recipients.
 
         Calls GET api/document/{id}/recipient.
@@ -767,7 +767,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_contract_responsible(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches responsible employees for a contract document.
 
         Calls GET api/document/{documentId}/responsible.
@@ -788,7 +788,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_nomenclature_affairs(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches nomenclature affairs linked to a document.
 
         Calls GET api/document/{id}/nomenclature-affair.
@@ -808,7 +808,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_repeat_identical_appeals(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches repeat and identical appeals linked to a document.
 
         Calls GET api/document/{documentId}/repeat-identical.
@@ -829,7 +829,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     async def get_document_versions(
         self, token: str, document_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches all versions of a document.
 
         Calls GET api/document/{id}/version.
@@ -886,7 +886,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> bool:
         """Cancels (annuls) a document.
 
@@ -901,7 +901,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         Returns:
             True on success, False on failure.
         """
-        payload: Dict[str, Any] = {"id": document_id}
+        payload: dict[str, Any] = {"id": document_id}
         if comment:
             payload["comment"] = comment.strip()
 
@@ -930,7 +930,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        operations: List[Dict[str, Any]],
+        operations: list[dict[str, Any]],
     ) -> bool:
         """Executes a list of operations on a document.
 
@@ -980,7 +980,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
 
     # ── Статистика ────────────────────────────────────────────────────────────
 
-    async def get_stat_user_executor(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_stat_user_executor(self, token: str) -> dict[str, Any] | None:
         """Fetches document execution statistics for the current user.
 
         Calls GET api/document/stat/user-executor.
@@ -997,7 +997,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         )
         return result if isinstance(result, dict) else None
 
-    async def get_stat_user_control(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_stat_user_control(self, token: str) -> dict[str, Any] | None:
         """Fetches document control statistics for the current user.
 
         Calls GET api/document/stat/user-control.
@@ -1014,7 +1014,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
         )
         return result if isinstance(result, dict) else None
 
-    async def get_stat_user_author(self, token: str) -> Optional[Dict[str, Any]]:
+    async def get_stat_user_author(self, token: str) -> dict[str, Any] | None:
         """Fetches document authoring statistics for the current user.
 
         Calls GET api/document/stat/user-author.

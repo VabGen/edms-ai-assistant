@@ -33,7 +33,7 @@ EDMS AI Assistant — Employee Search Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 _MAX_RESULTS: int = 20
 
 # Дефолтные includes: без них API не вернёт вложенные объекты post и department
-_DEFAULT_INCLUDES: List[str] = ["POST", "DEPARTMENT"]
+_DEFAULT_INCLUDES: list[str] = ["POST", "DEPARTMENT"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -71,7 +71,7 @@ class EmployeeSearchInput(BaseModel):
 
     # ── Прямой доступ по UUID ─────────────────────────────────────────────────
 
-    employee_id: Optional[str] = Field(
+    employee_id: str | None = Field(
         None,
         description=(
             "UUID конкретного сотрудника для получения полной карточки. "
@@ -81,7 +81,7 @@ class EmployeeSearchInput(BaseModel):
 
     # ── ФИО-поиск ─────────────────────────────────────────────────────────────
 
-    last_name: Optional[str] = Field(
+    last_name: str | None = Field(
         None,
         max_length=150,
         description=(
@@ -89,12 +89,12 @@ class EmployeeSearchInput(BaseModel):
             "Пример: 'Иванов'. Основной параметр поиска по имени."
         ),
     )
-    first_name: Optional[str] = Field(
+    first_name: str | None = Field(
         None,
         max_length=100,
         description="Имя сотрудника. Пример: 'Алексей'.",
     )
-    middle_name: Optional[str] = Field(
+    middle_name: str | None = Field(
         None,
         max_length=150,
         description="Отчество сотрудника. Пример: 'Петрович'.",
@@ -102,7 +102,7 @@ class EmployeeSearchInput(BaseModel):
 
     # ── Должность ─────────────────────────────────────────────────────────────
 
-    full_post_name: Optional[str] = Field(
+    full_post_name: str | None = Field(
         None,
         max_length=300,
         description=(
@@ -115,7 +115,7 @@ class EmployeeSearchInput(BaseModel):
 
     # ── Статус ────────────────────────────────────────────────────────────────
 
-    active_only: Optional[bool] = Field(
+    active_only: bool | None = Field(
         None,
         description=(
             "True — только активные сотрудники (EmployeeFilter.active=true). "
@@ -123,7 +123,7 @@ class EmployeeSearchInput(BaseModel):
             "None — без фильтра по активности."
         ),
     )
-    fired_only: Optional[bool] = Field(
+    fired_only: bool | None = Field(
         None,
         description=(
             "True — только уволенные (EmployeeFilter.fired=true). "
@@ -133,7 +133,7 @@ class EmployeeSearchInput(BaseModel):
 
     # ── Структура организации ─────────────────────────────────────────────────
 
-    department_names: Optional[List[str]] = Field(
+    department_names: list[str] | None = Field(
         None,
         description=(
             "Список названий отделов/подразделений на русском языке. "
@@ -143,7 +143,7 @@ class EmployeeSearchInput(BaseModel):
             "НЕ передавай UUID в это поле."
         ),
     )
-    department_ids: Optional[List[str]] = Field(
+    department_ids: list[str] | None = Field(
         None,
         description=(
             "Список UUID отделов/подразделений (EmployeeFilter.departmentId). "
@@ -151,21 +151,21 @@ class EmployeeSearchInput(BaseModel):
             "Если известно только название отдела — используй department_names."
         ),
     )
-    child_departments: Optional[bool] = Field(
+    child_departments: bool | None = Field(
         None,
         description=(
             "True — включить сотрудников всех дочерних подразделений. "
             "Используй совместно с department_names или department_ids."
         ),
     )
-    employee_ids: Optional[List[str]] = Field(
+    employee_ids: list[str] | None = Field(
         None,
         description=(
             "Список UUID конкретных сотрудников (EmployeeFilter.ids). "
             "Используй для пакетного получения карточек по известным UUID."
         ),
     )
-    exclude_ids: Optional[List[str]] = Field(
+    exclude_ids: list[str] | None = Field(
         None,
         description="Список UUID сотрудников для исключения из результатов.",
     )
@@ -180,7 +180,7 @@ class EmployeeSearchInput(BaseModel):
         mode="before",
     )
     @classmethod
-    def strip_and_none(cls, v: Optional[str]) -> Optional[str]:
+    def strip_and_none(cls, v: str | None) -> str | None:
         """Strips whitespace; converts empty string to None."""
         if v is None:
             return None
@@ -188,7 +188,7 @@ class EmployeeSearchInput(BaseModel):
         return stripped if stripped else None
 
     @model_validator(mode="after")
-    def at_least_one_param(self) -> "EmployeeSearchInput":
+    def at_least_one_param(self) -> EmployeeSearchInput:
         """Ensures at least one meaningful search parameter is provided.
 
         Raises:
@@ -222,19 +222,19 @@ class EmployeeSearchInput(BaseModel):
 @tool("employee_search_tool", args_schema=EmployeeSearchInput)
 async def employee_search_tool(
     token: str,
-    employee_id: Optional[str] = None,
-    last_name: Optional[str] = None,
-    first_name: Optional[str] = None,
-    middle_name: Optional[str] = None,
-    full_post_name: Optional[str] = None,
-    active_only: Optional[bool] = None,
-    fired_only: Optional[bool] = None,
-    department_names: Optional[List[str]] = None,
-    department_ids: Optional[List[str]] = None,
-    child_departments: Optional[bool] = None,
-    employee_ids: Optional[List[str]] = None,
-    exclude_ids: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    employee_id: str | None = None,
+    last_name: str | None = None,
+    first_name: str | None = None,
+    middle_name: str | None = None,
+    full_post_name: str | None = None,
+    active_only: bool | None = None,
+    fired_only: bool | None = None,
+    department_names: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    child_departments: bool | None = None,
+    employee_ids: list[str] | None = None,
+    exclude_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """
     Searches for employees in the EDMS directory.
 
@@ -262,7 +262,7 @@ async def employee_search_tool(
         return await _get_employee_card(token, employee_id, nlp)
 
     # ── Сборка EmployeeFilter ─────────────────────────────────────────────────
-    employee_filter: Dict[str, Any] = {"includes": _DEFAULT_INCLUDES}
+    employee_filter: dict[str, Any] = {"includes": _DEFAULT_INCLUDES}
 
     # ФИО
     if last_name:
@@ -284,7 +284,7 @@ async def employee_search_tool(
 
     # Структура: резолвим названия → UUID, затем мержим с явными UUID
     # departmentId в Java: UUID[] — ТОЛЬКО UUID, никаких строк-названий
-    resolved_dept_ids: List[str] = list(department_ids or [])
+    resolved_dept_ids: list[str] = list(department_ids or [])
 
     if department_names:
         newly_resolved, unresolved = await _resolve_department_names(
@@ -394,8 +394,8 @@ async def employee_search_tool(
 
 async def _resolve_department_names(
     token: str,
-    names: List[str],
-) -> Tuple[List[str], List[str]]:
+    names: list[str],
+) -> tuple[list[str], list[str]]:
     """Resolves department names to UUID strings via DepartmentClient.
 
     Для каждого названия отдела ищет UUID через GET api/department.
@@ -411,8 +411,8 @@ async def _resolve_department_names(
     # Импортируем здесь чтобы избежать циклических зависимостей
     from edms_ai_assistant.clients.department_client import DepartmentClient
 
-    resolved: List[str] = []
-    unresolved: List[str] = []
+    resolved: list[str] = []
+    unresolved: list[str] = []
 
     async with DepartmentClient() as dept_client:
         for name in names:
@@ -443,7 +443,7 @@ async def _get_employee_card(
     token: str,
     employee_id: str,
     nlp: EDMSNaturalLanguageService,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fetches and formats a single employee card by UUID.
 
     Args:
@@ -484,9 +484,9 @@ async def _get_employee_card(
 
 
 def _serialize_employee(
-    raw: Dict[str, Any],
+    raw: dict[str, Any],
     nlp: EDMSNaturalLanguageService,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Converts raw EmployeeDto dict to full formatted card via NLP service.
 
     nlp.process_employee_info требует EmployeeDto (Pydantic), не dict.
@@ -510,7 +510,7 @@ def _serialize_employee(
         return _serialize_employee_brief(raw)
 
 
-def _serialize_employee_brief(raw: Dict[str, Any]) -> Dict[str, Any]:
+def _serialize_employee_brief(raw: dict[str, Any]) -> dict[str, Any]:
     """Converts raw EmployeeDto dict to compact list-item representation.
 
     Используется когда найдено несколько сотрудников (список для выбора).
@@ -522,8 +522,8 @@ def _serialize_employee_brief(raw: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Compact dict: id, full_name, post, department, active, fired.
     """
-    post: Dict[str, Any] = raw.get("post") or {}
-    department: Dict[str, Any] = raw.get("department") or {}
+    post: dict[str, Any] = raw.get("post") or {}
+    department: dict[str, Any] = raw.get("department") or {}
 
     parts = [
         raw.get("lastName") or "",

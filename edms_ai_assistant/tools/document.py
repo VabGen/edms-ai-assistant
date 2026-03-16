@@ -14,7 +14,7 @@ EDMS AI Assistant — doc_get_details tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -52,7 +52,7 @@ def _clean(d: Any) -> Any:
 
 
 @tool("doc_get_details", args_schema=DocDetailsInput)
-async def doc_get_details(document_id: str, token: str) -> Dict[str, Any]:
+async def doc_get_details(document_id: str, token: str) -> dict[str, Any]:
     """Анализирует документ СЭД и все его вложенные сущности.
 
     Возвращает полный семантически структурированный контекст:

@@ -2,7 +2,7 @@
 import json
 import logging
 from abc import ABC
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import httpx
 
@@ -24,8 +24,8 @@ class EdmsHttpClient(EdmsBaseClient):
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
-        timeout: Optional[int] = None,
+        base_url: str | None = None,
+        timeout: int | None = None,
     ):
         resolved_base_url = base_url or settings.CHANCELLOR_NEXT_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
@@ -66,7 +66,7 @@ class EdmsHttpClient(EdmsBaseClient):
         is_json_response: bool = True,
         long_timeout: bool = False,
         **kwargs,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]], bytes, None]:
+    ) -> dict[str, Any] | list[dict[str, Any]] | bytes | None:
         """
         Выполняет HTTP-запрос с авторизацией, обработкой ошибок и повторными попытками.
         Возвращает десериализованный JSON или сырые байты.

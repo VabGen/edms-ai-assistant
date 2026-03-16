@@ -4,7 +4,6 @@ import logging
 import re
 import subprocess
 import sys
-from typing import List, Tuple
 
 import httpx
 
@@ -95,9 +94,9 @@ def run_datamodel_codegen(input_file: str, output_file: str) -> bool:
         return False
 
 
-RegexPatch = Tuple[str, str]
+RegexPatch = tuple[str, str]
 
-POST_GENERATION_PATCHES: List[RegexPatch] = [
+POST_GENERATION_PATCHES: list[RegexPatch] = [
     (r",\s*unique_items=True(?=\s*(?:,|\)))", ""),
     (r"unique_items=True\s*,?", ""),
     (r",\s*,", ","),
@@ -114,7 +113,7 @@ POST_GENERATION_PATCHES: List[RegexPatch] = [
 ]
 
 
-def apply_regex_patches(content: str, patches: List[RegexPatch]) -> str:
+def apply_regex_patches(content: str, patches: list[RegexPatch]) -> str:
     """Применяет список регулярных выражений к содержимому файла."""
     for pattern, replacement in patches:
         if isinstance(replacement, str):
@@ -129,7 +128,7 @@ def fix_generated_file(file_path: str):
     Применяет необходимые исправления к сгенерированному файлу Pydantic-моделей.
     """
     logger.info(f"Applying fixes to {file_path}...")
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         content = f.read()
 
     pydantic_import_pattern = r"from pydantic import [^\n]+\n"

@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from enum import StrEnum
-from typing import Any, Dict, Optional
+from typing import Any
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _MAX_TEXT_LENGTH: int = 12_000
 _HEAD_FRACTION: float = 0.67
 
-_SUMMARY_TYPE_ALIASES: Dict[str, str] = {
+_SUMMARY_TYPE_ALIASES: dict[str, str] = {
     # extractive
     "факты": "extractive",
     "ключевые факты": "extractive",
@@ -76,7 +76,7 @@ class SummarizeInput(BaseModel):
         min_length=1,
         max_length=50_000,
     )
-    summary_type: Optional[SummarizeType] = Field(
+    summary_type: SummarizeType | None = Field(
         None,
         description=(
             "Формат суммаризации: "
@@ -113,8 +113,8 @@ class SummarizeInput(BaseModel):
 @tool("doc_summarize_text", args_schema=SummarizeInput)
 async def doc_summarize_text(
     text: str,
-    summary_type: Optional[SummarizeType] = None,
-) -> Dict[str, Any]:
+    summary_type: SummarizeType | None = None,
+) -> dict[str, Any]:
     """Perform intelligent summarisation of document text via LLM.
 
     Human-in-the-Loop contract:
@@ -221,7 +221,7 @@ def _unwrap_json_envelope(text: str) -> str:
     if not (clean.startswith("{") and clean.endswith("}")):
         return clean
     try:
-        data: Dict[str, Any] = json.loads(clean)
+        data: dict[str, Any] = json.loads(clean)
         for key in ("content", "text", "document_info", "text_preview"):
             extracted = data.get(key)
             if extracted and isinstance(extracted, str) and len(extracted) > 10:
@@ -236,7 +236,7 @@ def _unwrap_json_envelope(text: str) -> str:
     return clean
 
 
-def _heuristic_recommendation(text: str) -> Dict[str, str]:
+def _heuristic_recommendation(text: str) -> dict[str, str]:
     """Heuristically recommend a summarisation format for the given text.
 
     Rules (applied in priority order):
@@ -282,7 +282,7 @@ def _heuristic_recommendation(text: str) -> Dict[str, str]:
     }
 
 
-def _build_requires_choice_response(text: str) -> Dict[str, Any]:
+def _build_requires_choice_response(text: str) -> dict[str, Any]:
     """Build a requires_choice response with format options and a recommendation.
 
     Always called when summary_type is None. The response is structured
@@ -364,7 +364,7 @@ def _build_llm_prompt(summary_type: SummarizeType) -> ChatPromptTemplate:
     Returns:
         Ready-to-invoke ChatPromptTemplate.
     """
-    instructions: Dict[SummarizeType, str] = {
+    instructions: dict[SummarizeType, str] = {
         SummarizeType.EXTRACTIVE: (
             "Выдели ключевые факты: конкретные даты, суммы, имена, сроки и обязательства. "
             "Оформи СТРОГО нумерованным списком. "
@@ -401,7 +401,7 @@ def _build_llm_prompt(summary_type: SummarizeType) -> ChatPromptTemplate:
 async def _execute_summarization(
     text: str,
     summary_type: SummarizeType,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute the LLM summarisation pipeline.
 
     Args:

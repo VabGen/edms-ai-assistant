@@ -1,7 +1,7 @@
 # edms_ai_assistant/clients/department_client.py
 import logging
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from .base_client import EdmsBaseClient, EdmsHttpClient
@@ -14,13 +14,13 @@ class BaseDepartmentClient(EdmsBaseClient):
     @abstractmethod
     async def find_by_name(
         self, token: str, department_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         raise NotImplementedError
 
     @abstractmethod
     async def get_employees_by_department_id(
         self, token: str, department_id: UUID
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -28,7 +28,7 @@ class DepartmentClient(BaseDepartmentClient, EdmsHttpClient):
 
     async def find_by_name(
         self, token: str, department_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         endpoint = "api/department/fts-name"
         params = {"fts": department_name}
 
@@ -46,7 +46,7 @@ class DepartmentClient(BaseDepartmentClient, EdmsHttpClient):
 
     async def get_employees_by_department_id(
         self, token: str, department_id: UUID
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         endpoint = f"api/department/{department_id}/employees/all"
 
         try:
