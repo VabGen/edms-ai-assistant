@@ -9,6 +9,7 @@ EDMS AI Assistant — Document Resolution Tool.
 Резолюция (resolution) — это официальное решение/поручение руководителя,
 внесённое непосредственно в карточку документа.
 """
+
 from __future__ import annotations
 
 import logging

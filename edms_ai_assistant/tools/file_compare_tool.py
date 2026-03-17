@@ -4,6 +4,7 @@ EDMS AI Assistant — File Comparison Tool.
 
 Сравнивает локально загруженный файл с вложением документа EDMS.
 """
+
 from __future__ import annotations
 
 import contextlib

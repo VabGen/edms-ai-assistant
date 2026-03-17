@@ -6,6 +6,7 @@ EDMS AI Assistant — Document Search Tool.
 Поиск документов в EDMS по текстовому запросу, номеру,
 дате регистрации и категории документа.
 """
+
 from __future__ import annotations
 
 import logging

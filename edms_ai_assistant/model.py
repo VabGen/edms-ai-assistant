@@ -2,6 +2,7 @@
 """
 EDMS AI Assistant — Public data contracts (Pydantic v2).
 """
+
 from __future__ import annotations
 
 from typing import Annotated, List, Literal, Optional
@@ -10,7 +11,6 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import TypedDict
-
 
 # ─────────────────────────────────────────────────────────────
 # LangGraph state

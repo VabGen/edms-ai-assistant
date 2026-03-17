@@ -4,6 +4,7 @@ EDMS AI Assistant — Attachment Fetch Tool.
 
 Извлекает содержимое вложений из документов EDMS.
 """
+
 from __future__ import annotations
 
 import logging

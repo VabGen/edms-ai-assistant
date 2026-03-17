@@ -26,15 +26,15 @@ class ReferenceClient(EdmsHttpClient):
 
     # Маппинг endpoint → приоритет полей имени в GET /{id} ответе
     _CANONICAL_NAME_FIELDS: Dict[str, tuple] = {
-        "country":         ("fullName", "name", "shortName"),
-        "region":          ("nameRegion", "name", "shortName"),
-        "district":        ("nameDistrict", "name", "shortName"),
-        "city":            ("nameCity", "name", "shortName"),
-        "citizen-type":    ("name", "shortName"),
-        "correspondent":   ("name", "fullName", "shortName"),
+        "country": ("fullName", "name", "shortName"),
+        "region": ("nameRegion", "name", "shortName"),
+        "district": ("nameDistrict", "name", "shortName"),
+        "city": ("nameCity", "name", "shortName"),
+        "citizen-type": ("name", "shortName"),
+        "correspondent": ("name", "fullName", "shortName"),
         "delivery-method": ("name", "shortName"),
-        "department":      ("name", "fullName", "shortName"),
-        "group":           ("name", "shortName"),
+        "department": ("name", "fullName", "shortName"),
+        "group": ("name", "shortName"),
     }
 
     # ─────────────────────────────────────────────────────────────────
@@ -66,7 +66,9 @@ class ReferenceClient(EdmsHttpClient):
             {"id": str, "name": str} из справочника, или None.
         """
         if not search_name or not search_name.strip():
-            logger.debug("[REFERENCE-CLIENT] Пропуск поиска %s: пустое значение", entity_label)
+            logger.debug(
+                "[REFERENCE-CLIENT] Пропуск поиска %s: пустое значение", entity_label
+            )
             return None
 
         search_query = search_name.strip()
@@ -83,12 +85,19 @@ class ReferenceClient(EdmsHttpClient):
         except Exception as exc:
             logger.error(
                 "[REFERENCE-CLIENT] FTS ошибка %s '%s': %s",
-                entity_label, search_query, exc, exc_info=True,
+                entity_label,
+                search_query,
+                exc,
+                exc_info=True,
             )
             return None
 
         if not fts_result:
-            logger.warning("[REFERENCE-CLIENT] %s не найден по FTS: '%s'", entity_label, search_query)
+            logger.warning(
+                "[REFERENCE-CLIENT] %s не найден по FTS: '%s'",
+                entity_label,
+                search_query,
+            )
             return None
 
         fts_data = (
@@ -97,12 +106,20 @@ class ReferenceClient(EdmsHttpClient):
             else (fts_result if isinstance(fts_result, dict) else None)
         )
         if not fts_data or not isinstance(fts_data, dict):
-            logger.warning("[REFERENCE-CLIENT] Пустой FTS-ответ для %s: '%s'", entity_label, search_query)
+            logger.warning(
+                "[REFERENCE-CLIENT] Пустой FTS-ответ для %s: '%s'",
+                entity_label,
+                search_query,
+            )
             return None
 
         entity_id = str(fts_data.get("id", "")).strip()
         if not entity_id or entity_id == "None":
-            logger.warning("[REFERENCE-CLIENT] FTS не вернул id для %s: '%s'", entity_label, search_query)
+            logger.warning(
+                "[REFERENCE-CLIENT] FTS не вернул id для %s: '%s'",
+                entity_label,
+                search_query,
+            )
             return None
 
         logger.debug("[REFERENCE-CLIENT] %s FTS → id=%s", entity_label, entity_id)
@@ -110,12 +127,16 @@ class ReferenceClient(EdmsHttpClient):
         # ── Шаг 2: GET /{id} → канонический name из справочника ─────────────
         try:
             record = await self._make_request(
-                "GET", f"api/{endpoint}/{entity_id}", token=token,
+                "GET",
+                f"api/{endpoint}/{entity_id}",
+                token=token,
             )
         except Exception as exc:
             logger.warning(
                 "[REFERENCE-CLIENT] GET /%s/%s ошибка: %s — используем FTS name",
-                endpoint, entity_id, exc,
+                endpoint,
+                entity_id,
+                exc,
             )
             fts_name = self._extract_canonical_name(fts_data, endpoint) or search_query
             return {"id": entity_id, "name": fts_name}
@@ -123,7 +144,8 @@ class ReferenceClient(EdmsHttpClient):
         if not record or not isinstance(record, dict):
             logger.warning(
                 "[REFERENCE-CLIENT] GET /%s/%s вернул пустой ответ — используем FTS name",
-                endpoint, entity_id,
+                endpoint,
+                entity_id,
             )
             fts_name = self._extract_canonical_name(fts_data, endpoint) or search_query
             return {"id": entity_id, "name": fts_name}
@@ -131,7 +153,10 @@ class ReferenceClient(EdmsHttpClient):
         canonical_name = self._extract_canonical_name(record, endpoint) or search_query
         logger.info(
             "[REFERENCE-CLIENT] %s: '%s' → id=%s, name='%s' (canonical)",
-            entity_label, search_query, entity_id, canonical_name,
+            entity_label,
+            search_query,
+            entity_id,
+            canonical_name,
         )
         return {"id": entity_id, "name": canonical_name}
 
@@ -169,19 +194,27 @@ class ReferenceClient(EdmsHttpClient):
     # Гео-справочники: {id, canonical name}
     # ─────────────────────────────────────────────────────────────────
 
-    async def find_country_with_name(self, token: str, name: str) -> Optional[Dict[str, str]]:
+    async def find_country_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
         """Two-step country lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "country", name, "Страна")
 
-    async def find_region_with_name(self, token: str, name: str) -> Optional[Dict[str, str]]:
+    async def find_region_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
         """Two-step region lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "region", name, "Регион")
 
-    async def find_district_with_name(self, token: str, name: str) -> Optional[Dict[str, str]]:
+    async def find_district_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
         """Two-step district lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "district", name, "Район")
 
-    async def find_city_with_name(self, token: str, name: str) -> Optional[Dict[str, str]]:
+    async def find_city_with_name(
+        self, token: str, name: str
+    ) -> Optional[Dict[str, str]]:
         """Two-step city lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "city", name, "Город")
 
@@ -230,7 +263,10 @@ class ReferenceClient(EdmsHttpClient):
         # ── Шаг 1: fts-name → id города ─────────────────────────────────────
         try:
             fts_result = await self._make_request(
-                "GET", "api/city/fts-name", token=token, params={"fts": query},
+                "GET",
+                "api/city/fts-name",
+                token=token,
+                params={"fts": query},
             )
         except Exception as exc:
             logger.error("[REFERENCE-CLIENT] City FTS error: %s", exc, exc_info=True)
@@ -251,7 +287,8 @@ class ReferenceClient(EdmsHttpClient):
         # ── Шаг 2: GET /city/{id}?includes=DISTRICT_WITH_REGION ──────────────
         try:
             city_dto = await self._make_request(
-                "GET", f"api/city/{city_id}",
+                "GET",
+                f"api/city/{city_id}",
                 token=token,
                 params={"includes": "DISTRICT_WITH_REGION"},
             )
@@ -264,22 +301,22 @@ class ReferenceClient(EdmsHttpClient):
 
         # ── Извлекаем поля из вложенной структуры ────────────────────────────
         result: Dict[str, Any] = {
-            "id":   city_id,
+            "id": city_id,
             "name": city_dto.get("nameCity") or query,
         }
 
-        district     = city_dto.get("district")
-        district_id  = str(city_dto.get("districtId", "")).strip() or None
+        district = city_dto.get("district")
+        district_id = str(city_dto.get("districtId", "")).strip() or None
 
         if district and isinstance(district, dict):
-            result["districtId"]   = district.get("id") or district_id
+            result["districtId"] = district.get("id") or district_id
             result["districtName"] = district.get("nameDistrict") or None
 
-            region    = district.get("region")
+            region = district.get("region")
             region_id = str(district.get("regionId", "")).strip() or None
 
             if region and isinstance(region, dict):
-                result["regionId"]   = region.get("id") or region_id
+                result["regionId"] = region.get("id") or region_id
                 result["regionName"] = region.get("nameRegion") or None
             elif region_id:
                 result["regionId"] = region_id
@@ -325,10 +362,14 @@ class ReferenceClient(EdmsHttpClient):
 
     async def find_delivery_method(self, token: str, name: str) -> Optional[str]:
         """Поиск способа доставки с fallback на 'Курьер'."""
-        result = await self._find_entity_id(token, "delivery-method", name, "Способ доставки")
+        result = await self._find_entity_id(
+            token, "delivery-method", name, "Способ доставки"
+        )
         if not result and name != "Курьер":
             logger.info("[REFERENCE-CLIENT] Fallback: используем 'Курьер'")
-            return await self._find_entity_id(token, "delivery-method", "Курьер", "Способ доставки")
+            return await self._find_entity_id(
+                token, "delivery-method", "Курьер", "Способ доставки"
+            )
         return result
 
     async def find_department(self, token: str, name: str) -> Optional[str]:
@@ -347,21 +388,27 @@ class ReferenceClient(EdmsHttpClient):
         """Получить список родительских тем."""
         try:
             result = await self._make_request(
-                "GET", "api/subject/parents", token=token,
+                "GET",
+                "api/subject/parents",
+                token=token,
                 params={"listAttribute": "true"},
             )
             count = len(result) if isinstance(result, list) else 0
             logger.info("[REFERENCE-CLIENT] Загружено родительских тем: %d", count)
             return result if isinstance(result, list) else []
         except Exception as exc:
-            logger.error("[REFERENCE-CLIENT] Ошибка получения родительских тем: %s", exc)
+            logger.error(
+                "[REFERENCE-CLIENT] Ошибка получения родительских тем: %s", exc
+            )
             return []
 
     async def get_child_subjects(self, token: str, parent_id: str) -> List[Dict]:
         """Получить дочерние темы по parent_id."""
         try:
             result = await self._make_request(
-                "GET", f"api/subject/parent/{parent_id}", token=token,
+                "GET",
+                f"api/subject/parent/{parent_id}",
+                token=token,
             )
             count = len(result) if isinstance(result, list) else 0
             logger.info("[REFERENCE-CLIENT] Дочерних тем для %s: %d", parent_id, count)
@@ -369,7 +416,8 @@ class ReferenceClient(EdmsHttpClient):
         except Exception as exc:
             logger.error(
                 "[REFERENCE-CLIENT] Ошибка получения дочерних тем для %s: %s",
-                parent_id, exc,
+                parent_id,
+                exc,
             )
             return []
 
@@ -398,23 +446,33 @@ class ReferenceClient(EdmsHttpClient):
             choice_text = response.content.strip()
             match = re.search(r"\d+", choice_text)
             if not match:
-                logger.warning("[REFERENCE-CLIENT] LLM не вернула номер: %s", choice_text)
+                logger.warning(
+                    "[REFERENCE-CLIENT] LLM не вернула номер: %s", choice_text
+                )
                 return None
 
             index = int(match.group(0)) - 1
             if not (0 <= index < len(parents)):
-                logger.warning("[REFERENCE-CLIENT] Неверный индекс родительской темы: %d", index)
+                logger.warning(
+                    "[REFERENCE-CLIENT] Неверный индекс родительской темы: %d", index
+                )
                 return None
 
             parent = parents[index]
             parent_id = str(parent["id"])
-            logger.info("[REFERENCE-CLIENT] Родительская тема: %s (ID: %s)", parent["name"], parent_id)
+            logger.info(
+                "[REFERENCE-CLIENT] Родительская тема: %s (ID: %s)",
+                parent["name"],
+                parent_id,
+            )
 
             children = await self.get_child_subjects(token, parent_id)
             if not children:
                 return parent_id
 
-            children_text = "\n".join(f"{i + 1}. {c['name']}" for i, c in enumerate(children))
+            children_text = "\n".join(
+                f"{i + 1}. {c['name']}" for i, c in enumerate(children)
+            )
             prompt2 = (
                 f"Выбери ОДНУ наиболее подходящую подтему.\n\n"
                 f"СПИСОК ПОДТЕМ:\n{children_text}\n\n"
@@ -426,19 +484,27 @@ class ReferenceClient(EdmsHttpClient):
             choice2_text = response2.content.strip()
             match2 = re.search(r"\d+", choice2_text)
             if not match2:
-                logger.warning("[REFERENCE-CLIENT] LLM не вернула номер подтемы: %s", choice2_text)
+                logger.warning(
+                    "[REFERENCE-CLIENT] LLM не вернула номер подтемы: %s", choice2_text
+                )
                 return parent_id
 
             child_index = int(match2.group(0)) - 1
             if not (0 <= child_index < len(children)):
-                logger.warning("[REFERENCE-CLIENT] Неверный индекс подтемы: %d", child_index)
+                logger.warning(
+                    "[REFERENCE-CLIENT] Неверный индекс подтемы: %d", child_index
+                )
                 return parent_id
 
             child = children[child_index]
             child_id = str(child["id"])
-            logger.info("[REFERENCE-CLIENT] Дочерняя тема: %s (ID: %s)", child["name"], child_id)
+            logger.info(
+                "[REFERENCE-CLIENT] Дочерняя тема: %s (ID: %s)", child["name"], child_id
+            )
             return child_id
 
         except Exception as exc:
-            logger.error("[REFERENCE-CLIENT] Ошибка выбора темы: %s", exc, exc_info=True)
+            logger.error(
+                "[REFERENCE-CLIENT] Ошибка выбора темы: %s", exc, exc_info=True
+            )
             return None

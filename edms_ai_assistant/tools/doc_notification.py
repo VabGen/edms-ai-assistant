@@ -10,6 +10,7 @@ EDMS AI Assistant — Notification & Reminder Tool.
   - DEADLINE   — предупреждение о приближающемся сроке поручения
   - CUSTOM     — произвольное сообщение по документу
 """
+
 from __future__ import annotations
 
 import logging

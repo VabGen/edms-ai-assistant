@@ -2,6 +2,7 @@
 """
 Production-ready configuration with validation, security, and environment separation.
 """
+
 import os
 from typing import Optional, List
 from pydantic import Field, field_validator, HttpUrl, SecretStr
@@ -80,10 +81,10 @@ class Settings(BaseSettings):
 
     # ── Database Configuration ───────────────────────────────────────────────
     POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: SecretStr = Field(default="change-me-in-production")
+    POSTGRES_PASSWORD: SecretStr = Field(default="password")
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
-    POSTGRES_DB: str = "postgres"
+    POSTGRES_DB: str = "ai_assistant"
 
     @property
     def CHANCELLOR_NEXT_BASE_URL(self) -> str:
@@ -93,7 +94,7 @@ class Settings(BaseSettings):
     @property
     def DATABASE_URL(self) -> str:
         return (
-            f"postgresql://{self.POSTGRES_USER}:"
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:"
             f"{self.POSTGRES_PASSWORD.get_secret_value()}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
@@ -157,9 +158,7 @@ class Settings(BaseSettings):
 
     # ── Telemetry & Monitoring ───────────────────────────────────────────────
     TELEMETRY_ENABLED: bool = False
-    TELEMETRY_ENDPOINT: Optional[str] = Field(
-        default=None
-    )  # ← ИСПРАВЛЕНО: Optional[str] вместо HttpUrl
+    TELEMETRY_ENDPOINT: Optional[str] = Field(default=None)
     HEALTH_CHECK_ENABLED: bool = True
 
     # ── Environment-specific defaults ────────────────────────────────────────
@@ -179,7 +178,6 @@ class Settings(BaseSettings):
         env = info.data.get("ENVIRONMENT", "development")
         return "DEBUG" if env == "development" else "INFO"
 
-    # ← ИСПРАВЛЕНО: Добавлен валидатор для TELEMETRY_ENDPOINT
     @field_validator("TELEMETRY_ENDPOINT", mode="before")
     @classmethod
     def validate_telemetry_endpoint(cls, v: Optional[str]) -> Optional[str]:
@@ -195,7 +193,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-# ── Convenience properties (for backward compatibility) ─────────────────────
+# ── Convenience properties ─────────────────────
 @property
 def LLM_ENDPOINT(self) -> str:
     return str(settings.LLM_GENERATIVE_URL)

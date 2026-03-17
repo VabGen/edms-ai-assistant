@@ -189,7 +189,10 @@ function createActionButton(row: HTMLElement): HTMLElement {
 
 // ─── File helpers ──────────────────────────────────────────────────────────────
 function getFileName(row: HTMLElement): string {
-    return row.querySelector('span.lead')?.textContent?.trim() ?? 'Документ'
+    const lead = row.querySelector('span.lead');
+    if (!lead) return 'Документ';
+
+    return lead.childNodes[0]?.textContent?.trim() || lead.textContent?.trim() || 'Документ';
 }
 
 function getFileId(row: HTMLElement): string {
@@ -216,8 +219,15 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
         return
     }
 
-    const fileId = getFileId(row)
-    const docId = extractDocIdFromUrl()
+    // const fileId = getFileId(row)
+    // const docId = extractDocIdFromUrl()
+
+    let fileId = getFileId(row);
+    const effectiveFileId = (fileId && fileId.length > 10) ? fileId : fileName;
+
+    btn.innerHTML = spinnerSVG();
+
+    const docId = extractDocIdFromUrl();
 
     btn.innerHTML = spinnerSVG()
     btn.style.color = '#6366f1'
@@ -228,7 +238,7 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
             message: fileName,
             user_token: token,
             context_ui_id: docId,
-            file_path: fileId,
+            file_path: effectiveFileId,
             human_choice: summaryType,
         },
     }, res => {

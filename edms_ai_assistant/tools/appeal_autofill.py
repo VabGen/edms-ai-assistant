@@ -87,8 +87,17 @@ class ValueSanitizer:
     """Утилиты для очистки и валидации данных."""
 
     EMPTY_PLACEHOLDERS = {
-        "none", "null", "nil", "n/a", "na", "unknown",
-        "not specified", "no", "нет", "неизвестно", "н/д",
+        "none",
+        "null",
+        "nil",
+        "n/a",
+        "na",
+        "unknown",
+        "not specified",
+        "no",
+        "нет",
+        "неизвестно",
+        "н/д",
     }
 
     @classmethod
@@ -106,8 +115,11 @@ class ValueSanitizer:
         if cls.is_empty(value):
             return None
         cleaned = (
-            value.replace("\u201c", '"').replace("\u201d", '"')
-            .replace("\u201e", '"').replace("\u00ab", '"').replace("\u00bb", '"')
+            value.replace("\u201c", '"')
+            .replace("\u201d", '"')
+            .replace("\u201e", '"')
+            .replace("\u00ab", '"')
+            .replace("\u00bb", '"')
             .strip()
         )
         return cleaned if cleaned else None
@@ -184,7 +196,8 @@ class AttachmentSelector:
         if not target:
             target = next(
                 (
-                    a for a in document.attachmentDocument
+                    a
+                    for a in document.attachmentDocument
                     if a.name.lower().endswith(cls.SUPPORTED_EXTENSIONS)
                 ),
                 document.attachmentDocument[0],
@@ -238,8 +251,8 @@ class GeographyResolver:
         """
         geo_data: Dict[str, Any] = {}
 
-        city_name     = self._get_field(document, fields, "cityName")
-        region_name   = self._get_field(document, fields, "regionName")
+        city_name = self._get_field(document, fields, "cityName")
+        region_name = self._get_field(document, fields, "regionName")
         district_name = self._get_field(document, fields, "districtName")
 
         # ── 1. Страна ─────────────────────────────────────────────────────────
@@ -247,11 +260,15 @@ class GeographyResolver:
 
         # ── 2. Область — только если явно указана ────────────────────────────
         if region_name:
-            await self._lookup("region", region_name, "regionId", "regionName", geo_data)
+            await self._lookup(
+                "region", region_name, "regionId", "regionName", geo_data
+            )
 
         # ── 3. Район — только если явно указан ───────────────────────────────
         if district_name:
-            await self._lookup("district", district_name, "districtId", "districtName", geo_data)
+            await self._lookup(
+                "district", district_name, "districtId", "districtName", geo_data
+            )
 
         # ── 4. Город ─────────────────────────────────────────────────────────
         await self._resolve_city(city_name, document, geo_data)
@@ -305,7 +322,9 @@ class GeographyResolver:
 
         if country_name:
             try:
-                data = await self.ref_client.find_country_with_name(self.token, country_name)
+                data = await self.ref_client.find_country_with_name(
+                    self.token, country_name
+                )
                 if data:
                     geo_data["countryAppealId"] = data["id"]
                     geo_data["countryAppealName"] = data["name"]
@@ -343,7 +362,9 @@ class GeographyResolver:
             if data:
                 geo_data[id_key] = data["id"]
                 geo_data[name_key] = data["name"]
-                logger.info("%s: %s → %s (ID: %s)", endpoint, name, data["name"], data["id"])
+                logger.info(
+                    "%s: %s → %s (ID: %s)", endpoint, name, data["name"], data["id"]
+                )
             else:
                 logger.warning("%s not found in reference: %s", endpoint, name)
         except Exception as exc:
@@ -376,13 +397,17 @@ class GeographyResolver:
         d = document.documentAppeal
         if city_name:
             try:
-                data = await self.ref_client.find_city_with_hierarchy(self.token, city_name)
+                data = await self.ref_client.find_city_with_hierarchy(
+                    self.token, city_name
+                )
                 if data:
-                    geo_data["cityId"]   = data["id"]
+                    geo_data["cityId"] = data["id"]
                     geo_data["cityName"] = data["name"]
                     logger.info(
                         "City resolved: %s → '%s' (ID: %s)",
-                        city_name, data["name"], data["id"],
+                        city_name,
+                        data["name"],
+                        data["id"],
                     )
 
                     if "districtId" not in geo_data and data.get("districtId"):
@@ -397,9 +422,7 @@ class GeographyResolver:
                         )
                     if "regionId" not in geo_data and data.get("regionId"):
                         geo_data["regionId"] = data["regionId"]
-                        logger.info(
-                            "Region from hierarchy: id=%s", data["regionId"]
-                        )
+                        logger.info("Region from hierarchy: id=%s", data["regionId"])
                     if "regionName" not in geo_data and data.get("regionName"):
                         geo_data["regionName"] = data["regionName"]
                         logger.info(
@@ -408,7 +431,9 @@ class GeographyResolver:
                 else:
                     logger.warning("City not found in reference: '%s'", city_name)
             except Exception as exc:
-                logger.error("City resolution error for '%s': %s", city_name, exc, exc_info=True)
+                logger.error(
+                    "City resolution error for '%s': %s", city_name, exc, exc_info=True
+                )
         elif d and d.cityId:
             geo_data["cityId"] = str(d.cityId)
             logger.debug("City fallback: DB cityId=%s", d.cityId)
@@ -446,10 +471,14 @@ class AppealFieldsBuilder:
         payload: Dict[str, Any] = {}
 
         GEO_KEY_ORDER = [
-            "countryAppealId", "countryAppealName",
-            "regionId",        "regionName",
-            "districtId",      "districtName",
-            "cityId",          "cityName",
+            "countryAppealId",
+            "countryAppealName",
+            "regionId",
+            "regionName",
+            "districtId",
+            "districtName",
+            "cityId",
+            "cityName",
         ]
         for key in GEO_KEY_ORDER:
             if key in geo_data:
@@ -466,20 +495,38 @@ class AppealFieldsBuilder:
 
     def _create_empty_appeal(self) -> Any:
         return type(
-            "EmptyDocumentAppeal", (),
+            "EmptyDocumentAppeal",
+            (),
             {
-                "fioApplicant": None, "countryAppealId": None,
-                "countryAppealName": None, "regionId": None, "regionName": None,
-                "districtId": None, "districtName": None, "cityId": None,
-                "cityName": None, "correspondentAppealId": None,
-                "correspondentAppeal": None, "citizenTypeId": None,
-                "declarantType": None, "collective": None, "anonymous": None,
-                "reasonably": None, "receiptDate": None,
-                "dateDocCorrespondentOrg": None, "organizationName": None,
-                "fullAddress": None, "phone": None, "email": None,
-                "index": None, "signed": None, "correspondentOrgNumber": None,
-                "indexDateCoverLetter": None, "reviewProgress": None,
-                "subjectId": None, "solutionResultId": None,
+                "fioApplicant": None,
+                "countryAppealId": None,
+                "countryAppealName": None,
+                "regionId": None,
+                "regionName": None,
+                "districtId": None,
+                "districtName": None,
+                "cityId": None,
+                "cityName": None,
+                "correspondentAppealId": None,
+                "correspondentAppeal": None,
+                "citizenTypeId": None,
+                "declarantType": None,
+                "collective": None,
+                "anonymous": None,
+                "reasonably": None,
+                "receiptDate": None,
+                "dateDocCorrespondentOrg": None,
+                "organizationName": None,
+                "fullAddress": None,
+                "phone": None,
+                "email": None,
+                "index": None,
+                "signed": None,
+                "correspondentOrgNumber": None,
+                "indexDateCoverLetter": None,
+                "reviewProgress": None,
+                "subjectId": None,
+                "solutionResultId": None,
                 "nomenclatureAffairId": None,
             },
         )()
@@ -517,7 +564,9 @@ class AppealFieldsBuilder:
         if not ValueSanitizer.is_empty(d.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fioApplicant)
         elif not ValueSanitizer.is_empty(fields.fioApplicant):
-            payload["fioApplicant"] = ValueSanitizer.sanitize_string(fields.fioApplicant)
+            payload["fioApplicant"] = ValueSanitizer.sanitize_string(
+                fields.fioApplicant
+            )
 
         if d.dateDocCorrespondentOrg:
             payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(
@@ -594,22 +643,27 @@ class AppealFieldsBuilder:
 
     def _add_common_fields(self, d: Any, fields: Any, payload: Dict) -> None:
         payload["collective"] = (
-            True if fields.collective is True
+            True
+            if fields.collective is True
             else (d.collective if d.collective is not None else fields.collective)
         )
         payload["anonymous"] = (
-            True if fields.anonymous is True
+            True
+            if fields.anonymous is True
             else (d.anonymous if d.anonymous is not None else fields.anonymous)
         )
         payload["reasonably"] = (
-            True if fields.reasonably is True
+            True
+            if fields.reasonably is True
             else (d.reasonably if d.reasonably is not None else fields.reasonably)
         )
         payload["receiptDate"] = ValueSanitizer.fix_datetime_format(
             d.receiptDate if d.receiptDate else fields.receiptDate
         )
         payload["fullAddress"] = ValueSanitizer.sanitize_string(
-            d.fullAddress if not ValueSanitizer.is_empty(d.fullAddress) else fields.fullAddress
+            d.fullAddress
+            if not ValueSanitizer.is_empty(d.fullAddress)
+            else fields.fullAddress
         )
         payload["phone"] = ValueSanitizer.sanitize_string(
             d.phone if not ValueSanitizer.is_empty(d.phone) else fields.phone
@@ -728,7 +782,9 @@ class AppealAutofillOrchestrator:
         self, document: DocumentDto, fields: Any, extracted_text: str
     ) -> None:
         async with DocumentClient() as doc_client, ReferenceClient() as ref_client:
-            await self._execute_main_fields_update(doc_client, ref_client, document, fields)
+            await self._execute_main_fields_update(
+                doc_client, ref_client, document, fields
+            )
             await self._execute_appeal_fields_update(
                 doc_client, ref_client, document, fields, extracted_text
             )
@@ -766,8 +822,11 @@ class AppealAutofillOrchestrator:
         main_payload = {k: v for k, v in main_payload.items() if v is not None}
 
         await DocumentOperationExecutor.execute(
-            doc_client, self.token, self.document_id,
-            "DOCUMENT_MAIN_FIELDS_UPDATE", main_payload,
+            doc_client,
+            self.token,
+            self.document_id,
+            "DOCUMENT_MAIN_FIELDS_UPDATE",
+            main_payload,
         )
 
     async def _execute_appeal_fields_update(
@@ -788,8 +847,11 @@ class AppealAutofillOrchestrator:
         self.warnings.extend(fields_builder.warnings)
 
         await DocumentOperationExecutor.execute(
-            doc_client, self.token, self.document_id,
-            "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE", appeal_payload,
+            doc_client,
+            self.token,
+            self.document_id,
+            "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE",
+            appeal_payload,
         )
 
 

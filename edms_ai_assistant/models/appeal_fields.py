@@ -2,6 +2,7 @@
 """
 Модели данных для автоматического заполнения карточек обращений граждан (APPEAL).
 """
+
 import re
 import logging
 from datetime import datetime

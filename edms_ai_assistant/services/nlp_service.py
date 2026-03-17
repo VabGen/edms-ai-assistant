@@ -526,7 +526,9 @@ class QueryRefiner:
             "|".join(re.escape(jargon) for jargon, _ in sorted_pairs),
             flags=re.IGNORECASE,
         )
-        canonical_map = {jargon.lower(): canonical for jargon, canonical in sorted_pairs}
+        canonical_map = {
+            jargon.lower(): canonical for jargon, canonical in sorted_pairs
+        }
 
         def _replace(m: re.Match) -> str:
             return canonical_map.get(m.group(0).lower(), m.group(0))
@@ -585,13 +587,17 @@ class QueryRefiner:
             if "persons" in entities:
                 hints.append(f"исполнитель: {entities['persons'][0].value}")
             if "dates" in entities:
-                hints.append(f"дата: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
+                hints.append(
+                    f"дата: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}"
+                )
 
         elif intent == UserIntent.CREATE_TASK:
             if "dates" not in entities:
                 hints.append("срок: +7 дней (не указан)")
             else:
-                hints.append(f"срок: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
+                hints.append(
+                    f"срок: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}"
+                )
             if "persons" in entities:
                 hints.append(f"исполнитель: {entities['persons'][0].value}")
 
@@ -663,6 +669,7 @@ class SemanticDispatcher:
 
     Args: None (stateless helpers are instantiated internally).
     """
+
     INTENT_KEYWORDS: Dict[UserIntent, Dict[str, list[str]]] = {
         UserIntent.CREATE_INTRODUCTION: {
             "primary": [
@@ -899,8 +906,8 @@ class SemanticDispatcher:
         primary_score = sorted_intents[0][1]
 
         intent_kw = self.INTENT_KEYWORDS.get(primary_intent, {})
-        max_possible = (
-            len(intent_kw.get("primary", [])) * 2 + len(intent_kw.get("secondary", []))
+        max_possible = len(intent_kw.get("primary", [])) * 2 + len(
+            intent_kw.get("secondary", [])
         )
         confidence = min(primary_score / max(max_possible, 1), 1.0)
 
@@ -913,8 +920,7 @@ class SemanticDispatcher:
 
         if secondary_intents:
             has_connector = any(
-                connector in message_lower
-                for connector in self.COMPOSITE_CONNECTORS
+                connector in message_lower for connector in self.COMPOSITE_CONNECTORS
             )
             if has_connector and len(secondary_intents) >= 1:
                 # Убеждаемся что у нас реально два разных намерения с ненулевыми scores
