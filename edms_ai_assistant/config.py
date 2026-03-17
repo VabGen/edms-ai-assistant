@@ -80,22 +80,22 @@ class Settings(BaseSettings):
     EDMS_TIMEOUT: int = Field(default=120, ge=10, le=600)
     EDMS_API_VERSION: str = "v1"
 
-    # ── Database Configuration ───────────────────────────────────────────────
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: SecretStr = Field(default="change-me-in-production")
-    POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: int = 5432
-    POSTGRES_DB: str = "postgres"
-
     @property
     def CHANCELLOR_NEXT_BASE_URL(self) -> str:
         """Alias for backward compatibility with existing clients."""
         return str(self.EDMS_BASE_URL)
 
+    # ── Database Configuration ───────────────────────────────────────────────
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: SecretStr = Field(default="password")
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "ai_assistant"
+
     @property
     def DATABASE_URL(self) -> str:
         return (
-            f"postgresql://{self.POSTGRES_USER}:"
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:"
             f"{self.POSTGRES_PASSWORD.get_secret_value()}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )

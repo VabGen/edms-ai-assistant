@@ -189,7 +189,10 @@ function createActionButton(row: HTMLElement): HTMLElement {
 
 // ─── File helpers ──────────────────────────────────────────────────────────────
 function getFileName(row: HTMLElement): string {
-    return row.querySelector('span.lead')?.textContent?.trim() ?? 'Документ'
+    const lead = row.querySelector('span.lead');
+    if (!lead) return 'Документ';
+
+    return lead.childNodes[0]?.textContent?.trim() || lead.textContent?.trim() || 'Документ';
 }
 
 function getFileId(row: HTMLElement): string {
@@ -211,13 +214,16 @@ function getFileId(row: HTMLElement): string {
 function handleAction(summaryType: string, row: HTMLElement, fileName: string, btn: HTMLElement) {
     const token = getAuthToken()
     if (!token) {
-        // Toast instead of alert()
         toast.error('Войдите в систему и попробуйте снова.', 'Авторизация не найдена')
         return
     }
 
-    const fileId = getFileId(row)
-    const docId = extractDocIdFromUrl()
+    let fileId = getFileId(row);
+    const effectiveFileId = (fileId && fileId.length > 10) ? fileId : fileName;
+
+    btn.innerHTML = spinnerSVG();
+
+    const docId = extractDocIdFromUrl();
 
     btn.innerHTML = spinnerSVG()
     btn.style.color = '#6366f1'
@@ -228,7 +234,7 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
             message: fileName,
             user_token: token,
             context_ui_id: docId,
-            file_path: fileId,
+            file_path: effectiveFileId,
             human_choice: summaryType,
         },
     }, res => {
@@ -236,7 +242,6 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
         btn.style.color = '#94a3b8'
 
         if (res?.success) {
-            // Success toast
             toast.success(`Анализ файла "${fileName}" готов`, 'Добавлено вложение')
 
             window.postMessage({
@@ -247,7 +252,6 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
                 ],
             }, '*')
         } else {
-            // Error toast instead of alert()
             const errMsg = res?.error ?? 'Неизвестная ошибка'
             toast.error(humanizeActionError(errMsg), 'Ошибка анализа')
         }
