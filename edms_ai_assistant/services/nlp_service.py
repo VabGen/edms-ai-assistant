@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.utils.regex_utils import UUID_RE
@@ -68,7 +68,6 @@ class UserIntent(Enum):
     COMPOSITE = "composite"
     UNKNOWN = "unknown"
     FILE_ANALYSIS = "file_analysis"
-    RESOLUTION = "resolution"
     NOTIFICATION = "notification"
 
 
@@ -110,7 +109,7 @@ class Entity:
     value: Any
     raw_text: str
     confidence: float = 1.0
-    normalized_value: Optional[Any] = None
+    normalized_value: Any | None = None
 
 
 @dataclass
@@ -131,10 +130,10 @@ class UserQuery:
     original: str
     refined: str
     intent: UserIntent
-    secondary_intents: List[UserIntent] = field(default_factory=list)
+    secondary_intents: list[UserIntent] = field(default_factory=list)
     complexity: QueryComplexity = QueryComplexity.SIMPLE
-    entities: Dict[str, List[Entity]] = field(default_factory=dict)
-    keywords: Set[str] = field(default_factory=set)
+    entities: dict[str, list[Entity]] = field(default_factory=dict)
+    keywords: set[str] = field(default_factory=set)
     confidence: float = 1.0
 
 
@@ -151,10 +150,10 @@ class SemanticContext:
     """
 
     query: UserQuery
-    document: Optional[Any] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    suggestions: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    document: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    suggestions: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 class EntityExtractor:
@@ -195,8 +194,8 @@ class EntityExtractor:
     def extract_dates(
         self,
         text: str,
-        base_date: Optional[datetime] = None,
-    ) -> List[Entity]:
+        base_date: datetime | None = None,
+    ) -> list[Entity]:
         """Extract and normalise date expressions from text.
 
         Args:
@@ -274,7 +273,7 @@ class EntityExtractor:
 
         return dates
 
-    def extract_persons(self, text: str) -> List[Entity]:
+    def extract_persons(self, text: str) -> list[Entity]:
         """Extract person names (ФИО) from text.
 
         Args:
@@ -310,7 +309,7 @@ class EntityExtractor:
 
         return persons
 
-    def extract_numbers(self, text: str) -> List[Entity]:
+    def extract_numbers(self, text: str) -> list[Entity]:
         """Extract numeric values from text.
 
         Args:
@@ -333,7 +332,7 @@ class EntityExtractor:
             )
         return numbers
 
-    def extract_money(self, text: str) -> List[Entity]:
+    def extract_money(self, text: str) -> list[Entity]:
         """Extract monetary amounts with currency codes.
 
         Args:
@@ -362,7 +361,7 @@ class EntityExtractor:
                 )
         return money
 
-    def extract_document_ids(self, text: str) -> List[Entity]:
+    def extract_document_ids(self, text: str) -> list[Entity]:
         """Extract UUID document identifiers from text.
 
         Args:
@@ -388,8 +387,8 @@ class EntityExtractor:
     def extract_all(
         self,
         text: str,
-        base_date: Optional[datetime] = None,
-    ) -> Dict[str, List[Entity]]:
+        base_date: datetime | None = None,
+    ) -> dict[str, list[Entity]]:
         """Run all extractors and return a grouped entity dict.
 
         Args:
@@ -399,7 +398,7 @@ class EntityExtractor:
         Returns:
             Dict mapping entity type names to lists of entities.
         """
-        entities: Dict[str, List[Entity]] = {}
+        entities: dict[str, list[Entity]] = {}
 
         for key, extractor in [
             ("dates", lambda: self.extract_dates(text, base_date)),
@@ -565,7 +564,7 @@ class QueryRefiner:
         self,
         text: str,
         intent: UserIntent,
-        entities: Dict[str, List[Entity]],
+        entities: dict[str, list[Entity]],
     ) -> str:
         """Augment the query with intent-specific structured context hints.
 
@@ -615,12 +614,6 @@ class QueryRefiner:
             if "dates" in entities:
                 hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
 
-        elif intent == UserIntent.RESOLUTION:
-            if "persons" in entities:
-                hints.append(f"исполнитель резолюции: {entities['persons'][0].value}")
-            if "dates" in entities:
-                hints.append(f"срок резолюции: {entities['dates'][0].raw_text}")
-
         elif intent == UserIntent.SUMMARIZE:
             if "numbers" in entities:
                 hints.append(f"объём: {entities['numbers'][0].value} слов")
@@ -638,7 +631,7 @@ class QueryRefiner:
         self,
         text: str,
         intent: UserIntent,
-        entities: Dict[str, List[Entity]],
+        entities: dict[str, list[Entity]],
     ) -> str:
         """Run the full refinement pipeline on a query.
 
@@ -670,7 +663,7 @@ class SemanticDispatcher:
     Args: None (stateless helpers are instantiated internally).
     """
 
-    INTENT_KEYWORDS: Dict[UserIntent, Dict[str, list[str]]] = {
+    INTENT_KEYWORDS: dict[UserIntent, dict[str, list[str]]] = {
         UserIntent.CREATE_INTRODUCTION: {
             "primary": [
                 "ознакомление",
@@ -784,20 +777,6 @@ class SemanticDispatcher:
             ],
             "negative": [],
         },
-        UserIntent.RESOLUTION: {
-            "primary": [
-                "резолюция",
-                "резолюцию",
-                "резолюции",
-                "добавь резолюцию",
-                "напиши резолюцию",
-                "поставь резолюцию",
-                "наложи резолюцию",
-                "покажи резолюции",
-            ],
-            "secondary": ["решение", "поручение руководителя", "написать", "наложить"],
-            "negative": [],
-        },
         UserIntent.NOTIFICATION: {
             "primary": [
                 "уведоми",
@@ -846,8 +825,8 @@ class SemanticDispatcher:
     def detect_intent(
         self,
         message: str,
-        file_path: Optional[str] = None,
-    ) -> Tuple[UserIntent, List[UserIntent], float]:
+        file_path: str | None = None,
+    ) -> tuple[UserIntent, list[UserIntent], float]:
         """Classify primary and secondary intents with confidence scoring.
 
         Scoring rules:
@@ -939,7 +918,7 @@ class SemanticDispatcher:
     def estimate_complexity(
         self,
         message: str,
-        document: Optional[Any] = None,
+        document: Any | None = None,
     ) -> QueryComplexity:
         """Estimate the processing complexity of a query.
 
@@ -991,7 +970,7 @@ class SemanticDispatcher:
             return QueryComplexity.MEDIUM
         return QueryComplexity.SIMPLE
 
-    def extract_keywords(self, message: str) -> Set[str]:
+    def extract_keywords(self, message: str) -> set[str]:
         """Extract content keywords by removing Russian stop words.
 
         Args:
@@ -1032,7 +1011,7 @@ class SemanticDispatcher:
         words = re.findall(r"\b[а-яёА-ЯЁ]{3,}\b", message.lower())
         return {w for w in words if w not in stop_words}
 
-    def _validate_file_path(self, file_path: str) -> Tuple[bool, Optional[str]]:
+    def _validate_file_path(self, file_path: str) -> tuple[bool, str | None]:
         """Check that *file_path* exists and is within the configured upload directory.
 
         Args:
@@ -1061,8 +1040,8 @@ class SemanticDispatcher:
     def build_context(
         self,
         message: str,
-        document: Optional[Any] = None,
-        file_path: Optional[str] = None,
+        document: Any | None = None,
+        file_path: str | None = None,
     ) -> SemanticContext:
         """Build a complete SemanticContext for one user turn.
 
@@ -1093,7 +1072,7 @@ class SemanticDispatcher:
             confidence=confidence,
         )
 
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "word_count": len(message.split()),
             "char_count": len(message),
             "has_question_mark": message.strip().endswith("?"),
@@ -1165,7 +1144,7 @@ class EDMSNaturalLanguageService:
     """High-level service for semantic analysis of EDMS domain objects."""
 
     @staticmethod
-    def format_user(user: Any) -> Optional[str]:
+    def format_user(user: Any) -> str | None:
         """Format a UserInfoDto or EmployeeDto into a display name string.
 
         Args:
@@ -1190,7 +1169,7 @@ class EDMSNaturalLanguageService:
             return None
 
     @staticmethod
-    def format_date(instant: Any) -> Optional[str]:
+    def format_date(instant: Any) -> str | None:
         """Format an Instant-like value to DD.MM.YYYY.
 
         Args:
@@ -1215,7 +1194,7 @@ class EDMSNaturalLanguageService:
             return None
 
     @staticmethod
-    def format_datetime(instant: Any) -> Optional[str]:
+    def format_datetime(instant: Any) -> str | None:
         """Format an Instant-like value to DD.MM.YYYY HH:MM.
 
         Args:
@@ -1270,39 +1249,93 @@ class EDMSNaturalLanguageService:
             logger.debug("Error accessing path '%s': %s", path, exc)
             return default
 
-    def process_document(self, doc: Any) -> Dict[str, Any]:
+    def process_document(self, doc: Any) -> dict[str, Any]:
         """Produce a full structured analysis of a DocumentDto.
 
+        Covers ALL nested entities defined in the Java EDMS DTO schema:
+        tasks with executors, attachments, recipients, process route,
+        introduction list, nomenclature affairs, and category-specific
+        sections (APPEAL, MEETING, MEETING_QUESTION, CONTRACT, QUESTION).
+
         Args:
-            doc: DocumentDto instance.
+            doc: DocumentDto instance (generated Pydantic model).
 
         Returns:
-            Nested dict with all document sections, cleaned of None values.
+            Nested dict with all document sections, cleaned of None/empty values.
         """
         if not doc:
             logger.warning("Attempted to process None document")
             return {}
 
         try:
+            # ── Категория (enum-safe) ──────────────────────────────────────────
             category = self.get_safe(doc, "docCategoryConstant")
-            category_value = (
+            category_value: str = (
                 category.value if hasattr(category, "value") else str(category or "")
             )
 
+            # ── 1. Базовая информация ─────────────────────────────────────────
             base_info = {
                 "id": str(doc.id) if getattr(doc, "id", None) else None,
                 "категория": category_value,
                 "краткое_содержание": getattr(doc, "shortSummary", None),
                 "полный_текст": getattr(doc, "summary", None),
                 "примечание": getattr(doc, "note", None),
+                "профиль": getattr(doc, "profileName", None),
+                "гриф_ДСП": getattr(doc, "dspFlag", None),
+                "вид_документа": self.get_safe(doc, "documentType.typeName"),
+                "способ_создания": self.get_safe(doc, "createType"),
             }
 
+            # ── 2. Регистрация ────────────────────────────────────────────────
             registration = {
                 "рег_номер": getattr(doc, "regNumber", None)
                 or getattr(doc, "reservedRegNumber", None),
                 "дата_регистрации": self.format_date(getattr(doc, "regDate", None)),
                 "дата_создания": self.format_datetime(getattr(doc, "createDate", None)),
+                "исходящий_номер": getattr(doc, "outRegNumber", None),
+                "исходящая_дата": self.format_date(getattr(doc, "outRegDate", None)),
+                "журнал_регистрации": self.get_safe(
+                    doc, "registrationJournal.journalName"
+                ),
+                "версия": self.get_safe(doc, "version.version"),
+                "признак_версионности": getattr(doc, "versionFlag", None),
+                "страниц": getattr(doc, "pages", None),
+                "кол-во_экземпляров": getattr(doc, "exemplarCount", None),
             }
+
+            # ── 3. Участники ──────────────────────────────────────────────────
+            responsible_executors = [
+                self.format_user(getattr(r, "executor", None))
+                for r in (getattr(doc, "responsibleExecutors", None) or [])
+                if getattr(r, "executor", None)
+            ]
+            # Контрагенты договора — хранятся в recipientList
+            # (DocumentRecipientDtoModel: name, unp, contractNumber и др.)
+            _recipient_list_raw = getattr(doc, "recipientList", None) or []
+            _contractors = [
+                {
+                    "название": getattr(r, "name", None),
+                    "УНП": getattr(r, "unp", None),
+                    "номер_договора_контрагента": getattr(r, "contractNumber", None),
+                    "дата_договора_контрагента": self.format_date(
+                        getattr(r, "contractDate", None)
+                    ),
+                }
+                for r in _recipient_list_raw
+                if getattr(r, "name", None)
+            ] or None
+
+            # Ответственные по договору — приходят из contractResponsible (enricher).
+            # contractResponsible — list[dict], каждый элемент: {user: UserInfoDto, createDate}
+            _contract_responsible_raw = getattr(doc, "contractResponsible", None) or []
+            _contract_responsible_users: list[str] | None = [
+                self.format_user(
+                    r.get("user") if isinstance(r, dict) else getattr(r, "user", None)
+                )
+                for r in _contract_responsible_raw
+                if (r.get("user") if isinstance(r, dict) else getattr(r, "user", None))
+            ] or None
 
             participants = {
                 "автор": self.format_user(getattr(doc, "author", None)),
@@ -1311,28 +1344,226 @@ class EDMSNaturalLanguageService:
                     getattr(doc, "responsibleExecutor", None)
                 ),
                 "корреспондент": getattr(doc, "correspondentName", None),
+                "контрагенты": _contractors,
+                "ответственные_по_договору": _contract_responsible_users,
+                "кем_подписан": self.format_user(getattr(doc, "whoSigned", None)),
+                "председатель": self.format_user(getattr(doc, "chairperson", None)),
+                "секретарь": self.format_user(getattr(doc, "secretary", None)),
+                "ответственные_за_подготовку": responsible_executors or None,
             }
+
+            # ── 4. Жизненный цикл ─────────────────────────────────────────────
+            process_obj = getattr(doc, "process", None)
+            process_detail: dict[str, Any] | None = None
+            if process_obj:
+                items_raw = getattr(process_obj, "items", None) or []
+                process_items = [
+                    {
+                        "название": getattr(item, "name", None),
+                        "тип": self.get_safe(item, "type"),
+                        "статус": (
+                            "завершён"
+                            if getattr(item, "completed", False)
+                            else (
+                                "начат"
+                                if getattr(item, "started", False)
+                                else "ожидает"
+                            )
+                        ),
+                        "дата_начала": self.format_datetime(
+                            getattr(item, "start", None)
+                        ),
+                        "дата_конца": self.format_datetime(getattr(item, "end", None)),
+                        "дней": getattr(item, "days", None),
+                        "исполнители": [
+                            {
+                                "имя": self.format_user(getattr(ex, "executor", None)),
+                                "результат": getattr(ex, "result", None),
+                                "комментарий": getattr(ex, "comment", None),
+                                "дата_исполнения": self.format_datetime(
+                                    getattr(ex, "executionEnd", None)
+                                ),
+                            }
+                            for ex in (getattr(item, "executors", None) or [])
+                        ]
+                        or None,
+                    }
+                    for item in items_raw
+                ]
+                process_detail = {
+                    "завершен": self.get_safe(doc, "process.completed"),
+                    "запущен": self.get_safe(doc, "process.started"),
+                    "текущий_этап": self.get_safe(doc, "process.current.name"),
+                    "следующий_этап": self.get_safe(doc, "process.next.name"),
+                    "этапы": process_items or None,
+                }
 
             lifecycle = {
                 "текущий_статус": self.get_safe(doc, "status"),
+                "предыдущий_статус": self.get_safe(doc, "prevStatus"),
                 "текущий_этап_БП": getattr(doc, "currentBpmnTaskName", None),
-                "процесс": (
-                    {
-                        "завершен": self.get_safe(doc, "process.completed"),
-                    }
-                    if getattr(doc, "process", None)
-                    else None
-                ),
+                "процесс": process_detail,
             }
 
-            control_info = {
+            # ── 5. Контроль ───────────────────────────────────────────────────
+            control_obj = getattr(doc, "control", None)
+            control_info: dict[str, Any] = {
                 "на_контроле": getattr(doc, "controlFlag", None),
+                "снять_с_контроля": getattr(doc, "removeControl", None),
                 "дней_на_исполнение": getattr(doc, "daysExecution", None),
             }
+            if control_obj:
+                control_info.update(
+                    {
+                        "тип_контроля": self.get_safe(doc, "control.controlType.name"),
+                        "дата_начала_контроля": self.format_date(
+                            self.get_safe(doc, "control.controlDateStart")
+                        ),
+                        "плановая_дата_снятия": self.format_date(
+                            self.get_safe(doc, "control.controlPlanDateEnd")
+                        ),
+                        "контролёр": self.format_user(
+                            self.get_safe(doc, "control.controlEmployee")
+                        ),
+                    }
+                )
 
-            specialized: Dict[str, Any] = {}
+            # ── 6. Поручения ──────────────────────────────────────────────────
+            task_list = getattr(doc, "taskList", None) or []
+            tasks_info: dict[str, Any] = {
+                "общее_количество": getattr(doc, "countTask", None) or len(task_list),
+                "выполнено": getattr(doc, "completedTaskCount", None),
+                "список": [
+                    {
+                        "номер": getattr(t, "taskNumber", None),
+                        "тип": self.get_safe(t, "type"),
+                        "текст": getattr(t, "taskText", None),
+                        "статус": self.get_safe(t, "taskStatus"),
+                        "автор": self.format_user(getattr(t, "author", None)),
+                        "срок": self.format_date(getattr(t, "planedDateEnd", None)),
+                        "на_контроле": getattr(t, "onControl", None),
+                        "бессрочное": getattr(t, "endless", None),
+                        "периодическое": getattr(t, "periodTask", None),
+                        "интервал_периода": self.get_safe(t, "period"),
+                        "исполнители": [
+                            {
+                                "имя": self.format_user(getattr(ex, "executor", None)),
+                                "ответственный": getattr(ex, "responsible", None),
+                                "дата_исполнения": self.format_datetime(
+                                    getattr(ex, "executedDate", None)
+                                ),
+                                "текст_отметки": getattr(ex, "stampText", None),
+                            }
+                            for ex in (getattr(t, "taskExecutors", None) or [])
+                        ]
+                        or None,
+                    }
+                    for t in task_list
+                ]
+                or None,
+            }
+
+            # ── 7. Вложения ───────────────────────────────────────────────────
+            attachments_list = getattr(doc, "attachmentDocument", None) or []
+            relations: dict[str, Any] = {
+                "вложения": [
+                    {
+                        "название": getattr(a, "name", None),
+                        "id": str(a.id) if getattr(a, "id", None) else None,
+                        "тип_вложения": self.get_safe(a, "attachmentDocumentType"),
+                        "вид": self.get_safe(a, "type"),
+                        "размер_байт": getattr(a, "size", None),
+                        "кол-во_подписей": len(getattr(a, "signs", None) or []) or None,
+                        "дата_загрузки": self.format_datetime(
+                            getattr(a, "uploadDate", None)
+                        ),
+                    }
+                    for a in attachments_list
+                ]
+                or None,
+            }
+
+            # ── 8. Адресаты и корреспондент ───────────────────────────────────
+            recipient_list = getattr(doc, "recipientList", None) or []
+            if recipient_list:
+                relations["адресаты"] = [
+                    {
+                        "название": getattr(r, "name", None),
+                        "статус": self.get_safe(r, "status"),
+                        "способ_доставки": self.get_safe(
+                            r, "deliveryMethod.deliveryName"
+                        ),
+                        "отправлено": self.format_datetime(
+                            getattr(r, "dateSend", None)
+                        ),
+                        "доставлено": getattr(r, "delivered", None),
+                        "контрагент_УНП": getattr(r, "unp", None),
+                        "контрагент_номер_договора": getattr(r, "contractNumber", None),
+                    }
+                    for r in recipient_list
+                ]
+
+            correspondent_obj = getattr(doc, "correspondent", None)
+            if correspondent_obj:
+                relations["корреспондент_орг"] = {
+                    "название": self.get_safe(doc, "correspondent.name"),
+                    "способ_доставки": self.get_safe(
+                        doc, "correspondent.deliveryMethod.deliveryName"
+                    ),
+                }
+
+            # ── 9. Ознакомления ───────────────────────────────────────────────
+            intro_list = getattr(doc, "introduction", None) or []
+            if intro_list:
+                relations["ознакомления"] = {
+                    "всего": getattr(doc, "introductionCount", None) or len(intro_list),
+                    "выполнено": getattr(doc, "introductionCompleteCount", None),
+                    "список": [
+                        {
+                            "сотрудник": self.format_user(getattr(i, "author", None)),
+                            "дата_ознакомления": self.format_datetime(
+                                getattr(i, "introductionDate", None)
+                            ),
+                            "комментарий": getattr(i, "comment", None),
+                        }
+                        for i in intro_list[
+                            :10
+                        ]  # не более 10, чтобы не раздувать промпт
+                    ]
+                    or None,
+                }
+
+            # ── 10. Предварительные номенклатурные дела ───────────────────────
+            pre_noms = getattr(doc, "preNomenclatureAffairs", None) or []
+            if pre_noms:
+                relations["предвыбранные_дела"] = [
+                    {
+                        "дело": self.get_safe(pn, "nomenclatureAffair.name"),
+                        "индекс": self.get_safe(pn, "nomenclatureAffair.index"),
+                        "списан": getattr(pn, "writeOff", None),
+                    }
+                    for pn in pre_noms
+                ]
+
+            # ── 11. Специализированные секции по категории ───────────────────
+            specialized: dict[str, Any] = {}
+
+            # --- CONTRACT ---------------------------------------------------
             if getattr(doc, "contractNumber", None) or category_value == "CONTRACT":
-                currency_code = self.get_safe(doc, "currency.code", "BYN")
+                currency_code = self.get_safe(doc, "currency.code") or "BYN"
+                # Контрагенты договора берутся из recipientList
+                _contract_contractors = [
+                    {
+                        "название": getattr(r, "name", None),
+                        "УНП": getattr(r, "unp", None),
+                        "номер_договора": getattr(r, "contractNumber", None),
+                        "дата_подписания": self.format_date(
+                            getattr(r, "signDate", None)
+                        ),
+                    }
+                    for r in (_recipient_list_raw or [])
+                    if getattr(r, "name", None)
+                ] or None
                 specialized["договор"] = {
                     "номер": getattr(doc, "contractNumber", None),
                     "дата": self.format_date(getattr(doc, "contractDate", None)),
@@ -1341,34 +1572,119 @@ class EDMSNaturalLanguageService:
                         if getattr(doc, "contractSum", None) is not None
                         else None
                     ),
+                    "валюта": self.get_safe(doc, "currency.name"),
+                    "дата_подписания": self.format_date(
+                        getattr(doc, "contractSigningDate", None)
+                    ),
+                    "срок_начала": self.format_date(
+                        getattr(doc, "contractDurationStart", None)
+                    ),
+                    "срок_окончания": self.format_date(
+                        getattr(doc, "contractDurationEnd", None)
+                    ),
+                    "автопролонгация": getattr(doc, "contractAutoProlongation", None),
+                    "типовой": getattr(doc, "contractTypical", None),
+                    "согласован_с_заказчиком": getattr(doc, "contractAgreement", None),
+                    "контрагенты": _contract_contractors,
+                    "ответственные_по_договору": _contract_responsible_users,
                 }
 
-            tasks_info = {
-                "общее_количество": getattr(doc, "countTask", None),
-                "список": [
-                    {
-                        "текст": getattr(t, "taskText", None),
-                        "исполнитель": self.format_user(getattr(t, "author", None)),
-                        "срок": self.format_date(getattr(t, "planedDateEnd", None)),
-                        "статус": self.get_safe(t, "taskStatus"),
+            # --- APPEAL -----------------------------------------------------
+            appeal_obj = getattr(doc, "documentAppeal", None)
+            if appeal_obj or category_value == "APPEAL":
+                if appeal_obj:
+                    repeat_list = (
+                        getattr(appeal_obj, "repeatIdenticalAppeals", None) or []
+                    )
+                    specialized["обращение"] = {
+                        "заявитель": getattr(appeal_obj, "fioApplicant", None),
+                        "тип_заявителя": self.get_safe(appeal_obj, "declarantType"),
+                        "организация_заявителя": getattr(
+                            appeal_obj, "organizationName", None
+                        ),
+                        "вид_обращения": self.get_safe(appeal_obj, "citizenType.name"),
+                        "коллективное": getattr(appeal_obj, "collective", None),
+                        "анонимное": getattr(appeal_obj, "anonymous", None),
+                        "дата_поступления": self.format_datetime(
+                            getattr(appeal_obj, "receiptDate", None)
+                        ),
+                        "страна": getattr(appeal_obj, "countryAppealName", None),
+                        "регион": getattr(appeal_obj, "regionName", None),
+                        "район": getattr(appeal_obj, "districtName", None),
+                        "город": getattr(appeal_obj, "cityName", None),
+                        "полный_адрес": getattr(appeal_obj, "fullAddress", None),
+                        "телефон": getattr(appeal_obj, "phone", None),
+                        "email": getattr(appeal_obj, "email", None),
+                        "тематика": self.get_safe(appeal_obj, "subject.name"),
+                        "рассмотрен_обоснованно": getattr(
+                            appeal_obj, "reasonably", None
+                        ),
+                        "результат_решения": self.get_safe(
+                            appeal_obj, "solutionResult.name"
+                        ),
+                        "ход_рассмотрения": getattr(appeal_obj, "reviewProgress", None),
+                        "повторных_обращений": len(repeat_list) or None,
+                        "исходящий_индекс_корреспондента": getattr(
+                            appeal_obj, "correspondentOrgNumber", None
+                        ),
                     }
-                    for t in (getattr(doc, "taskList", None) or [])
-                ],
-            }
 
-            relations = {
-                "вложения": [
-                    {
-                        "название": getattr(a, "name", None),
-                        "id": str(a.id) if getattr(a, "id", None) else None,
-                        "тип": self.get_safe(a, "attachmentDocumentType.name"),
-                        "размер_байт": getattr(a, "size", None),
-                    }
-                    for a in (getattr(doc, "attachmentDocument", None) or [])
-                ],
-            }
+            # --- MEETING ----------------------------------------------------
+            if category_value == "MEETING" or getattr(doc, "dateMeeting", None):
+                questions = getattr(doc, "documentQuestions", None) or []
+                specialized["совещание"] = {
+                    "дата": self.format_date(getattr(doc, "dateMeeting", None)),
+                    "время_начала": self.format_datetime(
+                        getattr(doc, "startMeeting", None)
+                    ),
+                    "время_конца": self.format_datetime(
+                        getattr(doc, "endMeeting", None)
+                    ),
+                    "место": getattr(doc, "placeMeeting", None),
+                    "председатель": self.format_user(getattr(doc, "chairperson", None)),
+                    "секретарь": self.format_user(getattr(doc, "secretary", None)),
+                    "внешние_приглашённые": getattr(doc, "externalInvitees", None),
+                    "кол-во_приглашённых": getattr(doc, "inviteesCount", None),
+                    "дополнение_к_повестке": getattr(doc, "addition", None),
+                    "вопросы": [
+                        {
+                            "номер": getattr(q, "questionNumber", None),
+                            "формулировка": getattr(q, "question", None),
+                            "докладчики": [
+                                {
+                                    "имя": self.format_user(
+                                        getattr(s, "employee", None)
+                                    ),
+                                    "тип": self.get_safe(s, "type"),
+                                }
+                                for s in (getattr(q, "speakers", None) or [])
+                            ]
+                            or None,
+                        }
+                        for q in questions
+                    ]
+                    or None,
+                }
 
-            result = {
+            # --- MEETING_QUESTION (Повестка заседания) ----------------------
+            if category_value == "MEETING_QUESTION" or getattr(
+                doc, "dateMeetingQuestion", None
+            ):
+                specialized["повестка_заседания"] = {
+                    "дата_заседания": self.format_date(
+                        getattr(doc, "dateMeetingQuestion", None)
+                    ),
+                    "форма_проведения": self.get_safe(doc, "formMeetingType"),
+                    "номер_вопроса": getattr(doc, "numberQuestion", None),
+                    "дата_вопроса": self.format_date(
+                        getattr(doc, "dateQuestion", None)
+                    ),
+                    "комментарий_руководителю": getattr(doc, "commentQuestion", None),
+                    "есть_вопросы": getattr(doc, "hasQuestion", None),
+                }
+
+            # ── 12. Сборка итогового словаря ──────────────────────────────────
+            result: dict[str, Any] = {
                 "базовая_информация": self._clean_dict(base_info),
                 "регистрация": self._clean_dict(registration),
                 "участники": self._clean_dict(participants),
@@ -1406,7 +1722,7 @@ class EDMSNaturalLanguageService:
             return cleaned_list or None
         return d
 
-    def analyze_local_file(self, file_path: str) -> Dict[str, Any]:
+    def analyze_local_file(self, file_path: str) -> dict[str, Any]:
         """Return basic metadata for a local file before reading its content.
 
         Args:
@@ -1438,7 +1754,7 @@ class EDMSNaturalLanguageService:
             )
             return {"error": str(exc)}
 
-    def suggest_summarize_format(self, text: str) -> Dict[str, Any]:
+    def suggest_summarize_format(self, text: str) -> dict[str, Any]:
         """Recommend a summarisation format based on text characteristics.
 
         Args:
@@ -1476,7 +1792,7 @@ class EDMSNaturalLanguageService:
             "stats": {"chars": length, "lines": lines},
         }
 
-    def process_employee_info(self, emp: Any) -> Dict[str, Any]:
+    def process_employee_info(self, emp: Any) -> dict[str, Any]:
         """Build an analytical employee card from an EmployeeDto.
 
         Args:

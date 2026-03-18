@@ -1,8 +1,8 @@
 # edms_ai_assistant/utils/json_encoder.py
 import json
-from uuid import UUID
 from datetime import datetime
 from enum import Enum
+from uuid import UUID
 
 
 class CustomJSONEncoder(json.JSONEncoder):

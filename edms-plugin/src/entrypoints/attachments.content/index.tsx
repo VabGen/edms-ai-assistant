@@ -214,13 +214,9 @@ function getFileId(row: HTMLElement): string {
 function handleAction(summaryType: string, row: HTMLElement, fileName: string, btn: HTMLElement) {
     const token = getAuthToken()
     if (!token) {
-        // Toast instead of alert()
         toast.error('Войдите в систему и попробуйте снова.', 'Авторизация не найдена')
         return
     }
-
-    // const fileId = getFileId(row)
-    // const docId = extractDocIdFromUrl()
 
     let fileId = getFileId(row);
     const effectiveFileId = (fileId && fileId.length > 10) ? fileId : fileName;
@@ -246,7 +242,6 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
         btn.style.color = '#94a3b8'
 
         if (res?.success) {
-            // Success toast
             toast.success(`Анализ файла "${fileName}" готов`, 'Добавлено вложение')
 
             window.postMessage({
@@ -257,7 +252,6 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
                 ],
             }, '*')
         } else {
-            // Error toast instead of alert()
             const errMsg = res?.error ?? 'Неизвестная ошибка'
             toast.error(humanizeActionError(errMsg), 'Ошибка анализа')
         }

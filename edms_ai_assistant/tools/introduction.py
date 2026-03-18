@@ -5,7 +5,7 @@ EDMS AI Assistant - Introduction Tool.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from langchain_core.tools import tool
@@ -25,25 +25,25 @@ class IntroductionInput(BaseModel):
         description="UUID документа для создания ознакомления",
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     )
-    last_names: Optional[List[str]] = Field(
+    last_names: list[str] | None = Field(
         None,
         description="Фамилии сотрудников для поиска (например: ['Иванов', 'Петров'])",
         max_length=50,
     )
-    department_names: Optional[List[str]] = Field(
+    department_names: list[str] | None = Field(
         None,
         description="Названия подразделений для массового добавления",
         max_length=20,
     )
-    group_names: Optional[List[str]] = Field(
+    group_names: list[str] | None = Field(
         None,
         description="Названия групп для массового добавления",
         max_length=20,
     )
-    comment: Optional[str] = Field(
+    comment: str | None = Field(
         None, description="Комментарий к ознакомлению", max_length=500
     )
-    selected_employee_ids: Optional[List[str]] = Field(
+    selected_employee_ids: list[str] | None = Field(
         None,
         description=(
             "UUID выбранных сотрудников для разрешения disambiguation. "
@@ -54,14 +54,14 @@ class IntroductionInput(BaseModel):
 
     @field_validator("last_names", "department_names", "group_names")
     @classmethod
-    def validate_string_lists(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_string_lists(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
         return [s.strip() for s in v if s and s.strip()]
 
     @field_validator("selected_employee_ids")
     @classmethod
-    def validate_employee_ids(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_employee_ids(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
         validated = []
@@ -78,12 +78,12 @@ class IntroductionInput(BaseModel):
 async def introduction_create_tool(
     token: str,
     document_id: str,
-    last_names: Optional[List[str]] = None,
-    department_names: Optional[List[str]] = None,
-    group_names: Optional[List[str]] = None,
-    comment: Optional[str] = None,
-    selected_employee_ids: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    last_names: list[str] | None = None,
+    department_names: list[str] | None = None,
+    group_names: list[str] | None = None,
+    comment: str | None = None,
+    selected_employee_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """
     Создает список ознакомления с документом через workflow с disambiguation.
 
@@ -191,7 +191,7 @@ async def introduction_create_tool(
         )
         return {
             "status": "error",
-            "message": f"❌ Произошла ошибка при создании ознакомления: {str(e)}",
+            "message": f"❌ Произошла ошибка при создании ознакомления: {e!s}",
         }
 
 
@@ -199,9 +199,9 @@ async def _handle_direct_addition(
     service: IntroductionService,
     token: str,
     document_id: str,
-    employee_ids: List[str],
-    comment: Optional[str],
-) -> Dict[str, Any]:
+    employee_ids: list[str],
+    comment: str | None,
+) -> dict[str, Any]:
     """
     Обработка прямого добавления сотрудников по UUID.
 
@@ -246,11 +246,11 @@ async def _handle_search_and_create(
     service: IntroductionService,
     token: str,
     document_id: str,
-    last_names: Optional[List[str]],
-    department_names: Optional[List[str]],
-    group_names: Optional[List[str]],
-    comment: Optional[str],
-) -> Dict[str, Any]:
+    last_names: list[str] | None,
+    department_names: list[str] | None,
+    group_names: list[str] | None,
+    comment: str | None,
+) -> dict[str, Any]:
     """
     Обработка поиска сотрудников с созданием ознакомления или disambiguation.
 
@@ -321,8 +321,8 @@ async def _handle_search_and_create(
 
 
 def _build_disambiguation_response(
-    ambiguous_results: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    ambiguous_results: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Формирует структурированный ответ для disambiguation workflow.
 

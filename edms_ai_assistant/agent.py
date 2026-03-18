@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from langchain_core.messages import (
@@ -74,20 +74,18 @@ _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset(
     {
         "doc_get_details",
         "doc_get_versions",
-        "doc_compare",
+        "doc_compare_documents",
         "doc_get_file_content",
-        "doc_compare_with_local",
+        "doc_compare_attachment_with_local",
         "doc_summarize_text",
         "doc_search_tool",
         "introduction_create_tool",
         "task_create_tool",
-        "doc_get_resolutions",
-        "doc_create_resolution",
         "doc_send_notification",
     }
 )
 
-# ─── Placeholder-значения local_file_path для doc_compare_with_local ──────────
+# ─── Placeholder-значения local_file_path для doc_compare_attachment_with_local ──────────
 _COMPARE_LOCAL_PLACEHOLDERS: frozenset[str] = frozenset(
     {
         "",
@@ -107,13 +105,12 @@ _DISAMBIGUATION_TOOLS: frozenset[str] = frozenset(
     {
         "introduction_create_tool",
         "task_create_tool",
-        "doc_create_resolution",
         "doc_send_notification",
     }
 )
 
 
-def _is_mutation_response(content: Optional[str]) -> bool:
+def _is_mutation_response(content: str | None) -> bool:
     """
     Returns True if the agent response describes a successful mutating EDMS operation.
 
@@ -174,19 +171,19 @@ class ContextParams:
     """
 
     user_token: str
-    document_id: Optional[str] = None
-    file_path: Optional[str] = None
+    document_id: str | None = None
+    file_path: str | None = None
     thread_id: str = "default"
     user_name: str = "пользователь"
-    user_first_name: Optional[str] = None
-    user_last_name: Optional[str] = None
-    user_full_name: Optional[str] = None
-    user_id: Optional[str] = None
+    user_first_name: str | None = None
+    user_last_name: str | None = None
+    user_full_name: str | None = None
+    user_id: str | None = None
     current_date: str = field(
         default_factory=lambda: datetime.now().strftime("%d.%m.%Y")
     )
     current_year: str = field(default_factory=lambda: str(datetime.now().year))
-    uploaded_file_name: Optional[str] = None
+    uploaded_file_name: str | None = None
 
     def __post_init__(self) -> None:
         if not self.user_token or not isinstance(self.user_token, str):
@@ -211,14 +208,15 @@ class AgentRequest(BaseModel):
 
     message: str = Field(default="", max_length=8000)
     user_token: str = Field(..., min_length=10)
-    context_ui_id: Optional[str] = Field(
+    context_ui_id: str | None = Field(
         None,
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^$",
     )
-    thread_id: Optional[str] = Field(None, max_length=255)
-    user_context: Dict[str, Any] = Field(default_factory=dict)
-    file_path: Optional[str] = Field(None, max_length=500)
-    human_choice: Optional[str] = Field(None, max_length=200)
+    thread_id: str | None = Field(None, max_length=255)
+    user_context: dict[str, Any] = Field(default_factory=dict)
+    file_path: str | None = Field(None, max_length=500)
+    file_name: str | None = Field(None, max_length=260)
+    human_choice: str | None = Field(None, max_length=200)
 
     @field_validator("message")
     @classmethod
@@ -227,7 +225,7 @@ class AgentRequest(BaseModel):
         return v.strip()
 
     @model_validator(mode="after")
-    def validate_message_or_choice(self) -> "AgentRequest":
+    def validate_message_or_choice(self) -> AgentRequest:
         """
         Ensures the request has either a non-empty message or a human_choice.
 
@@ -248,7 +246,7 @@ class AgentRequest(BaseModel):
 
     @field_validator("file_path")
     @classmethod
-    def validate_file_path(cls, v: Optional[str]) -> Optional[str]:
+    def validate_file_path(cls, v: str | None) -> str | None:
         """
         Validates file_path as UUID or filesystem path.
 
@@ -285,11 +283,11 @@ class AgentResponse(BaseModel):
     """Standardized agent execution result (internal, not exposed via HTTP)."""
 
     status: AgentStatus
-    content: Optional[str] = None
-    message: Optional[str] = None
-    action_type: Optional[ActionType] = None
+    content: str | None = None
+    message: str | None = None
+    action_type: ActionType | None = None
     requires_reload: bool = False
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,15 +304,15 @@ class IDocumentRepository(Protocol):
     in dependency injection and testing scenarios.
     """
 
-    async def get_document(self, token: str, doc_id: str) -> Optional[DocumentDto]:
-        """Fetches document metadata by ID."""
+    async def get_document(self, token: str, doc_id: str) -> DocumentDto | None:
+        """Получить метаданные документа."""
         ...
 
 
 class DocumentRepository:
     """Production implementation of IDocumentRepository."""
 
-    async def get_document(self, token: str, doc_id: str) -> Optional[DocumentDto]:
+    async def get_document(self, token: str, doc_id: str) -> DocumentDto | None:
         """
         Fetches and validates document metadata from the EDMS REST API.
 
@@ -368,7 +366,8 @@ class PromptBuilder:
 - Текущая дата: {current_date} (год: {current_year})
 - Активный документ в EDMS: {context_ui_id}
 - Загруженный файл/вложение: {local_file}
-- Имя загруженного файла: {uploaded_file_name}
+- Имя загруженного файла (показывай пользователю): {uploaded_file_name}
+<local_file_path>{local_file}</local_file_path>
 </context>
 
 <current_user_rules>
@@ -419,23 +418,21 @@ class PromptBuilder:
 </critical_rules>
 
 <available_tools_guide>
-| Сценарий                          | Последовательность инструментов                              |
-|-----------------------------------|--------------------------------------------------------------|
-| Анализ документа целиком          | doc_get_details → doc_get_file_content → doc_summarize_text  |
-| Анализ конкретного вложения (UUID)| doc_get_file_content → doc_summarize_text                    |
-| Анализ загруженного файла         | read_local_file_content → doc_summarize_text                 |
-| Сравнение файла с вложением [ЕСТЬ файл]  | doc_compare_with_local (приоритет всегда)                     |
-| Вопрос о документе                | doc_get_details                                              |
-| Сравнение версий документа [НЕТ файла]   | doc_get_versions (возвращает все сравнения) |
-| Поиск документов в базе EDMS      | doc_search_tool                                              |
-| Поиск сотрудника                  | employee_search_tool                                         |
-| Добавление в лист ознакомления    | introduction_create_tool                                     |
-| Создание поручения                | task_create_tool                                             |
-| Автозаполнение обращения          | autofill_appeal_document                                     |
-| Просмотр резолюций                | doc_get_resolutions                                          |
-| Создание резолюции                | [employee_search_tool →] doc_create_resolution               |
-| Уведомление / напоминание         | employee_search_tool → doc_send_notification                 |
-| Вопрос без документа              | Ответь напрямую из контекста                                 |
+| Сценарий                                 | Последовательность инструментов                              |
+|------------------------------------------|--------------------------------------------------------------|
+| Анализ документа целиком                 | doc_get_details → doc_get_file_content → doc_summarize_text  |
+| Анализ конкретного вложения (UUID)       | doc_get_file_content → doc_summarize_text                    |
+| Анализ загруженного файла                | read_local_file_content → doc_summarize_text                 |
+| Сравнение файла с вложением [ЕСТЬ файл]  | doc_compare_attachment_with_local (приоритет всегда)         |
+| Вопрос о документе                       | doc_get_details                                              |
+| Сравнение версий документа [НЕТ файла]   | doc_get_versions (возвращает все сравнения)                  |
+| Поиск документов в базе EDMS             | doc_search_tool                                              |
+| Поиск сотрудника                         | employee_search_tool                                         |
+| Добавление в лист ознакомления           | introduction_create_tool                                     |
+| Создание поручения                       | task_create_tool                                             |
+| Автозаполнение обращения                 | autofill_appeal_document                                     |
+| Уведомление / напоминание                | employee_search_tool → doc_send_notification                 |
+| Вопрос без документа                     | Ответь напрямую из контекста                                 |
 </available_tools_guide>
 
 <response_format>
@@ -447,7 +444,7 @@ class PromptBuilder:
 ❌ Фразы "как ИИ я не могу..." — просто помогай
 </response_format>"""
 
-    _SNIPPETS: Dict[UserIntent, str] = {
+    _SNIPPETS: dict[UserIntent, str] = {
         UserIntent.CREATE_INTRODUCTION: """
 <introduction_workflow>
 Workflow создания листа ознакомления:
@@ -502,12 +499,12 @@ Workflow суммаризации документа:
 ⚠️ ОБЯЗАТЕЛЬНО прочитай условие ДО выбора инструмента сравнения:
 
 УСЛОВИЕ А: В контексте есть "Загруженный файл" (путь /tmp/... или UUID)?
-  → ДА: ИСПОЛЬЗУЙ ТОЛЬКО doc_compare_with_local. СТОП. doc_get_versions НЕ вызывать.
-  → НЕТ: ИСПОЛЬЗУЙ doc_get_versions (сам вернёт все сравнения, doc_compare НЕ нужен).
+  → ДА: ИСПОЛЬЗУЙ ТОЛЬКО doc_compare_attachment_with_local. СТОП. doc_get_versions НЕ вызывать.
+  → НЕТ: ИСПОЛЬЗУЙ doc_get_versions (сам вернёт все сравнения, doc_compare_documents НЕ нужен).
 
 ЗАПРЕЩЕНО при наличии загруженного файла:
   ❌ doc_get_versions
-  ❌ doc_compare
+  ❌ doc_compare_documents
   ❌ предлагать пользователю "выбрать версию"
   ❌ спрашивать "какие версии сравнить"
 
@@ -517,10 +514,10 @@ Workflow суммаризации документа:
 </compare_decision_tree>
 
 <compare_with_local_guide>
-ПУТЬ А: Есть загруженный файл → doc_compare_with_local
+ПУТЬ А: Есть загруженный файл → doc_compare_attachment_with_local
 
 ШАГ 1 — Вызови СРАЗУ, без предварительных вызовов:
-  doc_compare_with_local(
+  doc_compare_attachment_with_local(
       local_file_path=<АВТОМАТИЧЕСКИ из контекста, не спрашивай>,
       attachment_id=<имя или UUID вложения — только если пользователь явно указал>,
       document_id=<АВТОМАТИЧЕСКИ из контекста>
@@ -551,11 +548,11 @@ Workflow суммаризации документа:
 ШАГ 2 — Ответь пользователю, используя поле "comparisons" из ответа:
   - Для каждой пары: что изменилось в метаданных и вложениях
   - Если "has_any_changes" = false → версии идентичны
-  - Если "comparison_complete" = true → НЕ вызывай doc_compare, данные уже есть
+  - Если "comparison_complete" = true → НЕ вызывай doc_compare_documents, данные уже есть
 
 ⚠️ ЗАПРЕЩЕНО:
   - Спрашивать "какие версии сравнить" — всё уже сравнено автоматически
-  - Вызывать doc_compare после doc_get_versions — это дублирование
+  - Вызывать doc_compare_documents после doc_get_versions — это дублирование
   - Вызывать doc_get_versions несколько раз
 
 Формат ответа: по каждой паре — секция с изменениями (или "изменений нет").
@@ -586,16 +583,6 @@ Workflow суммаризации документа:
 - Вопросы о сотрудниках: employee_search_tool
 - Общие вопросы без документа: отвечай напрямую из контекста
 </question_guide>""",
-        UserIntent.RESOLUTION: """
-<resolution_guide>
-При работе с резолюциями документа:
-- Просмотр резолюций: doc_get_resolutions(document_id=..., token=...)
-- Создание резолюции: doc_create_resolution(document_id=..., resolution_text=..., executor_ids=[], deadline=...)
-  - executor_ids — опциональный список UUID исполнителей (получи через employee_search_tool)
-  - deadline — опциональная дата в ISO 8601 (например: "2026-04-01T23:59:59Z")
-- Если в запросе упоминаются исполнители по фамилии → сначала employee_search_tool → затем doc_create_resolution
-Резолюция — это официальное решение руководителя на документ.
-</resolution_guide>""",
         UserIntent.NOTIFICATION: """
 <notification_guide>
 При отправке уведомлений и напоминаний:
@@ -611,7 +598,7 @@ Workflow суммаризации документа:
 При анализе загруженного файла:
 - Локальный файл (/tmp/...): read_local_file_content → doc_summarize_text
 - UUID вложения EDMS: doc_get_file_content → doc_summarize_text
-- Сравнение файла с вложением документа: doc_compare_with_local
+- Сравнение файла с вложением документа: doc_compare_attachment_with_local
 Путь к файлу берётся из <local_file_path> в system prompt.
 </file_analysis_guide>""",
     }
@@ -641,7 +628,7 @@ Workflow суммаризации документа:
             current_date=context.current_date,
             current_year=context.current_year,
             context_ui_id=context.document_id or "Не указан",
-            local_file=context.uploaded_file_name or context.file_path or "Не загружен",
+            local_file=context.file_path or "Не загружен",
             uploaded_file_name=context.uploaded_file_name or "Не определено",
         )
         snippet = cls._SNIPPETS.get(intent, "")
@@ -699,7 +686,7 @@ class ContentExtractor:
     )
 
     @classmethod
-    def extract_final_content(cls, messages: List[BaseMessage]) -> Optional[str]:
+    def extract_final_content(cls, messages: list[BaseMessage]) -> str | None:
         """
         Extracts the final user-visible content from the message chain.
 
@@ -709,7 +696,6 @@ class ContentExtractor:
         Returns:
             Cleaned content string, or None if nothing found.
         """
-        # Шаг 1: последнее содержательное AIMessage
         for m in reversed(messages):
             if isinstance(m, AIMessage) and m.content:
                 text = str(m.content).strip()
@@ -719,7 +705,6 @@ class ContentExtractor:
                     )
                     return text
 
-        # Шаг 2: последнее ToolMessage с распознаваемым JSON-полем
         for m in reversed(messages):
             if isinstance(m, ToolMessage):
                 extracted = cls._parse_tool_message(m)
@@ -729,7 +714,6 @@ class ContentExtractor:
                     )
                     return extracted
 
-        # Шаг 3: fallback — любое AIMessage
         for m in reversed(messages):
             if isinstance(m, AIMessage) and m.content:
                 text = str(m.content).strip()
@@ -737,7 +721,6 @@ class ContentExtractor:
                     logger.debug("Fallback AIMessage", extra={"chars": len(text)})
                     return text
 
-        # Шаг 4: last resort — сырой ToolMessage
         for m in reversed(messages):
             if isinstance(m, ToolMessage):
                 extracted = cls._parse_tool_message(m)
@@ -747,7 +730,7 @@ class ContentExtractor:
         return None
 
     @classmethod
-    def extract_last_tool_text(cls, messages: List[BaseMessage]) -> Optional[str]:
+    def extract_last_tool_text(cls, messages: list[BaseMessage]) -> str | None:
         """
         Extracts substantial text content from the most recent ToolMessage.
 
@@ -766,7 +749,7 @@ class ContentExtractor:
             try:
                 raw = str(m.content).strip()
                 if raw.startswith("{"):
-                    data: Dict[str, Any] = json.loads(raw)
+                    data: dict[str, Any] = json.loads(raw)
                     for key in cls._JSON_PRIORITY_FIELDS:
                         val = data.get(key)
                         if val and len(str(val)) > 100:
@@ -794,7 +777,7 @@ class ContentExtractor:
         """
         stripped = content.strip()
 
-        # Случай 1: весь контент — это JSON объект
+        # Случай 1: весь контент — JSON объект
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
                 data = json.loads(stripped)
@@ -809,7 +792,7 @@ class ContentExtractor:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Случай 2: JSON-обёртки встроены в текст — убираем регулярками
+        # Случай 2: JSON-обёртки встроены в текст
         # Убираем {"status": "success", "content": "..."} паттерны
         content = re.sub(
             r'\{"status"\s*:\s*"[^"]*",\s*"(?:content|message|text)"\s*:\s*"',
@@ -832,7 +815,7 @@ class ContentExtractor:
         return any(pattern in lower for pattern in cls._SKIP_PATTERNS)
 
     @classmethod
-    def _parse_tool_message(cls, message: ToolMessage) -> Optional[str]:
+    def _parse_tool_message(cls, message: ToolMessage) -> str | None:
         """
         Safely parses human-readable content from a ToolMessage.
 
@@ -845,8 +828,7 @@ class ContentExtractor:
         try:
             raw = str(message.content).strip()
             if raw.startswith("{"):
-                data: Dict[str, Any] = json.loads(raw)
-                # Пропускаем технические ответы об ошибках
+                data: dict[str, Any] = json.loads(raw)
                 if data.get("status") == "error":
                     return None
                 for key in cls._JSON_PRIORITY_FIELDS:
@@ -900,7 +882,7 @@ class AgentStateManager:
             },
         )
 
-    def _config(self, thread_id: str) -> Dict[str, Any]:
+    def _config(self, thread_id: str) -> dict[str, Any]:
         """Builds a LangGraph config dict for the given thread."""
         return {"configurable": {"thread_id": thread_id}}
 
@@ -919,7 +901,7 @@ class AgentStateManager:
     async def update_state(
         self,
         thread_id: str,
-        messages: List[BaseMessage],
+        messages: list[BaseMessage],
         as_node: str = "agent",
     ) -> None:
         """
@@ -938,7 +920,7 @@ class AgentStateManager:
 
     async def invoke(
         self,
-        inputs: Optional[Dict[str, Any]],
+        inputs: dict[str, Any],
         thread_id: str,
         timeout: float = 120.0,
     ) -> None:
@@ -1092,8 +1074,8 @@ class EdmsDocumentAgent:
 
     def __init__(
         self,
-        document_repo: Optional[IDocumentRepository] = None,
-        semantic_dispatcher: Optional[SemanticDispatcher] = None,
+        document_repo: IDocumentRepository | None = None,
+        semantic_dispatcher: SemanticDispatcher | None = None,
     ) -> None:
         """
         Initializes the agent and compiles the LangGraph workflow.
@@ -1137,7 +1119,7 @@ class EdmsDocumentAgent:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def health_check(self) -> Dict[str, bool]:
+    def health_check(self) -> dict[str, bool]:
         """
         Returns a shallow health status for each agent component.
 
@@ -1158,12 +1140,13 @@ class EdmsDocumentAgent:
         self,
         message: str,
         user_token: str,
-        context_ui_id: Optional[str] = None,
-        thread_id: Optional[str] = None,
-        user_context: Optional[Dict[str, Any]] = None,
-        file_path: Optional[str] = None,
-        human_choice: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        context_ui_id: str | None = None,
+        thread_id: str | None = None,
+        user_context: dict[str, Any] | None = None,
+        file_path: str | None = None,
+        file_name: str | None = None,
+        human_choice: str | None = None,
+    ) -> dict[str, Any]:
         """
         Main entry point for agent interaction.
 
@@ -1190,11 +1173,11 @@ class EdmsDocumentAgent:
                 thread_id=thread_id,
                 user_context=user_context or {},
                 file_path=file_path,
+                file_name=file_name,
                 human_choice=human_choice,
             )
             context = await self._build_context(request)
 
-            # ── Автоматическое восстановление сломанного треда ───────────────
             if await self.state_manager.is_thread_broken(context.thread_id):
                 repaired = await self.state_manager.repair_thread(context.thread_id)
                 logger.warning(
@@ -1205,11 +1188,10 @@ class EdmsDocumentAgent:
 
             state = await self.state_manager.get_state(context.thread_id)
 
-            # Если граф ждёт продолжения (interrupt_before) и пришёл human_choice
             if human_choice and state.next:
                 return await self._handle_human_choice(context, human_choice)
 
-            document: Optional[DocumentDto] = None
+            document: DocumentDto | None = None
             if context.document_id:
                 document = await self.document_repo.get_document(
                     context.user_token, context.document_id
@@ -1231,7 +1213,7 @@ class EdmsDocumentAgent:
                 self._build_semantic_xml(semantic_ctx),
             )
 
-            inputs: Dict[str, Any] = {
+            inputs: dict[str, Any] = {
                 "messages": [
                     SystemMessage(content=full_prompt),
                     HumanMessage(content=semantic_ctx.query.refined),
@@ -1260,7 +1242,7 @@ class EdmsDocumentAgent:
 
     async def _handle_human_choice(
         self, context: ContextParams, human_choice: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Resumes a paused graph after the user resolves a disambiguation or
         selects a summarization type.
@@ -1285,7 +1267,6 @@ class EdmsDocumentAgent:
             t_name: str = tc["name"]
 
             if t_name == "doc_summarize_text":
-                # Пользователь выбрал тип суммаризации
                 t_args["summary_type"] = human_choice.strip()
                 logger.info(
                     "Human choice: summary_type",
@@ -1293,12 +1274,11 @@ class EdmsDocumentAgent:
                 )
 
             elif t_name in _DISAMBIGUATION_TOOLS:
-                # Пользователь выбрал сотрудника(ов) из disambiguation-списка.
                 raw_ids = [x.strip() for x in human_choice.split(",") if x.strip()]
                 valid_ids = []
                 for raw_id in raw_ids:
                     try:
-                        UUID(raw_id)  # валидация формата
+                        UUID(raw_id)
                         valid_ids.append(raw_id)
                     except ValueError:
                         logger.warning(
@@ -1307,11 +1287,9 @@ class EdmsDocumentAgent:
                         )
 
                 if valid_ids:
-                    # Маппинг инструментов на их поле selected_ids
-                    _TOOL_ID_FIELD: Dict[str, str] = {
+                    _TOOL_ID_FIELD: dict[str, str] = {
                         "introduction_create_tool": "selected_employee_ids",
                         "task_create_tool": "selected_employee_ids",
-                        "doc_create_resolution": "executor_ids",
                         "doc_send_notification": "recipient_ids",
                     }
                     id_field = _TOOL_ID_FIELD.get(t_name, "selected_employee_ids")
@@ -1329,54 +1307,48 @@ class EdmsDocumentAgent:
                         },
                     )
 
-            elif t_name == "doc_compare_with_local":
-                # Пользователь выбрал вложение из disambiguation-списка.
-                # human_choice должен содержать UUID вложения.
+            elif t_name == "doc_compare_attachment_with_local":
                 choice = human_choice.strip()
+
                 try:
-                    UUID(choice)
-                    t_args["attachment_id"] = choice
-                    if context.document_id and not _is_valid_uuid(
-                        str(t_args.get("document_id", "")).strip()
-                    ):
-                        t_args["document_id"] = context.document_id
-                        logger.debug(
-                            "Re-injected document_id for compare resume",
-                            extra={"doc_id": context.document_id[:8]},
+                    if _is_valid_uuid(choice):
+                        t_args["attachment_id"] = choice
+                    else:
+                        t_args["attachment_id"] = choice
+                        logger.info(
+                            "Human choice: attachment by name",
+                            extra={
+                                "attachment_name": choice,
+                                "thread_id": context.thread_id,
+                            },
                         )
-                    # Гарантируем local_file_path из контекста при resume
-                    if context.file_path:
-                        cur_local = str(t_args.get("local_file_path", "")).strip()
-                        fp = str(context.file_path).strip()
-                        if (
-                            not cur_local
-                            or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
-                        ):
-                            t_args["local_file_path"] = fp
-                            logger.debug(
-                                "Re-injected local_file_path for compare resume",
-                                extra={"path": fp[:32]},
-                            )
-                    # Гарантируем original_filename при resume.
-                    if context.uploaded_file_name and not t_args.get(
-                        "original_filename"
-                    ):
+
+                    if context.document_id:
+                        doc_id = str(context.document_id).strip()
+
+                        if _is_valid_uuid(doc_id):
+                            t_args["document_id"] = doc_id
+
+                    if context.uploaded_file_name:
                         t_args["original_filename"] = context.uploaded_file_name
-                        logger.debug(
-                            "Re-injected original_filename for compare resume",
-                            extra={"file_name": context.uploaded_file_name},
-                        )
+
                     logger.info(
                         "Human choice: attachment disambiguation resolved for compare",
                         extra={
                             "attachment_id": choice[:8] + "...",
                             "thread_id": context.thread_id,
+                            "local_file_path": (
+                                t_args.get("local_file_path", "")[:32]
+                                if t_args.get("local_file_path")
+                                else None
+                            ),
                             "doc_id": str(t_args.get("document_id", "?"))[:8],
                         },
                     )
+
                 except ValueError:
                     logger.warning(
-                        "Invalid attachment UUID in human_choice for doc_compare_with_local",
+                        "Invalid attachment UUID in human_choice for doc_compare_attachment_with_local",
                         extra={"raw_choice": choice},
                     )
 
@@ -1406,10 +1378,10 @@ class EdmsDocumentAgent:
     async def _orchestrate(
         self,
         context: ContextParams,
-        inputs: Optional[Dict[str, Any]],
+        inputs: dict[str, Any] | None,
         is_choice_active: bool,
         iteration: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Core recursive orchestration loop.
 
@@ -1450,7 +1422,7 @@ class EdmsDocumentAgent:
             )
 
             state = await self.state_manager.get_state(context.thread_id)
-            messages: List[BaseMessage] = state.values.get("messages", [])
+            messages: list[BaseMessage] = state.values.get("messages", [])
 
             logger.debug(
                 "State snapshot",
@@ -1476,7 +1448,6 @@ class EdmsDocumentAgent:
 
             last_msg = messages[-1]
 
-            # ── Граф завершился (END) — нет pending nodes ──────────────────
             last_is_tool_msg = isinstance(last_msg, ToolMessage)
             last_has_tool_calls = isinstance(last_msg, AIMessage) and bool(
                 getattr(last_msg, "tool_calls", None)
@@ -1487,10 +1458,8 @@ class EdmsDocumentAgent:
             if is_finished:
                 return self._build_final_response(messages, context)
 
-            # ── Граф прерван перед "tools" — патчим tool_calls ─────────────
             raw_calls = list(last_msg.tool_calls)
 
-            # Защита от параллельных вызовов: берём только первый
             if len(raw_calls) > 1:
                 logger.warning(
                     "Parallel tool_calls detected — keeping only the first",
@@ -1505,6 +1474,26 @@ class EdmsDocumentAgent:
 
             last_tool_text = ContentExtractor.extract_last_tool_text(messages)
             patched_calls = []
+
+            _after_compare_disambiguation = False
+            for prev_msg in reversed(messages[-15:]):
+                if isinstance(prev_msg, ToolMessage):
+                    try:
+                        prev_data = json.loads(str(prev_msg.content))
+                        if (
+                            prev_data.get("status") == "requires_disambiguation"
+                            and prev_msg.name == "doc_compare_attachment_with_local"
+                        ):
+                            _after_compare_disambiguation = True
+                            logger.debug(
+                                "Detected requires_disambiguation from doc_compare_attachment_with_local",
+                                extra={"tool_call_id": prev_msg.tool_call_id},
+                            )
+                            break
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+                if isinstance(prev_msg, HumanMessage):
+                    break
 
             for tc in raw_calls:
                 t_name = tc["name"]
@@ -1530,11 +1519,10 @@ class EdmsDocumentAgent:
                 path_is_uuid = _is_valid_uuid(clean_path)
                 path_is_local = bool(clean_path) and not path_is_uuid
 
+                # ── Логика для локальных файлов ───────────────────────────
                 if path_is_local:
-
-                    # ── GUARD 1: doc_get_versions при наличии файла → БЛОК ────
                     if t_name == "doc_get_versions":
-                        t_name = "doc_compare_with_local"
+                        t_name = "doc_compare_attachment_with_local"
                         t_args = {
                             "local_file_path": clean_path,
                         }
@@ -1542,23 +1530,21 @@ class EdmsDocumentAgent:
                             t_args["document_id"] = context.document_id
                         logger.warning(
                             "GUARD: doc_get_versions blocked (local file present) "
-                            "→ redirected to doc_compare_with_local",
+                            "→ redirected to doc_compare_attachment_with_local",
                             extra={"path": clean_path[:32]},
                         )
 
-                    # ── GUARD 2: doc_compare (версии) → compare_with_local ─────
-                    elif t_name == "doc_compare":
-                        t_name = "doc_compare_with_local"
+                    elif t_name == "doc_compare_documents":
+                        t_name = "doc_compare_attachment_with_local"
                         t_args["local_file_path"] = clean_path
                         t_args.pop("document_id_1", None)
                         t_args.pop("document_id_2", None)
                         logger.warning(
-                            "GUARD: doc_compare blocked (local file present) "
-                            "→ redirected to doc_compare_with_local",
+                            "GUARD: doc_compare_documents blocked (local file present) "
+                            "→ redirected to doc_compare_attachment_with_local",
                             extra={"path": clean_path[:32]},
                         )
 
-                    # ── GUARD 3: doc_get_file_content без attachment_id ────────
                     elif t_name == "doc_get_file_content" and not t_args.get(
                         "attachment_id"
                     ):
@@ -1571,25 +1557,134 @@ class EdmsDocumentAgent:
                             extra={"path": clean_path[:32]},
                         )
 
-                if t_name == "doc_compare_with_local" and not clean_path:
-                    t_name = "doc_compare"
+                # ── Логика для UUID-файлов (вложения) ─────────────────────
+                elif path_is_uuid:
+                    if t_name == "read_local_file_content":
+                        t_name = "doc_get_file_content"
+                        t_args["attachment_id"] = clean_path
+                        t_args.pop("file_path", None)
+                        logger.info(
+                            "Routed read_local_file_content → doc_get_file_content",
+                            extra={"attachment_id": clean_path[:8]},
+                        )
+                    elif t_name == "doc_get_file_content":
+                        cur_att = str(t_args.get("attachment_id", "")).strip()
+                        if not cur_att or not _is_valid_uuid(cur_att):
+                            t_args["attachment_id"] = clean_path
+                            logger.info(
+                                "Injected attachment_id from context",
+                                extra={"attachment_id": clean_path[:8]},
+                            )
+
+                # ── Фолбэк: если нет файла, но вызван compare_with_local ───
+                if (
+                    t_name == "doc_compare_attachment_with_local"
+                    and not clean_path
+                    and not _after_compare_disambiguation
+                    and not (is_choice_active and t_args.get("attachment_id"))
+                ):
+                    t_name = "doc_compare_documents"
                     t_args.pop("local_file_path", None)
                     t_args.pop("attachment_id", None)
                     logger.info(
-                        "Routed doc_compare_with_local → doc_compare "
+                        "Routed doc_compare_attachment_with_local → doc_compare_documents "
                         "(no file in context → version compare intended)",
                     )
 
-                if path_is_local and t_name == "doc_get_file_content":
-                    t_name = "read_local_file_content"
-                    t_args["file_path"] = clean_path
-                    t_args.pop("attachment_id", None)
-                    logger.info(
-                        "Routed doc_get_file_content → read_local_file_content",
-                        extra={"path_prefix": clean_path[:32]},
-                    )
+                # ── Инжект local_file_path для compare_with_local ─────────
+                if t_name == "doc_compare_attachment_with_local" and path_is_local:
+                    cur_local = str(t_args.get("local_file_path", "")).strip()
+                    if (
+                        not cur_local
+                        or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
+                        or not Path(cur_local).exists()
+                    ):
+                        t_args["local_file_path"] = clean_path
+                        logger.info(
+                            "Force-injected local_file_path for doc_compare_attachment_with_local",
+                            extra={"path": clean_path[:32]},
+                        )
 
-                elif path_is_local and t_name == "read_local_file_content":
+                    if context.uploaded_file_name and not t_args.get(
+                        "original_filename"
+                    ):
+                        t_args["original_filename"] = context.uploaded_file_name
+                        logger.debug(
+                            "Injected original_filename for doc_compare_attachment_with_local",
+                            extra={"file_name": context.uploaded_file_name},
+                        )
+
+                # ── Блокировка doc_compare_documents после disambiguation ─
+                if t_name == "doc_compare_documents":
+                    # Блок 1: после requires_disambiguation от compare_with_local
+                    if _after_compare_disambiguation or (
+                        is_choice_active and path_is_local
+                    ):
+                        logger.warning(
+                            "GUARD: doc_compare_documents blocked — redirecting to doc_compare_attachment_with_local",
+                            extra={
+                                "thread_id": context.thread_id,
+                                "reason": (
+                                    "disambiguation_flow"
+                                    if _after_compare_disambiguation
+                                    else "choice_active_with_local_file"
+                                ),
+                            },
+                        )
+                        t_name = "doc_compare_attachment_with_local"
+                        t_args = {
+                            "token": context.user_token,
+                            "document_id": context.document_id,
+                            "local_file_path": (
+                                clean_path
+                                if path_is_local
+                                else t_args.get("local_file_path")
+                            ),
+                            "attachment_id": t_args.get("document_id_2")
+                            or t_args.get("attachment_id"),
+                            "original_filename": context.uploaded_file_name,
+                        }
+                        for key in [
+                            "document_id_1",
+                            "document_id_2",
+                            "comparison_focus",
+                        ]:
+                            t_args.pop(key, None)
+                        if context.uploaded_file_name and not t_args.get(
+                            "original_filename"
+                        ):
+                            t_args["original_filename"] = context.uploaded_file_name
+
+                    # Блок 2: после doc_get_versions с comparison_complete=True
+                    else:
+                        _versions_result_complete = False
+                        for prev_msg in reversed(messages):
+                            if isinstance(prev_msg, ToolMessage):
+                                try:
+                                    prev_data = json.loads(str(prev_msg.content))
+                                    if prev_data.get(
+                                        "comparison_complete"
+                                    ) and prev_data.get("comparisons"):
+                                        _versions_result_complete = True
+                                        break
+                                except (json.JSONDecodeError, AttributeError):
+                                    continue
+                            if isinstance(prev_msg, HumanMessage):
+                                break
+
+                        if _versions_result_complete:
+                            logger.warning(
+                                "GUARD: doc_compare_documents blocked — doc_get_versions already "
+                                "completed all comparisons (comparison_complete=True). "
+                                "Replacing with no-op to prevent redundant API call.",
+                            )
+                            t_name = "doc_get_details"
+                            t_args = {}
+                            if context.document_id:
+                                t_args["document_id"] = context.document_id
+
+                # ── Инжект для read_local_file_content (placeholder replacement) ─
+                if path_is_local and t_name == "read_local_file_content":
                     cur_fp = str(t_args.get("file_path", "")).strip()
                     if not cur_fp or cur_fp.lower() in (
                         "local_file",
@@ -1604,75 +1699,6 @@ class EdmsDocumentAgent:
                             extra={"path_prefix": clean_path[:32]},
                         )
 
-                elif path_is_uuid and t_name == "read_local_file_content":
-                    t_name = "doc_get_file_content"
-                    t_args["attachment_id"] = clean_path
-                    t_args.pop("file_path", None)
-                    logger.info(
-                        "Routed read_local_file_content → doc_get_file_content",
-                        extra={"attachment_id": clean_path[:8]},
-                    )
-
-                elif path_is_uuid and t_name == "doc_get_file_content":
-                    cur_att = str(t_args.get("attachment_id", "")).strip()
-                    if not cur_att or not _is_valid_uuid(cur_att):
-                        t_args["attachment_id"] = clean_path
-                        logger.info(
-                            "Injected attachment_id from context",
-                            extra={"attachment_id": clean_path[:8]},
-                        )
-
-                # ── 2а. doc_compare_with_local: инжект local_file_path ─────────
-                if t_name == "doc_compare_with_local" and path_is_local:
-                    cur_local = str(t_args.get("local_file_path", "")).strip()
-                    if (
-                        not cur_local
-                        or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
-                        or not Path(cur_local).exists()
-                    ):
-                        t_args["local_file_path"] = clean_path
-                        logger.info(
-                            "Force-injected local_file_path for doc_compare_with_local",
-                            extra={"path": clean_path[:32]},
-                        )
-
-                    if context.uploaded_file_name and not t_args.get(
-                        "original_filename"
-                    ):
-                        t_args["original_filename"] = context.uploaded_file_name
-                        logger.debug(
-                            "Injected original_filename for doc_compare_with_local",
-                            extra={"file_name": context.uploaded_file_name},
-                        )
-
-                # ── 2б. doc_compare после doc_get_versions → БЛОК ────────────
-                if t_name == "doc_compare":
-                    _versions_result_complete = False
-                    for prev_msg in reversed(messages):
-                        if isinstance(prev_msg, ToolMessage):
-                            try:
-                                prev_data = json.loads(str(prev_msg.content))
-                                if prev_data.get(
-                                    "comparison_complete"
-                                ) and prev_data.get("comparisons"):
-                                    _versions_result_complete = True
-                                    break
-                            except (json.JSONDecodeError, AttributeError):
-                                continue
-                        if isinstance(prev_msg, HumanMessage):
-                            break
-
-                    if _versions_result_complete:
-                        logger.warning(
-                            "GUARD: doc_compare blocked — doc_get_versions already "
-                            "completed all comparisons (comparison_complete=True). "
-                            "Replacing with no-op to prevent redundant API call.",
-                        )
-                        t_name = "doc_get_details"
-                        t_args = {}
-                        if context.document_id:
-                            t_args["document_id"] = context.document_id
-
                 # ── 3. Инжект текста для суммаризации ─────────────────────
                 if t_name == "doc_summarize_text":
                     if last_tool_text:
@@ -1686,7 +1712,6 @@ class EdmsDocumentAgent:
 
                 patched_calls.append({"name": t_name, "args": t_args, "id": t_id})
 
-            # Сохраняем AIMessage с исправленными tool_calls обратно в граф
             await self.state_manager.update_state(
                 context.thread_id,
                 [
@@ -1699,14 +1724,25 @@ class EdmsDocumentAgent:
                 as_node="agent",
             )
 
+            next_is_choice_active = is_choice_active
+            if is_choice_active and patched_calls:
+                last_tool_name = patched_calls[-1]["name"]
+                if last_tool_name in (
+                    "doc_compare_attachment_with_local",
+                    "doc_summarize_text",
+                ):
+                    next_is_choice_active = True
+                else:
+                    next_is_choice_active = False
+
             return await self._orchestrate(
                 context=context,
                 inputs=None,
-                is_choice_active=is_choice_active,
+                is_choice_active=next_is_choice_active,
                 iteration=iteration + 1,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Execution timeout",
                 extra={
@@ -1727,7 +1763,6 @@ class EdmsDocumentAgent:
                 extra={"thread_id": context.thread_id, "iteration": iteration},
             )
 
-            # ── Специфичная обработка ошибки несогласованного треда ──────────
             _BROKEN_THREAD_SIGNALS = (
                 "tool_calls must be followed by tool messages",
                 "tool_call_ids did not have response messages",
@@ -1739,7 +1774,6 @@ class EdmsDocumentAgent:
             )
 
             if is_broken_thread_error and iteration == 0:
-                # Только на первой итерации — чтобы не зациклиться
                 logger.warning(
                     "Broken thread error detected — attempting auto-repair",
                     extra={"thread_id": context.thread_id},
@@ -1788,7 +1822,7 @@ class EdmsDocumentAgent:
         workflow: StateGraph = StateGraph(AgentState)
 
         # ── Нода: вызов LLM ──────────────────────────────────────────────────
-        async def call_model(state: AgentState) -> Dict[str, Any]:
+        async def call_model(state: AgentState) -> dict[str, Any]:
             """
             Invokes the LLM with bound tools.
             """
@@ -1799,11 +1833,9 @@ class EdmsDocumentAgent:
                 non_sys = non_sys[-_MAX_HISTORY_MSGS:]
             candidate_msgs = ([sys_msgs[-1]] if sys_msgs else []) + non_sys
 
-            # ── Санация истории: убираем «висящие» tool_calls ─────────────────
             final_msgs = []
             for i, msg in enumerate(candidate_msgs):
                 if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-                    # Проверяем: следующее сообщение должно быть ToolMessage
                     next_msg = (
                         candidate_msgs[i + 1] if i + 1 < len(candidate_msgs) else None
                     )
@@ -1824,8 +1856,7 @@ class EdmsDocumentAgent:
             response = await self._model_with_tools.ainvoke(final_msgs)
             return {"messages": [response]}
 
-        # ── Нода: валидация результатов инструментов ─────────────────────────
-        async def validator(state: AgentState) -> Dict[str, Any]:
+        async def validator(state: AgentState) -> dict[str, Any]:
             """
             Post-tool validator: injects system notifications for failed or
             empty tool results as AIMessage with non-empty content.
@@ -1836,7 +1867,6 @@ class EdmsDocumentAgent:
 
             raw = str(last.content).strip()
 
-            # Пустой результат инструмента
             if not raw or raw in ("None", "{}", "null"):
                 return {
                     "messages": [
@@ -1866,7 +1896,6 @@ class EdmsDocumentAgent:
                 except json.JSONDecodeError:
                     pass
 
-            # Явная ошибка от инструмента
             raw_lower = raw.lower()
             if '"status": "error"' in raw_lower or (
                 raw_lower.startswith("{") and '"error"' in raw_lower
@@ -1891,7 +1920,6 @@ class EdmsDocumentAgent:
 
             return {"messages": []}
 
-        # ── Регистрация нод и рёбер ───────────────────────────────────────────
         workflow.add_node("agent", call_model)
         workflow.add_node("tools", ToolNode(self.tools))
         workflow.add_node("validator", validator)
@@ -1926,8 +1954,8 @@ class EdmsDocumentAgent:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _build_final_response(
-        self, messages: List[BaseMessage], context: ContextParams
-    ) -> Dict[str, Any]:
+        self, messages: list[BaseMessage], context: ContextParams
+    ) -> dict[str, Any]:
         """
         Extracts final content and wraps it into an AgentResponse.
 
@@ -1946,7 +1974,6 @@ class EdmsDocumentAgent:
         Returns:
             Serialized AgentResponse dict.
         """
-        # ── Проверяем ToolMessage на интерактивные статусы ──────────────────
         interactive = self._detect_interactive_status(messages)
         if interactive:
             logger.info(
@@ -1958,7 +1985,6 @@ class EdmsDocumentAgent:
             )
             return interactive
 
-        # ── Стандартное извлечение финального текста ────────────────────────
         final_content = ContentExtractor.extract_final_content(messages)
 
         if final_content:
@@ -1988,8 +2014,8 @@ class EdmsDocumentAgent:
 
     @staticmethod
     def _detect_interactive_status(
-        messages: List[BaseMessage],
-    ) -> Optional[Dict[str, Any]]:
+        messages: list[BaseMessage],
+    ) -> dict[str, Any] | None:
         """
         Сканирует ПОСЛЕДНИЙ ToolMessage на наличие статусов интерактива.
 
@@ -2004,8 +2030,7 @@ class EdmsDocumentAgent:
         Returns:
             Сериализованный словарь AgentResponse или None.
         """
-        # Поиск последнего ToolMessage в цепочке
-        last_tool_msg: Optional[ToolMessage] = None
+        last_tool_msg: ToolMessage | None = None
         for m in reversed(messages):
             if isinstance(m, ToolMessage):
                 last_tool_msg = m
@@ -2019,7 +2044,7 @@ class EdmsDocumentAgent:
             return None
 
         try:
-            data: Dict[str, Any] = json.loads(raw)
+            data: dict[str, Any] = json.loads(raw)
         except json.JSONDecodeError:
             return None
 
@@ -2074,8 +2099,7 @@ class EdmsDocumentAgent:
                 "users",
             )
 
-            # Поиск списка доступных вариантов
-            available: List[Dict[str, Any]] = next(
+            available: list[dict[str, Any]] = next(
                 (
                     v
                     for k in _KNOWN_LIST_KEYS
@@ -2093,8 +2117,7 @@ class EdmsDocumentAgent:
                             and "matches" in first_item
                             and not first_item.get("id")
                         ):
-                            # Nested format — разворачиваем
-                            flat: List[Dict[str, Any]] = []
+                            flat: list[dict[str, Any]] = []
                             for group in _v:
                                 flat.extend(group.get("matches", []))
                             if flat:
@@ -2129,13 +2152,13 @@ class EdmsDocumentAgent:
             )
             if not base_msg:
                 base_msg = "Уточните выбор:"
-            candidates_structured: List[Dict[str, str]] = []
+            candidates_structured: list[dict[str, str]] = []
 
             for item in available:
                 if not isinstance(item, dict):
                     continue
 
-                # Извлечение ФИО (поддержка разных схем именования)
+                # Извлечение ФИО
                 first = (
                     item.get("firstName")
                     or item.get("first_name")
@@ -2232,9 +2255,7 @@ class EdmsDocumentAgent:
         full_name: str = (
             ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
         ).strip()
-        user_id: Optional[str] = (
-            ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
-        )
+        user_id: str | None = ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
 
         display_name: str = first_name or last_name or full_name or "пользователь"
 
@@ -2242,6 +2263,7 @@ class EdmsDocumentAgent:
             user_token=request.user_token,
             document_id=request.context_ui_id,
             file_path=request.file_path,
+            uploaded_file_name=request.file_name or None,
             thread_id=request.thread_id or "default",
             user_name=display_name,
             user_first_name=first_name or None,

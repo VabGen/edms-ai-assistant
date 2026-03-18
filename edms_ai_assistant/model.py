@@ -5,7 +5,7 @@ EDMS AI Assistant — Public data contracts (Pydantic v2).
 
 from __future__ import annotations
 
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Any, Literal
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -26,7 +26,7 @@ class AgentState(TypedDict):
     Reducer add_messages обеспечивает корректное слияние.
     """
 
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -37,11 +37,11 @@ class AgentState(TypedDict):
 class UserContext(BaseModel):
     """Профиль пользователя из EDMS."""
 
-    firstName: Optional[str] = Field(None, max_length=100)
-    lastName: Optional[str] = Field(None, max_length=100)
-    middleName: Optional[str] = Field(None, max_length=100)
-    role: Optional[str] = Field(None, max_length=100)
-    post: Optional[str] = Field(None, max_length=200)
+    firstName: str | None = Field(None, max_length=100)
+    lastName: str | None = Field(None, max_length=100)
+    middleName: str | None = Field(None, max_length=100)
+    role: str | None = Field(None, max_length=100)
+    post: str | None = Field(None, max_length=200)
 
 
 class UserInput(BaseModel):
@@ -54,17 +54,18 @@ class UserInput(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=8000)
     user_token: str = Field(..., min_length=10)
-    context_ui_id: Optional[str] = Field(
+    context_ui_id: str | None = Field(
         None,
         description="UUID активного документа в UI EDMS",
     )
-    context: Optional[UserContext] = None
-    file_path: Optional[str] = Field(
+    context: UserContext | None = None
+    file_path: str | None = Field(
         None,
         max_length=500,
         description="UUID вложения EDMS или путь к локальному файлу",
     )
-    human_choice: Optional[str] = Field(
+    file_name: str | None = None
+    human_choice: str | None = Field(
         None,
         max_length=200,
         description=(
@@ -72,7 +73,7 @@ class UserInput(BaseModel):
             "или UUID сотрудников через запятую для disambiguation"
         ),
     )
-    thread_id: Optional[str] = Field(None, max_length=255)
+    thread_id: str | None = Field(None, max_length=255)
 
     @field_validator("message")
     @classmethod
@@ -103,10 +104,10 @@ class AssistantResponse(BaseModel):
     """
 
     status: ResponseStatus = "success"
-    response: Optional[str] = None
-    action_type: Optional[str] = None
-    message: Optional[str] = None
-    thread_id: Optional[str] = None
+    response: str | None = None
+    action_type: str | None = None
+    message: str | None = None
+    thread_id: str | None = None
     requires_reload: bool = Field(
         default=False,
         description=(
@@ -114,6 +115,7 @@ class AssistantResponse(BaseModel):
             "после успешного выполнения мутирующих операций"
         ),
     )
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────

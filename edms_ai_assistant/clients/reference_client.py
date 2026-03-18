@@ -1,6 +1,6 @@
 # edms_ai_assistant/clients/reference_client.py
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base_client import EdmsHttpClient
 
@@ -10,22 +10,9 @@ logger = logging.getLogger(__name__)
 class ReferenceClient(EdmsHttpClient):
     """
     Client for EDMS reference book (справочники) API.
-
-    Geography lookup protocol:
-      Простой lookup (country/region/district/city):
-        Step 1: GET /api/{endpoint}/fts-name?fts={name}  → list → [0].id
-        Step 2: GET /api/{endpoint}/{id}                 → canonical name from DB
-
-      Иерархия города (find_city_with_hierarchy):
-        Step 1: GET /api/city/fts-name?fts={name}            → city id
-        Step 2: GET /api/city/{id}?includes=DISTRICT_WITH_REGION
-                → вся иерархия одним запросом: city + district + region
-
-    Это гарантирует, что name в payload точно совпадает со справочником.
     """
 
-    # Маппинг endpoint → приоритет полей имени в GET /{id} ответе
-    _CANONICAL_NAME_FIELDS: Dict[str, tuple] = {
+    _CANONICAL_NAME_FIELDS: dict[str, tuple] = {
         "country": ("fullName", "name", "shortName"),
         "region": ("nameRegion", "name", "shortName"),
         "district": ("nameDistrict", "name", "shortName"),
@@ -47,7 +34,7 @@ class ReferenceClient(EdmsHttpClient):
         endpoint: str,
         search_name: str,
         entity_label: str,
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         """
         Two-step reference lookup: fts-name → GET /{id} → canonical name.
 
@@ -161,8 +148,8 @@ class ReferenceClient(EdmsHttpClient):
         return {"id": entity_id, "name": canonical_name}
 
     def _extract_canonical_name(
-        self, record: Dict[str, Any], endpoint: str
-    ) -> Optional[str]:
+        self, record: dict[str, Any], endpoint: str
+    ) -> str | None:
         """
         Extracts the canonical name from a DB record using endpoint-specific
         field priority from _CANONICAL_NAME_FIELDS.
@@ -185,7 +172,7 @@ class ReferenceClient(EdmsHttpClient):
 
     async def _find_entity_id(
         self, token: str, endpoint: str, name: str, entity_label: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Legacy helper: возвращает только id (без name)."""
         result = await self._find_entity_with_name(token, endpoint, name, entity_label)
         return result["id"] if result else None
@@ -196,31 +183,29 @@ class ReferenceClient(EdmsHttpClient):
 
     async def find_country_with_name(
         self, token: str, name: str
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         """Two-step country lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "country", name, "Страна")
 
     async def find_region_with_name(
         self, token: str, name: str
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         """Two-step region lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "region", name, "Регион")
 
     async def find_district_with_name(
         self, token: str, name: str
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         """Two-step district lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "district", name, "Район")
 
-    async def find_city_with_name(
-        self, token: str, name: str
-    ) -> Optional[Dict[str, str]]:
+    async def find_city_with_name(self, token: str, name: str) -> dict[str, str] | None:
         """Two-step city lookup → {id, canonical name}."""
         return await self._find_entity_with_name(token, "city", name, "Город")
 
     async def find_city_with_hierarchy(
         self, token: str, city_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         City lookup with full geo hierarchy in ONE request.
 
@@ -300,7 +285,7 @@ class ReferenceClient(EdmsHttpClient):
             return None
 
         # ── Извлекаем поля из вложенной структуры ────────────────────────────
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "id": city_id,
             "name": city_dto.get("nameCity") or query,
         }
@@ -336,31 +321,31 @@ class ReferenceClient(EdmsHttpClient):
     # Legacy API (только id, обратная совместимость)
     # ─────────────────────────────────────────────────────────────────
 
-    async def find_country(self, token: str, name: str) -> Optional[str]:
+    async def find_country(self, token: str, name: str) -> str | None:
         """Поиск страны (только ID)."""
         return await self._find_entity_id(token, "country", name, "Страна")
 
-    async def find_region(self, token: str, name: str) -> Optional[str]:
+    async def find_region(self, token: str, name: str) -> str | None:
         """Поиск региона (только ID)."""
         return await self._find_entity_id(token, "region", name, "Регион")
 
-    async def find_district(self, token: str, name: str) -> Optional[str]:
+    async def find_district(self, token: str, name: str) -> str | None:
         """Поиск района (только ID)."""
         return await self._find_entity_id(token, "district", name, "Район")
 
-    async def find_city(self, token: str, name: str) -> Optional[str]:
+    async def find_city(self, token: str, name: str) -> str | None:
         """Поиск города (только ID)."""
         return await self._find_entity_id(token, "city", name, "Город")
 
-    async def find_citizen_type(self, token: str, name: str) -> Optional[str]:
+    async def find_citizen_type(self, token: str, name: str) -> str | None:
         """Поиск вида обращения (только ID)."""
         return await self._find_entity_id(token, "citizen-type", name, "Вид обращения")
 
-    async def find_correspondent(self, token: str, name: str) -> Optional[str]:
+    async def find_correspondent(self, token: str, name: str) -> str | None:
         """Поиск корреспондента (только ID)."""
         return await self._find_entity_id(token, "correspondent", name, "Корреспондент")
 
-    async def find_delivery_method(self, token: str, name: str) -> Optional[str]:
+    async def find_delivery_method(self, token: str, name: str) -> str | None:
         """Поиск способа доставки с fallback на 'Курьер'."""
         result = await self._find_entity_id(
             token, "delivery-method", name, "Способ доставки"
@@ -372,11 +357,11 @@ class ReferenceClient(EdmsHttpClient):
             )
         return result
 
-    async def find_department(self, token: str, name: str) -> Optional[str]:
+    async def find_department(self, token: str, name: str) -> str | None:
         """Поиск подразделения (только ID)."""
         return await self._find_entity_id(token, "department", name, "Подразделение")
 
-    async def find_group(self, token: str, name: str) -> Optional[str]:
+    async def find_group(self, token: str, name: str) -> str | None:
         """Поиск группы (только ID)."""
         return await self._find_entity_id(token, "group", name, "Группа")
 
@@ -384,7 +369,7 @@ class ReferenceClient(EdmsHttpClient):
     # Тематики (Subject)
     # ─────────────────────────────────────────────────────────────────
 
-    async def get_parent_subjects(self, token: str) -> List[Dict]:
+    async def get_parent_subjects(self, token: str) -> list[dict]:
         """Получить список родительских тем."""
         try:
             result = await self._make_request(
@@ -402,7 +387,7 @@ class ReferenceClient(EdmsHttpClient):
             )
             return []
 
-    async def get_child_subjects(self, token: str, parent_id: str) -> List[Dict]:
+    async def get_child_subjects(self, token: str, parent_id: str) -> list[dict]:
         """Получить дочерние темы по parent_id."""
         try:
             result = await self._make_request(
@@ -421,9 +406,10 @@ class ReferenceClient(EdmsHttpClient):
             )
             return []
 
-    async def find_best_subject(self, token: str, text: str) -> Optional[str]:
+    async def find_best_subject(self, token: str, text: str) -> str | None:
         """LLM-based two-level subject selection (parent → child)."""
         import re
+
         from edms_ai_assistant.llm import get_chat_model
 
         parents = await self.get_parent_subjects(token)

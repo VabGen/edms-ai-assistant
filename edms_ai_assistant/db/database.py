@@ -1,11 +1,12 @@
 # edms_ai_assistant/db/database.py
+import logging
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, UniqueConstraint, text, func
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import DateTime, String, Text, UniqueConstraint, func, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
 from edms_ai_assistant.config import settings
-import logging
 
 logger = logging.getLogger(__name__)
 

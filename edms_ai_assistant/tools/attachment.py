@@ -11,7 +11,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -67,7 +67,7 @@ class AttachmentFetchInput(BaseModel):
 
     document_id: str = Field(..., description="UUID документа в СЭД")
     token: str = Field(..., description="Токен авторизации пользователя (JWT)")
-    attachment_id: Optional[str] = Field(
+    attachment_id: str | None = Field(
         None,
         description=(
             "UUID вложения или имя файла (например: «Шаблон обложки.docx»). "
@@ -84,7 +84,7 @@ class AttachmentFetchInput(BaseModel):
             "'full' — текст + таблицы + метаданные."
         ),
     )
-    summary_type: Optional[str] = Field(
+    summary_type: str | None = Field(
         None,
         description=(
             "Тип суммаризации для передачи следующему инструменту: "
@@ -145,7 +145,7 @@ def _get_attachment_id(attachment: Any) -> str:
     return str(getattr(attachment, "id", "") or "")
 
 
-def _resolve_attachment(attachments: List[Any], hint: str) -> Optional[Any]:
+def _resolve_attachment(attachments: list[Any], hint: str) -> Any | None:
     """Resolve an attachment from a list by UUID or filename hint.
 
     Resolution order:
@@ -202,7 +202,7 @@ def _resolve_attachment(attachments: List[Any], hint: str) -> Optional[Any]:
     return None
 
 
-def _build_attachment_meta(attachment: Any) -> Dict[str, Any]:
+def _build_attachment_meta(attachment: Any) -> dict[str, Any]:
     """Build a human-readable metadata dict from an attachment domain object.
 
     Args:
@@ -217,11 +217,11 @@ def _build_attachment_meta(attachment: Any) -> Dict[str, Any]:
     signs = getattr(attachment, "signs", None) or []
 
     att_type_obj = getattr(attachment, "attachmentDocumentType", None)
-    att_type: Optional[str] = None
+    att_type: str | None = None
     if att_type_obj:
         att_type = getattr(att_type_obj, "name", None) or str(att_type_obj)
 
-    formatted_date: Optional[str] = None
+    formatted_date: str | None = None
     if upload_date:
         try:
             formatted_date = (
@@ -249,10 +249,10 @@ def _build_attachment_meta(attachment: Any) -> Dict[str, Any]:
 async def doc_get_file_content(
     document_id: str,
     token: str,
-    attachment_id: Optional[str] = None,
+    attachment_id: str | None = None,
     analysis_mode: str = "text",
-    summary_type: Optional[str] = None,
-) -> Dict[str, Any]:
+    summary_type: str | None = None,
+) -> dict[str, Any]:
     """Extract and analyse the content of a document attachment from EDMS.
 
     Accepts ``attachment_id`` as either a UUID or a filename string.
@@ -297,7 +297,7 @@ async def doc_get_file_content(
         async with DocumentClient() as doc_client:
             raw_data = await doc_client.get_document_metadata(token, document_id)
             doc = DocumentDto.model_validate(raw_data)
-            attachments: List[Any] = doc.attachmentDocument or []
+            attachments: list[Any] = doc.attachmentDocument or []
     except Exception as exc:
         logger.error("Failed to fetch document metadata: %s", exc, exc_info=True)
         return {
@@ -399,7 +399,7 @@ async def doc_get_file_content(
         }
 
     # ── Обработка через FileProcessorService ─────────────────────────────────
-    tmp_path: Optional[str] = None
+    tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content_bytes)

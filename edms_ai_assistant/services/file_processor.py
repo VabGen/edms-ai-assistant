@@ -2,11 +2,11 @@
 EDMS AI Assistant - Enhanced File Processor Service.
 """
 
-import logging
-from pathlib import Path
-from typing import Optional, Dict, Any, List
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
 
 from langchain_community.document_loaders import (
     Docx2txtLoader,
@@ -80,11 +80,9 @@ class FileProcessorService:
             return warning_msg
 
         try:
-            # Обработка Excel файлов
             if ext in [".xlsx", ".xls"]:
                 return cls._extract_from_excel(file_path, ext)
 
-            # Стандартная обработка через LangChain
             loader_class = cls.SUPPORTED_EXTENSIONS[ext]
             loader = loader_class(file_path)
 
@@ -124,7 +122,7 @@ class FileProcessorService:
             return full_text
 
         except Exception as e:
-            error_msg = f"Произошла техническая ошибка при чтении файла {ext}: {str(e)}"
+            error_msg = f"Произошла техническая ошибка при чтении файла {ext}: {e!s}"
             logger.error(
                 f"File parsing error: {e}",
                 exc_info=True,
@@ -161,9 +159,7 @@ class FileProcessorService:
                     sheet = wb[sheet_name]
                     extracted_text.append(f"\n{'='*50}\nЛИСТ: {sheet_name}\n{'='*50}\n")
 
-                    # Извлекаем данные с сохранением структуры
                     for row in sheet.iter_rows(values_only=True):
-                        # Пропускаем полностью пустые строки
                         if any(cell is not None for cell in row):
                             row_text = " | ".join(
                                 str(cell) if cell is not None else "" for cell in row
@@ -207,10 +203,10 @@ class FileProcessorService:
             )
         except Exception as e:
             logger.error(f"Excel extraction error: {e}", exc_info=True)
-            return f"Ошибка при чтении Excel файла: {str(e)}"
+            return f"Ошибка при чтении Excel файла: {e!s}"
 
     @classmethod
-    async def extract_structured_data(cls, file_path: str) -> Dict[str, Any]:
+    async def extract_structured_data(cls, file_path: str) -> dict[str, Any]:
         """
         Извлекает структурированные данные из файла (метаданные + контент).
 
@@ -260,7 +256,7 @@ class FileProcessorService:
     @classmethod
     async def _extract_excel_tables(
         cls, file_path: str, ext: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Извлекает таблицы из Excel как структурированные данные.
 
@@ -276,7 +272,7 @@ class FileProcessorService:
         )
 
     @classmethod
-    def _extract_tables_sync(cls, file_path: str, ext: str) -> List[Dict[str, Any]]:
+    def _extract_tables_sync(cls, file_path: str, ext: str) -> list[dict[str, Any]]:
         """Синхронная версия извлечения таблиц."""
         try:
             if ext == ".xlsx":
@@ -335,7 +331,7 @@ class FileProcessorService:
             return []
 
     @classmethod
-    def validate_file_path(cls, file_path: str) -> Optional[str]:
+    def validate_file_path(cls, file_path: str) -> str | None:
         """Валидирует путь к файлу перед обработкой."""
         if not file_path or not file_path.strip():
             return "Путь к файлу не может быть пустым"
@@ -387,5 +383,5 @@ class FileProcessorService:
             )
             return {
                 "exists": True,
-                "error": f"Не удалось получить информацию о файле: {str(e)}",
+                "error": f"Не удалось получить информацию о файле: {e!s}",
             }

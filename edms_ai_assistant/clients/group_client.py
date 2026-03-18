@@ -1,10 +1,10 @@
 # edms_ai_assistant/clients/group_client.py
 import logging
-from typing import Optional, Dict, Any, List
 from abc import abstractmethod
+from typing import Any
 from uuid import UUID
 
-from .base_client import EdmsHttpClient, EdmsBaseClient
+from .base_client import EdmsBaseClient, EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 
@@ -12,23 +12,19 @@ logger = logging.getLogger(__name__)
 class BaseGroupClient(EdmsBaseClient):
 
     @abstractmethod
-    async def find_by_name(
-        self, token: str, group_name: str
-    ) -> Optional[Dict[str, Any]]:
+    async def find_by_name(self, token: str, group_name: str) -> dict[str, Any] | None:
         raise NotImplementedError
 
     @abstractmethod
     async def get_employees_by_group_ids(
-        self, token: str, group_ids: List[UUID]
-    ) -> List[Dict[str, Any]]:
+        self, token: str, group_ids: list[UUID]
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
 
 
 class GroupClient(BaseGroupClient, EdmsHttpClient):
 
-    async def find_by_name(
-        self, token: str, group_name: str
-    ) -> Optional[Dict[str, Any]]:
+    async def find_by_name(self, token: str, group_name: str) -> dict[str, Any] | None:
         endpoint = "api/group/fts-name"
         params = {"fts": group_name}
 
@@ -45,8 +41,8 @@ class GroupClient(BaseGroupClient, EdmsHttpClient):
             return None
 
     async def get_employees_by_group_ids(
-        self, token: str, group_ids: List[UUID]
-    ) -> List[Dict[str, Any]]:
+        self, token: str, group_ids: list[UUID]
+    ) -> list[dict[str, Any]]:
         if not group_ids:
             return []
 

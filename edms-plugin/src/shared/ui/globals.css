@@ -3,30 +3,127 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --glass-bg:     rgba(255, 255, 255, 0.35);
-    --glass-border: rgba(255, 255, 255, 0.40);
-    --glass-shadow: rgba(31,  38,  135, 0.15);
-  }
-  * { box-sizing: border-box; }
+    :root {
+        --glass-bg: rgba(255, 255, 255, 0.35);
+        --glass-border: rgba(255, 255, 255, 0.45);
+        --glass-shadow: rgba(31, 38, 135, 0.12);
+        --edms-font-size: 14px;
+    }
+
+    * {
+        box-sizing: border-box;
+    }
 }
 
 @layer components {
-  .glass {
-    background:   var(--glass-bg);
-    border:       1px solid var(--glass-border);
-    box-shadow:   0 8px 32px 0 var(--glass-shadow);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-  }
+    .glass {
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        box-shadow: 0 8px 32px 0 var(--glass-shadow),
+        0 1px 0 0 rgba(255, 255, 255, 0.60) inset;
+        backdrop-filter: blur(24px) saturate(1.6);
+        -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    }
 }
 
-@layer utilities {
-  /* Thin scrollbar */
-  .scrollbar-thin::-webkit-scrollbar        { width: 4px; }
-  .scrollbar-thin::-webkit-scrollbar-track  { background: transparent; }
-  .scrollbar-thin::-webkit-scrollbar-thumb  {
-    background:    rgba(99, 102, 241, 0.25);
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+.scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.25);
     border-radius: 10px;
-  }
+}
+
+/* ─── Font size scaling ──────────────────────────────────────────────────────
+ * --edms-font-size задаётся через inline style на корневом div виджета.
+ * Tailwind text-sm/text-xs использует rem от <html>, поэтому мы переопределяем
+ * конкретные элементы через CSS var напрямую.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* Текст сообщений в чате */
+.edms-chat-text {
+    font-size: var(--edms-font-size, 14px) !important;
+    line-height: 1.65;
+}
+
+/* Textarea поля ввода */
+.edms-textarea {
+    font-size: var(--edms-font-size, 14px) !important;
+    line-height: 1.5;
+}
+
+/* Заголовок виджета */
+.edms-header-title {
+    font-size: calc(var(--edms-font-size, 14px) + 0px) !important;
+    font-weight: 600;
+}
+
+/* Треды в сайдбаре */
+.edms-thread-preview {
+    font-size: calc(var(--edms-font-size, 14px) - 3px) !important;
+}
+
+/* Кнопки действий (Пересказ, Факты, Тезисы) */
+.edms-action-btn {
+    font-size: calc(var(--edms-font-size, 14px) - 2px) !important;
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes edms-ripple {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.6;
+    }
+    100% {
+        transform: scale(2.4);
+        opacity: 0;
+    }
+}
+
+@keyframes edms-fade-in {
+    from {
+        opacity: 0;
+        transform: scale(0.93) translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes edms-wave {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+    30% {
+        transform: translateY(-6px);
+        opacity: 1;
+    }
+}
+
+@keyframes edms-soundbar {
+    0%, 100% {
+        transform: scaleY(0.4);
+    }
+    50% {
+        transform: scaleY(1.2);
+    }
+}
+
+@keyframes ios-ripple {
+    0% {
+        transform: translate(50%, -50%) scale(1);
+        opacity: 0.6;
+    }
+    100% {
+        transform: translate(50%, -50%) scale(18);
+        opacity: 0;
+    }
 }

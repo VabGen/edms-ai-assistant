@@ -9,7 +9,7 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -47,7 +47,7 @@ def _att_name(attachment: Any) -> str:
     )
 
 
-def _compare_metadata(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> Dict[str, Any]:
+def _compare_metadata(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str, Any]:
     """
     Compares metadata fields of two document versions.
 
@@ -58,7 +58,7 @@ def _compare_metadata(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> Dict[str, A
     Returns:
         Dict with changed fields: {field_label: {from: val1, to: val2}}.
     """
-    changes: Dict[str, Any] = {}
+    changes: dict[str, Any] = {}
     for field_key, field_label in _METADATA_FIELDS:
         v1 = doc1.get(field_key)
         v2 = doc2.get(field_key)
@@ -70,7 +70,7 @@ def _compare_metadata(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> Dict[str, A
     return changes
 
 
-def _compare_attachments(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> Dict[str, Any]:
+def _compare_attachments(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str, Any]:
     """
     Compares attachment lists of two document versions.
 
@@ -83,11 +83,11 @@ def _compare_attachments(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> Dict[str
     Returns:
         Dict with added, removed, common attachment names and counts.
     """
-    att1: List[Any] = doc1.get("attachmentDocument") or []
-    att2: List[Any] = doc2.get("attachmentDocument") or []
+    att1: list[Any] = doc1.get("attachmentDocument") or []
+    att2: list[Any] = doc2.get("attachmentDocument") or []
 
-    names1: Set[str] = {_att_name(a) for a in att1 if _att_name(a)}
-    names2: Set[str] = {_att_name(a) for a in att2 if _att_name(a)}
+    names1: set[str] = {_att_name(a) for a in att1 if _att_name(a)}
+    names2: set[str] = {_att_name(a) for a in att2 if _att_name(a)}
 
     return {
         "добавлены_в_новой": sorted(names2 - names1) or [],
@@ -106,7 +106,7 @@ class DocumentVersionsInput(BaseModel):
 
 
 @tool("doc_get_versions", args_schema=DocumentVersionsInput)
-async def doc_get_versions(document_id: str, token: str) -> Dict[str, Any]:
+async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
     """Retrieve all document versions and compare each consecutive pair automatically.
 
     BEHAVIOUR:
@@ -140,8 +140,8 @@ async def doc_get_versions(document_id: str, token: str) -> Dict[str, Any]:
             total = len(sorted_versions)
 
             # ── Сбор метаданных всех версий ─────────────────────────────────
-            versions_info: List[Dict[str, Any]] = []
-            version_ids: Dict[str, str] = {}  # "1" → doc_uuid
+            versions_info: list[dict[str, Any]] = []
+            version_ids: dict[str, str] = {}  # "1" → doc_uuid
 
             for v in sorted_versions:
                 vnum = v.get("version") or (len(versions_info) + 1)
@@ -166,8 +166,8 @@ async def doc_get_versions(document_id: str, token: str) -> Dict[str, Any]:
             # ── Последовательное сравнение всех соседних пар ────────────────
             # Для N версий выполняем N-1 сравнений: (1,2), (2,3), ..., (N-1,N).
             # Каждое сравнение — отдельный API-запрос за метаданными двух версий.
-            comparisons: List[Dict[str, Any]] = []
-            errors: List[str] = []
+            comparisons: list[dict[str, Any]] = []
+            errors: list[str] = []
 
             version_nums = sorted(version_ids.keys(), key=lambda x: int(x))
 
@@ -260,4 +260,4 @@ async def doc_get_versions(document_id: str, token: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error("[DOC-VERSIONS-TOOL] Error: %s", e, exc_info=True)
-        return {"status": "error", "message": f"Ошибка получения версий: {str(e)}"}
+        return {"status": "error", "message": f"Ошибка получения версий: {e!s}"}

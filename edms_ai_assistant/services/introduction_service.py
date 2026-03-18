@@ -4,7 +4,6 @@ EDMS AI Assistant - Introduction Service.
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Set
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,7 +19,7 @@ logger = logging.getLogger(__name__)
 class PostIntroductionRequest(BaseModel):
     """Request DTO для создания ознакомления через API."""
 
-    executorListIds: List[UUID] = Field(
+    executorListIds: list[UUID] = Field(
         ..., description="UUID сотрудников для добавления в список ознакомления"
     )
     comment: str = Field(
@@ -40,16 +39,16 @@ class IntroductionResult:
 
     success: bool
     added_count: int = 0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
 class EmployeeResolutionResult:
     """Результат резолвинга сотрудников с обработкой неоднозначностей."""
 
-    employee_ids: Set[UUID] = field(default_factory=set)
-    not_found: List[str] = field(default_factory=list)
-    ambiguous: List[dict] = field(default_factory=list)
+    employee_ids: set[UUID] = field(default_factory=set)
+    not_found: list[str] = field(default_factory=list)
+    ambiguous: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -57,7 +56,7 @@ class AmbiguousMatch:
     """Структура для неоднозначного совпадения при поиске сотрудника."""
 
     search_query: str
-    matches: List[dict]
+    matches: list[dict]
 
 
 class IntroductionService:
@@ -96,9 +95,9 @@ class IntroductionService:
     async def resolve_employees(
         self,
         token: str,
-        last_names: List[str],
-        department_names: List[str],
-        group_names: List[str],
+        last_names: list[str],
+        department_names: list[str],
+        group_names: list[str],
     ) -> EmployeeResolutionResult:
         """
         Резолвит сотрудников по множественным критериям поиска.
@@ -118,9 +117,9 @@ class IntroductionService:
             EmployeeResolutionResult с найденными UUID, не найденными критериями
             и неоднозначными совпадениями
         """
-        found_ids: Set[UUID] = set()
-        not_found: List[str] = []
-        ambiguous_results: List[dict] = []
+        found_ids: set[UUID] = set()
+        not_found: list[str] = []
+        ambiguous_results: list[dict] = []
 
         if last_names:
             for last_name in last_names:
@@ -197,16 +196,16 @@ class IntroductionService:
         }
 
     async def _resolve_departments(
-        self, token: str, department_names: List[str]
-    ) -> tuple[Set[UUID], List[str]]:
+        self, token: str, department_names: list[str]
+    ) -> tuple[set[UUID], list[str]]:
         """
         Резолвит сотрудников по названиям отделов.
 
         Returns:
             Tuple[Set[UUID], List[str]]: Найденные ID и не найденные отделы
         """
-        found_ids: Set[UUID] = set()
-        not_found: List[str] = []
+        found_ids: set[UUID] = set()
+        not_found: list[str] = []
 
         for dept_name in department_names:
             dept = await self.department_client.find_by_name(token, dept_name)
@@ -232,17 +231,17 @@ class IntroductionService:
         return found_ids, not_found
 
     async def _resolve_groups(
-        self, token: str, group_names: List[str]
-    ) -> tuple[Set[UUID], List[str]]:
+        self, token: str, group_names: list[str]
+    ) -> tuple[set[UUID], list[str]]:
         """
         Резолвит сотрудников по названиям групп.
 
         Returns:
             Tuple[Set[UUID], List[str]]: Найденные ID и не найденные группы
         """
-        found_ids: Set[UUID] = set()
-        not_found: List[str] = []
-        group_ids: List[UUID] = []
+        found_ids: set[UUID] = set()
+        not_found: list[str] = []
+        group_ids: list[UUID] = []
 
         for group_name in group_names:
             group = await self.group_client.find_by_name(token, group_name)
@@ -274,8 +273,8 @@ class IntroductionService:
         self,
         token: str,
         document_id: str,
-        employee_ids: List[UUID],
-        comment: Optional[str] = None,
+        employee_ids: list[UUID],
+        comment: str | None = None,
     ) -> IntroductionResult:
         """
         Создает список ознакомления через API EDMS.
@@ -335,11 +334,11 @@ class IntroductionService:
             return IntroductionResult(
                 success=False,
                 added_count=0,
-                error_message=f"Ошибка API: {str(e)}",
+                error_message=f"Ошибка API: {e!s}",
             )
 
     @staticmethod
-    def _normalize_comment(comment: Optional[str]) -> str:
+    def _normalize_comment(comment: str | None) -> str:
         """
         Нормализует комментарий перед отправкой в API.
 

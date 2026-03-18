@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from enum import StrEnum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -40,17 +40,17 @@ class _NotificationClient(EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        recipient_ids: List[str],
+        recipient_ids: list[str],
         notification_type: str,
         message: str,
-        deadline: Optional[str],
-    ) -> Dict[str, Any]:
+        deadline: str | None,
+    ) -> dict[str, Any]:
         """
         Sends a notification to the given employees.
 
         POST api/document/{document_id}/notification
         """
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "recipientIds": recipient_ids,
             "type": notification_type,
             "message": message.strip(),
@@ -81,7 +81,7 @@ class SendNotificationInput(BaseModel):
     document_id: str = Field(
         ..., description="UUID документа, к которому привязано уведомление"
     )
-    recipient_ids: List[str] = Field(
+    recipient_ids: list[str] = Field(
         ...,
         min_length=1,
         description=(
@@ -104,7 +104,7 @@ class SendNotificationInput(BaseModel):
             "CUSTOM — произвольное"
         ),
     )
-    deadline: Optional[str] = Field(
+    deadline: str | None = Field(
         None,
         description=(
             "Дедлайн, о котором напоминаем, в формате ISO 8601 "
@@ -114,7 +114,7 @@ class SendNotificationInput(BaseModel):
 
     @field_validator("recipient_ids")
     @classmethod
-    def validate_recipient_ids(cls, v: List[str]) -> List[str]:
+    def validate_recipient_ids(cls, v: list[str]) -> list[str]:
         """Filters out empty/blank recipient IDs."""
         cleaned = [uid.strip() for uid in v if uid and uid.strip()]
         if not cleaned:
@@ -140,11 +140,11 @@ class SendNotificationInput(BaseModel):
 async def doc_send_notification(
     token: str,
     document_id: str,
-    recipient_ids: List[str],
+    recipient_ids: list[str],
     message: str,
     notification_type: NotificationType = NotificationType.REMINDER,
-    deadline: Optional[str] = None,
-) -> Dict[str, Any]:
+    deadline: str | None = None,
+) -> dict[str, Any]:
     """
     Отправляет уведомление или напоминание сотрудникам по документу.
 

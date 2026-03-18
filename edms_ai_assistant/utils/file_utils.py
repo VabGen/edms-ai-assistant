@@ -1,6 +1,5 @@
 # utils\file_utils.py
 import io
-from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,7 @@ except ImportError:
     PdfReader = None
 
 
-def extract_text_from_bytes(file_bytes: bytes, filename: str) -> Optional[str]:
+def extract_text_from_bytes(file_bytes: bytes, filename: str) -> str | None:
     """
     Извлекает текст из байтов файла (поддержка .docx, .pdf, .txt).
     """

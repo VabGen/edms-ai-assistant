@@ -1,14 +1,13 @@
 # edms_ai_assistant/utils/api_utils.py
 import json
+import logging
 
 import httpx
-import logging
-from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 
-def prepare_auth_headers(token: str) -> Dict[str, str]:
+def prepare_auth_headers(token: str) -> dict[str, str]:
     """Создает стандартные заголовки для EDMS API."""
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 

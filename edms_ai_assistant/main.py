@@ -1,4 +1,4 @@
-# main.py
+# edms_ai_assistant/main.py
 """
 EDMS AI Assistant — FastAPI Application Entry Point.
 
@@ -17,8 +17,7 @@ import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Optional
-from sqlalchemy import select
+from typing import Annotated
 
 import aiofiles
 import uvicorn
@@ -32,12 +31,15 @@ from fastapi import (
     UploadFile,
 )
 from langchain_core.messages import AIMessage, HumanMessage
+from sqlalchemy import select
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent import EdmsDocumentAgent
+from edms_ai_assistant.api.routes.settings import router as settings_router
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.config import settings
+from edms_ai_assistant.db.database import AsyncSessionLocal, SummarizationCache, init_db
 from edms_ai_assistant.model import (
     AssistantResponse,
     FileUploadResponse,
@@ -45,9 +47,9 @@ from edms_ai_assistant.model import (
     UserInput,
 )
 from edms_ai_assistant.security import extract_user_id_from_token
-from edms_ai_assistant.utils.regex_utils import UUID_RE
-from edms_ai_assistant.db.database import AsyncSessionLocal, SummarizationCache, init_db
+from edms_ai_assistant.services.document_service import close_redis, init_redis
 from edms_ai_assistant.utils.hash_utils import get_file_hash
+from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
@@ -61,7 +63,7 @@ UPLOAD_DIR = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 # Application state (singleton agent)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_agent: Optional[EdmsDocumentAgent] = None
+_agent: EdmsDocumentAgent | None = None
 
 
 def get_agent() -> EdmsDocumentAgent:
@@ -85,17 +87,30 @@ def get_agent() -> EdmsDocumentAgent:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """
-    Application lifespan: initializes agent, database and upload directory on startup,
-    cleans up temporary files on shutdown.
+    Application lifespan: initializes Redis, agent and upload directory
+    on startup; shuts them down cleanly on stop.
+
+    Порядок запуска:
+        1. Создаём директорию для загрузок
+        2. Подключаемся к Redis (async, с PING-проверкой)
+        3. Инициализируем агента
+    Порядок остановки (обратный):
+        1. Закрываем Redis-клиент
+        2. Удаляем временные файлы
     """
     global _agent
+
+    # ── Startup ───────────────────────────────────────────────────────────────
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     # Initialize Database
     logger.info("Initializing database...")
     await init_db()
+
+    # Redis — запускается автоматически вместе с приложением.
+    await init_redis()
 
     try:
         _agent = EdmsDocumentAgent()
@@ -110,6 +125,9 @@ async def lifespan(app: FastAPI):
         )
 
     yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    await close_redis()
 
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
@@ -136,13 +154,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(settings_router)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Утилиты
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _is_system_attachment(file_path: Optional[str]) -> bool:
+def _is_system_attachment(file_path: str | None) -> bool:
     """Returns True if *file_path* is an EDMS attachment UUID (not a local file)."""
     return bool(file_path and UUID_RE.match(str(file_path)))
 
@@ -243,10 +263,10 @@ async def chat_endpoint(
         thread_id=thread_id,
         user_context=user_context,
         file_path=user_input.file_path,
+        file_name=user_input.file_name,
         human_choice=user_input.human_choice,
     )
 
-    # удаление временного файла после отдачи ответа
     _FILE_OPERATION_KEYWORDS = (
         "сравни",
         "сравнение",
@@ -270,22 +290,29 @@ async def chat_endpoint(
 
     if user_input.file_path and not _is_system_attachment(user_input.file_path):
         result_status = result.get("status", "success")
+        _is_disambiguation = result.get("action_type") in (
+            "requires_disambiguation",
+            "summarize_selection",
+        )
         _should_cleanup = (
             result_status not in ("requires_action",)
             and not _is_file_operation
             and not _is_continuation
+            and not _is_disambiguation
             and result.get("requires_reload", False)
         )
         if _should_cleanup:
             background_tasks.add_task(_cleanup_file, user_input.file_path)
             logger.debug(
-                "Scheduled file cleanup (mutation response, file not needed)",
+                "Scheduled file cleanup",
                 extra={"file_path": user_input.file_path},
             )
 
+    final_response_text = result.get("content") or result.get("message")
+
     return AssistantResponse(
-        status=result.get("status", "success"),
-        response=result.get("content"),
+        status=result.get("status") or "success",
+        response=final_response_text,
         action_type=result.get("action_type"),
         message=result.get("message"),
         thread_id=thread_id,
@@ -496,9 +523,7 @@ async def get_history(
 ) -> dict:
     """
     Returns filtered conversation history for *thread_id*.
-
-    Filters out ToolMessages and empty AIMessages — only Human/AI
-    turns with actual content are returned to the client.
+    Filters out ToolMessages and empty AIMessages.
     """
     try:
         state = await agent.state_manager.get_state(thread_id)
@@ -535,15 +560,13 @@ async def get_history(
 async def create_new_thread(request: NewChatRequest) -> dict:
     """
     Generates a fresh thread_id for a new conversation.
-
-    The thread is not pre-created in LangGraph — it will be initialized
-    lazily on the first /chat request with this thread_id.
+    The thread is initialized lazily on the first /chat request.
     """
     try:
         user_id = extract_user_id_from_token(request.user_token)
         new_thread_id = f"chat_{user_id}_{uuid.uuid4().hex[:8]}"
         return {"status": "success", "thread_id": new_thread_id}
-    except Exception as exc:
+    except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
 
@@ -559,23 +582,33 @@ async def upload_file(
 ) -> FileUploadResponse:
     """
     Receives a file upload and stores it in a temporary directory.
-
-    The returned ``file_path`` is passed back to /chat as ``file_path``
-    so the agent can read and analyze it.
-    Files are automatically cleaned up after successful chat responses.
+    The returned file_path is passed back to /chat as file_path.
     """
     try:
-        user_id = extract_user_id_from_token(user_token)
+        extract_user_id_from_token(user_token)
 
         if not file.filename:
             raise HTTPException(status_code=400, detail="Имя файла не указано")
 
-        suffix = Path(file.filename).suffix.lower()
-        file_id = f"{user_id}_{uuid.uuid4().hex}{suffix}"
-        dest_path = UPLOAD_DIR / file_id
+        original_path = Path(file.filename or "file")
+
+        suffix = original_path.suffix.lower()
+        if not suffix:
+            ct = file.content_type or ""
+            suffix = {
+                "application/pdf": ".pdf",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                "application/msword": ".doc",
+                "text/plain": ".txt",
+            }.get(ct, "")
+
+        safe_stem = re.sub(r"[^\w\-.]", "_", original_path.stem[:80])
+        safe_stem = re.sub(r"_+", "_", safe_stem).strip("_")
+
+        dest_path = UPLOAD_DIR / f"{safe_stem}{suffix}"
 
         async with aiofiles.open(dest_path, "wb") as out_file:
-            while chunk := await file.read(1024 * 1024):  # читаем по 1 MB
+            while chunk := await file.read(1024 * 1024):
                 await out_file.write(chunk)
 
         logger.info(
@@ -592,8 +625,7 @@ async def upload_file(
     except Exception as exc:
         logger.error("File upload failed", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail="Ошибка при сохранении файла",
+            status_code=500, detail="Ошибка при сохранении файла"
         ) from exc
 
 
@@ -608,7 +640,7 @@ async def health_check(
     """Returns component-level health status of the agent."""
     return {
         "status": "ok",
-        "version": app.get("__version__"),
+        "version": app.version,
         "components": agent.health_check(),
     }
 

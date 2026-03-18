@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from typing import List
 
-from .base_client import EdmsHttpClient, EdmsBaseClient
 from edms_ai_assistant.models.task_models import CreateTaskRequest
+
+from .base_client import EdmsBaseClient, EdmsHttpClient
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class BaseTaskClient(EdmsBaseClient):
 
     @abstractmethod
     async def create_tasks_batch(
-        self, token: str, document_id: str, tasks: List[CreateTaskRequest]
+        self, token: str, document_id: str, tasks: list[CreateTaskRequest]
     ) -> bool:
         raise NotImplementedError
 
@@ -28,7 +28,7 @@ class TaskClient(BaseTaskClient, EdmsHttpClient):
         self,
         token: str,
         document_id: str,
-        tasks: List[CreateTaskRequest],
+        tasks: list[CreateTaskRequest],
     ) -> bool:
         """Create a batch of tasks for a document.
 
