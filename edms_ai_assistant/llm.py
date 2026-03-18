@@ -8,6 +8,7 @@ import logging
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseLanguageModel
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from edms_ai_assistant.config import settings
@@ -23,8 +24,35 @@ def _normalize_url(url) -> str:
     return url_str
 
 
-@functools.lru_cache(maxsize=1)
+# @functools.lru_cache(maxsize=1)
 def get_chat_model():
+    settings_kwargs = {
+        "model": "llama3.2",
+        "base_url": "http://127.0.0.1:11434",
+        "temperature": 0.1,
+        # "num_predict": 4096,
+        "num_predict": 1024,
+        "seed": 42,
+        "top_p": 0.9,
+        "streaming": False,
+        # "format": "json",
+    }
+
+    try:
+        model = ChatOllama(**settings_kwargs, timeout=300)
+        logger.info(
+            f"Локальная модель Ollama '{settings_kwargs['model']}' успешно инициализирована."
+        )
+        test_res = model.invoke("Привет, ты тут?")
+        logger.info(f"Тест модели: {test_res.content}")
+        return model
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации Ollama: {e}")
+        raise
+
+
+@functools.lru_cache(maxsize=1)
+def get_chat_modell():
     settings_kwargs = {
         "model": settings.LLM_GENERATIVE_MODEL,
         "temperature": 0.6,

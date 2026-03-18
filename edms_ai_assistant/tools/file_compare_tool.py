@@ -7,7 +7,6 @@ EDMS AI Assistant — File Comparison Tool.
 
 from __future__ import annotations
 
-import contextlib
 import difflib
 import logging
 import os
@@ -46,7 +45,7 @@ _PATH_PLACEHOLDERS: frozenset[str] = frozenset(
 
 
 class FileCompareInput(BaseModel):
-    """Validated input for the doc_compare_with_local tool."""
+    """Validated input for the doc_compare_attachment_with_local tool."""
 
     token: str = Field(..., description="JWT токен авторизации пользователя")
     document_id: str = Field(..., description="UUID документа в СЭД")
@@ -129,6 +128,12 @@ def _resolve_attachment(attachments: list[Any], hint: str) -> Any | None:
                 "Attachment resolved by partial stem: '%s' ~ '%s'", hint_stem, att_stem
             )
             return att
+
+    logger.warning(
+        "Attachment resolution failed: hint='%s', available=%s",
+        hint,
+        [_att_name(a) for a in attachments],
+    )
 
     return None
 
@@ -218,37 +223,40 @@ def _build_summary(
     )
 
 
-@tool("doc_compare_with_local", args_schema=FileCompareInput)
-async def doc_compare_with_local(
+@tool("doc_compare_attachment_with_local", args_schema=FileCompareInput)
+async def doc_compare_attachment_with_local(
     token: str,
     document_id: str,
     local_file_path: str,
     attachment_id: str | None = None,
     original_filename: str | None = None,
 ) -> dict[str, Any]:
-    """Compare a locally uploaded file with an EDMS document attachment.
+    """СРАВНИТЬ локальный файл с вложением документа в СЭД.
 
-    Attachment resolution (in order, first match wins):
-    1. attachment_id is a valid UUID → exact ID match.
-    2. attachment_id is a filename → case-insensitive name/stem lookup.
-    3. attachment_id is None, original_filename provided → auto-match by original name.
-    4. attachment_id is None, no original_filename → auto-match by temp file path name.
-    5. No match found → requires_disambiguation with full attachment list.
-       No silent random fallback ever.
+    ИСПОЛЬЗУЙ ЭТОТ ИНСТРУМЕНТ, КОГДА:
+    • Пользователь загрузил файл и просит сравнить его с вложением
+    • Нужно найти различия между файлом на компьютере и файлом в СЭД
 
-    original_filename is used both for attachment auto-resolution and for
-    human-readable disambiguation messages. It must be the user's original
-    file name (e.g. "Шаблон обложки.docx"), NOT the internal temp file path.
+    НЕ ИСПОЛЬЗУЙ этот инструмент для:
+    • Сравнения двух документов СЭД → используй `doc_compare`
+    • Сравнения версий документа → используй `doc_get_versions`
 
-    Args:
-        token: JWT bearer token (injected by orchestrator).
-        document_id: EDMS document UUID (injected by orchestrator).
-        local_file_path: Absolute path to the uploaded local file (temp path).
-        attachment_id: Attachment UUID or filename hint (optional).
-        original_filename: Original user-visible file name (injected by orchestrator).
+    ПАРАМЕТРЫ:
+    • attachment_id: UUID вложения ИЛИ имя файла. Если не указан — ищем по имени загруженного файла.
+    • local_file_path: БЕРЁТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
+    • document_id: БЕРЁТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
 
-    Returns:
-        Dict with status: success | requires_disambiguation | error.
+    ПОСЛЕ DISAMBIGUATION:
+    Если пользователь выбрал UUID из списка вложений — передай этот UUID в `attachment_id`
+    и вызови этот инструмент снова. НЕ вызывай `doc_compare`!
+
+    Примеры:
+    • doc_compare_attachment_with_local(attachment_id="363ca517-...", document_id="083a8076-...") # ✅
+    • doc_compare(document_id_2="363ca517-...") # ❌ ОШИБКА: это UUID вложения, не документа!
+
+    Возвращает: {"status": "success" | "requires_disambiguation" | "error",
+                    "similarity_percent": float, # % схожести
+                    "differences": [...] # список изменений}
     """
     local_path = Path(local_file_path)
     display_name: str = (
@@ -258,7 +266,7 @@ async def doc_compare_with_local(
     )
 
     logger.info(
-        "doc_compare_with_local called",
+        "doc_compare_attachment_with_local called",
         extra={
             "document_id": document_id[:8] + "…",
             "local_file": local_file_path,
@@ -364,18 +372,29 @@ async def doc_compare_with_local(
 
     # ── 6. Извлечение текста вложения через temp-файл ─────────────────────────
     att_text_raw: str = ""
+    tmp_path: str | None = None
+
     try:
-        with contextlib.ExitStack() as stack:
-            tmp_file = stack.enter_context(
-                tempfile.NamedTemporaryFile(delete=False, suffix=resolved_suffix)
-            )
-            tmp_path = tmp_file.name
-            stack.callback(
-                lambda p=tmp_path: os.unlink(p) if os.path.exists(p) else None
-            )
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=resolved_suffix)
+        tmp_path = tmp_file.name
+
+        try:
             tmp_file.write(att_bytes)
             tmp_file.flush()
+            tmp_file.close()
+
             att_text_raw = await FileProcessorService.extract_text_async(tmp_path)
+
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except PermissionError:
+                    logger.warning(
+                        "Could not delete temp file %s, it will be cleaned up later",
+                        tmp_path,
+                    )
+
     except Exception as exc:
         logger.error(
             "Text extraction from attachment '%s' failed: %s",
@@ -386,14 +405,6 @@ async def doc_compare_with_local(
         return {
             "status": "error",
             "message": f"Ошибка извлечения текста из «{resolved_name}»: {exc}",
-        }
-
-    if not att_text_raw or att_text_raw.startswith(("Ошибка:", "Формат файла")):
-        return {
-            "status": "error",
-            "message": (
-                f"Не удалось извлечь текст из вложения «{resolved_name}»: {att_text_raw}"
-            ),
         }
 
     # ── 7. Нормализация → сравнение → diff ───────────────────────────────────
@@ -430,7 +441,7 @@ async def doc_compare_with_local(
     )
 
     logger.info(
-        "doc_compare_with_local completed",
+        "doc_compare_attachment_with_local completed",
         extra={
             "are_identical": are_identical,
             "similarity": similarity,

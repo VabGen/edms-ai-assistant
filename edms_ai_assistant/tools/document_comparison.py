@@ -25,8 +25,8 @@ class DocumentComparisonInput(BaseModel):
     )
 
 
-@tool("doc_compare", args_schema=DocumentComparisonInput)
-async def doc_compare(
+@tool("doc_compare_documents", args_schema=DocumentComparisonInput)
+async def doc_compare_documents(
     document_id_1: str,
     document_id_2: str,
     token: str,

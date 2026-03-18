@@ -74,9 +74,9 @@ _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset(
     {
         "doc_get_details",
         "doc_get_versions",
-        "doc_compare",
+        "doc_compare_documents",
         "doc_get_file_content",
-        "doc_compare_with_local",
+        "doc_compare_attachment_with_local",
         "doc_summarize_text",
         "doc_search_tool",
         "introduction_create_tool",
@@ -85,7 +85,7 @@ _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset(
     }
 )
 
-# ─── Placeholder-значения local_file_path для doc_compare_with_local ──────────
+# ─── Placeholder-значения local_file_path для doc_compare_attachment_with_local ──────────
 _COMPARE_LOCAL_PLACEHOLDERS: frozenset[str] = frozenset(
     {
         "",
@@ -418,21 +418,21 @@ class PromptBuilder:
 </critical_rules>
 
 <available_tools_guide>
-| Сценарий                          | Последовательность инструментов                              |
-|-----------------------------------|--------------------------------------------------------------|
-| Анализ документа целиком          | doc_get_details → doc_get_file_content → doc_summarize_text  |
-| Анализ конкретного вложения (UUID)| doc_get_file_content → doc_summarize_text                    |
-| Анализ загруженного файла         | read_local_file_content → doc_summarize_text                 |
-| Сравнение файла с вложением [ЕСТЬ файл]  | doc_compare_with_local (приоритет всегда)                     |
-| Вопрос о документе                | doc_get_details                                              |
-| Сравнение версий документа [НЕТ файла]   | doc_get_versions (возвращает все сравнения) |
-| Поиск документов в базе EDMS      | doc_search_tool                                              |
-| Поиск сотрудника                  | employee_search_tool                                         |
-| Добавление в лист ознакомления    | introduction_create_tool                                     |
-| Создание поручения                | task_create_tool                                             |
-| Автозаполнение обращения          | autofill_appeal_document                                     |
-| Уведомление / напоминание         | employee_search_tool → doc_send_notification                 |
-| Вопрос без документа              | Ответь напрямую из контекста                                 |
+| Сценарий                                 | Последовательность инструментов                              |
+|------------------------------------------|--------------------------------------------------------------|
+| Анализ документа целиком                 | doc_get_details → doc_get_file_content → doc_summarize_text  |
+| Анализ конкретного вложения (UUID)       | doc_get_file_content → doc_summarize_text                    |
+| Анализ загруженного файла                | read_local_file_content → doc_summarize_text                 |
+| Сравнение файла с вложением [ЕСТЬ файл]  | doc_compare_attachment_with_local (приоритет всегда)         |
+| Вопрос о документе                       | doc_get_details                                              |
+| Сравнение версий документа [НЕТ файла]   | doc_get_versions (возвращает все сравнения)                  |
+| Поиск документов в базе EDMS             | doc_search_tool                                              |
+| Поиск сотрудника                         | employee_search_tool                                         |
+| Добавление в лист ознакомления           | introduction_create_tool                                     |
+| Создание поручения                       | task_create_tool                                             |
+| Автозаполнение обращения                 | autofill_appeal_document                                     |
+| Уведомление / напоминание                | employee_search_tool → doc_send_notification                 |
+| Вопрос без документа                     | Ответь напрямую из контекста                                 |
 </available_tools_guide>
 
 <response_format>
@@ -499,12 +499,12 @@ Workflow суммаризации документа:
 ⚠️ ОБЯЗАТЕЛЬНО прочитай условие ДО выбора инструмента сравнения:
 
 УСЛОВИЕ А: В контексте есть "Загруженный файл" (путь /tmp/... или UUID)?
-  → ДА: ИСПОЛЬЗУЙ ТОЛЬКО doc_compare_with_local. СТОП. doc_get_versions НЕ вызывать.
-  → НЕТ: ИСПОЛЬЗУЙ doc_get_versions (сам вернёт все сравнения, doc_compare НЕ нужен).
+  → ДА: ИСПОЛЬЗУЙ ТОЛЬКО doc_compare_attachment_with_local. СТОП. doc_get_versions НЕ вызывать.
+  → НЕТ: ИСПОЛЬЗУЙ doc_get_versions (сам вернёт все сравнения, doc_compare_documents НЕ нужен).
 
 ЗАПРЕЩЕНО при наличии загруженного файла:
   ❌ doc_get_versions
-  ❌ doc_compare
+  ❌ doc_compare_documents
   ❌ предлагать пользователю "выбрать версию"
   ❌ спрашивать "какие версии сравнить"
 
@@ -514,10 +514,10 @@ Workflow суммаризации документа:
 </compare_decision_tree>
 
 <compare_with_local_guide>
-ПУТЬ А: Есть загруженный файл → doc_compare_with_local
+ПУТЬ А: Есть загруженный файл → doc_compare_attachment_with_local
 
 ШАГ 1 — Вызови СРАЗУ, без предварительных вызовов:
-  doc_compare_with_local(
+  doc_compare_attachment_with_local(
       local_file_path=<АВТОМАТИЧЕСКИ из контекста, не спрашивай>,
       attachment_id=<имя или UUID вложения — только если пользователь явно указал>,
       document_id=<АВТОМАТИЧЕСКИ из контекста>
@@ -548,11 +548,11 @@ Workflow суммаризации документа:
 ШАГ 2 — Ответь пользователю, используя поле "comparisons" из ответа:
   - Для каждой пары: что изменилось в метаданных и вложениях
   - Если "has_any_changes" = false → версии идентичны
-  - Если "comparison_complete" = true → НЕ вызывай doc_compare, данные уже есть
+  - Если "comparison_complete" = true → НЕ вызывай doc_compare_documents, данные уже есть
 
 ⚠️ ЗАПРЕЩЕНО:
   - Спрашивать "какие версии сравнить" — всё уже сравнено автоматически
-  - Вызывать doc_compare после doc_get_versions — это дублирование
+  - Вызывать doc_compare_documents после doc_get_versions — это дублирование
   - Вызывать doc_get_versions несколько раз
 
 Формат ответа: по каждой паре — секция с изменениями (или "изменений нет").
@@ -598,7 +598,7 @@ Workflow суммаризации документа:
 При анализе загруженного файла:
 - Локальный файл (/tmp/...): read_local_file_content → doc_summarize_text
 - UUID вложения EDMS: doc_get_file_content → doc_summarize_text
-- Сравнение файла с вложением документа: doc_compare_with_local
+- Сравнение файла с вложением документа: doc_compare_attachment_with_local
 Путь к файлу берётся из <local_file_path> в system prompt.
 </file_analysis_guide>""",
     }
@@ -792,7 +792,7 @@ class ContentExtractor:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Случай 2: JSON-обёртки встроены в текст — убираем регулярками
+        # Случай 2: JSON-обёртки встроены в текст
         # Убираем {"status": "success", "content": "..."} паттерны
         content = re.sub(
             r'\{"status"\s*:\s*"[^"]*",\s*"(?:content|message|text)"\s*:\s*"',
@@ -1278,7 +1278,7 @@ class EdmsDocumentAgent:
                 valid_ids = []
                 for raw_id in raw_ids:
                     try:
-                        UUID(raw_id)  # валидация формата
+                        UUID(raw_id)
                         valid_ids.append(raw_id)
                     except ValueError:
                         logger.warning(
@@ -1307,50 +1307,48 @@ class EdmsDocumentAgent:
                         },
                     )
 
-            elif t_name == "doc_compare_with_local":
+            elif t_name == "doc_compare_attachment_with_local":
                 choice = human_choice.strip()
+
                 try:
-                    UUID(choice)
-                    t_args["attachment_id"] = choice
-                    if context.document_id and not _is_valid_uuid(
-                        str(t_args.get("document_id", "")).strip()
-                    ):
-                        t_args["document_id"] = context.document_id
-                        logger.debug(
-                            "Re-injected document_id for compare resume",
-                            extra={"doc_id": context.document_id[:8]},
+                    if _is_valid_uuid(choice):
+                        t_args["attachment_id"] = choice
+                    else:
+                        t_args["attachment_id"] = choice
+                        logger.info(
+                            "Human choice: attachment by name",
+                            extra={
+                                "attachment_name": choice,
+                                "thread_id": context.thread_id,
+                            },
                         )
-                    if context.file_path:
-                        cur_local = str(t_args.get("local_file_path", "")).strip()
-                        fp = str(context.file_path).strip()
-                        if (
-                            not cur_local
-                            or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
-                        ):
-                            t_args["local_file_path"] = fp
-                            logger.debug(
-                                "Re-injected local_file_path for compare resume",
-                                extra={"path": fp[:32]},
-                            )
-                    if context.uploaded_file_name and not t_args.get(
-                        "original_filename"
-                    ):
+
+                    if context.document_id:
+                        doc_id = str(context.document_id).strip()
+
+                        if _is_valid_uuid(doc_id):
+                            t_args["document_id"] = doc_id
+
+                    if context.uploaded_file_name:
                         t_args["original_filename"] = context.uploaded_file_name
-                        logger.debug(
-                            "Re-injected original_filename for compare resume",
-                            extra={"file_name": context.uploaded_file_name},
-                        )
+
                     logger.info(
                         "Human choice: attachment disambiguation resolved for compare",
                         extra={
                             "attachment_id": choice[:8] + "...",
                             "thread_id": context.thread_id,
+                            "local_file_path": (
+                                t_args.get("local_file_path", "")[:32]
+                                if t_args.get("local_file_path")
+                                else None
+                            ),
                             "doc_id": str(t_args.get("document_id", "?"))[:8],
                         },
                     )
+
                 except ValueError:
                     logger.warning(
-                        "Invalid attachment UUID in human_choice for doc_compare_with_local",
+                        "Invalid attachment UUID in human_choice for doc_compare_attachment_with_local",
                         extra={"raw_choice": choice},
                     )
 
@@ -1450,7 +1448,6 @@ class EdmsDocumentAgent:
 
             last_msg = messages[-1]
 
-            # ── Граф завершился (END) — нет pending nodes ──────────────────
             last_is_tool_msg = isinstance(last_msg, ToolMessage)
             last_has_tool_calls = isinstance(last_msg, AIMessage) and bool(
                 getattr(last_msg, "tool_calls", None)
@@ -1461,10 +1458,8 @@ class EdmsDocumentAgent:
             if is_finished:
                 return self._build_final_response(messages, context)
 
-            # ── Граф прерван перед "tools" — патчим tool_calls ─────────────
             raw_calls = list(last_msg.tool_calls)
 
-            # Защита от параллельных вызовов
             if len(raw_calls) > 1:
                 logger.warning(
                     "Parallel tool_calls detected — keeping only the first",
@@ -1479,6 +1474,26 @@ class EdmsDocumentAgent:
 
             last_tool_text = ContentExtractor.extract_last_tool_text(messages)
             patched_calls = []
+
+            _after_compare_disambiguation = False
+            for prev_msg in reversed(messages[-15:]):
+                if isinstance(prev_msg, ToolMessage):
+                    try:
+                        prev_data = json.loads(str(prev_msg.content))
+                        if (
+                            prev_data.get("status") == "requires_disambiguation"
+                            and prev_msg.name == "doc_compare_attachment_with_local"
+                        ):
+                            _after_compare_disambiguation = True
+                            logger.debug(
+                                "Detected requires_disambiguation from doc_compare_attachment_with_local",
+                                extra={"tool_call_id": prev_msg.tool_call_id},
+                            )
+                            break
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+                if isinstance(prev_msg, HumanMessage):
+                    break
 
             for tc in raw_calls:
                 t_name = tc["name"]
@@ -1504,11 +1519,10 @@ class EdmsDocumentAgent:
                 path_is_uuid = _is_valid_uuid(clean_path)
                 path_is_local = bool(clean_path) and not path_is_uuid
 
+                # ── Логика для локальных файлов ───────────────────────────
                 if path_is_local:
-
-                    # ── GUARD 1: doc_get_versions при наличии файла → БЛОК ────
                     if t_name == "doc_get_versions":
-                        t_name = "doc_compare_with_local"
+                        t_name = "doc_compare_attachment_with_local"
                         t_args = {
                             "local_file_path": clean_path,
                         }
@@ -1516,23 +1530,21 @@ class EdmsDocumentAgent:
                             t_args["document_id"] = context.document_id
                         logger.warning(
                             "GUARD: doc_get_versions blocked (local file present) "
-                            "→ redirected to doc_compare_with_local",
+                            "→ redirected to doc_compare_attachment_with_local",
                             extra={"path": clean_path[:32]},
                         )
 
-                    # ── GUARD 2: doc_compare (версии) → compare_with_local ─────
-                    elif t_name == "doc_compare":
-                        t_name = "doc_compare_with_local"
+                    elif t_name == "doc_compare_documents":
+                        t_name = "doc_compare_attachment_with_local"
                         t_args["local_file_path"] = clean_path
                         t_args.pop("document_id_1", None)
                         t_args.pop("document_id_2", None)
                         logger.warning(
-                            "GUARD: doc_compare blocked (local file present) "
-                            "→ redirected to doc_compare_with_local",
+                            "GUARD: doc_compare_documents blocked (local file present) "
+                            "→ redirected to doc_compare_attachment_with_local",
                             extra={"path": clean_path[:32]},
                         )
 
-                    # ── GUARD 3: doc_get_file_content без attachment_id ────────
                     elif t_name == "doc_get_file_content" and not t_args.get(
                         "attachment_id"
                     ):
@@ -1545,25 +1557,134 @@ class EdmsDocumentAgent:
                             extra={"path": clean_path[:32]},
                         )
 
-                if t_name == "doc_compare_with_local" and not clean_path:
-                    t_name = "doc_compare"
+                # ── Логика для UUID-файлов (вложения) ─────────────────────
+                elif path_is_uuid:
+                    if t_name == "read_local_file_content":
+                        t_name = "doc_get_file_content"
+                        t_args["attachment_id"] = clean_path
+                        t_args.pop("file_path", None)
+                        logger.info(
+                            "Routed read_local_file_content → doc_get_file_content",
+                            extra={"attachment_id": clean_path[:8]},
+                        )
+                    elif t_name == "doc_get_file_content":
+                        cur_att = str(t_args.get("attachment_id", "")).strip()
+                        if not cur_att or not _is_valid_uuid(cur_att):
+                            t_args["attachment_id"] = clean_path
+                            logger.info(
+                                "Injected attachment_id from context",
+                                extra={"attachment_id": clean_path[:8]},
+                            )
+
+                # ── Фолбэк: если нет файла, но вызван compare_with_local ───
+                if (
+                    t_name == "doc_compare_attachment_with_local"
+                    and not clean_path
+                    and not _after_compare_disambiguation
+                    and not (is_choice_active and t_args.get("attachment_id"))
+                ):
+                    t_name = "doc_compare_documents"
                     t_args.pop("local_file_path", None)
                     t_args.pop("attachment_id", None)
                     logger.info(
-                        "Routed doc_compare_with_local → doc_compare "
+                        "Routed doc_compare_attachment_with_local → doc_compare_documents "
                         "(no file in context → version compare intended)",
                     )
 
-                if path_is_local and t_name == "doc_get_file_content":
-                    t_name = "read_local_file_content"
-                    t_args["file_path"] = clean_path
-                    t_args.pop("attachment_id", None)
-                    logger.info(
-                        "Routed doc_get_file_content → read_local_file_content",
-                        extra={"path_prefix": clean_path[:32]},
-                    )
+                # ── Инжект local_file_path для compare_with_local ─────────
+                if t_name == "doc_compare_attachment_with_local" and path_is_local:
+                    cur_local = str(t_args.get("local_file_path", "")).strip()
+                    if (
+                        not cur_local
+                        or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
+                        or not Path(cur_local).exists()
+                    ):
+                        t_args["local_file_path"] = clean_path
+                        logger.info(
+                            "Force-injected local_file_path for doc_compare_attachment_with_local",
+                            extra={"path": clean_path[:32]},
+                        )
 
-                elif path_is_local and t_name == "read_local_file_content":
+                    if context.uploaded_file_name and not t_args.get(
+                        "original_filename"
+                    ):
+                        t_args["original_filename"] = context.uploaded_file_name
+                        logger.debug(
+                            "Injected original_filename for doc_compare_attachment_with_local",
+                            extra={"file_name": context.uploaded_file_name},
+                        )
+
+                # ── Блокировка doc_compare_documents после disambiguation ─
+                if t_name == "doc_compare_documents":
+                    # Блок 1: после requires_disambiguation от compare_with_local
+                    if _after_compare_disambiguation or (
+                        is_choice_active and path_is_local
+                    ):
+                        logger.warning(
+                            "GUARD: doc_compare_documents blocked — redirecting to doc_compare_attachment_with_local",
+                            extra={
+                                "thread_id": context.thread_id,
+                                "reason": (
+                                    "disambiguation_flow"
+                                    if _after_compare_disambiguation
+                                    else "choice_active_with_local_file"
+                                ),
+                            },
+                        )
+                        t_name = "doc_compare_attachment_with_local"
+                        t_args = {
+                            "token": context.user_token,
+                            "document_id": context.document_id,
+                            "local_file_path": (
+                                clean_path
+                                if path_is_local
+                                else t_args.get("local_file_path")
+                            ),
+                            "attachment_id": t_args.get("document_id_2")
+                            or t_args.get("attachment_id"),
+                            "original_filename": context.uploaded_file_name,
+                        }
+                        for key in [
+                            "document_id_1",
+                            "document_id_2",
+                            "comparison_focus",
+                        ]:
+                            t_args.pop(key, None)
+                        if context.uploaded_file_name and not t_args.get(
+                            "original_filename"
+                        ):
+                            t_args["original_filename"] = context.uploaded_file_name
+
+                    # Блок 2: после doc_get_versions с comparison_complete=True
+                    else:
+                        _versions_result_complete = False
+                        for prev_msg in reversed(messages):
+                            if isinstance(prev_msg, ToolMessage):
+                                try:
+                                    prev_data = json.loads(str(prev_msg.content))
+                                    if prev_data.get(
+                                        "comparison_complete"
+                                    ) and prev_data.get("comparisons"):
+                                        _versions_result_complete = True
+                                        break
+                                except (json.JSONDecodeError, AttributeError):
+                                    continue
+                            if isinstance(prev_msg, HumanMessage):
+                                break
+
+                        if _versions_result_complete:
+                            logger.warning(
+                                "GUARD: doc_compare_documents blocked — doc_get_versions already "
+                                "completed all comparisons (comparison_complete=True). "
+                                "Replacing with no-op to prevent redundant API call.",
+                            )
+                            t_name = "doc_get_details"
+                            t_args = {}
+                            if context.document_id:
+                                t_args["document_id"] = context.document_id
+
+                # ── Инжект для read_local_file_content (placeholder replacement) ─
+                if path_is_local and t_name == "read_local_file_content":
                     cur_fp = str(t_args.get("file_path", "")).strip()
                     if not cur_fp or cur_fp.lower() in (
                         "local_file",
@@ -1577,75 +1698,6 @@ class EdmsDocumentAgent:
                             "Injected local file_path (placeholder replaced)",
                             extra={"path_prefix": clean_path[:32]},
                         )
-
-                elif path_is_uuid and t_name == "read_local_file_content":
-                    t_name = "doc_get_file_content"
-                    t_args["attachment_id"] = clean_path
-                    t_args.pop("file_path", None)
-                    logger.info(
-                        "Routed read_local_file_content → doc_get_file_content",
-                        extra={"attachment_id": clean_path[:8]},
-                    )
-
-                elif path_is_uuid and t_name == "doc_get_file_content":
-                    cur_att = str(t_args.get("attachment_id", "")).strip()
-                    if not cur_att or not _is_valid_uuid(cur_att):
-                        t_args["attachment_id"] = clean_path
-                        logger.info(
-                            "Injected attachment_id from context",
-                            extra={"attachment_id": clean_path[:8]},
-                        )
-
-                # ── 2а. doc_compare_with_local: инжект local_file_path ─────────
-                if t_name == "doc_compare_with_local" and path_is_local:
-                    cur_local = str(t_args.get("local_file_path", "")).strip()
-                    if (
-                        not cur_local
-                        or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
-                        or not Path(cur_local).exists()
-                    ):
-                        t_args["local_file_path"] = clean_path
-                        logger.info(
-                            "Force-injected local_file_path for doc_compare_with_local",
-                            extra={"path": clean_path[:32]},
-                        )
-
-                    if context.uploaded_file_name and not t_args.get(
-                        "original_filename"
-                    ):
-                        t_args["original_filename"] = context.uploaded_file_name
-                        logger.debug(
-                            "Injected original_filename for doc_compare_with_local",
-                            extra={"file_name": context.uploaded_file_name},
-                        )
-
-                # ── 2б. doc_compare после doc_get_versions → БЛОК ────────────
-                if t_name == "doc_compare":
-                    _versions_result_complete = False
-                    for prev_msg in reversed(messages):
-                        if isinstance(prev_msg, ToolMessage):
-                            try:
-                                prev_data = json.loads(str(prev_msg.content))
-                                if prev_data.get(
-                                    "comparison_complete"
-                                ) and prev_data.get("comparisons"):
-                                    _versions_result_complete = True
-                                    break
-                            except (json.JSONDecodeError, AttributeError):
-                                continue
-                        if isinstance(prev_msg, HumanMessage):
-                            break
-
-                    if _versions_result_complete:
-                        logger.warning(
-                            "GUARD: doc_compare blocked — doc_get_versions already "
-                            "completed all comparisons (comparison_complete=True). "
-                            "Replacing with no-op to prevent redundant API call.",
-                        )
-                        t_name = "doc_get_details"
-                        t_args = {}
-                        if context.document_id:
-                            t_args["document_id"] = context.document_id
 
                 # ── 3. Инжект текста для суммаризации ─────────────────────
                 if t_name == "doc_summarize_text":
@@ -1672,10 +1724,21 @@ class EdmsDocumentAgent:
                 as_node="agent",
             )
 
+            next_is_choice_active = is_choice_active
+            if is_choice_active and patched_calls:
+                last_tool_name = patched_calls[-1]["name"]
+                if last_tool_name in (
+                    "doc_compare_attachment_with_local",
+                    "doc_summarize_text",
+                ):
+                    next_is_choice_active = True
+                else:
+                    next_is_choice_active = False
+
             return await self._orchestrate(
                 context=context,
                 inputs=None,
-                is_choice_active=True,
+                is_choice_active=next_is_choice_active,
                 iteration=iteration + 1,
             )
 

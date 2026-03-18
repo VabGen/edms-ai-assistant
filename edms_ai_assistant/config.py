@@ -162,7 +162,7 @@ class Settings(BaseSettings):
 
     # ── Logging Configuration ────────────────────────────────────────────────
     LOGGING_LEVEL: str = Field(
-        default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"
+        default="ERROR", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"
     )
     LOGGING_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     LOGGING_INCLUDE_TRACE_ID: bool = True

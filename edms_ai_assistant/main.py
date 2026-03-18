@@ -308,9 +308,11 @@ async def chat_endpoint(
                 extra={"file_path": user_input.file_path},
             )
 
+    final_response_text = result.get("content") or result.get("message")
+
     return AssistantResponse(
         status=result.get("status") or "success",
-        response=result.get("content"),
+        response=final_response_text,
         action_type=result.get("action_type"),
         message=result.get("message"),
         thread_id=thread_id,

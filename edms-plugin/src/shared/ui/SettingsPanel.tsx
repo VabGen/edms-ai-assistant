@@ -285,8 +285,8 @@ function EDMSTab({s, on}: { s: TechSettings['edms']; on: (p: Partial<TechSetting
         <div className="flex flex-col gap-3">
             <Field label="Base URL"><TextInput value={s.baseUrl} onChange={(v) => on({baseUrl: v})} type="url"
                                                mono/></Field>
-            <Field label="API Version"><TextInput value={s.apiVersion} onChange={(v) => on({apiVersion: v})}
-                                                  mono/></Field>
+            {/*<Field label="API Version"><TextInput value={s.apiVersion} onChange={(v) => on({apiVersion: v})}*/}
+            {/*                                      mono/></Field>*/}
             <Field label="Timeout (сек)"><TextInput value={s.timeout} onChange={(v) => on({timeout: Number(v)})}
                                                     type="number" min={10} max={600}/></Field>
         </div>

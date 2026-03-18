@@ -140,7 +140,7 @@ class EDMSSettingsSchema(BaseModel):
 
     base_url: str | None = None
     timeout: int | None = Field(None, ge=10, le=600)
-    api_version: str | None = Field(None, max_length=10)
+    # api_version: str | None = Field(None, max_length=10)
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -231,7 +231,7 @@ class _RuntimeSettingsStore:
             "edms": {
                 "base_url": str(settings.EDMS_BASE_URL),
                 "timeout": settings.EDMS_TIMEOUT,
-                "api_version": settings.EDMS_API_VERSION,
+                # "api_version": settings.EDMS_API_VERSION,
             },
         }
         return SettingsResponse(

@@ -4,7 +4,7 @@ EDMS AI Assistant — Document Enricher Service.
 
 Покрываемые связи:
     correspondentId               → GET /api/correspondent/{id}
-    journalId                     → GET /api/registration-journal/{id}
+    journalId                     → GET /api/reg-journal/{id}
     documentTypeId                → GET /api/document-type/{id}
     currencyId                    → GET /api/currency/{id}
     control.controlTypeId         → GET /api/control-type/{id}
@@ -64,7 +64,7 @@ class _RefClient(EdmsHttpClient):
         )
         return result if isinstance(result, dict) and result else None
 
-    async def get_registration_journal(
+    async def get_reg_journal(
         self, token: str, journal_id: str
     ) -> dict[str, Any] | None:
         """Fetches RegistrationJournalDto by UUID.
@@ -77,7 +77,7 @@ class _RefClient(EdmsHttpClient):
             RegistrationJournalDto as dict, or None on failure.
         """
         result = await self._make_request(
-            "GET", f"api/registration-journal/{journal_id}", token=token
+            "GET", f"api/reg-journal/{journal_id}", token=token
         )
         return result if isinstance(result, dict) and result else None
 
@@ -319,7 +319,7 @@ class DocumentEnricher:
 
             # ── Журнал регистрации ────────────────────────────────────────────
             if doc.get("journalId") and not _has_nested(doc, "registrationJournal"):
-                tasks["registrationJournal"] = client.get_registration_journal(
+                tasks["registrationJournal"] = client.get_reg_journal(
                     token, str(doc["journalId"])
                 )
 

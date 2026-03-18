@@ -335,6 +335,7 @@ export function AssistantWidget() {
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const requestIdRef = useRef<string | null>(null)
     const serverPathRef = useRef<string | null>(null)
+    const filePersistRef = useRef<string | null>(null)
     const messagesRef = useRef<Message[]>(messages)
     messagesRef.current = messages
 
@@ -442,6 +443,10 @@ export function AssistantWidget() {
             setThreadId(res.thread_id);
             setMessages([]);
             setIsSidebarOpen(false)
+            filePersistRef.current = null
+            serverPathRef.current = null
+            setAttachedFile(null)
+            if (fileRef.current) fileRef.current.value = ''
         } catch (err) {
             toast.error(getToastErrorText(err), 'Не удалось создать диалог')
         } finally {
@@ -527,18 +532,29 @@ export function AssistantWidget() {
                     user_token: token
                 })
                 serverPathRef.current = up.file_path
+                filePersistRef.current = up.file_path
             }
+
+            const finalFilePath = isChoiceFlow && filePersistRef.current
+                ? filePersistRef.current
+                : serverPathRef.current
+
             const res = await sendMsg<any>('sendChatMessage', {
                 message: isChoiceFlow ? humanChoice! : textToSend,
                 user_token: token,
                 requestId: reqId,
                 thread_id: tid,
                 context_ui_id: docId,
-                file_path: serverPathRef.current,
+                file_path: finalFilePath,
                 human_choice: isChoiceFlow ? humanChoice! : undefined,
                 user_context: Object.keys(userContext).length > 0 ? userContext : undefined
             })
-            if (!isChoiceFlow) serverPathRef.current = null
+
+            if (!isChoiceFlow) {
+                serverPathRef.current = null
+                filePersistRef.current = null
+            }
+
             const payload = (res && typeof res === 'object' && 'data' in res && res.success) ? (res as any).data : res
             const content = payload?.response ?? payload?.content ?? payload?.message ?? (Array.isArray(payload?.messages) ? payload.messages.at(-1)?.content : undefined) ?? 'Анализ завершён.'
             setMessages(prev => [...prev, {
