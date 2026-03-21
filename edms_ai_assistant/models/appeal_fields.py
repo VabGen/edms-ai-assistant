@@ -16,10 +16,6 @@ logger = logging.getLogger(__name__)
 class DeclarantType(StrEnum):
     """
     Тип заявителя согласно справочнику СЭД.
-
-    Attributes:
-        INDIVIDUAL: Физическое лицо (гражданин)
-        ENTITY: Юридическое лицо (организация, госорган)
     """
 
     INDIVIDUAL = "INDIVIDUAL"
@@ -29,38 +25,13 @@ class DeclarantType(StrEnum):
 class AppealFields(BaseModel):
     """
     Структура данных для извлечения информации из текста обращения с помощью LLM.
-
-    Attributes:
-        deliveryMethod: Способ доставки обращения (например, "Почта", "Email", "Курьер")
-        shortSummary: Краткое содержание обращения (до 200 символов)
-        receiptDate: Дата поступления/написания обращения
-        declarantType: Тип заявителя (INDIVIDUAL или ENTITY)
-        citizenType: Категория/вид обращения (например, "Жалоба", "Заявление")
-        collective: Признак коллективного обращения (подписано группой лиц)
-        anonymous: Признак анонимного обращения (без указания ФИО)
-        reasonably: Признак обоснованности (наличие фактов, ссылок на законы)
-        fioApplicant: ФИО заявителя (для INDIVIDUAL)
-        organizationName: Наименование организации-заявителя (для ENTITY)
-        signed: ФИО лица, подписавшего документ (для ENTITY)
-        correspondentOrgNumber: Исходящий номер документа (для ENTITY)
-        dateDocCorrespondentOrg: Дата исходящего номера (для ENTITY)
-        country: Название страны
-        regionName: Название региона/области
-        districtName: Название района
-        cityName: Название города
-        index: Почтовый индекс (6 цифр)
-        fullAddress: Полный почтовый адрес
-        phone: Контактный телефон
-        email: Email для связи
-        correspondentAppeal: Название организации, которая переслала обращение
-        indexDateCoverLetter: Индекс и дата сопроводительного письма
-        reviewProgress: Информация о ходе рассмотрения
     """
 
     # --- Основные поля ---
     deliveryMethod: str | None = Field(None, description="Способ доставки обращения")
     shortSummary: str | None = Field(
-        None, max_length=200, description="Краткое содержание (до 200 символов)"
+        None,
+        description="Краткое содержание (до 200 символов)",
     )
     receiptDate: datetime | None = Field(None, description="Дата поступления обращения")
     declarantType: DeclarantType | None = Field(
@@ -71,59 +42,42 @@ class AppealFields(BaseModel):
     )
 
     # --- Логические признаки ---
-    collective: bool | None = Field(
-        None, description="Коллективное обращение (true/false)"
-    )
-    anonymous: bool | None = Field(None, description="Анонимное обращение (true/false)")
-    reasonably: bool | None = Field(
-        None, description="Обоснованность обращения (есть факты/аргументы)"
-    )
+    collective: bool | None = Field(None)
+    anonymous: bool | None = Field(None)
+    reasonably: bool | None = Field(None)
 
     # --- Заявитель (Физическое лицо) ---
     fioApplicant: str | None = Field(None, description="ФИО заявителя")
 
     # --- Заявитель (Юридическое лицо) ---
-    organizationName: str | None = Field(
-        None, description="Наименование организации-заявителя"
-    )
-    signed: str | None = Field(None, description="ФИО лица, подписавшего документ")
-    correspondentOrgNumber: str | None = Field(
-        None, description="Исходящий номер документа организации"
-    )
-    dateDocCorrespondentOrg: datetime | None = Field(
-        None, description="Дата исходящего документа организации"
-    )
+    organizationName: str | None = Field(None)
+    signed: str | None = Field(None)
+    correspondentOrgNumber: str | None = Field(None)
+    dateDocCorrespondentOrg: datetime | None = Field(None)
 
     # --- География ---
-    country: str | None = Field(None, description="Страна заявителя")
-    regionName: str | None = Field(None, description="Регион/Область")
-    districtName: str | None = Field(None, description="Район")
-    cityName: str | None = Field(None, description="Город/Населенный пункт")
+    country: str | None = Field(None)
+    regionName: str | None = Field(None)
+    districtName: str | None = Field(None)
+    cityName: str | None = Field(None)
     index: str | None = Field(None, description="Почтовый индекс (6 цифр)")
-    fullAddress: str | None = Field(
-        None, description="Полный почтовый адрес (улица, дом, квартира)"
-    )
+    fullAddress: str | None = Field(None)
 
     # --- Контактная информация ---
-    phone: str | None = Field(None, description="Контактный телефон")
-    email: str | None = Field(None, description="Email для связи")
+    phone: str | None = Field(None)
+    email: str | None = Field(None)
 
     # --- Дополнительные сведения ---
-    correspondentAppeal: str | None = Field(
-        None, description="Организация, переславшая обращение (если применимо)"
-    )
-    indexDateCoverLetter: str | None = Field(
-        None, description="Индекс и дата сопроводительного письма"
-    )
-    reviewProgress: str | None = Field(
-        None, description="Информация о ходе рассмотрения"
-    )
+    correspondentAppeal: str | None = Field(None)
+    indexDateCoverLetter: str | None = Field(None)
+    reviewProgress: str | None = Field(None)
 
     @field_validator("shortSummary")
     @classmethod
     def truncate_summary(cls, v: str | None) -> str | None:
+        """Truncate shortSummary to 200 chars with ellipsis."""
         if v and len(v) > 200:
-            logger.debug(f"Краткое содержание обрезано: {len(v)} → 200 символов")
+            logger.debug("Краткое содержание обрезано: %d → 200 символов", len(v))
             return v[:197] + "..."
         return v
 

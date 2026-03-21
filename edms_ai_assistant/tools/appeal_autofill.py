@@ -1,26 +1,11 @@
 """
 EDMS AI Assistant - Appeal Autofill Tool
-
-Geography fill order (required by EDMS UI):
-
-  Обычный город (напр. Гомель):
-    1. country  — страна (из письма или "Республика Беларусь" по умолчанию)
-    2. region   — область (только если ЯВНО указана в письме: "Гомельская область")
-    3. district — административный район города/области (только если ЯВНО указан:
-                  "Октябрьский район", "Советский район" и т.п.)
-                  ❗ Район улицы (часть почтового адреса) — НЕ является районом EDMS
-    4. city     — город (последним, после region и district)
-
-  Столица (напр. Минск):
-    1. country  — страна
-    2. city     — город
-    Область и район EDMS заполняет автоматически — мы их НЕ отправляем.
 """
 
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.tools import tool
@@ -57,6 +42,15 @@ class AppealAutofillInput(BaseModel):
         None,
         description="UUID конкретного вложения для анализа",
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    )
+
+    generate_summary_choices: bool = Field(
+        False,
+        description=(
+            "Если True — после заполнения возвращает 3 варианта заголовка (shortSummary) "
+            "для выбора пользователем. Используй когда пользователь просит "
+            "выбрать или изменить заголовок документа."
+        ),
     )
 
     @field_validator("attachment_id")
@@ -212,18 +206,6 @@ class AttachmentSelector:
 class GeographyResolver:
     """
     Резолвер географических сущностей.
-
-    Правило заполнения:
-      - ВСЕГДА: country → city
-      - ТОЛЬКО если явно указаны в документе: region, district
-
-    Если область/район НЕ указаны явно в тексте письма — НЕ отправляем их.
-    EDMS заполняет область и район автоматически на основании города.
-
-    Это исключает путаницу между:
-      - административным районом области (Октябрьский район Гомельской области)
-      - внутригородским районом/микрорайоном (Октябрьский р-н г. Гомель)
-      - районом в названии организации ("суд Октябрьского района")
     """
 
     def __init__(self, ref_client: ReferenceClient, token: str) -> None:
@@ -388,9 +370,6 @@ class GeographyResolver:
         region/district were NOT explicitly stated in the source document and
         _lookup() has not already resolved them.
 
-        This covers the most common case: applicant writes only city name
-        (e.g. "г. Минск") and EDMS needs all four geo levels filled.
-
         Args:
             city_name: City name from document or LLM.
             document: DocumentDto (for DB cityId fallback).
@@ -441,6 +420,44 @@ class GeographyResolver:
             logger.debug("City fallback: DB cityId=%s", d.cityId)
 
 
+def _is_good_correspondent_match(query: str, canonical: str) -> bool:
+    """Check if FTS correspondent result is a genuine match for the query.
+
+    Prevents substituting a completely different organisation when EDMS
+    correspondent FTS returns a poor fuzzy-match.
+
+    Args:
+        query: Raw organisation name from LLM or DB.
+        canonical: Name returned by EDMS correspondent registry.
+
+    Returns:
+        True if canonical name is a plausible match for the query.
+    """
+    import re as _re
+    from difflib import SequenceMatcher
+
+    q = query.lower().strip()
+    c = canonical.lower().strip()
+
+    if c in q or q in c:
+        return True
+    if SequenceMatcher(None, q, c).ratio() >= 0.45:
+        return True
+
+    q_words = {w for w in q.split() if len(w) > 3}
+    c_words = {w for w in c.split() if len(w) > 3}
+    if q_words and c_words and len(q_words & c_words) / len(q_words) >= 0.40:
+        return True
+
+    orig_words = [w for w in query.strip().split() if len(w) > 3]
+    if len(orig_words) >= 2:
+        abbrev = "".join(w[0].upper() for w in orig_words)
+        if _re.search(r"\b" + _re.escape(abbrev) + r"\b", canonical, _re.IGNORECASE):
+            return True
+
+    return False
+
+
 class AppealFieldsBuilder:
     """Построитель payload для DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE."""
 
@@ -489,7 +506,7 @@ class AppealFieldsBuilder:
         self._add_personal_data(d, fields, payload)
         await self._add_classification(d, fields, extracted_text, payload)
         await self._add_declarant_type(d, fields, payload)
-        self._add_conditional_fields(d, fields, payload)
+        await self._add_conditional_fields(d, fields, payload)
         self._add_common_fields(d, fields, payload)
         self._add_db_only_fields(d, payload)
 
@@ -534,33 +551,57 @@ class AppealFieldsBuilder:
         )()
 
     async def _add_correspondent(self, d: Any, fields: Any, payload: dict) -> None:
+        """Resolve correspondentAppeal (пересылающий орган) with match quality guard.
+
+        correspondentAppeal — это орган, который ПЕРЕСЛАЛ нам письмо.
+        Если заявитель написал письмо сам — correspondentAppeal = null.
+
+        FTS из EDMS-справочника используется только если is_good_match проходит.
+        Это предотвращает замену "Министерство образования" на "НАЦЦ УСЫНОВЛЕНИЯ".
+        Если FTS-матч плохой — сохраняем как free-text (без ID).
+        """
         if d.correspondentAppealId:
             payload["correspondentAppealId"] = str(d.correspondentAppealId)
             payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
                 d.correspondentAppeal
             )
-        elif not ValueSanitizer.is_empty(d.correspondentAppeal):
-            corr_id = await self.ref_client.find_correspondent(
-                self.token, d.correspondentAppeal
-            )
-            if corr_id:
-                payload["correspondentAppealId"] = corr_id
-                payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
-                    d.correspondentAppeal
-                )
+            return
+
+        corr_name: str | None = None
+        if not ValueSanitizer.is_empty(d.correspondentAppeal):
+            corr_name = d.correspondentAppeal
         elif not ValueSanitizer.is_empty(fields.correspondentAppeal):
-            corr_id = await self.ref_client.find_correspondent(
-                self.token, fields.correspondentAppeal
+            corr_name = fields.correspondentAppeal
+
+        if corr_name:
+            canonical = await self.ref_client._find_entity_with_name(
+                self.token, "correspondent", corr_name, "Корреспондент"
             )
-            if corr_id:
-                payload["correspondentAppealId"] = corr_id
+            if canonical and _is_good_correspondent_match(corr_name, canonical["name"]):
+                payload["correspondentAppealId"] = canonical["id"]
                 payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
-                    fields.correspondentAppeal
+                    corr_name
+                )
+                logger.info(
+                    "correspondentAppeal matched: '%s' → '%s'",
+                    corr_name[:50],
+                    canonical["name"][:50],
+                )
+            else:
+                if canonical:
+                    logger.info(
+                        "correspondentAppeal registry rejected: '%s' ≉ '%s' — free-text",
+                        corr_name[:50],
+                        canonical["name"][:50],
+                    )
+                payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
+                    corr_name
                 )
 
         if not payload.get("correspondentAppealId"):
             payload["correspondentAppealId"] = None
-            payload["correspondentAppeal"] = None
+            if "correspondentAppeal" not in payload:
+                payload["correspondentAppeal"] = None
 
     def _add_personal_data(self, d: Any, fields: Any, payload: dict) -> None:
         if not ValueSanitizer.is_empty(d.fioApplicant):
@@ -623,13 +664,48 @@ class AppealFieldsBuilder:
             self.warnings.append("declarantType установлен INDIVIDUAL по умолчанию")
             logger.warning("declarantType set to INDIVIDUAL (fallback)")
 
-    def _add_conditional_fields(self, d: Any, fields: Any, payload: dict) -> None:
+    async def _add_conditional_fields(self, d: Any, fields: Any, payload: dict) -> None:
+        """Populate declarantType-specific fields.
+
+        organizationName: сначала проверяем в справочнике корреспондентов EDMS
+        (для получения canonical name). Если FTS-матч плохой — сохраняем как
+        free-text. Это универсально для любых документов: государственных,
+        коммерческих, НКО и т.д.
+
+        signed: только ФИО (должность убрана в _extract_fio_from_signed).
+        """
         if payload.get("declarantType") == GeneratedDeclarantType.ENTITY:
-            payload["organizationName"] = ValueSanitizer.sanitize_string(
+            raw_org: str | None = (
                 d.organizationName
                 if not ValueSanitizer.is_empty(d.organizationName)
                 else fields.organizationName
             )
+            if not ValueSanitizer.is_empty(raw_org):
+                corr_data = await self.ref_client._find_entity_with_name(
+                    self.token, "correspondent", raw_org, "Организация"
+                )
+                if corr_data and _is_good_correspondent_match(
+                    raw_org, corr_data.get("name", "")
+                ):
+                    payload["organizationName"] = corr_data["name"]
+                    logger.info(
+                        "organizationName from registry: '%s' → '%s'",
+                        raw_org[:50],
+                        corr_data["name"][:50],
+                    )
+                else:
+                    if corr_data:
+                        logger.info(
+                            "organizationName registry rejected (low quality): '%s' ≉ '%s' — free-text",
+                            raw_org[:50],
+                            corr_data.get("name", "")[:50],
+                        )
+                    payload["organizationName"] = ValueSanitizer.sanitize_string(
+                        raw_org
+                    )
+            else:
+                payload["organizationName"] = None
+
             payload["signed"] = ValueSanitizer.sanitize_string(
                 d.signed if not ValueSanitizer.is_empty(d.signed) else fields.signed
             )
@@ -659,9 +735,22 @@ class AppealFieldsBuilder:
             if fields.reasonably is True
             else (d.reasonably if d.reasonably is not None else fields.reasonably)
         )
-        payload["receiptDate"] = ValueSanitizer.fix_datetime_format(
-            d.receiptDate if d.receiptDate else fields.receiptDate
-        )
+        raw_receipt = d.receiptDate if d.receiptDate else fields.receiptDate
+        if raw_receipt:
+            _receipt_date = raw_receipt if isinstance(raw_receipt, datetime) else None
+            if (
+                _receipt_date
+                and abs((_receipt_date.date() - datetime.now(UTC).date()).days) <= 1
+            ):
+                logger.info(
+                    "receiptDate=%s выглядит как today → пропускаем",
+                    _receipt_date.date(),
+                )
+                payload["receiptDate"] = None
+            else:
+                payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt)
+        else:
+            payload["receiptDate"] = None
         payload["fullAddress"] = ValueSanitizer.sanitize_string(
             d.fullAddress
             if not ValueSanitizer.is_empty(d.fullAddress)
@@ -723,6 +812,8 @@ class AppealAutofillOrchestrator:
         self.token = token
         self.attachment_id = attachment_id
         self.warnings: list[str] = []
+        self._last_extracted_text: str | None = None
+        self._last_short_summary: str | None = None
 
     async def execute(self) -> AutofillResult:
         document = await self._load_document()
@@ -775,6 +866,8 @@ class AppealAutofillOrchestrator:
     async def _analyze_text(self, text: str) -> Any:
         extraction_service = AppealExtractionService()
         fields = await extraction_service.extract_appeal_fields(text)
+        self._last_extracted_text = text
+        self._last_short_summary = getattr(fields, "shortSummary", None)
         logger.info("LLM analysis complete")
         return fields
 
@@ -803,12 +896,17 @@ class AppealAutofillOrchestrator:
                 self.token, delivery_method_name
             )
 
+        raw_summary = (
+            ValueSanitizer.sanitize_string(fields.shortSummary)
+            if not ValueSanitizer.is_empty(fields.shortSummary)
+            else document.shortSummary
+        )
+        if raw_summary and len(raw_summary) > 80:
+            raw_summary = raw_summary[:80]
+            logger.warning("shortSummary обрезан до 80 символов: '%s'", raw_summary)
+
         main_payload = {
-            "shortSummary": (
-                ValueSanitizer.sanitize_string(fields.shortSummary)
-                if not ValueSanitizer.is_empty(fields.shortSummary)
-                else document.shortSummary
-            ),
+            "shortSummary": raw_summary,
             "deliveryMethodId": delivery_id,
             "documentTypeId": (
                 str(document.documentTypeId) if document.documentTypeId else None
@@ -855,22 +953,88 @@ class AppealAutofillOrchestrator:
         )
 
 
+async def _generate_summary_variants(
+    text: str, current_summary: str | None, token: str | None = None
+) -> list[str]:
+    """Generate 3 alternative shortSummary variants via LLM.
+
+    Used when the user wants to choose or change the document title.
+    Each variant differs in style: concise, formal, descriptive.
+
+    Args:
+        text: Source document text (first 2000 chars used).
+        current_summary: Current shortSummary (may be included as option 1).
+        token: Unused, reserved for future caching.
+
+    Returns:
+        List of 3 summary strings, each ≤ 80 characters.
+    """
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+
+    from edms_ai_assistant.llm import get_chat_model
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                (
+                    "Ты — эксперт по делопроизводству. "
+                    "Сформулируй РОВНО 3 варианта краткого содержания (заголовка) обращения. "
+                    "Каждый вариант — отдельная строка, максимум 80 символов. "
+                    "Стили: 1) краткий (суть в 5-8 словах), "
+                    "2) официальный (с указанием типа обращения), "
+                    "3) описательный (с ключевыми деталями). "
+                    "Отвечай ТОЛЬКО тремя строками без нумерации и без лишних слов."
+                ),
+            ),
+            ("user", "Текст обращения:\n{text}"),
+        ]
+    )
+
+    llm = get_chat_model()
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        result = await chain.ainvoke({"text": text[:2000]})
+        variants = [v.strip() for v in result.strip().split("\n") if v.strip()]
+        variants = [v[:77] + "..." if len(v) > 80 else v for v in variants[:3]]
+        if current_summary and current_summary not in variants:
+            variants = [
+                (
+                    current_summary[:77] + "..."
+                    if len(current_summary) > 80
+                    else current_summary
+                )
+            ] + variants[:2]
+        return variants[:3]
+    except Exception as exc:
+        logger.warning("Failed to generate summary variants: %s", exc)
+        return [current_summary] if current_summary else []
+
+
 @tool("autofill_appeal_document", args_schema=AppealAutofillInput)
 async def autofill_appeal_document(
     document_id: str,
     token: str,
     attachment_id: str | None = None,
+    generate_summary_choices: bool = False,
 ) -> dict[str, Any]:
     """
     Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ.
+
+    Используй generate_summary_choices=True когда пользователь хочет
+    выбрать или изменить заголовок (краткое содержание) документа.
 
     Args:
         document_id: UUID документа категории APPEAL.
         token: JWT токен авторизации.
         attachment_id: UUID конкретного файла (опционально).
+        generate_summary_choices: Вернуть 3 варианта заголовка для выбора.
 
     Returns:
-        Dict с результатом операции.
+        Dict с результатом операции. Если generate_summary_choices=True —
+        дополнительно содержит summary_choices: list[str].
     """
     logger.info(
         "========== APPEAL AUTOFILL START ==========",
@@ -881,7 +1045,25 @@ async def autofill_appeal_document(
         orchestrator = AppealAutofillOrchestrator(document_id, token, attachment_id)
         result = await orchestrator.execute()
         logger.info("========== APPEAL AUTOFILL SUCCESS ==========")
-        return result.to_dict()
+
+        result_dict = result.to_dict()
+
+        # Генерируем варианты заголовка если запрошено
+        if generate_summary_choices and orchestrator._last_extracted_text:
+            current_summary = orchestrator._last_short_summary
+            variants = await _generate_summary_variants(
+                orchestrator._last_extracted_text,
+                current_summary,
+            )
+            if variants:
+                result_dict["summary_choices"] = variants
+                result_dict["summary_choices_hint"] = (
+                    "Выберите заголовок или предложите свой вариант. "
+                    "Скажите 'Установи заголовок: <текст>' чтобы применить."
+                )
+                logger.info("Generated %d summary variants", len(variants))
+
+        return result_dict
 
     except ValueError as e:
         logger.error(f"Validation error: {e}")

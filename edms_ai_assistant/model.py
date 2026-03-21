@@ -74,6 +74,7 @@ class UserInput(BaseModel):
         ),
     )
     thread_id: str | None = Field(None, max_length=255)
+    preferred_summary_format: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -115,6 +116,7 @@ class AssistantResponse(BaseModel):
             "после успешного выполнения мутирующих операций"
         ),
     )
+    navigate_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

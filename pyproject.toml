@@ -68,6 +68,7 @@ dependencies = [
     "docx2txt>=0.8,<1.0",
     "openpyxl>=3.1.0,<4.0.0",
     "xlrd>=2.0.0,<3.0.0",
+    "mammoth>=1.12.0,<2.0.0",
 
     # ── NLP / ML ─────────────────────────────────────────────────────────────
     "tiktoken>=0.9.0,<1.0.0",
@@ -97,8 +98,6 @@ edms-assistant = "edms_ai_assistant.cli:main"
 
 
 # ─── Dependency groups (PEP 735) ─────────────────────────────────────────────
-# uv: `uv sync --group dev` / `uv sync --group lint` / `uv sync --all-groups`
-# Требует uv>=0.5.0 (поддержка PEP 735 dependency-groups)
 
 [dependency-groups]
 dev = [
@@ -126,7 +125,6 @@ packages = ["edms_ai_assistant"]
 # ─── uv ──────────────────────────────────────────────────────────────────────
 
 [tool.uv]
-# Создаёт venv в корне проекта
 # preview = true  # для экспериментальных фич uv
 
 [tool.uv.workspace]
@@ -137,32 +135,39 @@ exclude = [".venv"]
 
 [tool.ruff]
 target-version = "py313"
-line-length    = 88
-src            = ["edms_ai_assistant", "tests"]
+line-length = 100
+exclude = [
+    ".venv",
+    "__pycache__",
+    "*.pyc",
+    "edms_ai_assistant/generated/",
+]
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
-    "SIM", # flake8-simplify
-    "TCH", # flake8-type-checking
-    "RUF", # ruff-specific
+    "E",
+    "W",
+    "F",
+    "B",
+    "C4",
+    "SIM",
+    "UP",
+    "RUF",
+    "TC",
 ]
 ignore = [
-    "E501",  # line too long — handled by formatter
-    "B008",  # FastAPI Depends() в default args
-    "B904",  # raise from — слишком строго для error handlers
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "E501",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"edms_ai_assistant/generated/**" = ["E741", "F401", "UP"]
-"tests/**"                       = ["E402", "S101"]
-"scripts/**"                     = ["T201", "F841"]
+"edms_ai_assistant/generated/*" = ["ALL"]
+"**/__init__.py"                = ["F401"]
+"edms_ai_assistant/llm.py"      = ["F811"]
+"scripts/**"                    = ["T201", "F841"]
+"tests/**"                      = ["E402", "S101"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["edms_ai_assistant"]

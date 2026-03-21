@@ -24,10 +24,6 @@ class ReferenceClient(EdmsHttpClient):
         "group": ("name", "shortName"),
     }
 
-    # ─────────────────────────────────────────────────────────────────
-    # Базовые методы (два шага)
-    # ─────────────────────────────────────────────────────────────────
-
     async def _find_entity_with_name(
         self,
         token: str,
@@ -70,13 +66,25 @@ class ReferenceClient(EdmsHttpClient):
                 params={"fts": search_query},
             )
         except Exception as exc:
-            logger.error(
-                "[REFERENCE-CLIENT] FTS ошибка %s '%s': %s",
-                entity_label,
-                search_query,
-                exc,
-                exc_info=True,
-            )
+            import httpx as _httpx
+
+            if (
+                isinstance(exc, _httpx.HTTPStatusError)
+                and exc.response.status_code == 404
+            ):
+                logger.warning(
+                    "[REFERENCE-CLIENT] %s не найден в справочнике: '%s'",
+                    entity_label,
+                    search_query,
+                )
+            else:
+                logger.error(
+                    "[REFERENCE-CLIENT] FTS ошибка %s '%s': %s",
+                    entity_label,
+                    search_query,
+                    exc,
+                    exc_info=True,
+                )
             return None
 
         if not fts_result:
@@ -254,7 +262,17 @@ class ReferenceClient(EdmsHttpClient):
                 params={"fts": query},
             )
         except Exception as exc:
-            logger.error("[REFERENCE-CLIENT] City FTS error: %s", exc, exc_info=True)
+            import httpx as _httpx
+
+            if (
+                isinstance(exc, _httpx.HTTPStatusError)
+                and exc.response.status_code == 404
+            ):
+                logger.warning("[REFERENCE-CLIENT] City not found: '%s'", query)
+            else:
+                logger.error(
+                    "[REFERENCE-CLIENT] City FTS error: %s", exc, exc_info=True
+                )
             return None
 
         if not fts_result:

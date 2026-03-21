@@ -42,15 +42,14 @@ export default defineContentScript({
 })
 
 function removeButtons() {
-  const injectedElements = document.querySelectorAll(`[${INJECTED_ATTR}]`);
-
-  injectedElements.forEach(el => {
-    const btnWrapper = el.querySelector('.edms-ai-button-wrapper');
-    if (btnWrapper) {
-      btnWrapper.remove();
-    }
-    el.removeAttribute(INJECTED_ATTR);
-  });
+    const injectedElements = document.querySelectorAll(`[${INJECTED_ATTR}]`);
+    injectedElements.forEach(el => {
+        const btnWrapper = el.querySelector('.edms-ai-button-wrapper');
+        if (btnWrapper) {
+            btnWrapper.remove();
+        }
+        el.removeAttribute(INJECTED_ATTR);
+    });
 }
 
 // ─── Selectors ────────────────────────────────────────────────────────────────
@@ -191,7 +190,6 @@ function createActionButton(row: HTMLElement): HTMLElement {
 function getFileName(row: HTMLElement): string {
     const lead = row.querySelector('span.lead');
     if (!lead) return 'Документ';
-
     return lead.childNodes[0]?.textContent?.trim() || lead.textContent?.trim() || 'Документ';
 }
 
@@ -221,7 +219,7 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
     let fileId = getFileId(row);
     const effectiveFileId = (fileId && fileId.length > 10) ? fileId : fileName;
 
-    btn.innerHTML = spinnerSVG();
+    btn.innerHTML = spinnerSVG()
 
     const docId = extractDocIdFromUrl();
 
@@ -242,10 +240,22 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
         btn.style.color = '#94a3b8'
 
         if (res?.success) {
-            toast.success(`Анализ файла "${fileName}" готов`, 'Добавлено вложение')
+            toast.success(`Анализ файла "${fileName}" готов`, 'Готово')
+
+            // ── Передаём cache-поля из ответа сервера ──
+            const cacheFileIdentifier: string | null =
+                res.data?.metadata?.cache_file_identifier ?? null
+            const cacheSummaryType: string | null =
+                res.data?.metadata?.cache_summary_type ?? summaryType ?? null
+            const cacheContextId: string | null =
+                res.data?.metadata?.cache_context_ui_id ?? docId ?? null
 
             window.postMessage({
                 type: 'REFRESH_CHAT_HISTORY',
+                cache_file_identifier: cacheFileIdentifier,
+                cache_summary_type: cacheSummaryType,
+                cache_file_path: effectiveFileId,
+                cache_context_id: cacheContextId,
                 messages: [
                     {type: 'human', content: `Анализ файла: ${fileName}`},
                     {type: 'ai', content: res.data?.response ?? 'Анализ завершён.'},
