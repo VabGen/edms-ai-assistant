@@ -1,13 +1,4 @@
 # edms_ai_assistant/main.py
-"""
-EDMS AI Assistant — FastAPI Application Entry Point.
-
-Слой: Interface (Transport).
-Содержит только HTTP-маршруты, валидацию входных данных,
-маппинг запросов/ответов и фоновые задачи очистки файлов.
-Вся бизнес-логика делегируется EdmsDocumentAgent (Service Layer).
-"""
-
 from __future__ import annotations
 
 import logging
@@ -35,6 +26,7 @@ from sqlalchemy import select
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent import EdmsDocumentAgent
+from edms_ai_assistant.api.routes.cache import router as cache_router
 from edms_ai_assistant.api.routes.settings import router as settings_router
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -59,20 +51,10 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Application state (singleton agent)
-# ─────────────────────────────────────────────────────────────────────────────
-
 _agent: EdmsDocumentAgent | None = None
 
 
 def get_agent() -> EdmsDocumentAgent:
-    """
-    FastAPI dependency that returns the singleton EdmsDocumentAgent.
-
-    Raises:
-        HTTPException 503: If the agent failed to initialize at startup.
-    """
     if _agent is None:
         raise HTTPException(
             status_code=503,
@@ -81,35 +63,15 @@ def get_agent() -> EdmsDocumentAgent:
     return _agent
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Lifespan
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """
-    Application lifespan: initializes Redis, agent and upload directory
-    on startup; shuts them down cleanly on stop.
-
-    Порядок запуска:
-        1. Создаём директорию для загрузок
-        2. Подключаемся к Redis (async, с PING-проверкой)
-        3. Инициализируем агента
-    Порядок остановки (обратный):
-        1. Закрываем Redis-клиент
-        2. Удаляем временные файлы
-    """
     global _agent
 
-    # ── Startup ───────────────────────────────────────────────────────────────
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Initialize Database
     logger.info("Initializing database...")
     await init_db()
 
-    # Redis — запускается автоматически вместе с приложением.
     await init_redis()
 
     try:
@@ -126,17 +88,12 @@ async def lifespan(_app: FastAPI):
 
     yield
 
-    # ── Shutdown ──────────────────────────────────────────────────────────────
     await close_redis()
 
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
         logger.info("Temporary upload directory removed")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FastAPI application
-# ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="EDMS AI Assistant API",
@@ -145,7 +102,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — https://fastapi.tiangolo.com/advanced/cors/
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS if hasattr(settings, "CORS_ORIGINS") else ["*"],
@@ -155,28 +111,14 @@ app.add_middleware(
 )
 
 app.include_router(settings_router)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Утилиты
-# ─────────────────────────────────────────────────────────────────────────────
+app.include_router(cache_router)
 
 
 def _is_system_attachment(file_path: str | None) -> bool:
-    """Returns True if *file_path* is an EDMS attachment UUID (not a local file)."""
     return bool(file_path and UUID_RE.match(str(file_path)))
 
 
 def _cleanup_file(file_path: str) -> None:
-    """
-    Safely removes a temporary uploaded file.
-
-    Designed to be called as a FastAPI BackgroundTask — errors are logged
-    but never raised.
-
-    Args:
-        file_path: Absolute path to the file to remove.
-    """
     try:
         p = Path(file_path)
         if p.exists():
@@ -193,21 +135,6 @@ async def _resolve_user_context(
     user_input: UserInput,
     user_id: str,
 ) -> dict:
-    """
-    Resolves user context from request or EDMS employee API.
-
-    Priority:
-    1. UserContext provided directly in the request body
-    2. Fetched from EmployeeClient using user_id from token
-    3. Fallback: {"firstName": "Коллега"}
-
-    Args:
-        user_input: Validated HTTP request body.
-        user_id: User ID extracted from JWT token.
-
-    Returns:
-        Dict with at least {"firstName": str}.
-    """
     if user_input.context:
         return user_input.context.model_dump(exclude_none=True)
 
@@ -225,11 +152,6 @@ async def _resolve_user_context(
     return {"firstName": "Коллега"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Routes
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 @app.post(
     "/chat",
     response_model=AssistantResponse,
@@ -241,13 +163,6 @@ async def chat_endpoint(
     background_tasks: BackgroundTasks,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> AssistantResponse:
-    """
-    Main chat endpoint. Handles both fresh messages and Human-in-the-Loop
-    resumptions (disambiguation, summarization type selection).
-
-    The thread_id is persisted by LangGraph MemorySaver and enables
-    multi-turn conversations with full history.
-    """
     user_id = extract_user_id_from_token(user_input.user_token)
     thread_id = (
         user_input.thread_id
@@ -255,6 +170,12 @@ async def chat_endpoint(
     )
 
     user_context = await _resolve_user_context(user_input, user_id)
+
+    if (
+        user_input.preferred_summary_format
+        and user_input.preferred_summary_format != "ask"
+    ):
+        user_context["preferred_summary_format"] = user_input.preferred_summary_format
 
     result = await agent.chat(
         message=user_input.message,
@@ -317,6 +238,7 @@ async def chat_endpoint(
         message=result.get("message"),
         thread_id=thread_id,
         requires_reload=result.get("requires_reload", False),
+        navigate_url=result.get("navigate_url"),
         metadata=result.get("metadata", {}),
     )
 
@@ -400,7 +322,6 @@ async def api_direct_summarize(
                                     )
                                     or ""
                                 )
-
                                 if clean_input in strict_normalize(att_name):
                                     file_identifier = att_id
                                     logger.info(
@@ -450,6 +371,12 @@ async def api_direct_summarize(
                             status="success",
                             response=cached_row.content,
                             thread_id=new_thread_id,
+                            metadata={
+                                "cache_file_identifier": file_identifier,
+                                "cache_summary_type": summary_type,
+                                "cache_context_ui_id": user_input.context_ui_id,  # ← добавлено
+                                "from_cache": True,
+                            },
                         )
             except Exception as db_err:
                 logger.error(f"CACHE READ ERROR: {db_err}")
@@ -504,7 +431,13 @@ async def api_direct_summarize(
             thread_id=new_thread_id,
             message=agent_result.get("message"),
             requires_reload=agent_result.get("requires_reload", False),
-            metadata=agent_result.get("metadata", {}),
+            metadata={
+                **agent_result.get("metadata", {}),
+                "cache_file_identifier": file_identifier,
+                "cache_summary_type": summary_type,
+                "cache_context_ui_id": user_input.context_ui_id,  # ← добавлено
+                "from_cache": False,
+            },
         )
 
     except Exception as exc:
@@ -521,10 +454,6 @@ async def get_history(
     thread_id: str,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
-    """
-    Returns filtered conversation history for *thread_id*.
-    Filters out ToolMessages and empty AIMessages.
-    """
     try:
         state = await agent.state_manager.get_state(thread_id)
         messages = state.values.get("messages", [])
@@ -558,10 +487,6 @@ async def get_history(
     tags=["Chat"],
 )
 async def create_new_thread(request: NewChatRequest) -> dict:
-    """
-    Generates a fresh thread_id for a new conversation.
-    The thread is initialized lazily on the first /chat request.
-    """
     try:
         user_id = extract_user_id_from_token(request.user_token)
         new_thread_id = f"chat_{user_id}_{uuid.uuid4().hex[:8]}"
@@ -580,10 +505,6 @@ async def upload_file(
     user_token: Annotated[str, Form(...)],
     file: Annotated[UploadFile, File(...)],
 ) -> FileUploadResponse:
-    """
-    Receives a file upload and stores it in a temporary directory.
-    The returned file_path is passed back to /chat as file_path.
-    """
     try:
         extract_user_id_from_token(user_token)
 
@@ -637,17 +558,12 @@ async def upload_file(
 async def health_check(
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
-    """Returns component-level health status of the agent."""
     return {
         "status": "ok",
         "version": app.version,
         "components": agent.health_check(),
     }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     uvicorn.run(

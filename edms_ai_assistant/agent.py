@@ -43,7 +43,6 @@ from edms_ai_assistant.utils.regex_utils import UUID_RE
 logger = logging.getLogger(__name__)
 
 # ─── Фразы успешных мутирующих операций для requires_reload ──────────────────
-# При совпадении любой из них — фронтенд должен перезагрузить страницу EDMS
 _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "успешно добавлен",
     "успешно создан",
@@ -57,6 +56,10 @@ _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "добавлен в список",
     "ознакомление создано",
     "задача создана",
+    "заполнение обращения",
+    "обращение автоматически заполнен",
+    "карточка обращения заполнен",
+    "автозаполнен",
     # Уведомления
     # "уведомление отправлено",
     # "напоминание отправлено",
@@ -156,10 +159,6 @@ class ContextParams:
     """
     Immutable execution context passed through the entire agent lifecycle.
 
-    Не использует frozen=True чтобы избежать проблем с field(default_factory)
-    в Python 3.12. Иммутабельность обеспечивается соглашением — поля не
-    изменяются после __post_init__.
-
     Attributes:
         user_token: JWT authorization token.
         document_id: UUID of the active EDMS document.
@@ -168,6 +167,9 @@ class ContextParams:
         user_name: Display name for the system prompt.
         user_first_name: First name for personalized greetings.
         current_date: Formatted date string injected into the prompt.
+        user_context: Full user context dict (preferred_summary_format, etc.).
+        intent: Primary user intent, set in chat() after semantic analysis.
+            Used by tool router to select minimal relevant toolset.
     """
 
     user_token: str
@@ -184,6 +186,8 @@ class ContextParams:
     )
     current_year: str = field(default_factory=lambda: str(datetime.now().year))
     uploaded_file_name: str | None = None
+    user_context: dict = field(default_factory=dict)
+    intent: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self.user_token or not isinstance(self.user_token, str):
@@ -287,6 +291,7 @@ class AgentResponse(BaseModel):
     message: str | None = None
     action_type: ActionType | None = None
     requires_reload: bool = False
+    navigate_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -341,6 +346,12 @@ class DocumentRepository:
 # ─────────────────────────────────────────────────────────────────────────────
 # PromptBuilder — Strategy pattern для системных промптов
 # ─────────────────────────────────────────────────────────────────────────────
+
+USE_LEAN_PROMPT: bool = False
+"""
+True  → LEAN (~150 токенов)  — Llama 3.2, Mistral 7B, любые ≤13B модели
+False → FULL (~2125 токенов) — GPT-4, Claude, Qwen 72B
+"""
 
 
 class PromptBuilder:
@@ -415,6 +426,15 @@ class PromptBuilder:
    - Вместо UUID вложения → используй имя файла.
    - Вместо UUID документа → используй название или номер документа.
    - Технические данные (ID, пути, токены) — только во внутренних вызовах инструментов.
+
+ 8. **Создание документа из файла**:
+   - Если пользователь загрузил файл (путь в <local_file_path>) И просит
+     "создай обращение / входящий / договор" — вызови create_document_from_file.
+   - НЕ нужно сначала читать файл — инструмент сам его обработает.
+   - После получения navigate_url в ответе — фронтенд откроет новый документ автоматически.
+   - Параметр doc_category берётся из запроса пользователя:
+     "обращение" → APPEAL, "входящий" → INCOMING, "исходящий" → OUTGOING,
+     "внутренний" → INTERN, "договор" → CONTRACT.
 </critical_rules>
 
 <available_tools_guide>
@@ -432,6 +452,7 @@ class PromptBuilder:
 | Создание поручения                       | task_create_tool                                             |
 | Автозаполнение обращения                 | autofill_appeal_document                                     |
 | Уведомление / напоминание                | employee_search_tool → doc_send_notification                 |
+| Создать документ из файла                | create_document_from_file                                    |
 | Вопрос без документа                     | Ответь напрямую из контекста                                 |
 </available_tools_guide>
 
@@ -444,8 +465,104 @@ class PromptBuilder:
 ❌ Фразы "как ИИ я не могу..." — просто помогай
 </response_format>"""
 
-    _SNIPPETS: dict[UserIntent, str] = {
-        UserIntent.CREATE_INTRODUCTION: """
+    LEAN_TEMPLATE = """<role>Ты — AI-помощник системы электронного документооборота (EDMS/СЭД).</role>
+
+    <context>
+    Пользователь: {user_name} ({user_last_name})
+    Дата: {current_date} (год: {current_year})
+    Документ: {context_ui_id}
+    Файл: {local_file}
+    </context>
+
+    <user_self>
+    Когда пользователь говорит «я», «добавь меня» — его фамилия: {user_last_name}, полное имя: {user_full_name}.
+    </user_self>
+
+    <rules>
+    1. token/document_id инжектируются системой — не указывай их при вызове инструментов.
+    2. Если есть локальный файл ({local_file}) — работай с ним, не с вложениями документа.
+    3. Один инструмент за раз. Дождись результата перед следующим вызовом.
+    4. При requires_disambiguation — покажи список, жди выбора пользователя.
+    5. Финальный ответ — только на русском, без UUID, без JSON, без технических деталей.
+    6. UUID в ответах запрещены. Вместо UUID → имя/название.
+    </rules>"""
+
+    _SNIPPETS: dict = {}
+    _LEAN_SNIPPETS: dict = {}
+
+    @classmethod
+    def build(
+        cls,
+        context: ContextParams,
+        intent: UserIntent,
+        semantic_xml: str,
+        *,
+        lean: bool = False,
+    ) -> str:
+        """Assembles the full system prompt from context, intent snippet, and semantic XML.
+
+        Args:
+            context: Immutable execution context.
+            intent: Detected primary user intent for snippet selection.
+            semantic_xml: Pre-serialized semantic context XML block.
+            lean: When True, uses compact LEAN_TEMPLATE (~150 tokens) instead of
+                CORE_TEMPLATE (~2125 tokens). Set True for small LLMs (≤13B).
+
+        Returns:
+            Complete system prompt string ready for SystemMessage.
+        """
+        if lean:
+            base = cls.LEAN_TEMPLATE.format(
+                user_name=context.user_first_name or context.user_name,
+                user_last_name=context.user_last_name or "Не указана",
+                user_full_name=context.user_full_name or context.user_name,
+                current_date=context.current_date,
+                current_year=context.current_year,
+                context_ui_id=context.document_id or "Не указан",
+                local_file=context.file_path or "Не загружен",
+            )
+            snippet = cls._LEAN_SNIPPETS.get(intent, "")
+            return base + snippet + semantic_xml
+
+        base = cls.CORE_TEMPLATE.format(
+            user_name=context.user_first_name or context.user_name,
+            user_last_name=context.user_last_name or "Не указана",
+            user_full_name=context.user_full_name or context.user_name,
+            current_date=context.current_date,
+            current_year=context.current_year,
+            context_ui_id=context.document_id or "Не указан",
+            local_file=context.file_path or "Не загружен",
+            uploaded_file_name=context.uploaded_file_name or "Не определено",
+        )
+        snippet = cls._SNIPPETS.get(intent, "")
+        return base + snippet + semantic_xml
+
+
+PromptBuilder._LEAN_SNIPPETS = {
+    UserIntent.SUMMARIZE: """
+    <workflow>Суммаризация: получи текст (doc_get_file_content или read_local_file_content) → вызови doc_summarize_text(text=..., summary_type=...). Если summary_type не задан — верни requires_choice.</workflow>""",
+    UserIntent.COMPARE: """
+    <workflow>Сравнение: если есть локальный файл → doc_compare_attachment_with_local. Если нет → doc_get_versions (сравнивает все версии автоматически). НЕ вызывай doc_get_versions если есть файл.</workflow>""",
+    UserIntent.CREATE_INTRODUCTION: """
+    <workflow>Ознакомление: introduction_create_tool(last_names=[...]). При requires_disambiguation → покажи список → повторный вызов с selected_employee_ids.</workflow>""",
+    UserIntent.CREATE_TASK: """
+    <workflow>Поручение: task_create_tool(task_text=..., executor_last_names=[...]). Дата: если упомянута → ISO 8601, иначе не передавай. При disambiguation → покажи список → selected_employee_ids.</workflow>""",
+    UserIntent.NOTIFICATION: """
+    <workflow>Уведомление: employee_search_tool(last_name=...) → doc_send_notification(recipient_ids=[uuid], message=...).</workflow>""",
+    UserIntent.SEARCH: """
+    <workflow>Поиск: doc_search_tool(short_summary=...) или employee_search_tool(last_name=...). После поиска можно передать id в doc_get_details.</workflow>""",
+    UserIntent.ANALYZE: """
+    <workflow>Анализ: doc_get_details → doc_get_file_content → doc_summarize_text(summary_type='thesis').</workflow>""",
+    UserIntent.QUESTION: """
+    <workflow>Вопрос: doc_get_details для метаданных, doc_get_file_content для содержимого. Ответ — на русском языке без UUID.</workflow>""",
+    UserIntent.FILE_ANALYSIS: """
+    <workflow>Анализ файла: read_local_file_content(file_path=...) → doc_summarize_text(text=..., summary_type=...). Путь берётся из <context>.</workflow>""",
+    UserIntent.CREATE_DOCUMENT: """
+    <workflow>Создание документа: create_document_from_file(file_path=<из контекста>, doc_category=<APPEAL/INCOMING/...>). Один вызов — всё остальное автоматически.</workflow>""",
+}
+
+PromptBuilder._SNIPPETS = {
+    UserIntent.CREATE_INTRODUCTION: """
 <introduction_workflow>
 Workflow создания листа ознакомления:
 1. Вызови introduction_create_tool с last_names сотрудников
@@ -454,7 +571,7 @@ Workflow создания листа ознакомления:
 4. Повторный вызов: introduction_create_tool(selected_employee_ids=["uuid1", "uuid2"])
 5. Сообщи пользователю об успехе с именами добавленных сотрудников
 </introduction_workflow>""",
-        UserIntent.CREATE_TASK: """
+    UserIntent.CREATE_TASK: """
 <task_creation_guide>
 Параметры поручения:
 - task_text: текст поручения (обязательно)
@@ -474,7 +591,7 @@ Workflow создания листа ознакомления:
 
 Disambiguation: если исполнитель не найден однозначно → покажи список, дождись выбора.
 </task_creation_guide>""",
-        UserIntent.SUMMARIZE: """
+    UserIntent.SUMMARIZE: """
 <summarize_guide>
 Workflow суммаризации документа:
 
@@ -494,7 +611,7 @@ Workflow суммаризации документа:
 
 ЗАПРЕЩЕНО: подставлять summary_type самостоятельно если пользователь не указал формат.
 </summarize_guide>""",
-        UserIntent.COMPARE: """
+    UserIntent.COMPARE: """
 <compare_decision_tree>
 ⚠️ ОБЯЗАТЕЛЬНО прочитай условие ДО выбора инструмента сравнения:
 
@@ -557,7 +674,7 @@ Workflow суммаризации документа:
 
 Формат ответа: по каждой паре — секция с изменениями (или "изменений нет").
 </compare_versions_guide>""",
-        UserIntent.SEARCH: """
+    UserIntent.SEARCH: """
 <search_guide>
 При поиске документов в базе EDMS:
 - Поиск по тексту/номеру/категории/дате: doc_search_tool
@@ -567,7 +684,7 @@ Workflow суммаризации документа:
 - Если нужна информация из текста документа: doc_get_file_content → ответь на основе текста
 После doc_search_tool можно передать id найденного документа в doc_get_details или doc_get_file_content.
 </search_guide>""",
-        UserIntent.ANALYZE: """
+    UserIntent.ANALYZE: """
 <analyze_guide>
 Для глубокого анализа документа:
 1. doc_get_details — структура, метаданные, поручения, процессы
@@ -575,7 +692,7 @@ Workflow суммаризации документа:
 3. doc_summarize_text с типом thesis — тезисный разбор
 Обязательно укажи: тип документа, статус, ключевые участники, сроки.
 </analyze_guide>""",
-        UserIntent.QUESTION: """
+    UserIntent.QUESTION: """
 <question_guide>
 Отвечай на вопросы о документе:
 - Простые вопросы о метаданных: doc_get_details
@@ -583,7 +700,7 @@ Workflow суммаризации документа:
 - Вопросы о сотрудниках: employee_search_tool
 - Общие вопросы без документа: отвечай напрямую из контекста
 </question_guide>""",
-        UserIntent.NOTIFICATION: """
+    UserIntent.NOTIFICATION: """
 <notification_guide>
 При отправке уведомлений и напоминаний:
 - Инструмент: doc_send_notification(document_id=..., recipient_ids=[...], message=..., notification_type=..., deadline=...)
@@ -593,7 +710,7 @@ Workflow суммаризации документа:
 - Workflow: employee_search_tool → doc_send_notification
 - Если сотрудник один и найден однозначно — сразу передавай его UUID.
 </notification_guide>""",
-        UserIntent.FILE_ANALYSIS: """
+    UserIntent.FILE_ANALYSIS: """
 <file_analysis_guide>
 При анализе загруженного файла:
 - Локальный файл (/tmp/...): read_local_file_content → doc_summarize_text
@@ -601,42 +718,44 @@ Workflow суммаризации документа:
 - Сравнение файла с вложением документа: doc_compare_attachment_with_local
 Путь к файлу берётся из <local_file_path> в system prompt.
 </file_analysis_guide>""",
-    }
+    UserIntent.CREATE_DOCUMENT: """
+<create_document_guide>
+    Создание нового документа из загруженного файла:
 
-    @classmethod
-    def build(
-        cls,
-        context: ContextParams,
-        intent: UserIntent,
-        semantic_xml: str,
-    ) -> str:
-        """
-        Assembles the full system prompt from context, intent snippet, and semantic XML.
+    ТРИГГЕРЫ (когда вызывать create_document_from_file):
+      - Пользователь загрузил файл (есть <local_file_path>) И говорит:
+        "создай обращение", "сделай входящий", "оформи договор",
+        "зарегистрируй на основе этого файла", "создай документ из файла"
 
-        Args:
-            context: Immutable execution context.
-            intent: Detected primary user intent for snippet selection.
-            semantic_xml: Pre-serialized semantic context XML block.
+    МАППИНГ категорий:
+      - "обращение" / "жалоба" / "заявление" → APPEAL
+      - "входящий" / "входящее письмо"       → INCOMING
+      - "исходящий" / "исходящее"            → OUTGOING
+      - "внутренний"                         → INTERN
+      - "договор" / "контракт"               → CONTRACT
+      - "совещание"                          → MEETING
 
-        Returns:
-            Complete system prompt string ready for SystemMessage.
-        """
-        base = cls.CORE_TEMPLATE.format(
-            user_name=context.user_first_name or context.user_name,
-            user_last_name=context.user_last_name or "Не указана",
-            user_full_name=context.user_full_name or context.user_name,
-            current_date=context.current_date,
-            current_year=context.current_year,
-            context_ui_id=context.document_id or "Не указан",
-            local_file=context.file_path or "Не загружен",
-            uploaded_file_name=context.uploaded_file_name or "Не определено",
-        )
-        snippet = cls._SNIPPETS.get(intent, "")
-        return base + snippet + semantic_xml
+    ВЫЗОВ (один инструмент, ничего предварительно):
+      create_document_from_file(
+          file_path=<из <local_file_path>>,   # АВТОМАТИЧЕСКИ
+          doc_category="APPEAL",              # из запроса пользователя
+          autofill=True,                      # автозаполнение для APPEAL
+      )
+
+    НЕ НУЖНО:
+      ❌ Сначала читать файл через read_local_file_content
+      ❌ Спрашивать пользователя о пути к файлу
+      ❌ Вызывать doc_get_details или autofill_appeal_document отдельно
+
+    ПОСЛЕ получения navigate_url:
+      - Скажи пользователю: "Документ создан, открываю карточку..."
+      - navigate_url обрабатывается фронтендом автоматически
+    </create_document_guide>""",
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ContentExtractor — извлечение финального контента из цепочки сообщений
+# ContentExtractor
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -792,14 +911,11 @@ class ContentExtractor:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Случай 2: JSON-обёртки встроены в текст
-        # Убираем {"status": "success", "content": "..."} паттерны
         content = re.sub(
             r'\{"status"\s*:\s*"[^"]*",\s*"(?:content|message|text)"\s*:\s*"',
             "",
             content,
         )
-        # Убираем хвостовые meta-поля
         content = re.sub(r'",\s*"meta"\s*:\s*\{[^}]*\}\s*\}', "", content)
         content = re.sub(
             r'",?\s*"[a-z_]+"\s*:\s*(?:true|false|null|\d+)\s*\}?\s*$', "", content
@@ -1042,59 +1158,23 @@ class AgentStateManager:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# EdmsDocumentAgent — главный класс агента
+# EdmsDocumentAgent
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class EdmsDocumentAgent:
-    """
-    Production-ready EDMS AI agent orchestrating LangGraph tool-call workflows.
-
-    Graph topology:
-        START → agent → [tools → validator → agent]* → END
-
-    Key design decisions:
-    - ``interrupt_before=["tools"]`` enables Human-in-the-Loop (disambiguation,
-      summarization type selection).
-    - ``parallel_tool_calls`` is NOT passed to bind_tools — the custom model
-      endpoint does not support this parameter and silently drops all tool_calls
-      if it's present.
-    - Parallel tool_calls are prevented at the Python layer in _orchestrate
-      by keeping only the first call per turn.
-    - Token and document_id are injected in _orchestrate, not in the prompt,
-      to avoid prompt-injection and to keep the prompt model-agnostic.
-
-    Attributes:
-        MAX_ITERATIONS: Guard against infinite orchestration loops.
-        EXECUTION_TIMEOUT: Per-invocation wall-clock timeout in seconds.
-    """
-
     MAX_ITERATIONS: int = 10
     EXECUTION_TIMEOUT: float = 120.0
 
-    def __init__(
-        self,
-        document_repo: IDocumentRepository | None = None,
-        semantic_dispatcher: SemanticDispatcher | None = None,
-    ) -> None:
-        """
-        Initializes the agent and compiles the LangGraph workflow.
-
-        Args:
-            document_repo: Document repository (DI; defaults to DocumentRepository).
-            semantic_dispatcher: NLP dispatcher (DI; defaults to SemanticDispatcher).
-
-        Raises:
-            RuntimeError: If any component fails to initialize.
-        """
+    def __init__(self, document_repo=None, semantic_dispatcher=None):
         try:
             self.model = get_chat_model()
             self.tools = all_tools
-            self.document_repo: IDocumentRepository = (
-                document_repo or DocumentRepository()
-            )
+            self.document_repo = document_repo or DocumentRepository()
             self.dispatcher = semantic_dispatcher or SemanticDispatcher()
             self._checkpointer = MemorySaver()
+            self._tool_bindings: dict[str, Any] = {}
+            self._active_tools: list[Any] = self.tools
             self._model_with_tools = self.model.bind_tools(self.tools)
             self._compiled_graph = self._build_graph()
 
@@ -1105,7 +1185,6 @@ class EdmsDocumentAgent:
                 graph=self._compiled_graph,
                 checkpointer=self._checkpointer,
             )
-
             logger.info(
                 "EdmsDocumentAgent initialized",
                 extra={
@@ -1197,7 +1276,9 @@ class EdmsDocumentAgent:
                     context.user_token, context.document_id
                 )
 
-            semantic_ctx = self.dispatcher.build_context(request.message, document)
+            semantic_ctx = self.dispatcher.build_context(
+                request.message, document, context.file_path
+            )
             logger.info(
                 "Semantic analysis complete",
                 extra={
@@ -1207,10 +1288,13 @@ class EdmsDocumentAgent:
                 },
             )
 
+            context.intent = semantic_ctx.query.intent
+
             full_prompt = PromptBuilder.build(
                 context,
                 semantic_ctx.query.intent,
                 self._build_semantic_xml(semantic_ctx),
+                lean=USE_LEAN_PROMPT,
             )
 
             inputs: dict[str, Any] = {
@@ -1220,18 +1304,18 @@ class EdmsDocumentAgent:
                 ]
             }
 
+            _forced = await self._try_forced_tool_call(context, inputs, request.message)
+
             return await self._orchestrate(
                 context=context,
-                inputs=inputs,
+                inputs=None if _forced else inputs,
                 is_choice_active=bool(human_choice),
                 iteration=0,
             )
 
         except Exception as exc:
             logger.error(
-                "Chat error",
-                exc_info=True,
-                extra={"user_message": message[:200]},
+                "Chat error", exc_info=True, extra={"user_message": message[:200]}
             )
             return AgentResponse(
                 status=AgentStatus.ERROR,
@@ -1384,25 +1468,6 @@ class EdmsDocumentAgent:
     ) -> dict[str, Any]:
         """
         Core recursive orchestration loop.
-
-        На каждой итерации:
-        1. Вызывает граф (resume или fresh start)
-        2. Читает последнее состояние
-        3. Если граф завершён (END) → извлекает и возвращает финальный контент
-        4. Если граф прерван перед tools → патчит tool_calls (инжект token, doc_id,
-           attachment_id, summary_type) → сохраняет обратно → рекурсия
-
-        Параллельные tool_calls блокируются здесь: из списка берётся только первый.
-        Это безопаснее, чем полагаться на параметр модели, который может не поддерживаться.
-
-        Args:
-            context: Immutable execution context.
-            inputs: Graph inputs (None = resume from interrupt).
-            is_choice_active: True when resuming after human choice.
-            iteration: Current recursion depth.
-
-        Returns:
-            Serialized AgentResponse dict.
         """
         if iteration > self.MAX_ITERATIONS:
             logger.error(
@@ -1415,6 +1480,40 @@ class EdmsDocumentAgent:
             ).model_dump()
 
         try:
+            if iteration == 0:
+                from edms_ai_assistant.services.nlp_service import UserIntent
+                from edms_ai_assistant.tools.router import (
+                    estimate_tools_tokens,
+                    get_tools_for_intent,
+                )
+
+                active_intent = context.intent or UserIntent.UNKNOWN
+
+                is_appeal_doc = context.user_context.get("doc_category", "") == "APPEAL"
+
+                selected_tools = get_tools_for_intent(
+                    active_intent,
+                    self.tools,
+                    include_appeal=is_appeal_doc,
+                )
+
+                cache_key = ",".join(
+                    sorted(getattr(t, "name", "") for t in selected_tools)
+                )
+                if cache_key not in self._tool_bindings:
+                    self._tool_bindings[cache_key] = self.model.bind_tools(
+                        selected_tools
+                    )
+                    logger.info(
+                        "Tool binding created: intent=%s tools=%d (~%d tokens)",
+                        active_intent.value,
+                        len(selected_tools),
+                        estimate_tools_tokens(selected_tools),
+                    )
+
+                self._model_with_tools = self._tool_bindings[cache_key]
+                self._active_tools = selected_tools
+
             await self.state_manager.invoke(
                 inputs=inputs,
                 thread_id=context.thread_id,
@@ -1502,6 +1601,36 @@ class EdmsDocumentAgent:
 
                 # ── 1. Инжект токена авторизации ──────────────────────────
                 t_args["token"] = context.user_token
+
+                # ── Инжект параметров для create_document_from_file ───────────
+                if t_name == "create_document_from_file":
+                    if t_args.get("doc_category") is None:
+                        from edms_ai_assistant.tools.create_document_from_file import (
+                            _extract_category_from_message,
+                        )
+
+                        last_human_text = ""
+                        for _m in reversed(messages):
+                            if isinstance(_m, HumanMessage):
+                                last_human_text = str(_m.content)
+                                break
+                        detected = _extract_category_from_message(last_human_text)
+                        if detected:
+                            t_args["doc_category"] = detected
+                            logger.info(
+                                "Injected doc_category=%s for create_document_from_file",
+                                detected,
+                            )
+                    if t_args.get("file_path") is None and context.file_path:
+                        _cp = str(context.file_path).strip()
+                        if not _is_valid_uuid(_cp):
+                            t_args["file_path"] = _cp
+                            logger.info(
+                                "Injected file_path for create_document_from_file: %s...",
+                                _cp[:32],
+                            )
+                    if t_args.get("file_name") is None and context.uploaded_file_name:
+                        t_args["file_name"] = context.uploaded_file_name
 
                 # ── 1а. Инжект document_id ────────────────────────────────
                 if context.document_id and t_name in _TOOLS_REQUIRING_DOCUMENT_ID:
@@ -1616,7 +1745,6 @@ class EdmsDocumentAgent:
 
                 # ── Блокировка doc_compare_documents после disambiguation ─
                 if t_name == "doc_compare_documents":
-                    # Блок 1: после requires_disambiguation от compare_with_local
                     if _after_compare_disambiguation or (
                         is_choice_active and path_is_local
                     ):
@@ -1655,7 +1783,6 @@ class EdmsDocumentAgent:
                         ):
                             t_args["original_filename"] = context.uploaded_file_name
 
-                    # Блок 2: после doc_get_versions с comparison_complete=True
                     else:
                         _versions_result_complete = False
                         for prev_msg in reversed(messages):
@@ -1699,16 +1826,29 @@ class EdmsDocumentAgent:
                             extra={"path_prefix": clean_path[:32]},
                         )
 
-                # ── 3. Инжект текста для суммаризации ─────────────────────
+                # ── Инжект текста для суммаризации ─────────────────────
                 if t_name == "doc_summarize_text":
                     if last_tool_text:
                         t_args["text"] = last_tool_text
-                    if is_choice_active and not t_args.get("summary_type"):
-                        t_args["summary_type"] = "extractive"
-                        logger.warning(
-                            "safety-net: summary_type=extractive "
-                            "(is_choice_active but no type set)",
-                        )
+
+                    if not t_args.get("summary_type"):
+                        if is_choice_active:
+                            t_args["summary_type"] = "extractive"
+                            logger.warning(
+                                "safety-net: summary_type=extractive (is_choice_active but type not set)"
+                            )
+                        elif (
+                            context.user_context.get("preferred_summary_format")
+                            and context.user_context["preferred_summary_format"]
+                            != "ask"
+                        ):
+                            t_args["summary_type"] = context.user_context[
+                                "preferred_summary_format"
+                            ]
+                            logger.info(
+                                "Using preferred_summary_format from user settings: %s",
+                                t_args["summary_type"],
+                            )
 
                 patched_calls.append({"name": t_name, "args": t_args, "id": t_id})
 
@@ -1840,7 +1980,6 @@ class EdmsDocumentAgent:
                         candidate_msgs[i + 1] if i + 1 < len(candidate_msgs) else None
                     )
                     if not isinstance(next_msg, ToolMessage):
-                        # Заменяем на «безопасную» копию без tool_calls
                         safe_msg = AIMessage(
                             content=msg.content or "",
                             id=msg.id,
@@ -1887,6 +2026,7 @@ class EdmsDocumentAgent:
                     if interactive_status in (
                         "requires_choice",
                         "requires_disambiguation",
+                        "requires_action",
                     ):
                         logger.info(
                             "Validator: interactive status '%s' — stopping graph",
@@ -1921,7 +2061,7 @@ class EdmsDocumentAgent:
             return {"messages": []}
 
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", ToolNode(self.tools))
+        workflow.add_node("tools", ToolNode(tools=self.tools))
         workflow.add_node("validator", validator)
         workflow.add_edge(START, "agent")
 
@@ -1986,30 +2126,42 @@ class EdmsDocumentAgent:
             return interactive
 
         final_content = ContentExtractor.extract_final_content(messages)
+        navigate_url = self._extract_navigate_url(messages)
 
         if final_content:
             final_content = ContentExtractor.clean_json_artifacts(final_content)
             final_content = self._sanitize_technical_content(final_content, context)
             reload_needed = _is_mutation_response(final_content)
 
-            logger.info(
-                "Execution completed",
-                extra={
-                    "thread_id": context.thread_id,
-                    "content_length": len(final_content),
-                    "requires_reload": reload_needed,
-                },
-            )
+            if navigate_url:
+                logger.info(
+                    "Execution completed with navigation",
+                    extra={
+                        "thread_id": context.thread_id,
+                        "navigate_url": navigate_url,
+                    },
+                )
+            else:
+                logger.info(
+                    "Execution completed",
+                    extra={
+                        "thread_id": context.thread_id,
+                        "content_length": len(final_content),
+                        "requires_reload": reload_needed,
+                    },
+                )
             return AgentResponse(
                 status=AgentStatus.SUCCESS,
                 content=final_content,
                 requires_reload=reload_needed,
+                navigate_url=navigate_url,
             ).model_dump()
 
         logger.warning("No final content found", extra={"thread_id": context.thread_id})
         return AgentResponse(
             status=AgentStatus.SUCCESS,
             content="Операция завершена.",
+            navigate_url=navigate_url,
         ).model_dump()
 
     @staticmethod
@@ -2049,7 +2201,11 @@ class EdmsDocumentAgent:
             return None
 
         status = data.get("status", "")
-        if status not in ("requires_choice", "requires_disambiguation"):
+        if status not in (
+            "requires_choice",
+            "requires_disambiguation",
+            "requires_action",
+        ):
             return None
 
         logger.info(
@@ -2237,27 +2393,87 @@ class EdmsDocumentAgent:
                 message=full_msg,
             ).model_dump()
 
+        # ─── REQUIRES_ACTION: employee_search множественные совпадения ───────
+        if status == "requires_action":
+            action_type = data.get("action_type", "")
+            choices: list[dict[str, Any]] = data.get("choices", [])
+            base_msg = data.get("message", "Выберите сотрудника:")
+
+            candidates_structured: list[dict[str, str]] = []
+            for item in choices:
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("id", "?"))
+                display_name = (
+                    item.get("full_name")
+                    or item.get("fullName")
+                    or item.get("name")
+                    or "Без имени"
+                ).strip()
+                dept = (item.get("department") or item.get("post") or "").strip()
+                candidates_structured.append(
+                    {
+                        "id": item_id,
+                        "name": display_name,
+                        "dept": dept,
+                    }
+                )
+
+            if candidates_structured:
+                candidates_json = json.dumps(candidates_structured, ensure_ascii=False)
+                full_msg = base_msg + "\n\n<!--CANDIDATES:" + candidates_json + "-->"
+                logger.info(
+                    "Detect interactive: requires_action/select_employee → %d candidates",
+                    len(candidates_structured),
+                )
+                return AgentResponse(
+                    status=AgentStatus.REQUIRES_ACTION,
+                    action_type=ActionType.DISAMBIGUATION,
+                    message=full_msg,
+                ).model_dump()
+
+        return None
+
+    @staticmethod
+    def _extract_navigate_url(messages: list) -> str | None:
+        """Scan the message chain for a navigate_url in the last ToolMessage.
+
+        create_document_from_file returns ``navigate_url`` in its result dict.
+        The LLM agent reformulates this as prose ("Открываю карточку...") but
+        the raw URL must still reach the frontend so it can perform navigation.
+
+        Args:
+            messages: Complete LangGraph message chain.
+
+        Returns:
+            Navigate URL string (e.g. ``"/document-form/uuid"``), or None.
+        """
+        import json
+
+        from langchain_core.messages import ToolMessage
+
+        for m in reversed(messages[-8:]):
+            if not isinstance(m, ToolMessage):
+                continue
+            try:
+                data = json.loads(str(m.content))
+                url = data.get("navigate_url")
+                if url and isinstance(url, str) and url.startswith("/"):
+                    return url
+            except (json.JSONDecodeError, AttributeError):
+                pass
         return None
 
     async def _build_context(self, request: AgentRequest) -> ContextParams:
-        """
-        Builds an immutable ContextParams from a validated AgentRequest.
-
-        Args:
-            request: Validated agent request.
-
-        Returns:
-            Fully populated ContextParams instance.
-        """
+        """Builds an immutable ContextParams from a validated AgentRequest."""
         ctx = request.user_context
-        first_name: str = (ctx.get("firstName") or ctx.get("first_name") or "").strip()
-        last_name: str = (ctx.get("lastName") or ctx.get("last_name") or "").strip()
-        full_name: str = (
+        first_name = (ctx.get("firstName") or ctx.get("first_name") or "").strip()
+        last_name = (ctx.get("lastName") or ctx.get("last_name") or "").strip()
+        full_name = (
             ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
         ).strip()
-        user_id: str | None = ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
-
-        display_name: str = first_name or last_name or full_name or "пользователь"
+        user_id = ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
+        display_name = first_name or last_name or full_name or "пользователь"
 
         return ContextParams(
             user_token=request.user_token,
@@ -2270,6 +2486,7 @@ class EdmsDocumentAgent:
             user_last_name=last_name or None,
             user_full_name=full_name or None,
             user_id=user_id,
+            user_context=ctx,
         )
 
     def _sanitize_technical_content(self, content: str, context: ContextParams) -> str:
@@ -2351,6 +2568,90 @@ class EdmsDocumentAgent:
         content = re.sub(r"«документ»_\s*", "", content)
 
         return content
+
+    async def _try_forced_tool_call(
+        self,
+        context: ContextParams,
+        inputs: dict,
+        original_message: str,
+    ) -> bool:
+        """Bypass LLM for deterministic intents by injecting a pre-built tool_call.
+
+        Small models (llama3.2, Mistral 7B) often fail to generate a tool_call
+        and instead respond with plain text asking for clarification. For intents
+        where the tool and its arguments are fully determined by the context
+        (file present + clear intent), we skip the LLM entirely and inject the
+        AIMessage with tool_calls directly into the graph state.
+
+        Currently handles:
+        - CREATE_DOCUMENT + local file → create_document_from_file
+
+        Args:
+            context: Immutable execution context.
+            inputs: Initial graph inputs (SystemMessage + HumanMessage).
+            original_message: Raw user message for category detection.
+
+        Returns:
+            True if a forced tool_call was injected (caller must use inputs=None).
+            False if normal LLM flow should proceed.
+        """
+        import uuid as _uuid_module
+
+        from edms_ai_assistant.services.nlp_service import UserIntent
+        from edms_ai_assistant.tools.create_document_from_file import (
+            _extract_category_from_message,
+        )
+
+        # Только для CREATE_DOCUMENT с локальным файлом
+        if context.intent != UserIntent.CREATE_DOCUMENT:
+            return False
+
+        clean_path = str(context.file_path or "").strip()
+        if not clean_path or _is_valid_uuid(clean_path):
+            return False  # нет файла или это UUID вложения — пусть LLM решает
+
+        # Определяем категорию из сообщения пользователя
+        doc_category = _extract_category_from_message(original_message) or "APPEAL"
+
+        logger.info(
+            "Forced tool call: create_document_from_file " "file=%s... category=%s",
+            clean_path[:32],
+            doc_category,
+        )
+
+        tool_call_id = f"forced_{_uuid_module.uuid4().hex[:12]}"
+        forced_ai_msg = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "create_document_from_file",
+                    "args": {
+                        "token": context.user_token,
+                        "file_path": clean_path,
+                        "doc_category": doc_category,
+                        "file_name": context.uploaded_file_name or "",
+                        "autofill": True,
+                    },
+                    "id": tool_call_id,
+                }
+            ],
+        )
+
+        sys_msg = inputs["messages"][0]
+        human_msg = inputs["messages"][1]
+
+        await self.state_manager.update_state(
+            context.thread_id,
+            [sys_msg, human_msg, forced_ai_msg],
+            as_node="agent",
+        )
+
+        logger.info(
+            "Forced tool call injected: id=%s thread=%s",
+            tool_call_id,
+            context.thread_id,
+        )
+        return True
 
     @staticmethod
     def _build_semantic_xml(semantic_context: Any) -> str:

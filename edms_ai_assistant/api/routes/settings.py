@@ -2,20 +2,11 @@
 """
 Settings API router.
 
-Слой: Interface (Transport).
-
 Endpoints:
     GET    /api/settings/meta  — feature flags (show_technical из .env)
     GET    /api/settings       — текущие эффективные технические настройки
-    PATCH  /api/settings       — runtime-патч (in-memory, сброс при рестарте)
+    PATCH  /api/settings       — runtime-патч (применяется к глобальному settings)
     DELETE /api/settings       — сброс к .env-дефолтам
-
-Примечание по архитектуре:
-    PATCH защищён флагом SETTINGS_PANEL_SHOW_TECHNICAL: бэкенд возвращает 403,
-    если флаг выключен — клиент не может обойти UI-ограничение через прямой API.
-
-    Пользовательские настройки (appearance/voice/documents) хранятся в
-    chrome.storage.local на стороне клиента и через этот роутер НЕ проходят.
 """
 
 from __future__ import annotations
@@ -39,17 +30,10 @@ router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
 
 class SettingsMetaResponse(BaseModel):
-    """Feature flags controlling settings panel visibility in the Chrome plugin.
-
-    Читается плагином при инициализации сайдбара.
-    Позволяет администратору скрыть технический раздел без пересборки плагина.
-    """
+    """Feature flags controlling settings panel visibility in the Chrome plugin."""
 
     show_technical: bool = Field(
-        description=(
-            "Показывать технический раздел настроек (LLM/Agent/RAG/EDMS). "
-            "Управляется SETTINGS_PANEL_SHOW_TECHNICAL в .env."
-        )
+        description="Показывать технический раздел настроек (LLM/Agent/RAG/EDMS)."
     )
 
 
@@ -57,14 +41,9 @@ class SettingsMetaResponse(BaseModel):
     "/meta",
     response_model=SettingsMetaResponse,
     summary="Get settings panel feature flags",
-    description=(
-        "Returns feature flags read from server config. "
-        "Plugin calls this on sidebar init to show/hide the technical section. "
-        "Controlled by SETTINGS_PANEL_SHOW_TECHNICAL in .env."
-    ),
 )
 async def get_settings_meta() -> SettingsMetaResponse:
-    """Return settings panel feature flags.
+    """Return settings panel feature flags from server config.
 
     Returns:
         SettingsMetaResponse: Flags from .env via Pydantic Settings.
@@ -114,18 +93,7 @@ class RAGSettingsSchema(BaseModel):
     @field_validator("chunk_overlap", mode="after")
     @classmethod
     def overlap_less_than_chunk(cls, v: int | None, info: Any) -> int | None:
-        """Validates chunk_overlap < chunk_size when both provided.
-
-        Args:
-            v: chunk_overlap value.
-            info: Pydantic ValidationInfo.
-
-        Returns:
-            Validated value.
-
-        Raises:
-            ValueError: If chunk_overlap >= chunk_size.
-        """
+        """Validate chunk_overlap < chunk_size when both provided."""
         if v is not None:
             chunk_size = info.data.get("chunk_size")
             if chunk_size is not None and v >= chunk_size:
@@ -140,7 +108,6 @@ class EDMSSettingsSchema(BaseModel):
 
     base_url: str | None = None
     timeout: int | None = Field(None, ge=10, le=600)
-    # api_version: str | None = Field(None, max_length=10)
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -162,24 +129,54 @@ class SettingsResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Runtime settings store (singleton, in-memory)
+# Runtime settings store — мутирует реальный settings объект
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class _RuntimeSettingsStore:
-    """In-memory store for technical settings runtime overrides.
+    """In-memory store that mirrors patches to the global ``settings`` object."""
 
-    Singleton. Base values: config.py/.env.
-    Overrides: applied via PATCH, lost on service restart.
-
-    Для персистентности между рестартами — добавить Redis/PostgreSQL слой.
-    """
+    _SETTINGS_MAP: dict[str, dict[str, str]] = {
+        "llm": {
+            "generative_url": "LLM_GENERATIVE_URL",
+            "generative_model": "LLM_GENERATIVE_MODEL",
+            "embedding_url": "LLM_EMBEDDING_URL",
+            "embedding_model": "LLM_EMBEDDING_MODEL",
+            "temperature": "LLM_TEMPERATURE",
+            "max_tokens": "LLM_MAX_TOKENS",
+            "timeout": "LLM_TIMEOUT",
+            "max_retries": "LLM_MAX_RETRIES",
+        },
+        "agent": {
+            "max_iterations": "AGENT_MAX_ITERATIONS",
+            "max_context_messages": "AGENT_MAX_CONTEXT_MESSAGES",
+            "timeout": "AGENT_TIMEOUT",
+            "max_retries": "AGENT_MAX_RETRIES",
+            "enable_tracing": "AGENT_ENABLE_TRACING",
+            "log_level": "AGENT_LOG_LEVEL",
+        },
+        "rag": {
+            "chunk_size": "RAG_CHUNK_SIZE",
+            "chunk_overlap": "RAG_CHUNK_OVERLAP",
+            "batch_size": "RAG_BATCH_SIZE",
+            "embedding_batch_size": "RAG_EMBEDDING_BATCH_SIZE",
+        },
+        "edms": {
+            "base_url": "EDMS_BASE_URL",
+            "timeout": "EDMS_TIMEOUT",
+        },
+    }
 
     def __init__(self) -> None:
+        self._defaults: dict[str, Any] = {}
         self._overrides: dict[str, dict[str, Any]] = {}
 
+        for group, field_map in self._SETTINGS_MAP.items():
+            for _field, attr in field_map.items():
+                self._defaults[attr] = getattr(settings, attr, None)
+
     def apply_patch(self, patch: UpdateSettingsRequest) -> None:
-        """Apply non-None fields from PATCH request body.
+        """Apply non-None fields to both _overrides dict and global settings object.
 
         Args:
             patch: Validated PATCH request body.
@@ -189,22 +186,39 @@ class _RuntimeSettingsStore:
             if schema is None:
                 continue
             data = schema.model_dump(exclude_none=True)
-            if data:
-                self._overrides.setdefault(group, {}).update(data)
-                logger.info(
-                    "Settings patched: group=%s fields=%s",
-                    group,
-                    list(data.keys()),
-                )
+            if not data:
+                continue
+
+            self._overrides.setdefault(group, {}).update(data)
+
+            field_map = self._SETTINGS_MAP.get(group, {})
+            for field_name, value in data.items():
+                settings_attr = field_map.get(field_name)
+                if not settings_attr:
+                    continue
+                try:
+                    object.__setattr__(settings, settings_attr, value)
+                    logger.info(
+                        "Settings patched: %s.%s = %r",
+                        group,
+                        field_name,
+                        value,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not patch settings attr %s: %s",
+                        settings_attr,
+                        exc,
+                    )
 
     def get_current(self) -> SettingsResponse:
-        """Merge .env base config + runtime overrides.
+        """Return current effective settings by reading from global settings object.
 
         Returns:
-            SettingsResponse: Effective settings.
+            SettingsResponse with all current runtime values.
         """
-        base: dict[str, dict[str, Any]] = {
-            "llm": {
+        return SettingsResponse(
+            llm={
                 "generative_url": str(settings.LLM_GENERATIVE_URL),
                 "generative_model": settings.LLM_GENERATIVE_MODEL,
                 "embedding_url": str(settings.LLM_EMBEDDING_URL),
@@ -214,7 +228,7 @@ class _RuntimeSettingsStore:
                 "timeout": settings.LLM_TIMEOUT,
                 "max_retries": settings.LLM_MAX_RETRIES,
             },
-            "agent": {
+            agent={
                 "max_iterations": settings.AGENT_MAX_ITERATIONS,
                 "max_context_messages": settings.AGENT_MAX_CONTEXT_MESSAGES,
                 "timeout": settings.AGENT_TIMEOUT,
@@ -222,27 +236,30 @@ class _RuntimeSettingsStore:
                 "enable_tracing": settings.AGENT_ENABLE_TRACING,
                 "log_level": settings.AGENT_LOG_LEVEL,
             },
-            "rag": {
+            rag={
                 "chunk_size": settings.RAG_CHUNK_SIZE,
                 "chunk_overlap": settings.RAG_CHUNK_OVERLAP,
                 "batch_size": settings.RAG_BATCH_SIZE,
                 "embedding_batch_size": settings.RAG_EMBEDDING_BATCH_SIZE,
             },
-            "edms": {
+            edms={
                 "base_url": str(settings.EDMS_BASE_URL),
                 "timeout": settings.EDMS_TIMEOUT,
-                # "api_version": settings.EDMS_API_VERSION,
             },
-        }
-        return SettingsResponse(
-            llm={**base["llm"], **self._overrides.get("llm", {})},
-            agent={**base["agent"], **self._overrides.get("agent", {})},
-            rag={**base["rag"], **self._overrides.get("rag", {})},
-            edms={**base["edms"], **self._overrides.get("edms", {})},
         )
 
     def reset(self) -> None:
-        """Clear all overrides, restore .env defaults."""
+        """Restore all settings to original .env values captured at startup.
+
+        Iterates over the defaults snapshot taken in __init__ and restores
+        each attribute on the global settings object.
+        """
+        for attr, original_value in self._defaults.items():
+            if original_value is not None:
+                try:
+                    object.__setattr__(settings, attr, original_value)
+                except Exception as exc:
+                    logger.warning("Could not reset attr %s: %s", attr, exc)
         self._overrides.clear()
         logger.info("Runtime settings reset to .env defaults")
 
@@ -260,7 +277,7 @@ def get_settings_store() -> _RuntimeSettingsStore:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Technical settings routes
+# Routes
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -275,7 +292,7 @@ async def get_settings(
     """Return current effective technical settings.
 
     Returns:
-        SettingsResponse: Merged .env defaults + runtime overrides.
+        SettingsResponse: Current values from global settings object.
     """
     return store.get_current()
 
@@ -285,20 +302,16 @@ async def get_settings(
     response_model=SettingsResponse,
     summary="Patch runtime technical settings",
     description=(
-        "Applies partial update. In-memory only, resets on service restart. "
-        "Returns resulting effective settings. "
-        "Returns 403 if SETTINGS_PANEL_SHOW_TECHNICAL=false — "
-        "client cannot bypass the UI flag via direct API call."
+        "Applies partial update directly to the runtime settings object. "
+        "Changes take effect immediately on the next request. "
+        "Returns 403 if SETTINGS_PANEL_SHOW_TECHNICAL=false."
     ),
 )
 async def patch_settings(
     body: UpdateSettingsRequest,
     store: _RuntimeSettingsStore = Depends(get_settings_store),
 ) -> SettingsResponse:
-    """Apply partial technical settings patch.
-
-    Guards with SETTINGS_PANEL_SHOW_TECHNICAL flag — even if UI hides
-    the technical section, a direct API call is also rejected when flag is false.
+    """Apply partial technical settings patch immediately to runtime.
 
     Args:
         body: Partial settings update (all groups optional).
@@ -309,7 +322,6 @@ async def patch_settings(
 
     Raises:
         HTTPException 403: SETTINGS_PANEL_SHOW_TECHNICAL=false.
-        HTTPException 422: Pydantic validation error (e.g. chunk_overlap >= chunk_size).
         HTTPException 500: Unexpected store error.
     """
     if not settings.SETTINGS_PANEL_SHOW_TECHNICAL:
@@ -330,7 +342,7 @@ async def patch_settings(
         ) from exc
 
     logger.info(
-        "Settings PATCH done, groups=%s",
+        "Settings PATCH applied, groups=%s",
         [g for g in ("llm", "agent", "rag", "edms") if getattr(body, g) is not None],
     )
     return store.get_current()

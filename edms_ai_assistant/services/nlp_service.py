@@ -68,6 +68,7 @@ class UserIntent(Enum):
     COMPOSITE = "composite"
     UNKNOWN = "unknown"
     FILE_ANALYSIS = "file_analysis"
+    CREATE_DOCUMENT = "create_document"
     NOTIFICATION = "notification"
 
 
@@ -499,6 +500,14 @@ class QueryRefiner:
         "реквизиты": "информация о документе",
         "статус документа": "информация о документе",
         "кто автор": "информация об авторе документа",
+        "создай документ": "создай документ из файла",
+        "создай обращение": "создай документ из файла",
+        "создай входящий": "создай документ из файла",
+        "создай исходящий": "создай документ из файла",
+        "оформи": "создай документ из файла",
+        "зарегистрируй": "создай документ из файла",
+        "на основе файла": "создай документ из файла",
+        "на основе этого": "создай документ из файла",
     }
 
     def normalize_domain_synonyms(self, text: str) -> str:
@@ -777,6 +786,28 @@ class SemanticDispatcher:
             ],
             "negative": [],
         },
+        UserIntent.CREATE_DOCUMENT: {
+            "primary": [
+                "создай документ из файла",
+                "создай обращение",
+                "создай входящий",
+                "создай исходящий",
+                "создай договор",
+                "оформи обращение",
+                "зарегистрируй обращение",
+                "на основе файла",
+                "на основе этого файла",
+                "создать новый документ",
+            ],
+            "secondary": [
+                "создай",
+                "оформи",
+                "зарегистрируй",
+                "сделай входящий",
+                "новый документ",
+            ],
+            "negative": [],
+        },
         UserIntent.NOTIFICATION: {
             "primary": [
                 "уведоми",
@@ -855,10 +886,10 @@ class SemanticDispatcher:
 
         scores: Counter[UserIntent] = Counter()
 
-        # Буст за наличие локального файла (не UUID)
         if file_path and not UUID_RE.match(file_path):
             scores[UserIntent.FILE_ANALYSIS] += 3
             scores[UserIntent.SUMMARIZE] += 2
+            scores[UserIntent.CREATE_DOCUMENT] += 2
 
         for intent, keywords in self.INTENT_KEYWORDS.items():
             primary_hits = sum(

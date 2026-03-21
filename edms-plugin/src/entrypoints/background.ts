@@ -8,39 +8,32 @@ export default defineBackground({
             const reqId: string = msg.payload?.requestId ?? 'default'
 
             switch (msg.type) {
-                // ── Abort ──────────────────────────────────────────────────────────
                 case 'abortRequest': {
                     controllers.get(reqId)?.abort()
                     controllers.delete(reqId)
                     return false
                 }
 
-                // ── Chat ───────────────────────────────────────────────────────────
                 case 'sendChatMessage':
                     doFetch(`${API}/chat`, msg.payload, reqId, sendResponse)
                     return true
 
-                // ── Summarize attachment ───────────────────────────────────────────
                 case 'summarizeDocument':
                     doFetch(`${API}/actions/summarize`, msg.payload, reqId, sendResponse)
                     return true
 
-                // ── Upload file ────────────────────────────────────────────────────
                 case 'uploadFile':
                     doUpload(msg.payload, sendResponse)
                     return true
 
-                // ── History ────────────────────────────────────────────────────────
                 case 'getChatHistory':
                     doGetHistory(msg.payload.thread_id, sendResponse)
                     return true
 
-                // ── New chat ───────────────────────────────────────────────────────
                 case 'createNewChat':
                     doFetch(`${API}/chat/new`, {user_token: msg.payload.user_token}, reqId, sendResponse)
                     return true
 
-                // ── Autofill appeal ────────────────────────────────────────────────
                 case 'autofillAppeal':
                     doFetch(`${API}/appeal/autofill`, {
                         message: msg.payload.message ?? 'Заполни обращение',
@@ -50,32 +43,34 @@ export default defineBackground({
                     }, reqId, sendResponse)
                     return true
 
-                // ── Refresh document data ──────────────────────────────────────────
                 case 'refreshDocumentData':
                     doRefreshDocument(msg.payload, sendResponse)
                     return true
 
-                // ── Settings: feature flags ────────────────────────────────────────
                 case 'fetchSettingsMeta':
                     doFetchSettingsMeta(sendResponse)
                     return true
 
-                // ── Settings: GET current technical settings ───────────────────────
                 case 'fetchSettings':
                     doFetchSettings(msg.payload?.user_token, sendResponse)
                     return true
 
-                // ── Settings: PATCH technical settings ────────────────────────────
                 case 'updateSettings':
                     doPatchSettings(msg.payload?.user_token, msg.payload?.settings, sendResponse)
+                    return true
+
+                case 'navigateTo':
+                    doNavigateTo(msg.payload, sendResponse)
+                    return true
+
+                case 'deleteCache':
+                    doDeleteCache(msg.payload, sendResponse)
                     return true
 
                 default:
                     return false
             }
         })
-
-        // ── Helpers ─────────────────────────────────────────────────────────────
 
         async function doFetch(
             url: string,
@@ -170,16 +165,59 @@ export default defineBackground({
             }
         }
 
-        // ── Settings helpers (новые) ─────────────────────────────────────────────
+        async function doNavigateTo(
+            payload: { url: string },
+            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
+        ): Promise<void> {
+            try {
+                const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
+                if (!tab?.id) {
+                    respond({success: false, error: 'No active tab found'})
+                    return
+                }
 
-        /**
-         * Fetches settings panel feature flags from backend.
-         *
-         * Reads SETTINGS_PANEL_SHOW_TECHNICAL from server config.
-         * On network error falls back to safe default: show_technical = false.
-         *
-         * @param respond - Chrome message response callback.
-         */
+                const tabUrl = tab.url ?? ''
+                const origin = tabUrl ? new URL(tabUrl).origin : ''
+                const targetUrl = payload.url.startsWith('http')
+                    ? payload.url
+                    : `${origin}${payload.url}`
+
+                try {
+                    await chrome.scripting.executeScript({
+                        target: {tabId: tab.id},
+                        func: (url: string) => {
+                            window.location.href = url
+                        },
+                        args: [targetUrl],
+                    })
+                    respond({success: true, data: {url: targetUrl}})
+                } catch {
+                    await chrome.tabs.update(tab.id, {url: targetUrl})
+                    respond({success: true, data: {url: targetUrl}})
+                }
+            } catch (e: any) {
+                respond({success: false, error: e.message ?? 'Navigation failed'})
+            }
+        }
+
+        async function doDeleteCache(
+            payload: { file_identifier: string; summary_type?: string },
+            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
+        ): Promise<void> {
+            try {
+                const url = payload.summary_type
+                    ? `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}/${encodeURIComponent(payload.summary_type)}`
+                    : `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}`
+
+                const res = await fetch(url, {method: 'DELETE'})
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.detail ?? `Cache delete error: ${res.status}`)
+                respond({success: true, data})
+            } catch (e: any) {
+                respond({success: false, error: e.message})
+            }
+        }
+
         async function doFetchSettingsMeta(
             respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
         ): Promise<void> {
@@ -192,21 +230,10 @@ export default defineBackground({
                 if (!res.ok) throw new Error(data.detail ?? `Settings meta error: ${res.status}`)
                 respond({success: true, data})
             } catch {
-                respond({
-                    success: true,
-                    data: {show_technical: false},
-                })
+                respond({success: true, data: {show_technical: false}})
             }
         }
 
-        /**
-         * Fetches current effective technical settings from backend.
-         *
-         * Returns merged .env defaults + any in-memory runtime overrides.
-         *
-         * @param userToken - Optional JWT bearer token.
-         * @param respond   - Chrome message response callback.
-         */
         async function doFetchSettings(
             userToken: string | undefined,
             respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
@@ -224,16 +251,6 @@ export default defineBackground({
             }
         }
 
-        /**
-         * Sends a PATCH request to update runtime technical settings.
-         *
-         * Backend applies patch in-memory and returns resulting effective settings.
-         * Returns 403 if SETTINGS_PANEL_SHOW_TECHNICAL=false on the server.
-         *
-         * @param userToken - Optional JWT bearer token.
-         * @param settings  - UpdateSettingsRequest body (snake_case groups).
-         * @param respond   - Chrome message response callback.
-         */
         async function doPatchSettings(
             userToken: string | undefined,
             settings: unknown,

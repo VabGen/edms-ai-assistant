@@ -1,3 +1,5 @@
+# edms_ai_assistant/utils/retry_utils.py
+
 from __future__ import annotations
 
 import asyncio
@@ -47,6 +49,9 @@ def _should_retry(exc: Exception) -> bool:
     return False
 
 
+_EXPECTED_BUSINESS_STATUS_CODES: frozenset[int] = frozenset({400, 404, 422})
+
+
 def async_retry(
     max_attempts: int = 3,
     delay: float = 1.0,
@@ -57,6 +62,9 @@ def async_retry(
 
     Skips retry for non-retriable HTTP errors (401, 403, 404, 422, etc.)
     to avoid wasting time and producing misleading log noise.
+
+    For "business" 4xx responses (404 not found, 400 bad request, 422 validation)
+    uses DEBUG level instead of ERROR — these are expected API outcomes, not faults.
 
     Args:
         max_attempts: Total attempts including the first call.
@@ -81,14 +89,27 @@ def async_retry(
                     is_last = attempt == max_attempts - 1
 
                     if not _should_retry(exc):
-                        logger.error(
-                            "Non-retriable error in %s (attempt %d/%d): %s: %s",
-                            func.__name__,
-                            attempt + 1,
-                            max_attempts,
-                            type(exc).__name__,
-                            exc,
+                        status_code = (
+                            exc.response.status_code
+                            if isinstance(exc, httpx.HTTPStatusError)
+                            else None
                         )
+                        if status_code in _EXPECTED_BUSINESS_STATUS_CODES:
+                            logger.debug(
+                                "HTTP %s in %s: %s",
+                                status_code,
+                                func.__name__,
+                                exc,
+                            )
+                        else:
+                            logger.error(
+                                "Non-retriable error in %s (attempt %d/%d): %s: %s",
+                                func.__name__,
+                                attempt + 1,
+                                max_attempts,
+                                type(exc).__name__,
+                                exc,
+                            )
                         raise
 
                     if is_last:

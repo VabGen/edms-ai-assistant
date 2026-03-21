@@ -1,7 +1,6 @@
 # edms_ai_assistant\clients\base_client.py
 import json
 import logging
-from abc import ABC
 from typing import Any
 
 import httpx
@@ -13,10 +12,8 @@ from edms_ai_assistant.utils.retry_utils import async_retry
 logger = logging.getLogger(__name__)
 
 
-class EdmsBaseClient(ABC):
+class EdmsBaseClient:
     """Абстрактный базовый класс для всех клиентов EDMS API."""
-
-    pass
 
 
 class EdmsHttpClient(EdmsBaseClient):
