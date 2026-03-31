@@ -473,28 +473,38 @@ async def doc_search_tool(
 # ── Вспомогательные функции ───────────────────────────────────────────────────
 
 
+from datetime import datetime, time, timezone
+
 def _to_iso_start(date_str: str) -> str:
-    """Converts a YYYY-MM-DD string to start-of-day ISO 8601 datetime string.
-
-    Args:
-        date_str: Date string in YYYY-MM-DD format.
-
-    Returns:
-        ISO 8601 datetime string, e.g. '2026-03-01T00:00:00'.
-    """
-    return f"{date_str}T00:00:00"
-
+    dt = datetime.fromisoformat(date_str)
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 def _to_iso_end(date_str: str) -> str:
-    """Converts a YYYY-MM-DD string to end-of-day ISO 8601 datetime string.
+    dt = datetime.fromisoformat(date_str)
+    return dt.replace(hour=23, minute=59, second=59, microsecond=999).strftime("%Y-%m-%dT%H:%M:%S.999Z")
 
-    Args:
-        date_str: Date string in YYYY-MM-DD format.
-
-    Returns:
-        ISO 8601 datetime string, e.g. '2026-03-31T23:59:59'.
-    """
-    return f"{date_str}T23:59:59"
+# def _to_iso_start(date_str: str) -> str:
+#     """Converts a YYYY-MM-DD string to start-of-day ISO 8601 datetime string.
+#
+#     Args:
+#         date_str: Date string in YYYY-MM-DD format.
+#
+#     Returns:
+#         ISO 8601 datetime string, e.g. '2026-03-01T00:00:00'.
+#     """
+#     return f"{date_str}T00:00:00"
+#
+#
+# def _to_iso_end(date_str: str) -> str:
+#     """Converts a YYYY-MM-DD string to end-of-day ISO 8601 datetime string.
+#
+#     Args:
+#         date_str: Date string in YYYY-MM-DD format.
+#
+#     Returns:
+#         ISO 8601 datetime string, e.g. '2026-03-31T23:59:59'.
+#     """
+#     return f"{date_str}T23:59:59"
 
 
 def _serialize_document(d: dict[str, Any]) -> dict[str, Any]:
