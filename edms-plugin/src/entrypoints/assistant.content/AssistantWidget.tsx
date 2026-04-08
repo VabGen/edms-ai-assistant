@@ -111,10 +111,11 @@ function SoundWave() {
 function TypingDots() {
     return (
         <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
+            display: 'flex', alignItems: 'center', gap: 4,
             padding: '10px 14px', background: '#ffffff', borderRadius: 18,
-            border: '1px solid rgba(226,232,240,0.80)', width: 'fit-content',
-            boxShadow: '0 1px 6px rgba(0,0,0,0.06)',
+            // border: '1px solid rgba(226,232,240,0.80)',
+            width: 'fit-content',
+            // boxShadow: '0 1px 6px rgba(0,0,0,0.06)',
         }}>
             {[0, 160, 320].map(d => (
                 <div key={d} style={{
@@ -852,6 +853,28 @@ export function AssistantWidget() {
         }
     }
 
+    const handleDocumentClick = useCallback((documentId: string) => {
+        const normalizedId = documentId.replace(
+            /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
+            '-'
+        ).trim()
+
+        const url = `/document-form/${normalizedId}`
+
+        chrome.runtime.sendMessage(
+            {type: 'navigateTo', payload: {url, newTab: true}},
+            (r) => {
+                if (!r?.success) {
+                    try {
+                        window.open(url, '_blank', 'noopener,noreferrer')
+                    } catch {
+                        toast.info(`Откройте документ: ${url}`)
+                    }
+                }
+            }
+        )
+    }, [])
+
     const abort = () => {
         if (!requestIdRef.current) return
         chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
@@ -1064,7 +1087,7 @@ export function AssistantWidget() {
                               style={{background: 'rgba(255,255,255,0.60)'}}>
                             <div className="flex-1 p-4 overflow-y-auto scrollbar-thin flex flex-col gap-3">
                                 {messages.length === 0 && !loading && (
-                                    <div className="flex-1 flex flex-col items-center justify-center gap-3 select-none"
+                                    <div className="flex-1 flex flex-col items-center justify-center gap-3"
                                          style={{opacity: 0.30}}>
                                         <MessageSquare size={44} strokeWidth={1} style={{color: '#475569'}}/>
                                         <p className="font-medium" style={{color: '#475569', fontSize: 14}}>Чем я могу
@@ -1086,6 +1109,7 @@ export function AssistantWidget() {
                                                     setInput(prev => prev ? prev : `Проанализируй файл «${fileName}»`)
                                                     textareaRef.current?.focus()
                                                 }}
+                                                onDocumentClick={handleDocumentClick}
                                             />
                                             <ActionButtons
                                                 msg={msg}
@@ -1247,7 +1271,7 @@ export function AssistantWidget() {
                                         {interimTranscript && (
                                             <span
                                                 aria-hidden="true"
-                                                className="absolute left-1 pointer-events-none select-none"
+                                                className="absolute left-1 pointer-events-none"
                                                 style={{
                                                     top: '10px',
                                                     paddingLeft: input ? '0.5ch' : 0,

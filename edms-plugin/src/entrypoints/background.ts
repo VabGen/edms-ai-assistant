@@ -4,6 +4,10 @@ export default defineBackground({
         const API = 'http://localhost:8000'
         const controllers = new Map<string, AbortController>()
 
+        function normalizeUuid(raw: string): string {
+            return raw.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g, '-').trim()
+        }
+
         chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             const reqId: string = msg.payload?.requestId ?? 'default'
 
@@ -140,7 +144,6 @@ export default defineBackground({
                     `${payload.edmsApiUrl}/api/documents/${payload.documentId}`,
                     `${payload.edmsApiUrl}/api/document/${payload.documentId}`,
                 ]
-
                 for (const url of urls) {
                     try {
                         const res = await fetch(url, {
@@ -158,18 +161,30 @@ export default defineBackground({
                         continue
                     }
                 }
-
                 respond({success: false, error: 'Document API endpoint not found'})
             } catch (e: any) {
                 respond({success: false, error: e.message})
             }
         }
 
+        /**
+         * doNavigateTo — умная навигация.
+         *
+         * payload.newTab = true (по умолчанию) → открыть в НОВОЙ вкладке
+         *   Используется для DocCard клика (документы из поиска)
+         *
+         * payload.newTab = false → навигация в ТЕКУЩЕЙ вкладке
+         *   Используется только для create_document_from_file (после создания документа)
+         *
+         * Нормализует URL: заменяет типографские тире в UUID на ASCII дефис.
+         */
         async function doNavigateTo(
-            payload: { url: string },
+            payload: { url: string; newTab?: boolean },
             respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
         ): Promise<void> {
             try {
+                const normalizedUrl = normalizeUuid(payload.url)
+
                 const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
                 if (!tab?.id) {
                     respond({success: false, error: 'No active tab found'})
@@ -177,23 +192,35 @@ export default defineBackground({
                 }
 
                 const tabUrl = tab.url ?? ''
-                const origin = tabUrl ? new URL(tabUrl).origin : ''
-                const targetUrl = payload.url.startsWith('http')
-                    ? payload.url
-                    : `${origin}${payload.url}`
-
+                let origin = ''
                 try {
-                    await chrome.scripting.executeScript({
-                        target: {tabId: tab.id},
-                        func: (url: string) => {
-                            window.location.href = url
-                        },
-                        args: [targetUrl],
-                    })
-                    respond({success: true, data: {url: targetUrl}})
-                } catch {
-                    await chrome.tabs.update(tab.id, {url: targetUrl})
-                    respond({success: true, data: {url: targetUrl}})
+                    origin = tabUrl ? new URL(tabUrl).origin : ''
+                } catch { /* ignore */
+                }
+
+                const targetUrl = normalizedUrl.startsWith('http')
+                    ? normalizedUrl
+                    : `${origin}${normalizedUrl}`
+
+                const openInNew = payload.newTab !== false
+
+                if (openInNew) {
+                    await chrome.tabs.create({url: targetUrl, active: true})
+                    respond({success: true, data: {url: targetUrl, newTab: true}})
+                } else {
+                    try {
+                        await chrome.scripting.executeScript({
+                            target: {tabId: tab.id},
+                            func: (url: string) => {
+                                window.location.href = url
+                            },
+                            args: [targetUrl],
+                        })
+                        respond({success: true, data: {url: targetUrl, newTab: false}})
+                    } catch {
+                        await chrome.tabs.update(tab.id, {url: targetUrl})
+                        respond({success: true, data: {url: targetUrl, newTab: false}})
+                    }
                 }
             } catch (e: any) {
                 respond({success: false, error: e.message ?? 'Navigation failed'})
@@ -208,7 +235,6 @@ export default defineBackground({
                 const url = payload.summary_type
                     ? `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}/${encodeURIComponent(payload.summary_type)}`
                     : `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}`
-
                 const res = await fetch(url, {method: 'DELETE'})
                 const data = await res.json()
                 if (!res.ok) throw new Error(data.detail ?? `Cache delete error: ${res.status}`)
@@ -241,7 +267,6 @@ export default defineBackground({
             try {
                 const headers: Record<string, string> = {'Content-Type': 'application/json'}
                 if (userToken) headers['Authorization'] = `Bearer ${userToken}`
-
                 const res = await fetch(`${API}/api/settings`, {method: 'GET', headers})
                 const data = await res.json()
                 if (!res.ok) throw new Error(data.detail ?? `Settings fetch error: ${res.status}`)
@@ -259,7 +284,6 @@ export default defineBackground({
             try {
                 const headers: Record<string, string> = {'Content-Type': 'application/json'}
                 if (userToken) headers['Authorization'] = `Bearer ${userToken}`
-
                 const res = await fetch(`${API}/api/settings`, {
                     method: 'PATCH',
                     headers,

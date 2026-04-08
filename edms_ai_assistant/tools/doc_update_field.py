@@ -13,11 +13,11 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.clients.document_client import DocumentClient
+from edms_ai_assistant.generated.resources_openapi import DocumentDto
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
 
 logger = logging.getLogger(__name__)
 
-# Поля которые можно обновлять через DOCUMENT_MAIN_FIELDS_UPDATE
 _ALLOWED_FIELDS: dict[str, str] = {
     "shortSummary": "Заголовок/краткое содержание (≤80 символов)",
     "note": "Примечание",
@@ -26,7 +26,6 @@ _ALLOWED_FIELDS: dict[str, str] = {
     "exemplarCount": "Количество экземпляров",
 }
 
-# Поля appeal-карточки (DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE)
 _ALLOWED_APPEAL_FIELDS: dict[str, str] = {
     "fullAddress": "Адрес заявителя",
     "phone": "Телефон",
@@ -81,12 +80,129 @@ class UpdateDocumentFieldInput(BaseModel):
         return v.strip()
 
 
+def _enum_value(val: Any) -> Any:
+    """Safely extract .value from enum-like objects."""
+    return val.value if hasattr(val, "value") else val
+
+
+async def _fetch_main_required_fields(
+        client: DocumentClient, token: str, document_id: str
+) -> dict[str, Any]:
+    """
+    Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_UPDATE.
+    """
+    raw = await client.get_document_metadata(token, document_id)
+    if not raw:
+        return {}
+
+    doc = DocumentDto.model_validate(raw)
+    result: dict[str, Any] = {}
+
+    if doc.documentTypeId:
+        result["documentTypeId"] = str(doc.documentTypeId)
+    if doc.deliveryMethodId:
+        result["deliveryMethodId"] = str(doc.deliveryMethodId)
+    for attr in ("pages", "additionalPages", "exemplarCount"):
+        val = getattr(doc, attr, None)
+        if val is not None:
+            result[attr] = val
+    if doc.investProgramId:
+        result["investProgramId"] = str(doc.investProgramId)
+    if doc.note:
+        result["note"] = doc.note
+    if doc.shortSummary:
+        result["shortSummary"] = doc.shortSummary
+
+    return result
+
+
+async def _fetch_appeal_required_fields(
+        client: DocumentClient, token: str, document_id: str
+) -> dict[str, Any]:
+    """
+    Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE.
+    """
+    raw = await client.get_document_metadata(token, document_id)
+    if not raw:
+        return {"declarantType": "INDIVIDUAL", "submissionForm": "WRITTEN"}
+
+    doc = DocumentDto.model_validate(raw)
+    appeal = getattr(doc, "documentAppeal", None)
+    result: dict[str, Any] = {}
+
+    if not appeal:
+        logger.warning(
+            "documentAppeal is None for %s — using fallback INDIVIDUAL/WRITTEN",
+            document_id[:8],
+        )
+        return {"declarantType": "INDIVIDUAL", "submissionForm": "WRITTEN"}
+
+    # === Обязательные поля ===
+
+    declarant = getattr(appeal, "declarantType", None)
+    result["declarantType"] = _enum_value(declarant) if declarant is not None else "INDIVIDUAL"
+
+    sub_form = getattr(appeal, "submissionForm", None)
+    result["submissionForm"] = _enum_value(sub_form) if sub_form is not None else "WRITTEN"
+
+    # === Сохраняем текущие значения ===
+
+    _preserve_str = (
+        "fioApplicant",
+        "organizationName",
+        "fullAddress",
+        "phone",
+        "email",
+        "signed",
+        "correspondentOrgNumber",
+        "reviewProgress",
+        "countryAppealName",
+        "regionName",
+        "districtName",
+        "cityName",
+        "index",
+        "indexDateCoverLetter",
+    )
+    for attr in _preserve_str:
+        val = getattr(appeal, attr, None)
+        if val is not None and str(val).strip():
+            result[attr] = val
+
+    for attr in ("collective", "anonymous", "reasonably"):
+        val = getattr(appeal, attr, None)
+        if val is not None:
+            result[attr] = val
+
+    _id_fields = (
+        "citizenTypeId",
+        "subjectId",
+        "countryAppealId",
+        "cityId",
+        "districtId",
+        "regionId",
+        "correspondentAppealId",
+        "solutionResultId",
+    )
+    for attr in _id_fields:
+        val = getattr(appeal, attr, None)
+        if val is not None:
+            result[attr] = str(val)
+
+    # Даты
+    for attr in ("receiptDate", "dateDocCorrespondentOrg"):
+        val = getattr(appeal, attr, None)
+        if val is not None:
+            result[attr] = str(val) if not hasattr(val, "isoformat") else val.isoformat()
+
+    return result
+
+
 @tool("doc_update_field", args_schema=UpdateDocumentFieldInput)
 async def doc_update_field(
-    document_id: str,
-    token: str,
-    field_name: str,
-    field_value: str,
+        document_id: str,
+        token: str,
+        field_name: str,
+        field_value: str,
 ) -> dict[str, Any]:
     """Обновляет одно поле документа через API EDMS.
 
@@ -106,7 +222,6 @@ async def doc_update_field(
     Returns:
         Dict со статусом операции.
     """
-    # Проверяем shortSummary лимит
     if field_name == "shortSummary" and len(field_value) > 80:
         field_value = field_value[:80]
         logger.warning("shortSummary обрезан до 80 символов: '%s'", field_value)
@@ -118,7 +233,6 @@ async def doc_update_field(
         else "DOCUMENT_MAIN_FIELDS_UPDATE"
     )
 
-    # Для числовых полей конвертируем
     value: Any = field_value
     if field_name in ("pages", "additionalPages", "exemplarCount"):
         try:
@@ -128,9 +242,6 @@ async def doc_update_field(
                 "status": "error",
                 "message": f"Поле '{field_name}' должно быть числом, получено: '{field_value}'",
             }
-
-    body: dict[str, Any] = {field_name: value}
-    payload = [{"operationType": operation_type, "body": body}]
 
     logger.info(
         "doc_update_field: %s.%s = %r (operation=%s)",
@@ -142,7 +253,20 @@ async def doc_update_field(
 
     try:
         async with DocumentClient() as client:
+            if is_appeal_field:
+                existing = await _fetch_appeal_required_fields(client, token, document_id)
+            else:
+                existing = await _fetch_main_required_fields(client, token, document_id)
+
+            body: dict[str, Any] = {**existing, field_name: value}
+
+            payload = [{"operationType": operation_type, "body": body}]
             json_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
+
+            logger.debug(
+                "doc_update_field payload keys: %s", list(body.keys())
+            )
+
             await client._make_request(
                 "POST",
                 f"api/document/{document_id}/execute",
@@ -152,9 +276,9 @@ async def doc_update_field(
             )
 
         field_label = (
-            _ALLOWED_FIELDS.get(field_name)
-            or _ALLOWED_APPEAL_FIELDS.get(field_name)
-            or field_name
+                _ALLOWED_FIELDS.get(field_name)
+                or _ALLOWED_APPEAL_FIELDS.get(field_name)
+                or field_name
         )
 
         logger.info("doc_update_field success: %s = %r", field_name, value)

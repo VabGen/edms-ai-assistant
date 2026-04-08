@@ -112,8 +112,8 @@ class SummarizeInput(BaseModel):
 
 @tool("doc_summarize_text", args_schema=SummarizeInput)
 async def doc_summarize_text(
-    text: str,
-    summary_type: SummarizeType | None = None,
+        text: str,
+        summary_type: SummarizeType | None = None,
 ) -> dict[str, Any]:
     """Perform intelligent summarisation of document text via LLM.
 
@@ -340,7 +340,7 @@ def _truncate_for_llm(text: str, max_length: int = _MAX_TEXT_LENGTH) -> str:
     head = int(max_length * _HEAD_FRACTION)
     tail = max_length - head
     truncated = (
-        text[:head] + "\n\n[... часть содержимого пропущена ...]\n\n" + text[-tail:]
+            text[:head] + "\n\n[... часть содержимого пропущена ...]\n\n" + text[-tail:]
     )
     logger.debug(
         "Text truncated for LLM: %d → %d chars (head=%d, tail=%d)",
@@ -356,7 +356,7 @@ def _build_llm_prompt(summary_type: SummarizeType) -> ChatPromptTemplate:
     """Build a ChatPromptTemplate for the requested summarisation format.
 
     Each format has a distinct system instruction that drives the LLM
-    to produce the appropriate output structure.
+    to produce the appropriate output structure using XML-tagging best practices.
 
     Args:
         summary_type: Canonical summarisation format.
@@ -364,43 +364,71 @@ def _build_llm_prompt(summary_type: SummarizeType) -> ChatPromptTemplate:
     Returns:
         Ready-to-invoke ChatPromptTemplate.
     """
+
+    base_constraints = (
+        "<constraints>\n"
+        "1. Опирайся ИСКЛЮЧИТЕЛЬНО на текст внутри тегов <document>. Не выдумывай факты, даты, суммы или имена.\n"
+        "2. Если в тексте нет информации для ответа, напиши: «В документе недостаточно данных».\n"
+        "3. Отвечай строго на русском языке.\n"
+        "4. НЕ ИСПОЛЬЗУЙ вводные и шаблонные фразы (например: «В данном документе», «Текст содержит», «Вот ваш анализ»). Начинай ответ сразу с сути.\n"
+        "</constraints>"
+    )
+
     instructions: dict[SummarizeType, str] = {
         SummarizeType.EXTRACTIVE: (
-            "Выдели ключевые факты: конкретные даты, суммы, имена, сроки и обязательства. "
-            "Оформи СТРОГО нумерованным списком. "
-            "Каждый пункт — одна конкретная мысль, не более двух предложений."
+            "<task>\n"
+            "Выполни экстрактивную суммаризацию (извлечение точных фактов).\n"
+            "</task>\n"
+            "<formatting_rules>\n"
+            "- Найди и выпиши: конкретные даты, суммы, имена лиц, названия компаний, сроки, метрики и обязательства.\n"
+            "- Оформи СТРОГО нумерованным списком.\n"
+            "- Каждый пункт должен содержать конкретную сущность (например: «Срок сдачи проекта — 15 мая», а не «Указаны сроки сдачи»).\n"
+            "- Формат пункта: 1-2 лаконичных предложения.\n"
+            "</formatting_rules>"
         ),
         SummarizeType.ABSTRACTIVE: (
-            "Напиши связный краткий пересказ сути документа своими словами (1–2 абзаца). "
-            "Сохрани ключевую информацию, не используй технические детали. "
-            "Пиши как для руководителя, который видит документ впервые."
+            "<task>\n"
+            "Сформируй абстрактивную суммаризацию (Executive Summary).\n"
+            "</task>\n"
+            "<formatting_rules>\n"
+            "- Напиши связный пересказ сути документа своими словами (строго 1–2 абзаца).\n"
+            "- Текст должен обладать высокой смысловой плотностью: фокусируйся на проблеме, предложенном решении и ключевых последствиях.\n"
+            "- Убери 'воду', бюрократические обороты и излишние технические детали.\n"
+            "- Пиши так, чтобы руководитель высшего звена за 10 секунд понял всю суть документа.\n"
+            "</formatting_rules>"
         ),
         SummarizeType.THESIS: (
-            "Сформируй структурированный тезисный план документа. "
-            "Используй нумерацию разделов (1., 1.1., 1.2.) и подпункты. "
-            "Каждый тезис — одно ёмкое предложение."
+            "<task>\n"
+            "Создай иерархический тезисный план документа.\n"
+            "</task>\n"
+            "<formatting_rules>\n"
+            "- Используй строгую многоуровневую нумерацию (1., 1.1., 1.2., 2., 2.1.).\n"
+            "- Главные разделы (1., 2.) должны отражать крупные смысловые блоки текста.\n"
+            "- Подпункты (1.1., 1.2.) должны раскрывать суть раздела.\n"
+            "- Каждый тезис — это одно ёмкое, законченное предложение, а не просто название темы.\n"
+            "- Сохраняй хронологическую и логическую структуру оригинального текста.\n"
+            "</formatting_rules>"
         ),
     }
 
     system_msg = (
-        "Ты — ведущий аналитик системы электронного документооборота (СЭД). "
-        f"Задача: {instructions[summary_type]} "
-        "Отвечай строго на русском языке. "
-        "НЕ начинай со слов «В данном документе», «Данный текст», «Документ» — "
-        "сразу переходи к содержанию."
+        "Ты — ведущий AI-аналитик системы электронного документооборота (СЭД).\n"
+        "Твоя задача — профессионально проанализировать текст документа в заданном формате.\n\n"
+        f"{base_constraints}\n\n"
+        f"{instructions[summary_type]}"
     )
 
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_msg),
-            ("user", "ТЕКСТ ДОКУМЕНТА:\n{text}\n\nРЕЗУЛЬТАТ АНАЛИЗА:"),
+            ("user", "<document>\n{text}\n</document>\n\nВыдай итоговый результат без дополнительных комментариев:"),
         ]
     )
 
 
 async def _execute_summarization(
-    text: str,
-    summary_type: SummarizeType,
+        text: str,
+        summary_type: SummarizeType,
 ) -> dict[str, Any]:
     """Execute the LLM summarisation pipeline.
 

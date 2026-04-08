@@ -48,12 +48,12 @@ creates tasks and familiarity lists, and fills appeal cards — all through a ch
 
 ## Requirements
 
-| Tool      | Version   | Install                                                                       |
-|-----------|-----------|-------------------------------------------------------------------------------|
-| Python    | 3.13+     | [python.org](https://www.python.org/downloads/)                               |
-| uv        | 0.5.0+    | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
-| Redis     | 7.0+      | [redis.io](https://redis.io/docs/install/)                                    |
-| PostgreSQL| 15+       | [postgresql.org](https://www.postgresql.org/download/)                        |
+| Tool      | Version | Install                                                                       |
+|-----------|---------|-------------------------------------------------------------------------------|
+| Python    | 3.13+   | [python.org](https://www.python.org/downloads/)                               |
+| uv        | 0.5.0+  | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/)  |
+| Redis     | 7.0+    | [redis.io](https://redis.io/docs/install/)                                    |
+| PostgreSQL| 18+     | [postgresql.org](https://www.postgresql.org/download/)                        |
 
 ---
 
@@ -80,6 +80,10 @@ uv sync --all-groups
 
 # Production — runtime only
 uv sync --no-dev
+
+ollama serve
+
+https://www.libreoffice.org/download/download/
 ```
 
 ### Dependency groups
@@ -110,34 +114,6 @@ source .venv/bin/activate
 ```bash
 cp .env.example .env
 ```
-
-### 2. Key variables
-
-```dotenv
-# LLM
-OPENAI_API_KEY=sk-...
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL_NAME=gpt-4o
-
-# EDMS backend
-EDMS_BASE_URL=http://127.0.0.1:8098
-
-# PostgreSQL
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=postgres
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=change-me
-
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# Upload
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE_MB=50
-```
-
 ---
 
 ## Running
@@ -182,10 +158,10 @@ docker compose down           # остановить
 
 После запуска документация доступна по адресам:
 
-| UI        | URL                              |
-|-----------|----------------------------------|
-| Swagger   | http://localhost:8000/docs       |
-| ReDoc     | http://localhost:8000/redoc      |
+| UI        | URL                                |
+|-----------|------------------------------------|
+| Swagger   | http://localhost:8000/docs         |
+| ReDoc     | http://localhost:8000/redoc        |
 | OpenAPI   | http://localhost:8000/openapi.json |
 
 ### Основные эндпоинты

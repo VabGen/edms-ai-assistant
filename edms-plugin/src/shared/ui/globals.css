@@ -12,7 +12,14 @@
 
     * {
         box-sizing: border-box;
+        user-select: text !important;
+        -webkit-user-select: text !important;
     }
+}
+
+.hover\:bg-indigo-600:hover,
+.hover\:border-indigo-600:hover{
+    background-color: rgba(79, 70, 229, 0.7) !important;
 }
 
 @layer components {

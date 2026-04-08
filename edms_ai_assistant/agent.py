@@ -60,6 +60,13 @@ _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "обращение автоматически заполнен",
     "карточка обращения заполнен",
     "автозаполнен",
+    "заголовок обновлен",
+    "заголовок изменен",
+    "адрес заявителя обновлен",
+    "адрес заявителя изменен",
+    "телефон в карточке обновлен",
+    "изменение выполнино успешно",
+    "операция выполнина успешно",
     # Уведомления
     # "уведомление отправлено",
     # "напоминание отправлено",
@@ -435,6 +442,12 @@ class PromptBuilder:
    - Параметр doc_category берётся из запроса пользователя:
      "обращение" → APPEAL, "входящий" → INCOMING, "исходящий" → OUTGOING,
      "внутренний" → INTERN, "договор" → CONTRACT.
+     
+ 9. **Формат результатов поиска**:
+    - Результаты doc_search_tool выводи ТОЛЬКО в виде markdown-таблицы
+    - Колонки ОБЯЗАТЕЛЬНО: | № | id | Рег. номер | Дата | Краткое содержание | Автор | Статус |
+    - Колонка `id` — UUID документа из ответа инструмента — ОБЯЗАТЕЛЬНА для навигации.
+    - Никогда не убирай колонку id из таблицы поиска.
 </critical_rules>
 
 <available_tools_guide>
@@ -492,12 +505,12 @@ class PromptBuilder:
 
     @classmethod
     def build(
-        cls,
-        context: ContextParams,
-        intent: UserIntent,
-        semantic_xml: str,
-        *,
-        lean: bool = False,
+            cls,
+            context: ContextParams,
+            intent: UserIntent,
+            semantic_xml: str,
+            *,
+            lean: bool = False,
     ) -> str:
         """Assembles the full system prompt from context, intent snippet, and semantic XML.
 
@@ -903,9 +916,9 @@ class ContentExtractor:
                 for key in cls._JSON_PRIORITY_FIELDS:
                     val = data.get(key)
                     if (
-                        val
-                        and isinstance(val, str)
-                        and len(val) >= cls.MIN_CONTENT_LENGTH
+                            val
+                            and isinstance(val, str)
+                            and len(val) >= cls.MIN_CONTENT_LENGTH
                     ):
                         return val.replace("\\n", "\n").replace('\\"', '"').strip()
             except (json.JSONDecodeError, ValueError):
@@ -950,9 +963,9 @@ class ContentExtractor:
                 for key in cls._JSON_PRIORITY_FIELDS:
                     val = data.get(key)
                     if (
-                        val
-                        and isinstance(val, str)
-                        and len(val) >= cls.MIN_CONTENT_LENGTH
+                            val
+                            and isinstance(val, str)
+                            and len(val) >= cls.MIN_CONTENT_LENGTH
                     ):
                         return val
         except json.JSONDecodeError:
@@ -1015,10 +1028,10 @@ class AgentStateManager:
         return await self.graph.aget_state(self._config(thread_id))
 
     async def update_state(
-        self,
-        thread_id: str,
-        messages: list[BaseMessage],
-        as_node: str = "agent",
+            self,
+            thread_id: str,
+            messages: list[BaseMessage],
+            as_node: str = "agent",
     ) -> None:
         """
         Patches graph state for *thread_id* with new messages.
@@ -1035,10 +1048,10 @@ class AgentStateManager:
         )
 
     async def invoke(
-        self,
-        inputs: dict[str, Any],
-        thread_id: str,
-        timeout: float = 120.0,
+            self,
+            inputs: dict[str, Any],
+            thread_id: str,
+            timeout: float = 120.0,
     ) -> None:
         """
         Invokes the graph for *thread_id* with optional inputs.
@@ -1216,15 +1229,15 @@ class EdmsDocumentAgent:
         }
 
     async def chat(
-        self,
-        message: str,
-        user_token: str,
-        context_ui_id: str | None = None,
-        thread_id: str | None = None,
-        user_context: dict[str, Any] | None = None,
-        file_path: str | None = None,
-        file_name: str | None = None,
-        human_choice: str | None = None,
+            self,
+            message: str,
+            user_token: str,
+            context_ui_id: str | None = None,
+            thread_id: str | None = None,
+            user_context: dict[str, Any] | None = None,
+            file_path: str | None = None,
+            file_name: str | None = None,
+            human_choice: str | None = None,
     ) -> dict[str, Any]:
         """
         Main entry point for agent interaction.
@@ -1325,7 +1338,7 @@ class EdmsDocumentAgent:
     # ── Human-in-the-Loop ─────────────────────────────────────────────────────
 
     async def _handle_human_choice(
-        self, context: ContextParams, human_choice: str
+            self, context: ContextParams, human_choice: str
     ) -> dict[str, Any]:
         """
         Resumes a paused graph after the user resolves a disambiguation or
@@ -1460,11 +1473,11 @@ class EdmsDocumentAgent:
     # ── Core orchestration loop ───────────────────────────────────────────────
 
     async def _orchestrate(
-        self,
-        context: ContextParams,
-        inputs: dict[str, Any] | None,
-        is_choice_active: bool,
-        iteration: int,
+            self,
+            context: ContextParams,
+            inputs: dict[str, Any] | None,
+            is_choice_active: bool,
+            iteration: int,
     ) -> dict[str, Any]:
         """
         Core recursive orchestration loop.
@@ -1552,7 +1565,7 @@ class EdmsDocumentAgent:
                 getattr(last_msg, "tool_calls", None)
             )
             is_finished = (
-                not state.next and not last_is_tool_msg and not last_has_tool_calls
+                    not state.next and not last_is_tool_msg and not last_has_tool_calls
             )
             if is_finished:
                 return self._build_final_response(messages, context)
@@ -1580,8 +1593,8 @@ class EdmsDocumentAgent:
                     try:
                         prev_data = json.loads(str(prev_msg.content))
                         if (
-                            prev_data.get("status") == "requires_disambiguation"
-                            and prev_msg.name == "doc_compare_attachment_with_local"
+                                prev_data.get("status") == "requires_disambiguation"
+                                and prev_msg.name == "doc_compare_attachment_with_local"
                         ):
                             _after_compare_disambiguation = True
                             logger.debug(
@@ -1675,7 +1688,7 @@ class EdmsDocumentAgent:
                         )
 
                     elif t_name == "doc_get_file_content" and not t_args.get(
-                        "attachment_id"
+                            "attachment_id"
                     ):
                         t_name = "read_local_file_content"
                         t_args["file_path"] = clean_path
@@ -1707,10 +1720,10 @@ class EdmsDocumentAgent:
 
                 # ── Фолбэк: если нет файла, но вызван compare_with_local ───
                 if (
-                    t_name == "doc_compare_attachment_with_local"
-                    and not clean_path
-                    and not _after_compare_disambiguation
-                    and not (is_choice_active and t_args.get("attachment_id"))
+                        t_name == "doc_compare_attachment_with_local"
+                        and not clean_path
+                        and not _after_compare_disambiguation
+                        and not (is_choice_active and t_args.get("attachment_id"))
                 ):
                     t_name = "doc_compare_documents"
                     t_args.pop("local_file_path", None)
@@ -1724,9 +1737,9 @@ class EdmsDocumentAgent:
                 if t_name == "doc_compare_attachment_with_local" and path_is_local:
                     cur_local = str(t_args.get("local_file_path", "")).strip()
                     if (
-                        not cur_local
-                        or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
-                        or not Path(cur_local).exists()
+                            not cur_local
+                            or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
+                            or not Path(cur_local).exists()
                     ):
                         t_args["local_file_path"] = clean_path
                         logger.info(
@@ -1735,7 +1748,7 @@ class EdmsDocumentAgent:
                         )
 
                     if context.uploaded_file_name and not t_args.get(
-                        "original_filename"
+                            "original_filename"
                     ):
                         t_args["original_filename"] = context.uploaded_file_name
                         logger.debug(
@@ -1746,7 +1759,7 @@ class EdmsDocumentAgent:
                 # ── Блокировка doc_compare_documents после disambiguation ─
                 if t_name == "doc_compare_documents":
                     if _after_compare_disambiguation or (
-                        is_choice_active and path_is_local
+                            is_choice_active and path_is_local
                     ):
                         logger.warning(
                             "GUARD: doc_compare_documents blocked — redirecting to doc_compare_attachment_with_local",
@@ -1769,7 +1782,7 @@ class EdmsDocumentAgent:
                                 else t_args.get("local_file_path")
                             ),
                             "attachment_id": t_args.get("document_id_2")
-                            or t_args.get("attachment_id"),
+                                             or t_args.get("attachment_id"),
                             "original_filename": context.uploaded_file_name,
                         }
                         for key in [
@@ -1779,7 +1792,7 @@ class EdmsDocumentAgent:
                         ]:
                             t_args.pop(key, None)
                         if context.uploaded_file_name and not t_args.get(
-                            "original_filename"
+                                "original_filename"
                         ):
                             t_args["original_filename"] = context.uploaded_file_name
 
@@ -1790,7 +1803,7 @@ class EdmsDocumentAgent:
                                 try:
                                     prev_data = json.loads(str(prev_msg.content))
                                     if prev_data.get(
-                                        "comparison_complete"
+                                            "comparison_complete"
                                     ) and prev_data.get("comparisons"):
                                         _versions_result_complete = True
                                         break
@@ -1814,11 +1827,11 @@ class EdmsDocumentAgent:
                 if path_is_local and t_name == "read_local_file_content":
                     cur_fp = str(t_args.get("file_path", "")).strip()
                     if not cur_fp or cur_fp.lower() in (
-                        "local_file",
-                        "file_path",
-                        "none",
-                        "null",
-                        "",
+                            "local_file",
+                            "file_path",
+                            "none",
+                            "null",
+                            "",
                     ):
                         t_args["file_path"] = clean_path
                         logger.info(
@@ -1838,9 +1851,9 @@ class EdmsDocumentAgent:
                                 "safety-net: summary_type=extractive (is_choice_active but type not set)"
                             )
                         elif (
-                            context.user_context.get("preferred_summary_format")
-                            and context.user_context["preferred_summary_format"]
-                            != "ask"
+                                context.user_context.get("preferred_summary_format")
+                                and context.user_context["preferred_summary_format"]
+                                != "ask"
                         ):
                             t_args["summary_type"] = context.user_context[
                                 "preferred_summary_format"
@@ -1868,8 +1881,8 @@ class EdmsDocumentAgent:
             if is_choice_active and patched_calls:
                 last_tool_name = patched_calls[-1]["name"]
                 if last_tool_name in (
-                    "doc_compare_attachment_with_local",
-                    "doc_summarize_text",
+                        "doc_compare_attachment_with_local",
+                        "doc_summarize_text",
                 ):
                     next_is_choice_active = True
                 else:
@@ -2024,9 +2037,9 @@ class EdmsDocumentAgent:
                     tool_data = json.loads(raw)
                     interactive_status = tool_data.get("status", "")
                     if interactive_status in (
-                        "requires_choice",
-                        "requires_disambiguation",
-                        "requires_action",
+                            "requires_choice",
+                            "requires_disambiguation",
+                            "requires_action",
                     ):
                         logger.info(
                             "Validator: interactive status '%s' — stopping graph",
@@ -2038,7 +2051,7 @@ class EdmsDocumentAgent:
 
             raw_lower = raw.lower()
             if '"status": "error"' in raw_lower or (
-                raw_lower.startswith("{") and '"error"' in raw_lower
+                    raw_lower.startswith("{") and '"error"' in raw_lower
             ):
                 try:
                     err_data = json.loads(raw)
@@ -2094,7 +2107,7 @@ class EdmsDocumentAgent:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _build_final_response(
-        self, messages: list[BaseMessage], context: ContextParams
+            self, messages: list[BaseMessage], context: ContextParams
     ) -> dict[str, Any]:
         """
         Extracts final content and wraps it into an AgentResponse.
@@ -2166,7 +2179,7 @@ class EdmsDocumentAgent:
 
     @staticmethod
     def _detect_interactive_status(
-        messages: list[BaseMessage],
+            messages: list[BaseMessage],
     ) -> dict[str, Any] | None:
         """
         Сканирует ПОСЛЕДНИЙ ToolMessage на наличие статусов интерактива.
@@ -2202,9 +2215,9 @@ class EdmsDocumentAgent:
 
         status = data.get("status", "")
         if status not in (
-            "requires_choice",
-            "requires_disambiguation",
-            "requires_action",
+                "requires_choice",
+                "requires_disambiguation",
+                "requires_action",
         ):
             return None
 
@@ -2269,9 +2282,9 @@ class EdmsDocumentAgent:
                     if _k != "options" and isinstance(_v, list) and _v:
                         first_item = _v[0] if _v else {}
                         if (
-                            isinstance(first_item, dict)
-                            and "matches" in first_item
-                            and not first_item.get("id")
+                                isinstance(first_item, dict)
+                                and "matches" in first_item
+                                and not first_item.get("id")
                         ):
                             flat: list[dict[str, Any]] = []
                             for group in _v:
@@ -2316,51 +2329,51 @@ class EdmsDocumentAgent:
 
                 # Извлечение ФИО
                 first = (
-                    item.get("firstName")
-                    or item.get("first_name")
-                    or item.get("firstname")
-                    or item.get("givenName")
-                    or ""
+                        item.get("firstName")
+                        or item.get("first_name")
+                        or item.get("firstname")
+                        or item.get("givenName")
+                        or ""
                 ).strip()
                 last = (
-                    item.get("lastName")
-                    or item.get("last_name")
-                    or item.get("lastname")
-                    or item.get("surname")
-                    or item.get("familyName")
-                    or ""
+                        item.get("lastName")
+                        or item.get("last_name")
+                        or item.get("lastname")
+                        or item.get("surname")
+                        or item.get("familyName")
+                        or ""
                 ).strip()
                 middle = (
-                    item.get("middleName")
-                    or item.get("middle_name")
-                    or item.get("patronymic")
-                    or ""
+                        item.get("middleName")
+                        or item.get("middle_name")
+                        or item.get("patronymic")
+                        or ""
                 ).strip()
 
                 display_name = (
-                    item.get("fullName")
-                    or item.get("full_name")
-                    or item.get("fio")
-                    or item.get("FIO")
-                    or " ".join(filter(None, [last, first, middle]))
-                    or item.get("name")
-                    or item.get("username")
-                    or item.get("login")
-                    or item.get("email", "").split("@")[0]
-                    or "Без имени"
+                        item.get("fullName")
+                        or item.get("full_name")
+                        or item.get("fio")
+                        or item.get("FIO")
+                        or " ".join(filter(None, [last, first, middle]))
+                        or item.get("name")
+                        or item.get("username")
+                        or item.get("login")
+                        or item.get("email", "").split("@")[0]
+                        or "Без имени"
                 ).strip()
 
                 dept = (
-                    item.get("department")
-                    or item.get("departmentName")
-                    or item.get("department_name")
-                    or item.get("division")
-                    or item.get("post")
-                    or item.get("position")
-                    or item.get("jobTitle")
-                    or item.get("job_title")
-                    or item.get("role")
-                    or ""
+                        item.get("department")
+                        or item.get("departmentName")
+                        or item.get("department_name")
+                        or item.get("division")
+                        or item.get("post")
+                        or item.get("position")
+                        or item.get("jobTitle")
+                        or item.get("job_title")
+                        or item.get("role")
+                        or ""
                 ).strip()
 
                 item_id = str(
@@ -2405,10 +2418,10 @@ class EdmsDocumentAgent:
                     continue
                 item_id = str(item.get("id", "?"))
                 display_name = (
-                    item.get("full_name")
-                    or item.get("fullName")
-                    or item.get("name")
-                    or "Без имени"
+                        item.get("full_name")
+                        or item.get("fullName")
+                        or item.get("name")
+                        or "Без имени"
                 ).strip()
                 dept = (item.get("department") or item.get("post") or "").strip()
                 candidates_structured.append(
@@ -2470,7 +2483,7 @@ class EdmsDocumentAgent:
         first_name = (ctx.get("firstName") or ctx.get("first_name") or "").strip()
         last_name = (ctx.get("lastName") or ctx.get("last_name") or "").strip()
         full_name = (
-            ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
+                ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
         ).strip()
         user_id = ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
         display_name = first_name or last_name or full_name or "пользователь"
@@ -2570,10 +2583,10 @@ class EdmsDocumentAgent:
         return content
 
     async def _try_forced_tool_call(
-        self,
-        context: ContextParams,
-        inputs: dict,
-        original_message: str,
+            self,
+            context: ContextParams,
+            inputs: dict,
+            original_message: str,
     ) -> bool:
         """Bypass LLM for deterministic intents by injecting a pre-built tool_call.
 
