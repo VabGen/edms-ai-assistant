@@ -563,7 +563,7 @@ PromptBuilder._LEAN_SNIPPETS = {
     UserIntent.NOTIFICATION: """
     <workflow>Уведомление: employee_search_tool(last_name=...) → doc_send_notification(recipient_ids=[uuid], message=...).</workflow>""",
     UserIntent.SEARCH: """
-    <workflow>Поиск: doc_search_tool(short_summary=...) или employee_search_tool(last_name=...). После поиска можно передать id в doc_get_details.</workflow>""",
+    <workflow>Поиск: doc_search_tool(short_summary=...) или employee_search_tool(last_name=...). После поиска передавай id в doc_get_details.</workflow>""",
     UserIntent.ANALYZE: """
     <workflow>Анализ: doc_get_details → doc_get_file_content → doc_summarize_text(summary_type='thesis').</workflow>""",
     UserIntent.QUESTION: """
@@ -695,7 +695,7 @@ Workflow суммаризации документа:
 - Поиск сотрудника по фамилии: employee_search_tool
 - Информация о текущем документе из контекста: doc_get_details
 - Если нужна информация из текста документа: doc_get_file_content → ответь на основе текста
-После doc_search_tool можно передать id найденного документа в doc_get_details или doc_get_file_content.
+После doc_search_tool передавай id найденного документа в doc_get_details или doc_get_file_content.
 </search_guide>""",
     UserIntent.ANALYZE: """
 <analyze_guide>

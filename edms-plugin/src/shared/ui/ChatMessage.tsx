@@ -1,4 +1,5 @@
 import {createContext, useContext} from 'react'
+import { remarkLazyList } from '../plugins/remarkLazyList'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import dayjs from 'dayjs'
@@ -499,7 +500,7 @@ export function ChatMessage({content, role, timestamp, isError, onAttachmentClic
                 <AttachmentClickContext.Provider value={onAttachmentClick ?? null}>
                     <DocumentClickContext.Provider value={onDocumentClick ?? null}>
                         <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
+                            remarkPlugins={[remarkGfm, remarkLazyList]}
                             components={{
                                 table: ({children}) => <SmartTable>{children}</SmartTable>,
                                 thead: ({children}) => <thead>{children}</thead>,

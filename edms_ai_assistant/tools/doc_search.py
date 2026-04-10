@@ -360,6 +360,7 @@ async def doc_search_tool(
     «в работе» → IN_PROGRESS, «на согласовании» → ON_AGREEMENT,
     «завершённые» → COMPLETED, «аннулированные» → CANCELLED.
     Если не уверен в точном статусе — НЕ передавай поле status.
+    НЕ убирай и не меняй колонку id
 
     Use when the user asks:
     - «Найди договоры с ООО Альфа»                → correspondent_name + doc_category=CONTRACT
