@@ -2506,17 +2506,6 @@ class EdmsDocumentAgent:
         """
         Removes technical artifacts from user-visible response content.
 
-        Применяет замены в строго определённом порядке, чтобы избежать
-        артефактов от частичной замены составных имён temp-файлов.
-
-        Порядок замен:
-        1. Абсолютные пути (/tmp/..., C:\\...) → original filename label
-        2. Составное имя UUID_hex32.ext (полный паттерн temp-файла) → filename label
-        3. hex32.ext без UUID-prefix → filename label
-        4. UUID с дефисами (оставшиеся) → «документ»
-        5. UUID без дефисов — 32 hex chars → «документ»
-        6. Финальная очистка артефактов «документ»«...» → «...»
-
         Args:
             content: Raw extracted response content.
             context: Execution context with file_path and uploaded_file_name.
@@ -2530,57 +2519,55 @@ class EdmsDocumentAgent:
             else "«загруженный файл»"
         )
 
+        lines = content.split("\n")
+        sanitized_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("|"):
+                sanitized_lines.append(line)
+                continue
+
+            sanitized_lines.append(self._sanitize_line(line, context, file_label))
+
+        return "\n".join(sanitized_lines)
+
+    def _sanitize_line(self, line: str, context: ContextParams, file_label: str) -> str:
+        """Sanitize a single non-table line."""
+        import re
+
         # 1. Абсолютные пути файловой системы
-        content = re.sub(
+        line = re.sub(
             r"[A-Za-z]:\\[^\s,;)'\"]{3,}|/(?:tmp|var|home|uploads)/[^\s,;)'\"]{3,}",
             file_label,
-            content,
+            line,
         )
 
-        # 2. Составное имя: UUID-с-дефисами_hex32.ext (полный temp-файл паттерн)
-        content = re.sub(
+        line = re.sub(
             r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
             r"_[0-9a-f]{32}\.[a-zA-Z]{2,5}",
             file_label,
-            content,
+            line,
             flags=re.I,
         )
 
-        # 3. hex32.ext (с опциональным ведущим _) — частичный temp-файл паттерн
-        content = re.sub(
+        line = re.sub(
             r"_?[0-9a-f]{32}\.[a-zA-Z]{2,5}\b",
             file_label,
-            content,
+            line,
             flags=re.I,
         )
 
-        # 4. Конкретный UUID загруженного файла или документа (с дефисами)
         if context.file_path and _is_valid_uuid(str(context.file_path).strip()):
-            content = content.replace(str(context.file_path).strip(), file_label)
+            line = line.replace(str(context.file_path).strip(), file_label)
+
         if context.document_id and _is_valid_uuid(context.document_id):
-            content = content.replace(context.document_id, "«текущего документа»")
+            line = line.replace(context.document_id, "«текущего документа»")
 
-        # 5. Оставшиеся UUID с дефисами
-        content = re.sub(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-            "«документ»",
-            content,
-            flags=re.I,
-        )
+        line = re.sub(r"«документ»\s*(?=«)", "", line)
+        line = re.sub(r"«документ»_\s*", "", line)
 
-        # 6. UUID без дефисов — 32 hex chars (uuid4().hex)
-        content = re.sub(
-            r"(?<![a-zA-Z0-9])[0-9a-f]{32}(?![a-zA-Z0-9])",
-            "«документ»",
-            content,
-            flags=re.I,
-        )
-
-        # 7. Артефакты вида "«документ»«имя файла»" → "«имя файла»"
-        content = re.sub(r"«документ»\s*(?=«)", "", content)
-        content = re.sub(r"«документ»_\s*", "", content)
-
-        return content
+        return line
 
     async def _try_forced_tool_call(
             self,
