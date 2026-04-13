@@ -331,8 +331,8 @@ const DisambiguationButtons = memo(({msg, loading, onSend}: DisambButtonsProps) 
                             }}
                         >
                             <span
-                                className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200"
-                                style={{background: 'rgba(241,245,249,0.80)', color: '#64748b'}}>
+                                className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200 bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white"
+                            >
                                 {idx + 1}
                             </span>
                             <CandidateIcon type={ctype} className={accent}/>

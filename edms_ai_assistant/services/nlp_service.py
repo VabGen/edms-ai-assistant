@@ -1845,6 +1845,7 @@ class EDMSNaturalLanguageService:
                 "контакты": {
                     "email": getattr(emp, "email", None),
                     "телефон": getattr(emp, "phone", None),
+                    "адрес": getattr(emp, "address", None),
                 },
                 "структура": {
                     "код_департамента": self.get_safe(emp, "department.departmentCode"),

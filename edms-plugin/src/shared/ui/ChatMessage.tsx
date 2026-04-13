@@ -262,11 +262,13 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
     const summary = pairs.find(p => /содержан|summary|краткое|описан/i.test(p.key))?.value
     const author = pairs.find(p => /автор|author/i.test(p.key))?.value
     const status = pairs.find(p => /статус|status/i.test(p.key))?.value
+    const address = pairs.find(p => /адрес|address/i.test(p.key))?.value
+
     const rawId = pairs.find(p => /^id$/i.test(p.key))?.value ?? ''
     const docId = rawId ? normalizeUuid(rawId) : ''
     const isClickable = Boolean(onDocumentClick && docId && isValidUuid(docId))
 
-    const _skipKeys = /^[№#]$|^id$|рег.*номер|reg.*num|^номер$|^дата$|^date$|рег.*дата|reg.*date|категор|category|тип|type|содержан|summary|краткое|описан|автор|author|статус|status/i
+    const _skipKeys = /^[№#]$|^id$|рег.*номер|reg.*num|^номер$|^дата$|^date$|рег.*дата|reg.*date|категор|category|тип|type|содержан|summary|краткое|описан|автор|author|статус|status|адрес|address/i
     const extraPairs = pairs.filter(p => !_skipKeys.test(p.key) && p.value && p.value !== '—')
 
     const catStyle = category ? getCategoryStyle(category) : null
@@ -339,7 +341,7 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
                 }}>{summary}</p>
             )}
 
-            <div style={{display: 'flex', flexWrap: 'wrap', gap: 4}}>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'flex-start'}}>
                 {catStyle && (
                     <span style={{
                         fontSize: 10, fontWeight: 600,
@@ -363,13 +365,57 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
                         background: 'rgba(100,116,139,0.06)',
                     }}>{status}</span>
                 )}
-                {extraPairs.map(({key, value}) => (
-                    <span key={key} style={{
-                        fontSize: 10, color: '#64748b',
-                        padding: '2px 8px', borderRadius: 20,
-                        background: 'rgba(100,116,139,0.06)',
-                    }}>{key}: {value}</span>
-                ))}
+
+                {address && address !== '—' && (
+                    <div style={{
+                        width: '100%',
+                        marginTop: 4,
+                        fontSize: 11,
+                        color: '#64748b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        lineHeight: 1.4
+                    }}>
+                        <span style={{flexShrink: 0}}>📍</span>
+                        <span>{address}</span>
+                    </div>
+                )}
+
+                {extraPairs.map(({key, value}) => {
+                    const isContact = key.toLowerCase().includes('контакт') || key.toLowerCase().includes('contact');
+
+                    if (isContact && value) {
+                        const parts = value.split(/[\s\n]+/).filter(part => part.length > 0);
+                        return (
+                            <div key={key} className="flex flex-wrap gap-2 items-center">
+                                {parts.map((part, i) => (
+                                    <span
+                                        key={i}
+                                        style={{
+                                            fontSize: 10,
+                                            color: '#64748b',
+                                            padding: '2px 8px',
+                                            borderRadius: 20,
+                                            background: 'rgba(100,116,139,0.06)',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {part}
+                                    </span>
+                                ))}
+                            </div>
+                        );
+                    }
+
+                    return (
+                        <span key={key} style={{
+                            fontSize: 10, color: '#64748b',
+                            padding: '2px 8px', borderRadius: 20,
+                            background: 'rgba(100,116,139,0.06)',
+                        }}>{key}: {value}</span>
+                    );
+                })}
             </div>
         </div>
     )
