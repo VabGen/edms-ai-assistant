@@ -70,6 +70,7 @@ class UserIntent(Enum):
     FILE_ANALYSIS = "file_analysis"
     CREATE_DOCUMENT = "create_document"
     NOTIFICATION = "notification"
+    COMPLIANCE_CHECK = "compliance_check"
 
 
 class QueryComplexity(Enum):
@@ -820,6 +821,26 @@ class SemanticDispatcher:
                 "отправь уведомление",
             ],
             "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+            "negative": [],
+        },
+        UserIntent.COMPLIANCE_CHECK: {
+            "primary": [
+                "проверить документ",
+                "проверь документ",
+                "проверка документа",
+                "соответствие документа",
+                "корректность заполнения",
+                "всё ли правильно заполнено",
+                "соответствует ли карточка",
+                "перед отправкой проверь",
+            ],
+            "secondary": [
+                "проверить поля",
+                "проверить данные",
+                "расхождения",
+                "несоответствие",
+                "ошибки в карточке",
+            ],
             "negative": [],
         },
     }

@@ -287,9 +287,9 @@ class DocSearchInput(BaseModel):
 
 
 def _build_params_list(
-        doc_filter: dict[str, Any],
-        pageable: dict[str, Any],
-        includes: list[str],
+    doc_filter: dict[str, Any],
+    pageable: dict[str, Any],
+    includes: list[str],
 ) -> list[tuple[str, Any]]:
     """
     Строит список кортежей (key, value) для GET-запроса.
@@ -333,25 +333,25 @@ def _build_params_list(
 
 @tool("doc_search_tool", args_schema=DocSearchInput)
 async def doc_search_tool(
-        token: str,
-        short_summary: str | None = None,
-        reg_number: str | None = None,
-        out_reg_number: str | None = None,
-        doc_category: str | None = None,
-        status: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        date_control_start: str | None = None,
-        date_control_end: str | None = None,
-        author_last_name: str | None = None,
-        correspondent_name: str | None = None,
-        recipient_name: str | None = None,
-        task_executor_last_name: str | None = None,
-        author_current_user: bool | None = None,
-        process_executor_current_user: bool | None = None,
-        task_executor_current_user: bool | None = None,
-        control_user_current_user: bool | None = None,
-        introduction_current_user: bool | None = None,
+    token: str,
+    short_summary: str | None = None,
+    reg_number: str | None = None,
+    out_reg_number: str | None = None,
+    doc_category: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    date_control_start: str | None = None,
+    date_control_end: str | None = None,
+    author_last_name: str | None = None,
+    correspondent_name: str | None = None,
+    recipient_name: str | None = None,
+    task_executor_last_name: str | None = None,
+    author_current_user: bool | None = None,
+    process_executor_current_user: bool | None = None,
+    task_executor_current_user: bool | None = None,
+    control_user_current_user: bool | None = None,
+    introduction_current_user: bool | None = None,
 ) -> dict[str, Any]:
     """
     Searches documents in EDMS by a wide range of filter criteria.
@@ -445,12 +445,13 @@ async def doc_search_tool(
     if status and content:
         status_upper = status.strip().upper()
         filtered = [
-            d for d in content
-            if str(d.get("status", "")).upper() == status_upper
+            d for d in content if str(d.get("status", "")).upper() == status_upper
         ]
         logger.info(
             "Post-filter by status=%s: %d → %d documents",
-            status_upper, len(content), len(filtered),
+            status_upper,
+            len(content),
+            len(filtered),
         )
         content = filtered
 

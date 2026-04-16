@@ -112,8 +112,8 @@ class SummarizeInput(BaseModel):
 
 @tool("doc_summarize_text", args_schema=SummarizeInput)
 async def doc_summarize_text(
-        text: str,
-        summary_type: SummarizeType | None = None,
+    text: str,
+    summary_type: SummarizeType | None = None,
 ) -> dict[str, Any]:
     """Perform intelligent summarisation of document text via LLM.
 
@@ -340,7 +340,7 @@ def _truncate_for_llm(text: str, max_length: int = _MAX_TEXT_LENGTH) -> str:
     head = int(max_length * _HEAD_FRACTION)
     tail = max_length - head
     truncated = (
-            text[:head] + "\n\n[... часть содержимого пропущена ...]\n\n" + text[-tail:]
+        text[:head] + "\n\n[... часть содержимого пропущена ...]\n\n" + text[-tail:]
     )
     logger.debug(
         "Text truncated for LLM: %d → %d chars (head=%d, tail=%d)",
@@ -421,14 +421,17 @@ def _build_llm_prompt(summary_type: SummarizeType) -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages(
         [
             ("system", system_msg),
-            ("user", "<document>\n{text}\n</document>\n\nВыдай итоговый результат без дополнительных комментариев:"),
+            (
+                "user",
+                "<document>\n{text}\n</document>\n\nВыдай итоговый результат без дополнительных комментариев:",
+            ),
         ]
     )
 
 
 async def _execute_summarization(
-        text: str,
-        summary_type: SummarizeType,
+    text: str,
+    summary_type: SummarizeType,
 ) -> dict[str, Any]:
     """Execute the LLM summarisation pipeline.
 

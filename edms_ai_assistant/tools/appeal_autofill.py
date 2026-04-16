@@ -740,8 +740,8 @@ class AppealFieldsBuilder:
         if raw_receipt:
             _receipt_date = raw_receipt if isinstance(raw_receipt, datetime) else None
             if (
-                    _receipt_date
-                    and abs((_receipt_date.date() - datetime.now(UTC).date()).days) <= 1
+                _receipt_date
+                and abs((_receipt_date.date() - datetime.now(UTC).date()).days) <= 1
             ):
                 logger.info(
                     "receiptDate=%s выглядит как today → пропускаем",
@@ -805,7 +805,7 @@ class AppealFieldsBuilder:
         filtered = {}
         for k, v in payload.items():
             if k in _ALWAYS_INCLUDE or (
-                    v is not None and not ValueSanitizer.is_empty(v)
+                v is not None and not ValueSanitizer.is_empty(v)
             ):
                 filtered[k] = v
 

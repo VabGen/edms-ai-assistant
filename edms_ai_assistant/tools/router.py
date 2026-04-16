@@ -2,8 +2,6 @@
 """
 EDMS AI Assistant — Intent-Based Tool Router.
 
-Слой: Interface (Tools).
-
 Отвечает за два вопроса:
   1. Какой минимальный набор инструментов нужно передать в bind_tools
      для данного интента? (LLM видит только этот subset — меньше токенов,
@@ -37,7 +35,6 @@ logger = logging.getLogger(__name__)
 # Примерная стоимость токенов одного инструмента в bind_tools (среднее по schemas)
 _AVG_TOKENS_PER_TOOL: int = 120
 
-
 # ─── Tool name constants ──────────────────────────────────────────────────────
 
 # Documents
@@ -65,6 +62,10 @@ _EMPLOYEE_SEARCH = "employee_search_tool"
 
 # Notifications
 _DOC_SEND_NOTIFICATION = "doc_send_notification"
+
+# Compliance
+_DOC_COMPLIANCE_CHECK = "doc_compliance_check"
+_DOC_UPDATE_FIELD = "doc_update_field"
 
 
 # ─── Intent → tool names mapping ─────────────────────────────────────────────
@@ -136,6 +137,12 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _APPEAL_AUTOFILL,
         _DOC_GET_DETAILS,
         _DOC_GET_FILE,
+    ],
+    # Проверка соответствия документа
+    UserIntent.COMPLIANCE_CHECK: [
+        _DOC_COMPLIANCE_CHECK,
+        _DOC_UPDATE_FIELD,
+        _DOC_GET_DETAILS,
     ],
 }
 

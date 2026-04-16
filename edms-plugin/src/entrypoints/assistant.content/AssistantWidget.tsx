@@ -14,6 +14,7 @@ import {toast} from '@/shared/lib/toast'
 import {useSpeechRecognition} from '@/shared/hooks/useSpeechRecognition'
 import {useApplyPreferences} from '@/shared/hooks/useApplyPreferences'
 import {SettingsPanel} from '@/shared/ui/SettingsPanel'
+import {ComplianceData, ComplianceResult} from "@/shared/ui/ComplianceResult";
 
 dayjs.locale('ru')
 
@@ -28,6 +29,7 @@ interface Message {
     cacheSummaryType?: string | null
     cacheFilePath?: string | null
     cacheContextId?: string | null
+    compliance?: ComplianceData | null
 }
 
 interface Thread {
@@ -35,19 +37,18 @@ interface Thread {
     preview: string
     date: string
 }
+const MAX_THREADS = 20
+const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
+const CHOICE_LABELS: Record<string, string> = { abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы' }
+
+function persistThreads(threads: Thread[]): void {
+    chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
+}
 
 const newMsgId = (): string =>
     typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`
-
-const MAX_THREADS = 20
-const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
-const CHOICE_LABELS: Record<string, string> = {abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы'}
-
-function persistThreads(threads: Thread[]): void {
-    chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
-}
 
 function makeErrorMessage(err: unknown): string {
     if (err instanceof Error) return `__error__:${err.message}`
@@ -810,6 +811,7 @@ export function AssistantWidget() {
                 ?? 'Анализ завершён.'
 
             const cacheFileIdentifier: string | null = payload?.metadata?.cache_file_identifier ?? null
+            const complianceData: ComplianceData | null = payload?.metadata?.compliance ?? null
             const cacheSummaryType: string | null = payload?.metadata?.cache_summary_type ?? null
 
             const assistantMsg: Message = {
@@ -822,6 +824,7 @@ export function AssistantWidget() {
                 cacheSummaryType,
                 cacheFilePath: finalFilePath ?? null,
                 cacheContextId: docId ?? null,
+                compliance: complianceData,
             }
             setMessages(prev => [...prev, assistantMsg])
 
@@ -1244,6 +1247,39 @@ export function AssistantWidget() {
                                                 defaultSummaryFormat={userPrefs.documents.defaultSummaryFormat}
                                             />
                                             <DisambiguationButtons msg={msg} loading={loading} onSend={sendWithLabel}/>
+                                            {msg.compliance && (
+                                                <ComplianceResult
+                                                    data={msg.compliance}
+                                                    threadId={threadId}
+                                                    onFieldFixed={(fieldKey, newValue) => {
+                                                        setMessages(prev => prev.map(m => {
+                                                            if (m.id !== msg.id || !m.compliance) return m
+                                                            const updatedFields = m.compliance.fields.map(f =>
+                                                                f.field_key === fieldKey
+                                                                    ? {
+                                                                        ...f,
+                                                                        status: 'ok' as const,
+                                                                        card_value: newValue,
+                                                                        correct_value: null
+                                                                    }
+                                                                    : f
+                                                            )
+                                                            const anyMismatch = updatedFields.some(f => f.status === 'mismatch')
+                                                            return {
+                                                                ...m,
+                                                                compliance: {
+                                                                    ...m.compliance,
+                                                                    fields: updatedFields,
+                                                                    overall: anyMismatch ? 'has_mismatches' : 'ok',
+                                                                },
+                                                            }
+                                                        }))
+                                                    }}
+                                                    onAllFixed={() => {
+                                                        setTimeout(() => window.location.reload(), 1500)
+                                                    }}
+                                                />
+                                            )}
                                             <RefreshCacheButton
                                                 msg={msg}
                                                 userToken={getAuthToken() ?? ''}

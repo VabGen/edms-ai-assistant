@@ -448,6 +448,20 @@ class PromptBuilder:
     - Колонки ОБЯЗАТЕЛЬНО: | № | id | Рег. номер | Дата | Краткое содержание | Автор | Статус |
     - Колонка `id` — UUID документа из ответа инструмента — ОБЯЗАТЕЛЬНА для навигации.
     - Никогда не убирай колонку id из таблицы поиска.
+    
+ 10. **Проверка соответствия (Compliance)**:
+    - Вызови doc_compliance_check ОДИН РАЗ — не больше.
+    - После получения ответа инструмента — СРАЗУ формируй финальный ответ пользователю.
+    - ЗАПРЕЩЕНО: вызывать doc_compliance_check повторно в одном запросе.
+    - ЗАПРЕЩЕНО: самостоятельно вызывать doc_update_field после compliance — 
+      это делает пользователь через клик на карточку.
+    - Твой ответ должен быть КРАТКИМ: 1-2 предложения с итогом проверки.
+    - Не перечисляй все поля в тексте — фронтенд покажет карточки сам.
+    - КРИТИЧНО: после получения результата doc_compliance_check
+      НЕМЕДЛЕННО формулируй ответ пользователю.
+      НЕ вызывай doc_compliance_check повторно — данные уже получены.
+      НЕ вызывай doc_get_details после compliance — это лишний запрос.
+
 </critical_rules>
 
 <available_tools_guide>
@@ -505,12 +519,12 @@ class PromptBuilder:
 
     @classmethod
     def build(
-            cls,
-            context: ContextParams,
-            intent: UserIntent,
-            semantic_xml: str,
-            *,
-            lean: bool = False,
+        cls,
+        context: ContextParams,
+        intent: UserIntent,
+        semantic_xml: str,
+        *,
+        lean: bool = False,
     ) -> str:
         """Assembles the full system prompt from context, intent snippet, and semantic XML.
 
@@ -572,6 +586,21 @@ PromptBuilder._LEAN_SNIPPETS = {
     <workflow>Анализ файла: read_local_file_content(file_path=...) → doc_summarize_text(text=..., summary_type=...). Путь берётся из <context>.</workflow>""",
     UserIntent.CREATE_DOCUMENT: """
     <workflow>Создание документа: create_document_from_file(file_path=<из контекста>, doc_category=<APPEAL/INCOMING/...>). Один вызов — всё остальное автоматически.</workflow>""",
+    UserIntent.COMPLIANCE_CHECK: """
+    <compliance_workflow>
+    ШАГ 1: Вызови doc_compliance_check(document_id=<из контекста>, check_all=True)
+            Один вызов — результат готов сразу.
+
+    ШАГ 2: НЕМЕДЛЕННО формулируй ответ пользователю.
+            НЕ ВЫЗЫВАЙ doc_compliance_check повторно — ЗАПРЕЩЕНО.
+            НЕ ВЫЗЫВАЙ doc_get_details — это лишнее.
+
+    ШАГ 3: Формат ответа:
+      - overall="ok"             → все поля совпадают, документ готов
+      - overall="has_mismatches" → перечисли расхождения, предложи исправить
+      - overall="cannot_verify"  → объясни что не найдено в файле
+      - requires_disambiguation  → покажи список вложений, жди выбора
+    </compliance_workflow>""",
 }
 
 PromptBuilder._SNIPPETS = {
@@ -733,7 +762,7 @@ Workflow суммаризации документа:
 </file_analysis_guide>""",
     UserIntent.CREATE_DOCUMENT: """
 <create_document_guide>
-    Создание нового документа из загруженного файла:
+Создание нового документа из загруженного файла:
 
     ТРИГГЕРЫ (когда вызывать create_document_from_file):
       - Пользователь загрузил файл (есть <local_file_path>) И говорит:
@@ -763,7 +792,36 @@ Workflow суммаризации документа:
     ПОСЛЕ получения navigate_url:
       - Скажи пользователю: "Документ создан, открываю карточку..."
       - navigate_url обрабатывается фронтендом автоматически
-    </create_document_guide>""",
+</create_document_guide>""",
+    UserIntent.COMPLIANCE_CHECK: """
+<compliance_check_guide>
+    КРИТИЧНО — строго следуй этой последовательности:
+
+    ШАГ 1: Вызови ОДИН РАЗ:
+      doc_compliance_check(document_id=<автоматически>, check_all=True)
+
+    ШАГ 2: СРАЗУ после получения ответа — формулируй ФИНАЛЬНЫЙ ответ пользователю.
+      НЕ ВЫЗЫВАЙ повторно: ни doc_compliance_check, ни doc_get_details.
+      Данные УЖЕ ЕСТЬ в ответе инструмента.
+
+    ШАГ 3: Формат ответа:
+      overall="ok":
+        «Все заполненные поля (ФИО, телефон, email...) совпадают с данными в файле.
+         Документ готов к отправке.»
+
+      overall="has_mismatches":
+        «Обнаружены расхождения:
+         • Телефон: в карточке +375 29 000-00-01, в файле +375 29 000-00-00
+         • Email: в карточке ivan@mail.ru, в файле ivanov@mail.ru
+         Нажмите на карточку для автоисправления или «Исправить все».»
+
+      overall="cannot_verify":
+        «Поля [список] не найдены в тексте файла.
+         Вероятно, они заполнены оператором вручную — это допустимо.»
+
+      requires_disambiguation:
+        Покажи список вложений. Дождись выбора. Повторный вызов с attachment_id=<UUID>.
+</compliance_check_guide>""",
 }
 
 
@@ -916,9 +974,9 @@ class ContentExtractor:
                 for key in cls._JSON_PRIORITY_FIELDS:
                     val = data.get(key)
                     if (
-                            val
-                            and isinstance(val, str)
-                            and len(val) >= cls.MIN_CONTENT_LENGTH
+                        val
+                        and isinstance(val, str)
+                        and len(val) >= cls.MIN_CONTENT_LENGTH
                     ):
                         return val.replace("\\n", "\n").replace('\\"', '"').strip()
             except (json.JSONDecodeError, ValueError):
@@ -963,9 +1021,9 @@ class ContentExtractor:
                 for key in cls._JSON_PRIORITY_FIELDS:
                     val = data.get(key)
                     if (
-                            val
-                            and isinstance(val, str)
-                            and len(val) >= cls.MIN_CONTENT_LENGTH
+                        val
+                        and isinstance(val, str)
+                        and len(val) >= cls.MIN_CONTENT_LENGTH
                     ):
                         return val
         except json.JSONDecodeError:
@@ -1028,10 +1086,10 @@ class AgentStateManager:
         return await self.graph.aget_state(self._config(thread_id))
 
     async def update_state(
-            self,
-            thread_id: str,
-            messages: list[BaseMessage],
-            as_node: str = "agent",
+        self,
+        thread_id: str,
+        messages: list[BaseMessage],
+        as_node: str = "agent",
     ) -> None:
         """
         Patches graph state for *thread_id* with new messages.
@@ -1048,10 +1106,10 @@ class AgentStateManager:
         )
 
     async def invoke(
-            self,
-            inputs: dict[str, Any],
-            thread_id: str,
-            timeout: float = 120.0,
+        self,
+        inputs: dict[str, Any],
+        thread_id: str,
+        timeout: float = 120.0,
     ) -> None:
         """
         Invokes the graph for *thread_id* with optional inputs.
@@ -1229,15 +1287,15 @@ class EdmsDocumentAgent:
         }
 
     async def chat(
-            self,
-            message: str,
-            user_token: str,
-            context_ui_id: str | None = None,
-            thread_id: str | None = None,
-            user_context: dict[str, Any] | None = None,
-            file_path: str | None = None,
-            file_name: str | None = None,
-            human_choice: str | None = None,
+        self,
+        message: str,
+        user_token: str,
+        context_ui_id: str | None = None,
+        thread_id: str | None = None,
+        user_context: dict[str, Any] | None = None,
+        file_path: str | None = None,
+        file_name: str | None = None,
+        human_choice: str | None = None,
     ) -> dict[str, Any]:
         """
         Main entry point for agent interaction.
@@ -1337,24 +1395,75 @@ class EdmsDocumentAgent:
 
     # ── Human-in-the-Loop ─────────────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_compliance_data(messages: list[BaseMessage]) -> dict | None:
+        """Извлекает compliance результат из последних ToolMessage.
+
+        Ищет по структуре (status=success + fields + overall) — надёжнее
+        чем по name т.к. ToolMessage.name может быть None.
+        """
+        for m in reversed(messages[-10:]):
+            if not isinstance(m, ToolMessage):
+                continue
+            try:
+                data = json.loads(str(m.content))
+                if (
+                    data.get("status") == "success"
+                    and isinstance(data.get("fields"), list)
+                    and "overall" in data
+                ):
+                    return data
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                pass
+        return None
+
     async def _handle_human_choice(
-            self, context: ContextParams, human_choice: str
+        self, context: ContextParams, human_choice: str
     ) -> dict[str, Any]:
-        """
-        Resumes a paused graph after the user resolves a disambiguation or
-        selects a summarization type.
+        if human_choice and human_choice.startswith("fix_field:"):
+            parts = human_choice.split(":", 2)
+            if len(parts) == 3:
+                _, update_field, correct_value = parts
+                logger.info(
+                    "Compliance fix: field=%s value=%r",
+                    update_field,
+                    correct_value[:60],
+                )
+                new_inputs = {
+                    "messages": [
+                        HumanMessage(
+                            content=(
+                                f'Исправь поле "{update_field}" '
+                                f'на значение "{correct_value}"'
+                            )
+                        ),
+                    ]
+                }
+                return await self._orchestrate(
+                    context=context,
+                    inputs=new_inputs,
+                    is_choice_active=True,
+                    iteration=0,
+                )
+            return AgentResponse(
+                status=AgentStatus.ERROR,
+                message="Неверный формат команды исправления поля.",
+            ).model_dump()
 
-        Patches the pending AIMessage tool_calls with the user's choice,
-        then resumes orchestration.
-
-        Args:
-            context: Immutable execution context.
-            human_choice: Raw user choice: UUID list or summary type string.
-
-        Returns:
-            Serialized AgentResponse dict.
-        """
         state = await self.state_manager.get_state(context.thread_id)
+
+        if not state.next:
+            logger.warning(
+                "human_choice arrived after graph END: %s — treating as new message",
+                human_choice[:40],
+            )
+            return await self._orchestrate(
+                context=context,
+                inputs={"messages": [HumanMessage(content=human_choice)]},
+                is_choice_active=False,
+                iteration=0,
+            )
+
         last_msg: AIMessage = state.values["messages"][-1]
         raw_calls = getattr(last_msg, "tool_calls", [])
 
@@ -1394,6 +1503,7 @@ class EdmsDocumentAgent:
                     t_args.pop("last_names", None)
                     t_args.pop("executor_last_names", None)
                     t_args.pop("recipient_last_names", None)
+
                     logger.info(
                         "Human choice: employee disambiguation resolved",
                         extra={
@@ -1422,7 +1532,6 @@ class EdmsDocumentAgent:
 
                     if context.document_id:
                         doc_id = str(context.document_id).strip()
-
                         if _is_valid_uuid(doc_id):
                             t_args["document_id"] = doc_id
 
@@ -1473,11 +1582,11 @@ class EdmsDocumentAgent:
     # ── Core orchestration loop ───────────────────────────────────────────────
 
     async def _orchestrate(
-            self,
-            context: ContextParams,
-            inputs: dict[str, Any] | None,
-            is_choice_active: bool,
-            iteration: int,
+        self,
+        context: ContextParams,
+        inputs: dict[str, Any] | None,
+        is_choice_active: bool,
+        iteration: int,
     ) -> dict[str, Any]:
         """
         Core recursive orchestration loop.
@@ -1565,7 +1674,7 @@ class EdmsDocumentAgent:
                 getattr(last_msg, "tool_calls", None)
             )
             is_finished = (
-                    not state.next and not last_is_tool_msg and not last_has_tool_calls
+                not state.next and not last_is_tool_msg and not last_has_tool_calls
             )
             if is_finished:
                 return self._build_final_response(messages, context)
@@ -1593,8 +1702,8 @@ class EdmsDocumentAgent:
                     try:
                         prev_data = json.loads(str(prev_msg.content))
                         if (
-                                prev_data.get("status") == "requires_disambiguation"
-                                and prev_msg.name == "doc_compare_attachment_with_local"
+                            prev_data.get("status") == "requires_disambiguation"
+                            and prev_msg.name == "doc_compare_attachment_with_local"
                         ):
                             _after_compare_disambiguation = True
                             logger.debug(
@@ -1688,7 +1797,7 @@ class EdmsDocumentAgent:
                         )
 
                     elif t_name == "doc_get_file_content" and not t_args.get(
-                            "attachment_id"
+                        "attachment_id"
                     ):
                         t_name = "read_local_file_content"
                         t_args["file_path"] = clean_path
@@ -1720,10 +1829,10 @@ class EdmsDocumentAgent:
 
                 # ── Фолбэк: если нет файла, но вызван compare_with_local ───
                 if (
-                        t_name == "doc_compare_attachment_with_local"
-                        and not clean_path
-                        and not _after_compare_disambiguation
-                        and not (is_choice_active and t_args.get("attachment_id"))
+                    t_name == "doc_compare_attachment_with_local"
+                    and not clean_path
+                    and not _after_compare_disambiguation
+                    and not (is_choice_active and t_args.get("attachment_id"))
                 ):
                     t_name = "doc_compare_documents"
                     t_args.pop("local_file_path", None)
@@ -1737,9 +1846,9 @@ class EdmsDocumentAgent:
                 if t_name == "doc_compare_attachment_with_local" and path_is_local:
                     cur_local = str(t_args.get("local_file_path", "")).strip()
                     if (
-                            not cur_local
-                            or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
-                            or not Path(cur_local).exists()
+                        not cur_local
+                        or cur_local.lower() in _COMPARE_LOCAL_PLACEHOLDERS
+                        or not Path(cur_local).exists()
                     ):
                         t_args["local_file_path"] = clean_path
                         logger.info(
@@ -1748,7 +1857,7 @@ class EdmsDocumentAgent:
                         )
 
                     if context.uploaded_file_name and not t_args.get(
-                            "original_filename"
+                        "original_filename"
                     ):
                         t_args["original_filename"] = context.uploaded_file_name
                         logger.debug(
@@ -1759,7 +1868,7 @@ class EdmsDocumentAgent:
                 # ── Блокировка doc_compare_documents после disambiguation ─
                 if t_name == "doc_compare_documents":
                     if _after_compare_disambiguation or (
-                            is_choice_active and path_is_local
+                        is_choice_active and path_is_local
                     ):
                         logger.warning(
                             "GUARD: doc_compare_documents blocked — redirecting to doc_compare_attachment_with_local",
@@ -1782,7 +1891,7 @@ class EdmsDocumentAgent:
                                 else t_args.get("local_file_path")
                             ),
                             "attachment_id": t_args.get("document_id_2")
-                                             or t_args.get("attachment_id"),
+                            or t_args.get("attachment_id"),
                             "original_filename": context.uploaded_file_name,
                         }
                         for key in [
@@ -1792,7 +1901,7 @@ class EdmsDocumentAgent:
                         ]:
                             t_args.pop(key, None)
                         if context.uploaded_file_name and not t_args.get(
-                                "original_filename"
+                            "original_filename"
                         ):
                             t_args["original_filename"] = context.uploaded_file_name
 
@@ -1803,7 +1912,7 @@ class EdmsDocumentAgent:
                                 try:
                                     prev_data = json.loads(str(prev_msg.content))
                                     if prev_data.get(
-                                            "comparison_complete"
+                                        "comparison_complete"
                                     ) and prev_data.get("comparisons"):
                                         _versions_result_complete = True
                                         break
@@ -1827,11 +1936,11 @@ class EdmsDocumentAgent:
                 if path_is_local and t_name == "read_local_file_content":
                     cur_fp = str(t_args.get("file_path", "")).strip()
                     if not cur_fp or cur_fp.lower() in (
-                            "local_file",
-                            "file_path",
-                            "none",
-                            "null",
-                            "",
+                        "local_file",
+                        "file_path",
+                        "none",
+                        "null",
+                        "",
                     ):
                         t_args["file_path"] = clean_path
                         logger.info(
@@ -1851,9 +1960,9 @@ class EdmsDocumentAgent:
                                 "safety-net: summary_type=extractive (is_choice_active but type not set)"
                             )
                         elif (
-                                context.user_context.get("preferred_summary_format")
-                                and context.user_context["preferred_summary_format"]
-                                != "ask"
+                            context.user_context.get("preferred_summary_format")
+                            and context.user_context["preferred_summary_format"]
+                            != "ask"
                         ):
                             t_args["summary_type"] = context.user_context[
                                 "preferred_summary_format"
@@ -1881,8 +1990,8 @@ class EdmsDocumentAgent:
             if is_choice_active and patched_calls:
                 last_tool_name = patched_calls[-1]["name"]
                 if last_tool_name in (
-                        "doc_compare_attachment_with_local",
-                        "doc_summarize_text",
+                    "doc_compare_attachment_with_local",
+                    "doc_summarize_text",
                 ):
                     next_is_choice_active = True
                 else:
@@ -1951,40 +2060,45 @@ class EdmsDocumentAgent:
     def _build_graph(self) -> CompiledStateGraph:
         """
         Compiles the LangGraph ReAct workflow.
-
-        Nodes:
-        - ``agent``: invokes the LLM with bound tools
-        - ``tools``: executes tool_calls via ToolNode
-        - ``validator``: injects system notifications for tool errors
-
-        Edges:
-        - START → agent
-        - agent → tools (if tool_calls present) | END
-        - tools → validator → agent
-
-        Interrupt:
-        - ``interrupt_before=["tools"]`` pauses execution for Human-in-the-Loop
-          (human choice injection in _orchestrate / _handle_human_choice)
-
-        Returns:
-            Compiled state graph ready for ainvoke/aget_state/aupdate_state.
-
-        Raises:
-            RuntimeError: If LangGraph compilation fails.
         """
         workflow: StateGraph = StateGraph(AgentState)
 
-        # ── Нода: вызов LLM ──────────────────────────────────────────────────
         async def call_model(state: AgentState) -> dict[str, Any]:
             """
             Invokes the LLM with bound tools.
+            Injects dynamic hints based on context (e.g., pending compliance fixes).
             """
             _MAX_HISTORY_MSGS = 40
+
             sys_msgs = [m for m in state["messages"] if isinstance(m, SystemMessage)]
             non_sys = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
+
             if len(non_sys) > _MAX_HISTORY_MSGS:
                 non_sys = non_sys[-_MAX_HISTORY_MSGS:]
-            candidate_msgs = ([sys_msgs[-1]] if sys_msgs else []) + non_sys
+
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, ToolMessage):
+                    raw = str(msg.content)
+                    if raw.startswith("{"):
+                        try:
+                            data = json.loads(raw)
+                            if data.get("status") == "success" and "fields" in data:
+                                hint_content = (
+                                    "ВНИМАНИЕ: В истории сообщений есть результат проверки документа (compliance check). "
+                                    "Если пользователь просит 'исправить', 'обновить' или 'применить': "
+                                    "1. БЕРИ значения из 'correct_value' в результатах проверки. "
+                                    "2. ВЫЗЫВАЙ инструмент `doc_update_field` для КАЖДОГО поля с ошибкой. "
+                                    "3. НЕ пиши текст ответа, пока не вызовешь все инструменты."
+                                )
+                                sys_msgs.append(SystemMessage(content=hint_content))
+                                logger.debug(
+                                    "Injected compliance-fix hint into system prompt"
+                                )
+                        except json.JSONDecodeError:
+                            pass
+                    break
+
+            candidate_msgs = sys_msgs + non_sys
 
             final_msgs = []
             for i, msg in enumerate(candidate_msgs):
@@ -2036,10 +2150,23 @@ class EdmsDocumentAgent:
                 try:
                     tool_data = json.loads(raw)
                     interactive_status = tool_data.get("status", "")
+
+                    if interactive_status == "success" and "fields" in tool_data:
+                        logger.info(
+                            "Validator: compliance result received — stopping graph"
+                        )
+                        return {
+                            "messages": [
+                                AIMessage(
+                                    content="Анализ документа завершен. Обнаружены расхождения в полях."
+                                )
+                            ]
+                        }
+
                     if interactive_status in (
-                            "requires_choice",
-                            "requires_disambiguation",
-                            "requires_action",
+                        "requires_choice",
+                        "requires_disambiguation",
+                        "requires_action",
                     ):
                         logger.info(
                             "Validator: interactive status '%s' — stopping graph",
@@ -2051,7 +2178,7 @@ class EdmsDocumentAgent:
 
             raw_lower = raw.lower()
             if '"status": "error"' in raw_lower or (
-                    raw_lower.startswith("{") and '"error"' in raw_lower
+                raw_lower.startswith("{") and '"error"' in raw_lower
             ):
                 try:
                     err_data = json.loads(raw)
@@ -2104,28 +2231,11 @@ class EdmsDocumentAgent:
             logger.error("Graph compilation failed", exc_info=True)
             raise RuntimeError(f"Failed to compile graph: {exc}") from exc
 
-    # ── Private helpers ───────────────────────────────────────────────────────
-
     def _build_final_response(
-            self, messages: list[BaseMessage], context: ContextParams
+        self, messages: list[BaseMessage], context: ContextParams
     ) -> dict[str, Any]:
         """
         Extracts final content and wraps it into an AgentResponse.
-
-        Before extracting text content, scans the last ToolMessage for
-        structured interactive statuses:
-        - ``requires_choice``       : Summarisation format selection needed.
-        - ``requires_disambiguation``: Attachment or employee disambiguation needed.
-
-        These statuses bypass text extraction and are returned directly to
-        the HTTP layer so the frontend can render the appropriate widget.
-
-        Args:
-            messages: Complete LangGraph message chain.
-            context: Execution context (thread_id, file info for sanitization).
-
-        Returns:
-            Serialized AgentResponse dict.
         """
         interactive = self._detect_interactive_status(messages)
         if interactive:
@@ -2138,6 +2248,14 @@ class EdmsDocumentAgent:
             )
             return interactive
 
+        compliance_data = {}
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                break
+            if isinstance(msg, ToolMessage):
+                compliance_data = self._extract_compliance_data(messages)
+                break
+
         final_content = ContentExtractor.extract_final_content(messages)
         navigate_url = self._extract_navigate_url(messages)
 
@@ -2146,40 +2264,37 @@ class EdmsDocumentAgent:
             final_content = self._sanitize_technical_content(final_content, context)
             reload_needed = _is_mutation_response(final_content)
 
-            if navigate_url:
+            _metadata: dict[str, Any] = {}
+            if compliance_data:
+                _metadata["compliance"] = compliance_data
                 logger.info(
-                    "Execution completed with navigation",
-                    extra={
-                        "thread_id": context.thread_id,
-                        "navigate_url": navigate_url,
-                    },
+                    "Compliance added to metadata: overall=%s fields=%d",
+                    compliance_data.get("overall"),
+                    len(compliance_data.get("fields", [])),
                 )
-            else:
-                logger.info(
-                    "Execution completed",
-                    extra={
-                        "thread_id": context.thread_id,
-                        "content_length": len(final_content),
-                        "requires_reload": reload_needed,
-                    },
-                )
+
             return AgentResponse(
                 status=AgentStatus.SUCCESS,
                 content=final_content,
                 requires_reload=reload_needed,
                 navigate_url=navigate_url,
+                metadata=_metadata,
             ).model_dump()
 
         logger.warning("No final content found", extra={"thread_id": context.thread_id})
+        _meta_fallback: dict[str, Any] = {}
+        if compliance_data:
+            _meta_fallback["compliance"] = compliance_data
         return AgentResponse(
             status=AgentStatus.SUCCESS,
             content="Операция завершена.",
             navigate_url=navigate_url,
+            metadata=_meta_fallback,
         ).model_dump()
 
     @staticmethod
     def _detect_interactive_status(
-            messages: list[BaseMessage],
+        messages: list[BaseMessage],
     ) -> dict[str, Any] | None:
         """
         Сканирует ПОСЛЕДНИЙ ToolMessage на наличие статусов интерактива.
@@ -2215,9 +2330,9 @@ class EdmsDocumentAgent:
 
         status = data.get("status", "")
         if status not in (
-                "requires_choice",
-                "requires_disambiguation",
-                "requires_action",
+            "requires_choice",
+            "requires_disambiguation",
+            "requires_action",
         ):
             return None
 
@@ -2282,9 +2397,9 @@ class EdmsDocumentAgent:
                     if _k != "options" and isinstance(_v, list) and _v:
                         first_item = _v[0] if _v else {}
                         if (
-                                isinstance(first_item, dict)
-                                and "matches" in first_item
-                                and not first_item.get("id")
+                            isinstance(first_item, dict)
+                            and "matches" in first_item
+                            and not first_item.get("id")
                         ):
                             flat: list[dict[str, Any]] = []
                             for group in _v:
@@ -2329,51 +2444,51 @@ class EdmsDocumentAgent:
 
                 # Извлечение ФИО
                 first = (
-                        item.get("firstName")
-                        or item.get("first_name")
-                        or item.get("firstname")
-                        or item.get("givenName")
-                        or ""
+                    item.get("firstName")
+                    or item.get("first_name")
+                    or item.get("firstname")
+                    or item.get("givenName")
+                    or ""
                 ).strip()
                 last = (
-                        item.get("lastName")
-                        or item.get("last_name")
-                        or item.get("lastname")
-                        or item.get("surname")
-                        or item.get("familyName")
-                        or ""
+                    item.get("lastName")
+                    or item.get("last_name")
+                    or item.get("lastname")
+                    or item.get("surname")
+                    or item.get("familyName")
+                    or ""
                 ).strip()
                 middle = (
-                        item.get("middleName")
-                        or item.get("middle_name")
-                        or item.get("patronymic")
-                        or ""
+                    item.get("middleName")
+                    or item.get("middle_name")
+                    or item.get("patronymic")
+                    or ""
                 ).strip()
 
                 display_name = (
-                        item.get("fullName")
-                        or item.get("full_name")
-                        or item.get("fio")
-                        or item.get("FIO")
-                        or " ".join(filter(None, [last, first, middle]))
-                        or item.get("name")
-                        or item.get("username")
-                        or item.get("login")
-                        or item.get("email", "").split("@")[0]
-                        or "Без имени"
+                    item.get("fullName")
+                    or item.get("full_name")
+                    or item.get("fio")
+                    or item.get("FIO")
+                    or " ".join(filter(None, [last, first, middle]))
+                    or item.get("name")
+                    or item.get("username")
+                    or item.get("login")
+                    or item.get("email", "").split("@")[0]
+                    or "Без имени"
                 ).strip()
 
                 dept = (
-                        item.get("department")
-                        or item.get("departmentName")
-                        or item.get("department_name")
-                        or item.get("division")
-                        or item.get("post")
-                        or item.get("position")
-                        or item.get("jobTitle")
-                        or item.get("job_title")
-                        or item.get("role")
-                        or ""
+                    item.get("department")
+                    or item.get("departmentName")
+                    or item.get("department_name")
+                    or item.get("division")
+                    or item.get("post")
+                    or item.get("position")
+                    or item.get("jobTitle")
+                    or item.get("job_title")
+                    or item.get("role")
+                    or ""
                 ).strip()
 
                 item_id = str(
@@ -2418,10 +2533,10 @@ class EdmsDocumentAgent:
                     continue
                 item_id = str(item.get("id", "?"))
                 display_name = (
-                        item.get("full_name")
-                        or item.get("fullName")
-                        or item.get("name")
-                        or "Без имени"
+                    item.get("full_name")
+                    or item.get("fullName")
+                    or item.get("name")
+                    or "Без имени"
                 ).strip()
                 dept = (item.get("department") or item.get("post") or "").strip()
                 candidates_structured.append(
@@ -2483,7 +2598,7 @@ class EdmsDocumentAgent:
         first_name = (ctx.get("firstName") or ctx.get("first_name") or "").strip()
         last_name = (ctx.get("lastName") or ctx.get("last_name") or "").strip()
         full_name = (
-                ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
+            ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
         ).strip()
         user_id = ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
         display_name = first_name or last_name or full_name or "пользователь"
@@ -2570,10 +2685,10 @@ class EdmsDocumentAgent:
         return line
 
     async def _try_forced_tool_call(
-            self,
-            context: ContextParams,
-            inputs: dict,
-            original_message: str,
+        self,
+        context: ContextParams,
+        inputs: dict,
+        original_message: str,
     ) -> bool:
         """Bypass LLM for deterministic intents by injecting a pre-built tool_call.
 

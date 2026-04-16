@@ -86,7 +86,7 @@ def _enum_value(val: Any) -> Any:
 
 
 async def _fetch_main_required_fields(
-        client: DocumentClient, token: str, document_id: str
+    client: DocumentClient, token: str, document_id: str
 ) -> dict[str, Any]:
     """
     Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_UPDATE.
@@ -117,7 +117,7 @@ async def _fetch_main_required_fields(
 
 
 async def _fetch_appeal_required_fields(
-        client: DocumentClient, token: str, document_id: str
+    client: DocumentClient, token: str, document_id: str
 ) -> dict[str, Any]:
     """
     Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE.
@@ -140,10 +140,14 @@ async def _fetch_appeal_required_fields(
     # === Обязательные поля ===
 
     declarant = getattr(appeal, "declarantType", None)
-    result["declarantType"] = _enum_value(declarant) if declarant is not None else "INDIVIDUAL"
+    result["declarantType"] = (
+        _enum_value(declarant) if declarant is not None else "INDIVIDUAL"
+    )
 
     sub_form = getattr(appeal, "submissionForm", None)
-    result["submissionForm"] = _enum_value(sub_form) if sub_form is not None else "WRITTEN"
+    result["submissionForm"] = (
+        _enum_value(sub_form) if sub_form is not None else "WRITTEN"
+    )
 
     # === Сохраняем текущие значения ===
 
@@ -192,17 +196,19 @@ async def _fetch_appeal_required_fields(
     for attr in ("receiptDate", "dateDocCorrespondentOrg"):
         val = getattr(appeal, attr, None)
         if val is not None:
-            result[attr] = str(val) if not hasattr(val, "isoformat") else val.isoformat()
+            result[attr] = (
+                str(val) if not hasattr(val, "isoformat") else val.isoformat()
+            )
 
     return result
 
 
 @tool("doc_update_field", args_schema=UpdateDocumentFieldInput)
 async def doc_update_field(
-        document_id: str,
-        token: str,
-        field_name: str,
-        field_value: str,
+    document_id: str,
+    token: str,
+    field_name: str,
+    field_value: str,
 ) -> dict[str, Any]:
     """Обновляет одно поле документа через API EDMS.
 
@@ -254,7 +260,9 @@ async def doc_update_field(
     try:
         async with DocumentClient() as client:
             if is_appeal_field:
-                existing = await _fetch_appeal_required_fields(client, token, document_id)
+                existing = await _fetch_appeal_required_fields(
+                    client, token, document_id
+                )
             else:
                 existing = await _fetch_main_required_fields(client, token, document_id)
 
@@ -263,9 +271,7 @@ async def doc_update_field(
             payload = [{"operationType": operation_type, "body": body}]
             json_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
 
-            logger.debug(
-                "doc_update_field payload keys: %s", list(body.keys())
-            )
+            logger.debug("doc_update_field payload keys: %s", list(body.keys()))
 
             await client._make_request(
                 "POST",
@@ -276,9 +282,9 @@ async def doc_update_field(
             )
 
         field_label = (
-                _ALLOWED_FIELDS.get(field_name)
-                or _ALLOWED_APPEAL_FIELDS.get(field_name)
-                or field_name
+            _ALLOWED_FIELDS.get(field_name)
+            or _ALLOWED_APPEAL_FIELDS.get(field_name)
+            or field_name
         )
 
         logger.info("doc_update_field success: %s = %r", field_name, value)
