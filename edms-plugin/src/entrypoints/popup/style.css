@@ -1,1 +1,26 @@
 @import '../../shared/ui/globals.css';
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 280px;
+    min-height: 100%;
+    overflow: hidden;
+}
+
+body {
+    background: linear-gradient(135deg, #e8e8f0 0%, #f0eef5 50%, #e6e9f2 100%);
+}
+
+@keyframes popup-flash {
+    0% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}

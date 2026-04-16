@@ -6,14 +6,15 @@ import {
 import dayjs from 'dayjs'
 import 'dayjs/locale/ru'
 
-import {ChatMessage} from '../../shared/ui/ChatMessage'
-import {getAuthToken} from '../../shared/lib/auth'
-import {extractDocIdFromUrl} from '../../shared/lib/url'
-import {sendMsg} from '../../shared/lib/messaging'
-import {toast} from '../../shared/lib/toast'
-import {useSpeechRecognition} from '../../shared/hooks/useSpeechRecognition'
-import {useApplyPreferences} from '../../shared/hooks/useApplyPreferences'
-import {SettingsPanel} from '../../shared/ui/SettingsPanel'
+import {ChatMessage} from '@/shared/ui/ChatMessage'
+import {getAuthToken} from '@/shared/lib/auth'
+import {extractDocIdFromUrl} from '@/shared/lib/url'
+import {sendMsg} from '@/shared/lib/messaging'
+import {toast} from '@/shared/lib/toast'
+import {useSpeechRecognition} from '@/shared/hooks/useSpeechRecognition'
+import {useApplyPreferences} from '@/shared/hooks/useApplyPreferences'
+import {SettingsPanel} from '@/shared/ui/SettingsPanel'
+import {ComplianceData, ComplianceResult} from "@/shared/ui/ComplianceResult";
 
 dayjs.locale('ru')
 
@@ -24,10 +25,11 @@ interface Message {
     isError?: boolean
     id: string
     timestamp: number
-    cacheFileIdentifier?: string | null  // UUID вложения или хэш файла
-    cacheSummaryType?: string | null     // тип: extractive | abstractive | thesis
-    cacheFilePath?: string | null        // file_path для повторного запроса
-    cacheContextId?: string | null       // context_ui_id для повторного запроса
+    cacheFileIdentifier?: string | null
+    cacheSummaryType?: string | null
+    cacheFilePath?: string | null
+    cacheContextId?: string | null
+    compliance?: ComplianceData | null
 }
 
 interface Thread {
@@ -35,19 +37,18 @@ interface Thread {
     preview: string
     date: string
 }
+const MAX_THREADS = 20
+const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
+const CHOICE_LABELS: Record<string, string> = { abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы' }
+
+function persistThreads(threads: Thread[]): void {
+    chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
+}
 
 const newMsgId = (): string =>
     typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`
-
-const MAX_THREADS = 20
-const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
-const CHOICE_LABELS: Record<string, string> = {abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы'}
-
-function persistThreads(threads: Thread[]): void {
-    chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
-}
 
 function makeErrorMessage(err: unknown): string {
     if (err instanceof Error) return `__error__:${err.message}`
@@ -90,18 +91,21 @@ function SoundWave() {
     return (
         <div style={{
             display: 'flex',
-            alignItems: 'flex-end',
+            alignItems: 'center',
             justifyContent: 'center',
             gap: 3,
-            height: 12,
-            marginBottom: 8
+            height: 16,
+            marginBottom: 6,
+            padding: '0 4px',
         }}>
             {[0, 1, 2, 3, 4].map(i => (
                 <div key={i} style={{
-                    width: 3, height: 10, borderRadius: 2,
-                    background: 'rgba(99,102,241,0.7)',
+                    width: 2.5,
+                    height: 8,
+                    borderRadius: 2,
+                    background: 'rgba(99,102,241,0.50)',
                     transformOrigin: 'bottom',
-                    animation: `edms-soundbar 0.6s ease-in-out ${i * 80}ms infinite`,
+                    animation: `edms-soundbar 0.7s ease-in-out ${i * 90}ms infinite`,
                 }}/>
             ))}
         </div>
@@ -111,15 +115,24 @@ function SoundWave() {
 function TypingDots() {
     return (
         <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '10px 14px', background: '#ffffff', borderRadius: 18,
-            border: '1px solid rgba(226,232,240,0.80)', width: 'fit-content',
-            boxShadow: '0 1px 6px rgba(0,0,0,0.06)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '12px 18px',
+            // background: '#ffffff',
+            borderRadius: 22,
+            width: 'fit-content',
+            // boxShadow: 'var(--edms-shadow-sm)',
+            // border: '1px solid rgba(0,0,0,0.03)',
+            animation: 'edms-fade-in-up .3s ease-out',
         }}>
-            {[0, 160, 320].map(d => (
+            {[0, 180, 360].map(d => (
                 <div key={d} style={{
-                    width: 7, height: 7, borderRadius: '50%', background: '#818cf8',
-                    animation: `edms-wave 1.4s ease-in-out ${d}ms infinite`,
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: '#a5b4fc',
+                    animation: `edms-wave 1.6s ease-in-out ${d}ms infinite`,
                 }}/>
             ))}
         </div>
@@ -224,7 +237,7 @@ const ActionButtons = memo(({msg, loading, onSend, defaultSummaryFormat}: Action
     if (defaultSummaryFormat && defaultSummaryFormat !== 'ask') return null
 
     return (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2.5 flex flex-wrap gap-2" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
             {[
                 {id: 'abstractive', label: 'Пересказ', icon: <FileText size={13}/>},
                 {id: 'extractive', label: 'Факты', icon: <Search size={13}/>},
@@ -238,7 +251,22 @@ const ActionButtons = memo(({msg, loading, onSend, defaultSummaryFormat}: Action
                         e.stopPropagation();
                         onSend(btn.id, btn.label)
                     }}
-                    className="edms-action-btn flex items-center gap-1.5 px-3 py-1.5 font-semibold rounded-xl border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                    className="edms-action-btn flex items-center gap-1.5 px-3.5 py-2 font-semibold rounded-xl border bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                    style={{
+                        borderColor: 'rgba(99,102,241,0.18)',
+                        boxShadow: 'var(--edms-shadow-xs)',
+                    }}
+                    onMouseEnter={e => {
+                        if (loading) return
+                        const el = e.currentTarget as HTMLButtonElement
+                        el.style.boxShadow = '0 4px 14px rgba(99,102,241,0.25)'
+                        el.style.transform = 'translateY(-1px)'
+                    }}
+                    onMouseLeave={e => {
+                        const el = e.currentTarget as HTMLButtonElement
+                        el.style.boxShadow = 'var(--edms-shadow-xs)'
+                        el.style.transform = 'translateY(0)'
+                    }}
                 >
                     {btn.icon}{btn.label}
                 </button>
@@ -261,13 +289,13 @@ const DisambiguationButtons = memo(({msg, loading, onSend}: DisambButtonsProps) 
     const isEmployeeList = candidates.every(c => getCandidateType(c.name) === 'employee')
     const isFileList = candidates.every(c => getCandidateType(c.name) !== 'employee')
     return (
-        <div className="mt-3">
-            <p className="mb-2 px-0.5" style={{
+        <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+            <p className="mb-2.5 px-1" style={{
                 fontSize: 10,
-                fontWeight: 500,
+                fontWeight: 600,
                 textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                color: '#94a3b8'
+                letterSpacing: '0.08em',
+                color: '#94a3b8',
             }}>
                 {isEmployeeList ? '👤 Выберите сотрудника' : isFileList ? '📎 Выберите вложение' : '✦ Выберите вариант'}
             </p>
@@ -284,12 +312,28 @@ const DisambiguationButtons = memo(({msg, loading, onSend}: DisambButtonsProps) 
                                 e.stopPropagation();
                                 onSend(c.id, c.name)
                             }}
-                            className="group flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 shadow-sm hover:shadow-md"
-                            style={{borderColor: 'rgba(226,232,240,0.80)', color: '#1e293b', fontSize: 12}}
+                            className="group flex items-center gap-3 w-full px-3.5 py-3 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                            style={{
+                                borderColor: 'rgba(0,0,0,0.05)',
+                                color: '#1e293b',
+                                fontSize: 12,
+                                boxShadow: 'var(--edms-shadow-xs)',
+                            }}
+                            onMouseEnter={e => {
+                                if (loading) return
+                                const el = e.currentTarget as HTMLButtonElement
+                                el.style.boxShadow = '0 4px 16px rgba(99,102,241,0.22)'
+                                el.style.transform = 'translateY(-1px)'
+                            }}
+                            onMouseLeave={e => {
+                                const el = e.currentTarget as HTMLButtonElement
+                                el.style.boxShadow = 'var(--edms-shadow-xs)'
+                                el.style.transform = 'translateY(0)'
+                            }}
                         >
                             <span
-                                className="flex-shrink-0 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center transition-colors"
-                                style={{background: 'rgba(241,245,249,0.80)', color: '#475569'}}>
+                                className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200 bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white"
+                            >
                                 {idx + 1}
                             </span>
                             <CandidateIcon type={ctype} className={accent}/>
@@ -300,7 +344,7 @@ const DisambiguationButtons = memo(({msg, loading, onSend}: DisambButtonsProps) 
                                        style={{fontSize: 10}}>{c.dept}</p>}
                             </div>
                             <svg
-                                className="w-3.5 h-3.5 flex-shrink-0 opacity-30 group-hover:opacity-80 transition-opacity"
+                                className="w-3.5 h-3.5 flex-shrink-0 opacity-25 group-hover:opacity-80 transition-opacity"
                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                                 <path d="M9 18l6-6-6-6"/>
                             </svg>
@@ -339,7 +383,6 @@ const RefreshCacheButton = memo(({
     if (msg.role !== 'assistant' || msg.action_type || msg.isError) return null
     if (!msg.cacheFileIdentifier) return null
 
-    // Используем cacheFilePath если есть, иначе fallback на cacheFileIdentifier (UUID вложения)
     const effectiveFilePath = msg.cacheFilePath ?? msg.cacheFileIdentifier
 
     const typeLabel = msg.cacheSummaryType
@@ -349,17 +392,14 @@ const RefreshCacheButton = memo(({
     const handleRefresh = async () => {
         if (refreshing) return
         setRefreshing(true)
-        onRefreshStart(msg.id, msg.content)  // передаём текущий контент для восстановления
+        onRefreshStart(msg.id, msg.content)
 
         try {
-            // Шаг 1: удаляем конкретную запись из кэша
             await sendMsg('deleteCache', {
                 file_identifier: msg.cacheFileIdentifier,
                 summary_type: msg.cacheSummaryType ?? undefined,
             })
 
-            // Шаг 2: запускаем новый анализ
-            // message не может быть пустым (Pydantic min_length=1) — передаём осмысленный текст
             const summaryType = msg.cacheSummaryType ?? 'extractive'
             const res = await sendMsg<any>('summarizeDocument', {
                 message: `Проанализируй вложение`,
@@ -374,7 +414,7 @@ const RefreshCacheButton = memo(({
                 : res
 
             const newContent = payload?.response ?? payload?.content ?? payload?.message ?? 'Анализ завершён.'
-            onRefreshDone(msg.id, newContent, payload)  // передаём payload для обновления cache-полей
+            onRefreshDone(msg.id, newContent, payload)
 
             const label = typeLabel ? `«${typeLabel}»` : 'анализ'
             toast.success(`${label} обновлён.`, 'Готово')
@@ -392,19 +432,23 @@ const RefreshCacheButton = memo(({
             disabled={refreshing}
             onClick={handleRefresh}
             title={typeLabel ? `Пересчитать анализ «${typeLabel}»` : 'Пересчитать анализ'}
-            className="mt-1.5 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all disabled:opacity-50 self-start"
-            style={{color: '#94a3b8', background: 'transparent', border: '1px solid rgba(203,213,225,0.60)'}}
+            className="mt-2 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 self-start"
+            style={{
+                color: '#94a3b8',
+                background: 'transparent',
+                border: '1px solid rgba(0,0,0,0.05)',
+            }}
             onMouseEnter={e => {
                 if (refreshing) return
                 const el = e.currentTarget as HTMLButtonElement
                 el.style.color = '#6366f1'
-                el.style.borderColor = 'rgba(99,102,241,0.40)'
-                el.style.background = 'rgba(99,102,241,0.05)'
+                el.style.borderColor = 'rgba(99,102,241,0.20)'
+                el.style.background = 'rgba(99,102,241,0.04)'
             }}
             onMouseLeave={e => {
                 const el = e.currentTarget as HTMLButtonElement
                 el.style.color = '#94a3b8'
-                el.style.borderColor = 'rgba(203,213,225,0.60)'
+                el.style.borderColor = 'rgba(0,0,0,0.05)'
                 el.style.background = 'transparent'
             }}
         >
@@ -467,9 +511,13 @@ export function AssistantWidget() {
             setInput(prev => (prev.trimEnd() ? `${prev.trimEnd()} ` : '') + deltaText)
         },
         onAutoSend: () => {
+            stopMicRef.current()
             sendRef.current()
         },
     })
+
+    const stopMicRef = useRef(stopMic)
+    stopMicRef.current = stopMic
 
     const bottomRef = useRef<HTMLDivElement>(null)
     const fileRef = useRef<HTMLInputElement>(null)
@@ -537,7 +585,6 @@ export function AssistantWidget() {
                 content: m.content,
                 id: newMsgId(),
                 timestamp: now + i,
-                // Добавляем cache-поля только последнему (ai) сообщению
                 cacheFileIdentifier: (m.type === 'ai' && i === raw.length - 1)
                     ? (cache_file_identifier ?? null) : null,
                 cacheSummaryType: (m.type === 'ai' && i === raw.length - 1)
@@ -665,9 +712,7 @@ export function AssistantWidget() {
     }, [pendingDelete])
 
     const handleRefreshStart = useCallback((msgId: string, prevContent: string) => {
-        // Сохраняем старый контент в ref для восстановления при ошибке
         refreshPrevContentRef.current[msgId] = prevContent
-        // Показываем плейсхолдер пока идёт запрос
         setMessages(prev => prev.map(m =>
             m.id === msgId ? {...m, content: '…'} : m
         ))
@@ -682,7 +727,6 @@ export function AssistantWidget() {
                 content: newContent,
                 cacheFileIdentifier: newPayload?.metadata?.cache_file_identifier ?? m.cacheFileIdentifier,
                 cacheSummaryType: newPayload?.metadata?.cache_summary_type ?? m.cacheSummaryType,
-                // Обновляем contextId из нового ответа — он теперь приходит в metadata
                 cacheContextId: newPayload?.metadata?.cache_context_ui_id ?? m.cacheContextId,
                 cacheFilePath: m.cacheFilePath,
             }
@@ -690,7 +734,6 @@ export function AssistantWidget() {
     }, [])
 
     const handleRefreshError = useCallback((msgId: string) => {
-        // Восстанавливаем старый контент
         const prev = refreshPrevContentRef.current[msgId]
         if (prev) {
             setMessages(msgs => msgs.map(m =>
@@ -768,6 +811,7 @@ export function AssistantWidget() {
                 ?? 'Анализ завершён.'
 
             const cacheFileIdentifier: string | null = payload?.metadata?.cache_file_identifier ?? null
+            const complianceData: ComplianceData | null = payload?.metadata?.compliance ?? null
             const cacheSummaryType: string | null = payload?.metadata?.cache_summary_type ?? null
 
             const assistantMsg: Message = {
@@ -778,9 +822,9 @@ export function AssistantWidget() {
                 timestamp: Date.now(),
                 cacheFileIdentifier,
                 cacheSummaryType,
-                // Сохраняем параметры для повторного запроса при обновлении
                 cacheFilePath: finalFilePath ?? null,
                 cacheContextId: docId ?? null,
+                compliance: complianceData,
             }
             setMessages(prev => [...prev, assistantMsg])
 
@@ -852,6 +896,28 @@ export function AssistantWidget() {
         }
     }
 
+    const handleDocumentClick = useCallback((documentId: string) => {
+        const normalizedId = documentId.replace(
+            /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
+            '-'
+        ).trim()
+
+        const url = `/document-form/${normalizedId}`
+
+        chrome.runtime.sendMessage(
+            {type: 'navigateTo', payload: {url, newTab: true}},
+            (r) => {
+                if (!r?.success) {
+                    try {
+                        window.open(url, '_blank', 'noopener,noreferrer')
+                    } catch {
+                        toast.info(`Откройте документ: ${url}`)
+                    }
+                }
+            }
+        )
+    }, [])
+
     const abort = () => {
         if (!requestIdRef.current) return
         chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
@@ -871,6 +937,12 @@ export function AssistantWidget() {
         setIsSettingsOpen(false)
     }
 
+    const canSend = input.trim().length > 0 || Boolean(attachedFile)
+
+    // Прозрачность: 0 = непрозрачный, 0.5 = максимально прозрачный
+    const glassOpacity = userPrefs.appearance.glassOpacity ?? 0
+    const glassAlpha = 1 - glassOpacity
+
     if (!isEnabled) return null
 
     return (
@@ -880,15 +952,16 @@ export function AssistantWidget() {
                 <div
                     className="pointer-events-auto mb-2 flex items-center gap-3 px-4 py-2.5 rounded-2xl text-white shadow-xl"
                     style={{
-                        background: 'rgba(30,41,59,0.94)',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        animation: 'edms-fade-in .2s ease-out',
-                        backdropFilter: 'blur(12px)',
-                        fontSize: 12
+                        background: 'rgba(15,23,42,0.92)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        animation: 'edms-fade-in .25s ease-out',
+                        backdropFilter: 'blur(16px)',
+                        fontSize: 12,
                     }}
                 >
-                    <span style={{opacity: 0.85}}>Диалог удалён</span>
-                    <button type="button" onClick={undoDelete} className="font-semibold transition-colors"
+                    <span style={{opacity: 0.80}}>Диалог удалён</span>
+                    <button type="button" onClick={undoDelete}
+                            className="font-semibold transition-colors duration-200"
                             style={{color: '#a5b4fc'}}>Отменить
                     </button>
                 </div>
@@ -898,83 +971,104 @@ export function AssistantWidget() {
                 <button
                     type="button"
                     onClick={() => setIsOpen(true)}
-                    className="pointer-events-auto relative w-16 h-16 rounded-full flex items-center justify-center glass hover:scale-110 active:scale-95 transition-transform group"
+                    className="pointer-events-auto relative w-[56px] h-[56px] rounded-full flex items-center justify-center glass hover:scale-110 active:scale-95 transition-transform duration-300 group"
+                    style={{boxShadow: '0 4px 20px rgba(99,102,241,0.25)'}}
                 >
                     <span style={{
                         position: 'absolute',
-                        inset: 0,
+                        inset: -4,
                         borderRadius: '50%',
-                        background: 'rgba(99,102,241,0.18)',
+                        background: 'rgba(99,102,241,0.15)',
                         animation: 'edms-ripple 3s cubic-bezier(0.4,0,0.2,1) infinite',
-                        pointerEvents: 'none'
+                        pointerEvents: 'none',
                     }}/>
-                    <MessageSquare size={28}
-                                   className="text-indigo-600/90 group-hover:rotate-12 transition-transform z-10"/>
+                    <MessageSquare size={24}
+                                   className="text-indigo-500 group-hover:text-indigo-600 transition-colors z-10"
+                                   strokeWidth={2}/>
                 </button>
             )}
 
             {isOpen && (
                 <div
-                    className="pointer-events-auto flex flex-col w-[480px] max-w-[calc(100vw-40px)] rounded-[28px] overflow-hidden glass"
+                    className="pointer-events-auto flex flex-col w-[500px] max-w-[calc(100vw-32px)] overflow-hidden"
                     style={{
-                        height: 'min(720px, calc(100vh - 80px))',
-                        animation: 'edms-fade-in .3s cubic-bezier(.22,1,.36,1) forwards'
+                        height: 'min(740px, calc(100vh - 64px))',
+                        borderRadius: 24,
+                        background: `rgba(255,255,255,${glassAlpha})`,
+                        border: `1px solid rgba(255,255,255,${Math.min(glassAlpha + 0.12, 0.65)})`,
+                        boxShadow: `0 8px 40px rgba(0,0,0,${0.04 + glassOpacity * 0.08}), 0 0 0 1px rgba(0,0,0,0.03)`,
+                        backdropFilter: `blur(${Math.round(20 + glassOpacity * 20)}px) saturate(1.8)`,
+                        WebkitBackdropFilter: `blur(${Math.round(20 + glassOpacity * 20)}px) saturate(1.8)`,
+                        animation: 'edms-fade-in .35s cubic-bezier(.22,1,.36,1) forwards',
                     }}
                 >
+                    {/* ── Header ─────────────────────────────────────────── */}
                     <header
                         className="flex items-center justify-between px-4 py-3 shrink-0"
-                        style={{background: 'rgba(255,255,255,0.94)', borderBottom: '1px solid rgba(226,232,240,0.70)'}}
+                        style={{
+                            background: `rgba(255,255,255,${Math.min(glassAlpha + 0.15, 0.85)})`,
+                            borderBottom: '1px solid rgba(0,0,0,0.05)',
+                            backdropFilter: 'blur(12px)',
+                        }}
                     >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                             <button
                                 type="button"
                                 onClick={() => setIsSidebarOpen(v => !v)}
-                                className="p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-[5px] w-9 h-9"
+                                className="p-2 rounded-xl transition-all duration-200 flex flex-col justify-center items-center gap-[4px] w-8 h-8"
                                 style={{
-                                    background: isSidebarOpen ? 'rgba(99,102,241,0.10)' : 'transparent',
-                                    color: isSidebarOpen ? '#6366f1' : '#64748b'
+                                    background: isSidebarOpen ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                    color: isSidebarOpen ? '#6366f1' : '#94a3b8',
                                 }}
                             >
                                 <span
-                                    className={`h-px w-4 bg-current rounded transition-all duration-300 origin-center ${isSidebarOpen ? 'rotate-45 translate-y-[6px]' : ''}`}/>
+                                    className={`h-[1.5px] w-3.5 bg-current rounded-full transition-all duration-300 origin-center ${isSidebarOpen ? 'rotate-45 translate-y-[5px]' : ''}`}/>
                                 <span
-                                    className={`h-px w-4 bg-current rounded transition-all duration-200 ${isSidebarOpen ? 'opacity-0 scale-x-0' : ''}`}/>
+                                    className={`h-[1.5px] w-3.5 bg-current rounded-full transition-all duration-200 ${isSidebarOpen ? 'opacity-0 scale-x-0' : ''}`}/>
                                 <span
-                                    className={`h-px w-4 bg-current rounded transition-all duration-300 origin-center ${isSidebarOpen ? '-rotate-45 -translate-y-[6px]' : ''}`}/>
+                                    className={`h-[1.5px] w-3.5 bg-current rounded-full transition-all duration-300 origin-center ${isSidebarOpen ? '-rotate-45 -translate-y-[5px]' : ''}`}/>
                             </button>
-                            <h3 className="edms-header-title font-semibold tracking-tight"
-                                style={{color: '#0f172a'}}>EDMS Assistant</h3>
+                            <div className="flex items-center gap-2">
+                                <div style={{
+                                    width: 8, height: 8, borderRadius: '50%',
+                                    background: '#6366f1',
+                                    boxShadow: '0 0 8px rgba(99,102,241,0.40)',
+                                }}/>
+                                <h3 className="edms-header-title"
+                                    style={{color: '#0f172a'}}>EDMS Assistant</h3>
+                            </div>
                         </div>
                         <button
                             type="button"
                             onClick={closeWidget}
-                            className="p-2 rounded-xl transition-all"
-                            style={{color: '#94a3b8'}}
+                            className="p-2 rounded-xl transition-all duration-200"
+                            style={{color: '#cbd5e1'}}
                             onMouseEnter={e => {
                                 const el = e.currentTarget as HTMLElement;
-                                el.style.color = '#ef4444';
-                                el.style.background = 'rgba(254,226,226,0.70)'
+                                el.style.color = '#f87171';
+                                el.style.background = 'rgba(254,226,226,0.60)'
                             }}
                             onMouseLeave={e => {
                                 const el = e.currentTarget as HTMLElement;
-                                el.style.color = '#94a3b8';
+                                el.style.color = '#cbd5e1';
                                 el.style.background = 'transparent'
                             }}
                         >
-                            <X size={18}/>
+                            <X size={17}/>
                         </button>
                     </header>
 
                     <div className="flex-1 flex overflow-hidden">
+                        {/* ── Sidebar ────────────────────────────────────── */}
                         <aside
-                            className={`shrink-0 flex flex-col transition-all duration-300 overflow-hidden ${isSidebarOpen ? 'w-60' : 'w-0'}`}
+                            className={`shrink-0 flex flex-col transition-all duration-300 ease-out overflow-hidden ${isSidebarOpen ? 'w-[232px]' : 'w-0'}`}
                             style={{
-                                background: 'rgba(248,250,252,0.92)',
-                                borderRight: '1px solid rgba(226,232,240,0.70)',
-                                backdropFilter: 'blur(12px)'
+                                background: `rgba(248,250,252,${Math.min(glassAlpha + 0.2, 0.92)})`,
+                                borderRight: isSidebarOpen ? '1px solid rgba(0,0,0,0.05)' : '1px solid transparent',
+                                backdropFilter: 'blur(16px)',
                             }}
                         >
-                            <div className="p-3 w-60 flex flex-col h-full">
+                            <div className="p-3 w-[232px] flex flex-col h-full">
                                 {isSettingsOpen ? (
                                     <SettingsPanel onClose={() => setIsSettingsOpen(false)}/>
                                 ) : (
@@ -983,56 +1077,84 @@ export function AssistantWidget() {
                                             type="button"
                                             onClick={newChat}
                                             disabled={loading}
-                                            className="w-full py-2 px-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mb-4"
-                                            style={{fontSize: 13}}
+                                            className="w-full py-2.5 px-3 rounded-xl text-white font-semibold transition-all duration-200 mb-4"
+                                            style={{
+                                                fontSize: 12,
+                                                background: loading
+                                                    ? 'rgba(99,102,241,0.40)'
+                                                    : 'linear-gradient(135deg, #6366f1 0%, #818cf8 100%)',
+                                                boxShadow: loading ? 'none' : '0 2px 10px rgba(99,102,241,0.30)',
+                                            }}
+                                            onMouseEnter={e => {
+                                                if (loading) return
+                                                const el = e.currentTarget as HTMLButtonElement
+                                                el.style.boxShadow = '0 4px 16px rgba(99,102,241,0.40)'
+                                                el.style.transform = 'translateY(-1px)'
+                                            }}
+                                            onMouseLeave={e => {
+                                                const el = e.currentTarget as HTMLButtonElement
+                                                el.style.boxShadow = loading ? 'none' : '0 2px 10px rgba(99,102,241,0.30)'
+                                                el.style.transform = 'translateY(0)'
+                                            }}
                                         >
                                             + Новый диалог
                                         </button>
-                                        <div className="flex items-center gap-2 px-1 mb-2">
-                                            <History size={11} style={{color: '#94a3b8'}}/>
-                                            <span className="uppercase tracking-widest font-bold"
+                                        <div className="flex items-center gap-2 px-1 mb-2.5">
+                                            <History size={10} style={{color: '#94a3b8'}}/>
+                                            <span className="uppercase tracking-[0.12em] font-bold"
                                                   style={{color: '#94a3b8', fontSize: 9}}>История</span>
                                         </div>
-                                        <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col gap-1.5">
+                                        <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col gap-1">
                                             {threads.length === 0 ? (
-                                                <p className="italic text-center py-6 rounded-xl border border-dashed"
+                                                <p className="italic text-center py-8 rounded-xl border border-dashed"
                                                    style={{
                                                        color: '#94a3b8',
-                                                       borderColor: 'rgba(203,213,225,0.80)',
-                                                       fontSize: 11
+                                                       borderColor: 'rgba(0,0,0,0.06)',
+                                                       fontSize: 11,
                                                    }}>
                                                     История пуста
                                                 </p>
                                             ) : threads.map(t => (
                                                 <div
                                                     key={t.id}
-                                                    className="group relative flex items-stretch rounded-xl border transition-all"
+                                                    className="group relative flex items-stretch rounded-xl transition-all duration-150"
                                                     style={{
                                                         background: threadId === t.id ? 'rgba(255,255,255,0.90)' : 'transparent',
-                                                        borderColor: threadId === t.id ? 'rgba(203,213,225,0.80)' : 'transparent'
+                                                        border: threadId === t.id ? '1px solid rgba(0,0,0,0.05)' : '1px solid transparent',
+                                                        boxShadow: threadId === t.id ? 'var(--edms-shadow-xs)' : 'none',
                                                     }}
                                                 >
                                                     <button type="button" onClick={() => loadHistory(t.id)}
-                                                            className="flex-1 text-left p-2.5 min-w-0">
+                                                            className="flex-1 text-left p-2.5 min-w-0 transition-colors duration-150"
+                                                            style={{borderRadius: threadId === t.id ? 12 : 0}}
+                                                            onMouseEnter={e => {
+                                                                if (threadId === t.id) return
+                                                                e.currentTarget.style.background = 'rgba(255,255,255,0.60)'
+                                                            }}
+                                                            onMouseLeave={e => {
+                                                                if (threadId === t.id) return
+                                                                e.currentTarget.style.background = 'transparent'
+                                                            }}
+                                                    >
                                                         <p className="edms-thread-preview font-medium line-clamp-2 leading-relaxed pr-5"
-                                                           style={{color: '#1e293b'}}>{t.preview}</p>
-                                                        <span className="mt-0.5 block"
+                                                           style={{color: '#334155'}}>{t.preview}</p>
+                                                        <span className="mt-1 block"
                                                               style={{color: '#94a3b8', fontSize: 9}}>{t.date}</span>
                                                     </button>
                                                     <button
                                                         type="button"
                                                         onClick={(e) => deleteThread(t.id, e)}
                                                         title="Удалить"
-                                                        className="absolute top-1.5 right-1.5 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                                                        style={{color: '#94a3b8'}}
+                                                        className="absolute top-1.5 right-1.5 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-150"
+                                                        style={{color: '#cbd5e1'}}
                                                         onMouseEnter={e => {
                                                             const el = e.currentTarget as HTMLElement;
-                                                            el.style.color = '#ef4444';
-                                                            el.style.background = 'rgba(254,226,226,0.70)'
+                                                            el.style.color = '#f87171';
+                                                            el.style.background = 'rgba(254,226,226,0.60)'
                                                         }}
                                                         onMouseLeave={e => {
                                                             const el = e.currentTarget as HTMLElement;
-                                                            el.style.color = '#94a3b8';
+                                                            el.style.color = '#cbd5e1';
                                                             el.style.background = 'transparent'
                                                         }}
                                                     >
@@ -1042,15 +1164,25 @@ export function AssistantWidget() {
                                             ))}
                                         </div>
                                         <div className="mt-auto pt-3"
-                                             style={{borderTop: '1px solid rgba(226,232,240,0.70)'}}>
+                                             style={{borderTop: '1px solid rgba(0,0,0,0.05)'}}>
                                             <button
                                                 type="button"
                                                 onClick={() => setIsSettingsOpen(true)}
-                                                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl font-medium hover:bg-white/80 transition-all group"
-                                                style={{color: '#475569', fontSize: 11}}
+                                                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 group"
+                                                style={{color: '#64748b', fontSize: 11}}
+                                                onMouseEnter={e => {
+                                                    const el = e.currentTarget as HTMLButtonElement
+                                                    el.style.background = 'rgba(255,255,255,0.70)'
+                                                    el.style.color = '#334155'
+                                                }}
+                                                onMouseLeave={e => {
+                                                    const el = e.currentTarget as HTMLButtonElement
+                                                    el.style.background = 'transparent'
+                                                    el.style.color = '#64748b'
+                                                }}
                                             >
                                                 <Settings size={13}
-                                                          className="group-hover:text-indigo-500 transition-colors group-hover:rotate-45 duration-300"
+                                                          className="transition-colors duration-300"
                                                           style={{color: '#94a3b8'}}/>
                                                 <span>Настройки</span>
                                             </button>
@@ -1060,15 +1192,35 @@ export function AssistantWidget() {
                             </div>
                         </aside>
 
+                        {/* ── Main Chat Area ─────────────────────────────── */}
                         <main className="flex-1 flex flex-col min-w-0 overflow-hidden"
-                              style={{background: 'rgba(255,255,255,0.60)'}}>
+                              style={{background: `rgba(255,255,255,${glassAlpha * 0.6})`}}>
                             <div className="flex-1 p-4 overflow-y-auto scrollbar-thin flex flex-col gap-3">
                                 {messages.length === 0 && !loading && (
-                                    <div className="flex-1 flex flex-col items-center justify-center gap-3 select-none"
-                                         style={{opacity: 0.30}}>
-                                        <MessageSquare size={44} strokeWidth={1} style={{color: '#475569'}}/>
-                                        <p className="font-medium" style={{color: '#475569', fontSize: 14}}>Чем я могу
-                                            помочь?</p>
+                                    <div className="flex-1 flex flex-col items-center justify-center gap-4"
+                                         style={{animation: 'edms-fade-in-up .5s ease-out'}}>
+                                        <div style={{
+                                            position: 'relative',
+                                            width: 64, height: 64,
+                                            borderRadius: 20,
+                                            background: 'linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(129,140,248,0.04) 100%)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}>
+                                            <MessageSquare size={28} strokeWidth={1.5}
+                                                           style={{color: '#a5b4fc'}}/>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="font-semibold"
+                                               style={{color: '#334155', fontSize: 15, letterSpacing: '-0.01em'}}>
+                                                Чем могу помочь?
+                                            </p>
+                                            <p className="mt-1"
+                                               style={{color: '#94a3b8', fontSize: 12}}>
+                                                Задайте вопрос о документе или загрузите файл
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                                 {messages.map(msg => {
@@ -1086,6 +1238,7 @@ export function AssistantWidget() {
                                                     setInput(prev => prev ? prev : `Проанализируй файл «${fileName}»`)
                                                     textareaRef.current?.focus()
                                                 }}
+                                                onDocumentClick={handleDocumentClick}
                                             />
                                             <ActionButtons
                                                 msg={msg}
@@ -1094,6 +1247,39 @@ export function AssistantWidget() {
                                                 defaultSummaryFormat={userPrefs.documents.defaultSummaryFormat}
                                             />
                                             <DisambiguationButtons msg={msg} loading={loading} onSend={sendWithLabel}/>
+                                            {msg.compliance && (
+                                                <ComplianceResult
+                                                    data={msg.compliance}
+                                                    threadId={threadId}
+                                                    onFieldFixed={(fieldKey, newValue) => {
+                                                        setMessages(prev => prev.map(m => {
+                                                            if (m.id !== msg.id || !m.compliance) return m
+                                                            const updatedFields = m.compliance.fields.map(f =>
+                                                                f.field_key === fieldKey
+                                                                    ? {
+                                                                        ...f,
+                                                                        status: 'ok' as const,
+                                                                        card_value: newValue,
+                                                                        correct_value: null
+                                                                    }
+                                                                    : f
+                                                            )
+                                                            const anyMismatch = updatedFields.some(f => f.status === 'mismatch')
+                                                            return {
+                                                                ...m,
+                                                                compliance: {
+                                                                    ...m.compliance,
+                                                                    fields: updatedFields,
+                                                                    overall: anyMismatch ? 'has_mismatches' : 'ok',
+                                                                },
+                                                            }
+                                                        }))
+                                                    }}
+                                                    onAllFixed={() => {
+                                                        setTimeout(() => window.location.reload(), 1500)
+                                                    }}
+                                                />
+                                            )}
                                             <RefreshCacheButton
                                                 msg={msg}
                                                 userToken={getAuthToken() ?? ''}
@@ -1108,45 +1294,49 @@ export function AssistantWidget() {
                                 <div ref={bottomRef}/>
                             </div>
 
-                            <footer
-                                className="px-3 pb-3 pt-2 shrink-0"
-                                style={{
-                                    borderTop: '1px solid rgba(226,232,240,0.60)',
-                                    background: 'rgba(255,255,255,0.80)'
-                                }}
-                            >
+                            {/* ── Input Area ─────────────────────────────── */}
+                            <footer className="px-3 pb-3 pt-1 shrink-0">
                                 {isListening && (
-                                    <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center justify-between mb-1"
+                                         style={{animation: 'edms-fade-in .2s ease-out'}}>
                                         <SoundWave/>
-                                        {autoSendPending && <span className="font-medium animate-pulse pr-1" style={{
-                                            fontSize: 10,
-                                            color: '#6366f1'
-                                        }}>отправляю…</span>}
+                                        {autoSendPending && (
+                                            <span className="font-medium pr-1"
+                                                  style={{
+                                                      fontSize: 10,
+                                                      color: '#6366f1',
+                                                      animation: 'edms-pulse-soft 1.2s ease-in-out infinite',
+                                                  }}>
+                                                отправляю…
+                                            </span>
+                                        )}
                                     </div>
                                 )}
 
                                 {attachedFile && (
                                     <div
-                                        className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-xl w-fit"
+                                        className="flex items-center gap-2 mb-2 px-3 py-2 rounded-2xl w-fit"
                                         style={{
                                             background: 'rgba(241,245,249,0.90)',
-                                            border: '1px solid rgba(203,213,225,0.70)',
-                                            fontSize: 11
+                                            border: '1px solid rgba(0,0,0,0.05)',
+                                            fontSize: 11,
+                                            boxShadow: 'var(--edms-shadow-xs)',
+                                            animation: 'edms-fade-in-up .2s ease-out',
                                         }}
                                     >
-                                        <Paperclip size={13} style={{color: '#6366f1', flexShrink: 0}}/>
+                                        <Paperclip size={12} style={{color: '#6366f1', flexShrink: 0}}/>
                                         <span className="font-medium truncate max-w-[180px]"
                                               style={{color: '#1e293b'}}>{attachedFile.name}</span>
                                         <button
                                             type="button"
                                             onClick={() => setAttachedFile(null)}
-                                            className="ml-1 transition-colors"
-                                            style={{color: '#94a3b8'}}
+                                            className="ml-0.5 transition-colors duration-150"
+                                            style={{color: '#cbd5e1'}}
                                             onMouseEnter={e => {
-                                                (e.currentTarget as HTMLElement).style.color = '#ef4444'
+                                                (e.currentTarget as HTMLElement).style.color = '#f87171'
                                             }}
                                             onMouseLeave={e => {
-                                                (e.currentTarget as HTMLElement).style.color = '#94a3b8'
+                                                (e.currentTarget as HTMLElement).style.color = '#cbd5e1'
                                             }}
                                         >
                                             <X size={13}/>
@@ -1154,134 +1344,155 @@ export function AssistantWidget() {
                                     </div>
                                 )}
 
-                                <div style={{
-                                    display: 'flex', alignItems: 'flex-end', gap: 4, padding: 4,
-                                    background: 'rgba(255,255,255,0.95)', border: 'none', borderRadius: 18,
-                                    boxShadow: isFocused
-                                        ? '0 0 0 3px rgba(99,102,241,0.22), 0 0 28px rgba(99,102,241,0.16), 0 2px 12px rgba(0,0,0,0.07)'
-                                        : '0 1px 4px rgba(0,0,0,0.08), 0 0 0 1px rgba(226,232,240,0.60)',
-                                    transition: 'box-shadow 0.2s ease',
-                                }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => fileRef.current?.click()}
-                                        className="p-2 mb-1 rounded-xl transition-all shrink-0"
-                                        style={{color: '#94a3b8'}}
-                                        onMouseEnter={e => {
-                                            const el = e.currentTarget as HTMLElement;
-                                            el.style.color = '#6366f1';
-                                            el.style.background = 'rgba(99,102,241,0.08)'
-                                        }}
-                                        onMouseLeave={e => {
-                                            const el = e.currentTarget as HTMLElement;
-                                            el.style.color = '#94a3b8';
-                                            el.style.background = 'transparent'
-                                        }}
-                                    >
-                                        <Paperclip size={18}/>
-                                    </button>
-
-                                    {isSpeechSupported && (
-                                        <>
+                                {/* ── Pill Input ─────────────────────────── */}
+                                <div
+                                    className={`edms-input-pill ${isFocused ? 'focused' : ''}`}
+                                    style={{padding: '4px 4px 4px 2px'}}
+                                >
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 0,
+                                        width: '100%',
+                                    }}>
+                                        {/* Left: attachment + mic/send toggle */}
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 0,
+                                            flexShrink: 0,
+                                        }}>
                                             <button
                                                 type="button"
-                                                title={isListening ? 'Остановить' : 'Голосовой ввод'}
-                                                onClick={toggleMic}
-                                                className={`p-2 mb-1 rounded-xl transition-all shrink-0 ${isListening ? 'text-red-500 bg-red-50 animate-pulse' : ''}`}
-                                                style={isListening ? {} : {color: '#94a3b8'}}
-                                                onMouseEnter={e => {
-                                                    if (!isListening) {
-                                                        const el = e.currentTarget as HTMLElement;
-                                                        el.style.color = '#6366f1';
-                                                        el.style.background = 'rgba(99,102,241,0.08)'
-                                                    }
-                                                }}
-                                                onMouseLeave={e => {
-                                                    if (!isListening) {
-                                                        const el = e.currentTarget as HTMLElement;
-                                                        el.style.color = '#94a3b8';
-                                                        el.style.background = 'transparent'
-                                                    }
-                                                }}
+                                                onClick={() => fileRef.current?.click()}
+                                                className="edms-icon-btn"
+                                                title="Прикрепить файл"
                                             >
-                                                {isListening ? <StopCircle size={17}/> : <Mic size={18}/>}
+                                                <Paperclip size={18}/>
                                             </button>
-                                            {(isListening || handsFree) && (
+
+                                            {isSpeechSupported && (
+                                                <>
+                                                    {/* Микрофон ↔ Отправить: при вводе текста микрофон превращается в отправку */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={canSend ? (e) => send(e) : toggleMic}
+                                                        title={canSend ? 'Отправить' : isListening ? 'Остановить' : 'Голосовой ввод'}
+                                                        className="edms-icon-btn"
+                                                        style={canSend ? {
+                                                            background: 'rgba(99,102,241,0.10)',
+                                                            color: '#6366f1',
+                                                        } : isListening ? {
+                                                            background: 'rgba(239,68,68,0.08)',
+                                                            color: '#ef4444',
+                                                            animation: 'edms-pulse-soft 1.5s ease-in-out infinite',
+                                                        } : {}}
+                                                    >
+                                                        {canSend
+                                                            ? <Send size={17} style={{marginLeft: 1}}/>
+                                                            : isListening
+                                                                ? <StopCircle size={17}/>
+                                                                : <Mic size={18}/>
+                                                        }
+                                                    </button>
+
+                                                    {/* Hands-Free toggle */}
+                                                    {(isListening || handsFree) && !canSend && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setHandsFree(v => !v)}
+                                                            className="edms-icon-btn"
+                                                            title={handsFree ? 'Выключить автоотправку' : 'Включить автоотправку'}
+                                                            style={handsFree ? {
+                                                                background: 'rgba(99,102,241,0.10)',
+                                                                color: '#6366f1',
+                                                            } : {width: 28, height: 28}}
+                                                        >
+                                                            <svg width={handsFree ? 14 : 11}
+                                                                 height={handsFree ? 14 : 11}
+                                                                 viewBox="0 0 24 24" fill="none"
+                                                                 stroke="currentColor" strokeWidth={2.5}
+                                                                 strokeLinecap="round" strokeLinejoin="round">
+                                                                <polygon
+                                                                    points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                                            </svg>
+                                                        </button>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+
+                                        <div className="flex-1 relative" style={{padding: '0 2px'}}>
+                                            <textarea
+                                                ref={textareaRef}
+                                                rows={1}
+                                                value={input}
+                                                onFocus={() => setIsFocused(true)}
+                                                onBlur={() => setIsFocused(false)}
+                                                onChange={e => setInput(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                        e.preventDefault()
+                                                        send(e)
+                                                    }
+                                                }}
+                                                placeholder={
+                                                    isSidebarOpen
+                                                        ? ''
+                                                        : autoSendPending
+                                                            ? 'Отправляю…'
+                                                            : isListening
+                                                                ? 'Слушаю…'
+                                                                : attachedFile
+                                                                    ? 'Добавьте комментарий…'
+                                                                    : 'Спросите AI...'
+                                                }
+                                                className="edms-textarea w-full bg-transparent border-none outline-none resize-none scrollbar-thin"
+                                                style={{
+                                                    color: '#0f172a',
+                                                    caretColor: '#6366f1',
+                                                    padding: '9px 6px',
+                                                    maxHeight: 150,
+                                                    minWidth: 0,
+                                                }}
+                                            />
+                                            {interimTranscript && (
+                                                <span
+                                                    aria-hidden="true"
+                                                    className="absolute left-1 pointer-events-none"
+                                                    style={{
+                                                        top: '10px',
+                                                        paddingLeft: input ? '0.5ch' : 0,
+                                                        whiteSpace: 'pre-wrap',
+                                                        wordBreak: 'break-word',
+                                                        color: '#cbd5e1',
+                                                        fontSize: 14,
+                                                    }}
+                                                >
+                                                    {input ? `${input} ` : ''}{interimTranscript}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {/* Right: только стоп при загрузке */}
+                                        <div style={{flexShrink: 0}}>
+                                            {loading && (
                                                 <button
                                                     type="button"
-                                                    onClick={() => setHandsFree(v => !v)}
-                                                    className={`p-2 mb-1 rounded-xl transition-all leading-none shrink-0 ${handsFree ? 'text-indigo-600 bg-indigo-50 border border-indigo-200/60' : ''}`}
-                                                    style={handsFree ? {
-                                                        fontSize: 10,
-                                                        fontWeight: 700
-                                                    } : {color: '#94a3b8', fontSize: 10, fontWeight: 700}}
+                                                    onClick={abort}
+                                                    className="edms-stop-btn"
+                                                    title="Остановить"
                                                 >
-                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                                                         stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"
-                                                         strokeLinejoin="round">
-                                                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                                                    </svg>
+                                                    <StopCircle size={17}/>
                                                 </button>
                                             )}
-                                        </>
-                                    )}
-
-                                    <div className="flex-1 relative">
-                                        <textarea
-                                            ref={textareaRef}
-                                            rows={1}
-                                            value={input}
-                                            onFocus={() => setIsFocused(true)}
-                                            onBlur={() => setIsFocused(false)}
-                                            onChange={e => setInput(e.target.value)}
-                                            onKeyDown={e => {
-                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                    e.preventDefault()
-                                                    send(e)
-                                                }
-                                            }}
-                                            placeholder={isSidebarOpen ? '' : (autoSendPending ? 'Отправляю...' : isListening ? 'Слушаю...' : attachedFile ? 'Добавьте комментарий...' : 'Спросите AI...')}
-                                            className="edms-textarea w-full bg-transparent border-none outline-none px-2 py-[9px] resize-none max-h-[150px] scrollbar-thin leading-snug"
-                                            style={{color: '#0f172a', caretColor: '#6366f1'}}
-                                        />
-                                        {interimTranscript && (
-                                            <span
-                                                aria-hidden="true"
-                                                className="absolute left-1 pointer-events-none select-none"
-                                                style={{
-                                                    top: '10px',
-                                                    paddingLeft: input ? '0.5ch' : 0,
-                                                    whiteSpace: 'pre-wrap',
-                                                    wordBreak: 'break-word',
-                                                    color: '#94a3b8',
-                                                    fontSize: 14
-                                                }}
-                                            >
-                                                {input ? `${input} ` : ''}{interimTranscript}
-                                            </span>
-                                        )}
+                                        </div>
                                     </div>
-
-                                    {loading ? (
-                                        <button type="button" onClick={abort}
-                                                className="p-2 mb-1 rounded-xl bg-red-500 text-white hover:bg-red-600 active:scale-95 transition-all shrink-0">
-                                            <StopCircle size={17}/>
-                                        </button>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={e => send(e)}
-                                            disabled={!input.trim() && !attachedFile}
-                                            className="p-2 mb-1 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-30 active:scale-95 transition-all shrink-0"
-                                        >
-                                            <Send size={17}/>
-                                        </button>
-                                    )}
                                 </div>
 
-                                <p className="text-center mt-1.5 px-2.5 leading-tight"
-                                   style={{color: '#94a3b8', opacity: 0.65, fontSize: 10}}>
-                                    EDMS Assistant — это ИИ. Он может ошибаться, в том числе давать неверную информацию.
+                                <p className="text-center mt-2 px-4 leading-tight"
+                                   style={{color: '#cbd5e1', fontSize: 9.5}}>
+                                    EDMS Assistant — ИИ. Может ошибаться и давать неверную информацию.
                                 </p>
                             </footer>
                         </main>
@@ -1304,5 +1515,3 @@ export function AssistantWidget() {
         </div>
     )
 }
-
-// 5

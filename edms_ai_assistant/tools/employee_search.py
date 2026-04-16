@@ -2,7 +2,6 @@
 """
 EDMS AI Assistant — Employee Search Tool.
 
-Слой: Infrastructure / Tool.
 Поиск сотрудников в реестре EDMS по ФИО, отделу, должности и другим критериям.
 
 Маппинг параметров инструмента → поля EmployeeFilter (EmployeeController.java):
@@ -47,7 +46,6 @@ logger = logging.getLogger(__name__)
 # Максимальное количество сотрудников в одном ответе агенту
 _MAX_RESULTS: int = 20
 
-# Дефолтные includes: без них API не вернёт вложенные объекты post и department
 _DEFAULT_INCLUDES: list[str] = ["POST", "DEPARTMENT"]
 
 
@@ -251,7 +249,6 @@ async def employee_search_tool(
     IMPORTANT:
     - department_names принимает НАЗВАНИЯ отделов (не UUID) — «Бухгалтерия», «ОК».
     - department_ids принимает UUID — только если UUID уже получен из API.
-    - Никогда не передавай названия в department_ids — будет 400 Bad Request.
 
     Returns up to 20 employees. If multiple found — returns selection list.
     """
@@ -272,18 +269,14 @@ async def employee_search_tool(
     if middle_name:
         employee_filter["middleName"] = middle_name
 
-    # Должность — EmployeeFilter.fullPostName (строковый поиск)
     if full_post_name:
         employee_filter["fullPostName"] = full_post_name
 
-    # Статус — передаём только True; False не несёт смысла для фильтрации
     if active_only is True:
         employee_filter["active"] = True
     if fired_only is True:
         employee_filter["fired"] = True
 
-    # Структура: резолвим названия → UUID, затем мержим с явными UUID
-    # departmentId в Java: UUID[] — ТОЛЬКО UUID, никаких строк-названий
     resolved_dept_ids: list[str] = list(department_ids or [])
 
     if department_names:
@@ -297,7 +290,6 @@ async def employee_search_tool(
                 "Department names not resolved to UUID",
                 extra={"unresolved": unresolved},
             )
-            # Если не нашли ни одного отдела и других фильтров нет — ошибка
             has_other_filters = any(
                 [
                     last_name,
@@ -317,13 +309,11 @@ async def employee_search_tool(
                 }
 
     if resolved_dept_ids:
-        # Java UUID[] → передаём как список строк; Spring десериализует корректно
         employee_filter["departmentId"] = resolved_dept_ids
 
     if child_departments is True:
         employee_filter["childDepartments"] = True
 
-    # ids: List<UUID> в Java — пакетный запрос по конкретным UUID
     if employee_ids:
         employee_filter["ids"] = employee_ids
 
@@ -339,7 +329,6 @@ async def employee_search_tool(
 
     try:
         async with EmployeeClient() as client:
-            # POST /search предпочтителен: нет ограничений размера тела запроса
             results = await client.search_employees_post(
                 token=token,
                 employee_filter=employee_filter,
@@ -354,7 +343,6 @@ async def employee_search_tool(
                 "total": 0,
             }
 
-        # Один результат — сразу полная карточка
         if len(results) == 1:
             emp_card = _serialize_employee(results[0], nlp)
             logger.info(
@@ -367,7 +355,6 @@ async def employee_search_tool(
                 "employee_card": emp_card,
             }
 
-        # Несколько — список для уточнения выбора
         choices = [_serialize_employee_brief(r) for r in results[:_MAX_RESULTS]]
         logger.info("Multiple employees found", extra={"count": len(choices)})
 
@@ -408,7 +395,6 @@ async def _resolve_department_names(
     Returns:
         Tuple of (resolved_uuids: List[str], unresolved_names: List[str]).
     """
-    # Импортируем здесь чтобы избежать циклических зависимостей
     from edms_ai_assistant.clients.department_client import DepartmentClient
 
     resolved: list[str] = []
@@ -464,7 +450,6 @@ async def _get_employee_card(
                 "message": f"Сотрудник с UUID {employee_id} не найден.",
             }
 
-        # nlp.process_employee_info принимает EmployeeDto (Pydantic-объект), не dict
         emp = EmployeeDto.model_validate(raw)
         return {
             "status": "found",

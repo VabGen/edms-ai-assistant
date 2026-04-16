@@ -6,6 +6,7 @@ EDMS AI Assistant — Tool Registry.
 from .appeal_autofill import autofill_appeal_document
 from .attachment import doc_get_file_content
 from .create_document_from_file import create_document_from_file
+from .doc_compliance_check import doc_compliance_check
 from .doc_notification import doc_send_notification
 from .doc_search import doc_search_tool
 from .doc_update_field import doc_update_field
@@ -41,6 +42,8 @@ all_tools = [
     employee_search_tool,
     # Notifications
     doc_send_notification,
+    # Compliance
+    doc_compliance_check,
 ]
 
 __all__ = [
@@ -59,5 +62,6 @@ __all__ = [
     "introduction_create_tool",
     "read_local_file_content",
     "task_create_tool",
-    "create_document_from_file"
+    "create_document_from_file",
+    "doc_compliance_check",
 ]

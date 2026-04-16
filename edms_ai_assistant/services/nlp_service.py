@@ -69,7 +69,8 @@ class UserIntent(Enum):
     UNKNOWN = "unknown"
     FILE_ANALYSIS = "file_analysis"
     CREATE_DOCUMENT = "create_document"
-    NOTIFICATION = "notification"
+    # NOTIFICATION = "notification"
+    COMPLIANCE_CHECK = "compliance_check"
 
 
 class QueryComplexity(Enum):
@@ -617,11 +618,11 @@ class QueryRefiner:
             else:
                 hints.append("версии: авто (первая↔последняя)")
 
-        elif intent == UserIntent.NOTIFICATION:
-            if "persons" in entities:
-                hints.append(f"получатель: {entities['persons'][0].value}")
-            if "dates" in entities:
-                hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
+        # elif intent == UserIntent.NOTIFICATION:
+        #     if "persons" in entities:
+        #         hints.append(f"получатель: {entities['persons'][0].value}")
+        #     if "dates" in entities:
+        #         hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
 
         elif intent == UserIntent.SUMMARIZE:
             if "numbers" in entities:
@@ -808,18 +809,38 @@ class SemanticDispatcher:
             ],
             "negative": [],
         },
-        UserIntent.NOTIFICATION: {
+        # UserIntent.NOTIFICATION: {
+        #     "primary": [
+        #         "уведоми",
+        #         "напомни",
+        #         "отправь напоминание",
+        #         "уведомление",
+        #         "напоминание",
+        #         "предупреди",
+        #         "сообщи",
+        #         "отправь уведомление",
+        #     ],
+        #     "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+        #     "negative": [],
+        # },
+        UserIntent.COMPLIANCE_CHECK: {
             "primary": [
-                "уведоми",
-                "напомни",
-                "отправь напоминание",
-                "уведомление",
-                "напоминание",
-                "предупреди",
-                "сообщи",
-                "отправь уведомление",
+                "проверить документ",
+                "проверь документ",
+                "проверка документа",
+                "соответствие документа",
+                "корректность заполнения",
+                "всё ли правильно заполнено",
+                "соответствует ли карточка",
+                "перед отправкой проверь",
             ],
-            "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+            "secondary": [
+                "проверить поля",
+                "проверить данные",
+                "расхождения",
+                "несоответствие",
+                "ошибки в карточке",
+            ],
             "negative": [],
         },
     }
@@ -1845,6 +1866,7 @@ class EDMSNaturalLanguageService:
                 "контакты": {
                     "email": getattr(emp, "email", None),
                     "телефон": getattr(emp, "phone", None),
+                    "адрес": getattr(emp, "address", None),
                 },
                 "структура": {
                     "код_департамента": self.get_safe(emp, "department.departmentCode"),

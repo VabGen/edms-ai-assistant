@@ -1,14 +1,6 @@
 # edms_ai_assistant/tools/doc_notification.py
 """
 EDMS AI Assistant — Notification & Reminder Tool.
-
-Слой: Infrastructure / Tool.
-Отправляет уведомления и напоминания сотрудникам через EDMS API.
-
-Поддерживаемые типы уведомлений:
-  - REMINDER   — ручное напоминание о документе / дедлайне
-  - DEADLINE   — предупреждение о приближающемся сроке поручения
-  - CUSTOM     — произвольное сообщение по документу
 """
 
 from __future__ import annotations
@@ -47,8 +39,7 @@ class _NotificationClient(EdmsHttpClient):
     ) -> dict[str, Any]:
         """
         Sends a notification to the given employees.
-
-        POST api/document/{document_id}/notification
+        Endpoint: POST api/document/{document_id}/notification
         """
         payload: dict[str, Any] = {
             "recipientIds": recipient_ids,
@@ -58,14 +49,14 @@ class _NotificationClient(EdmsHttpClient):
         if deadline:
             payload["deadline"] = deadline
 
+        # FIX: is_json_response=True, так как бэкенд возвращает DTO, а не 204 No Content
         result = await self._make_request(
             "POST",
             f"api/document/{document_id}/notification",
             token=token,
             json=payload,
-            is_json_response=False,
+            is_json_response=True,
         )
-        # Некоторые EDMS-эндпоинты возвращают пустой 204 — нормализуем.
         return result if isinstance(result, dict) else {"sent": True}
 
 
@@ -152,12 +143,9 @@ async def doc_send_notification(
     - «Напомни Иванову о документе»
     - «Отправь уведомление исполнителям о дедлайне 15 апреля»
     - «Предупреди Петрова о приближающемся сроке»
-    - «Сообщи всем исполнителям поручения что срок переносится»
 
     ВАЖНО: перед вызовом используй employee_search_tool для получения UUID
     сотрудников-получателей, если они не известны.
-
-    Возвращает статус отправки и список адресатов.
     """
     logger.info(
         "Sending notification",
@@ -165,7 +153,6 @@ async def doc_send_notification(
             "document_id": document_id,
             "recipients_count": len(recipient_ids),
             "notification_type": notification_type,
-            "has_deadline": bool(deadline),
         },
     )
 
@@ -188,13 +175,14 @@ async def doc_send_notification(
             extra={
                 "document_id": document_id,
                 "recipients": recipients_count,
+                "response": result,
             },
         )
 
         return {
             "status": "success",
             "message": (
-                f"Уведомление отправлено {recipients_count} "
+                f"✅ Уведомление отправлено {recipients_count} "
                 f"сотруднику(-ам){deadline_note}."
             ),
             "notification_type": str(notification_type),
@@ -207,5 +195,5 @@ async def doc_send_notification(
         logger.error("Failed to send notification", exc_info=True)
         return {
             "status": "error",
-            "message": f"Ошибка отправки уведомления: {exc}",
+            "message": f"❌ Ошибка отправки уведомления: {exc}",
         }
