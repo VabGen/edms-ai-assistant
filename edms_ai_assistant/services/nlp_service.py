@@ -69,7 +69,7 @@ class UserIntent(Enum):
     UNKNOWN = "unknown"
     FILE_ANALYSIS = "file_analysis"
     CREATE_DOCUMENT = "create_document"
-    NOTIFICATION = "notification"
+    # NOTIFICATION = "notification"
     COMPLIANCE_CHECK = "compliance_check"
 
 
@@ -618,11 +618,11 @@ class QueryRefiner:
             else:
                 hints.append("версии: авто (первая↔последняя)")
 
-        elif intent == UserIntent.NOTIFICATION:
-            if "persons" in entities:
-                hints.append(f"получатель: {entities['persons'][0].value}")
-            if "dates" in entities:
-                hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
+        # elif intent == UserIntent.NOTIFICATION:
+        #     if "persons" in entities:
+        #         hints.append(f"получатель: {entities['persons'][0].value}")
+        #     if "dates" in entities:
+        #         hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
 
         elif intent == UserIntent.SUMMARIZE:
             if "numbers" in entities:
@@ -809,20 +809,20 @@ class SemanticDispatcher:
             ],
             "negative": [],
         },
-        UserIntent.NOTIFICATION: {
-            "primary": [
-                "уведоми",
-                "напомни",
-                "отправь напоминание",
-                "уведомление",
-                "напоминание",
-                "предупреди",
-                "сообщи",
-                "отправь уведомление",
-            ],
-            "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
-            "negative": [],
-        },
+        # UserIntent.NOTIFICATION: {
+        #     "primary": [
+        #         "уведоми",
+        #         "напомни",
+        #         "отправь напоминание",
+        #         "уведомление",
+        #         "напоминание",
+        #         "предупреди",
+        #         "сообщи",
+        #         "отправь уведомление",
+        #     ],
+        #     "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+        #     "negative": [],
+        # },
         UserIntent.COMPLIANCE_CHECK: {
             "primary": [
                 "проверить документ",

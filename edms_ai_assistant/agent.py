@@ -91,7 +91,7 @@ _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset(
         "doc_search_tool",
         "introduction_create_tool",
         "task_create_tool",
-        "doc_send_notification",
+        # "doc_send_notification",
     }
 )
 
@@ -115,7 +115,6 @@ _DISAMBIGUATION_TOOLS: frozenset[str] = frozenset(
     {
         "introduction_create_tool",
         "task_create_tool",
-        "doc_send_notification",
     }
 )
 
@@ -574,8 +573,16 @@ PromptBuilder._LEAN_SNIPPETS = {
     <workflow>Ознакомление: introduction_create_tool(last_names=[...]). При requires_disambiguation → покажи список → повторный вызов с selected_employee_ids.</workflow>""",
     UserIntent.CREATE_TASK: """
     <workflow>Поручение: task_create_tool(task_text=..., executor_last_names=[...]). Дата: если упомянута → ISO 8601, иначе не передавай. При disambiguation → покажи список → selected_employee_ids.</workflow>""",
-    UserIntent.NOTIFICATION: """
-    <workflow>Уведомление: employee_search_tool(last_name=...) → doc_send_notification(recipient_ids=[uuid], message=...).</workflow>""",
+    # UserIntent.NOTIFICATION: """
+    #     <notification_guide>
+    #     При отправке уведомлений и напоминаний:
+    #     1. Если сотрудник не известен (нет UUID), сначала вызови employee_search_tool(last_name="...").
+    #     2. Если сотрудник один — используй его UUID.
+    #     3. Если найдено несколько — попроси пользователя уточнить выбор.
+    #     4. Вызови doc_send_notification(document_id=..., recipient_ids=[uuid], message=..., notification_type=...).
+    #        - notification_type: REMINDER (напоминание), DEADLINE (срок), CUSTOM (произвольное).
+    #     </notification_guide>
+    #     """,
     UserIntent.SEARCH: """
     <workflow>Поиск: doc_search_tool(short_summary=...) или employee_search_tool(last_name=...). После поиска передавай id в doc_get_details.</workflow>""",
     UserIntent.ANALYZE: """
@@ -742,16 +749,16 @@ Workflow суммаризации документа:
 - Вопросы о сотрудниках: employee_search_tool
 - Общие вопросы без документа: отвечай напрямую из контекста
 </question_guide>""",
-    UserIntent.NOTIFICATION: """
-<notification_guide>
-При отправке уведомлений и напоминаний:
-- Инструмент: doc_send_notification(document_id=..., recipient_ids=[...], message=..., notification_type=..., deadline=...)
-  - recipient_ids — UUID сотрудников (получи через employee_search_tool если не известны)
-  - notification_type: REMINDER (напоминание), DEADLINE (срок), CUSTOM (произвольное)
-  - deadline — опциональная дата дедлайна в ISO 8601
-- Workflow: employee_search_tool → doc_send_notification
-- Если сотрудник один и найден однозначно — сразу передавай его UUID.
-</notification_guide>""",
+    #     UserIntent.NOTIFICATION: """
+    # <notification_guide>
+    # При отправке уведомлений и напоминаний:
+    # - Инструмент: doc_send_notification(document_id=..., recipient_ids=[...], message=..., notification_type=..., deadline=...)
+    #   - recipient_ids — UUID сотрудников (получи через employee_search_tool если не известны)
+    #   - notification_type: REMINDER (напоминание), DEADLINE (срок), CUSTOM (произвольное)
+    #   - deadline — опциональная дата дедлайна в ISO 8601
+    # - Workflow: employee_search_tool → doc_send_notification
+    # - Если сотрудник один и найден однозначно — сразу передавай его UUID.
+    # </notification_guide>""",
     UserIntent.FILE_ANALYSIS: """
 <file_analysis_guide>
 При анализе загруженного файла:
@@ -1496,7 +1503,6 @@ class EdmsDocumentAgent:
                     _TOOL_ID_FIELD: dict[str, str] = {
                         "introduction_create_tool": "selected_employee_ids",
                         "task_create_tool": "selected_employee_ids",
-                        "doc_send_notification": "recipient_ids",
                     }
                     id_field = _TOOL_ID_FIELD.get(t_name, "selected_employee_ids")
                     t_args[id_field] = valid_ids

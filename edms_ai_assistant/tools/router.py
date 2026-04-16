@@ -67,7 +67,6 @@ _DOC_SEND_NOTIFICATION = "doc_send_notification"
 _DOC_COMPLIANCE_CHECK = "doc_compliance_check"
 _DOC_UPDATE_FIELD = "doc_update_field"
 
-
 # ─── Intent → tool names mapping ─────────────────────────────────────────────
 
 _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
@@ -127,11 +126,11 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _EMPLOYEE_SEARCH,
     ],
     # Уведомления и напоминания
-    UserIntent.NOTIFICATION: [
-        _EMPLOYEE_SEARCH,
-        _DOC_SEND_NOTIFICATION,
-        _DOC_GET_DETAILS,
-    ],
+    # UserIntent.NOTIFICATION: [
+    #     _EMPLOYEE_SEARCH,
+    #     _DOC_SEND_NOTIFICATION,
+    #     _DOC_GET_DETAILS,
+    # ],
     # Автозаполнение обращения (отдельный сценарий)
     UserIntent.EXTRACT: [
         _APPEAL_AUTOFILL,
