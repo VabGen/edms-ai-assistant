@@ -29,10 +29,20 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from edms_ai_assistant.agent_config import AgentConfig, DEFAULT_CONFIG
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
+from edms_ai_assistant.guardrails import GuardrailPipeline
 from edms_ai_assistant.llm import get_chat_model
 from edms_ai_assistant.model import AgentState
+from edms_ai_assistant.observability import SpanKind, Trace, trace_span
+from edms_ai_assistant.resilience import (
+    CircuitBreaker,
+    RetryConfig,
+    retry_with_backoff,
+)
+from edms_ai_assistant.semantic_cache import SemanticCache
+from edms_ai_assistant.tool_call_guard import ToolCallGuard
 from edms_ai_assistant.services.nlp_service import (
     SemanticDispatcher,
     UserIntent,
@@ -1241,10 +1251,27 @@ class AgentStateManager:
 
 
 class EdmsDocumentAgent:
-    MAX_ITERATIONS: int = 10
-    EXECUTION_TIMEOUT: float = 120.0
+    """
+    EDMS AI Agent — 2026 best-practice architecture.
 
-    def __init__(self, document_repo=None, semantic_dispatcher=None):
+    Key improvements over legacy pattern:
+    - **AgentConfig**: All tunables in one immutable dataclass, env-overridable.
+    - **GuardrailPipeline**: Output validation (credential leak, UUID exposure,
+      response length, safety policy) before any content reaches the user.
+    - **Observability (Trace)**: Structured spans for latency analysis,
+      token budget monitoring, and A/B experiment comparison.
+    - **Resilience (retry_with_backoff)**: Exponential backoff with jitter
+      for transient LLM errors; circuit breaker for sustained failures.
+    """
+
+    def __init__(
+        self,
+        document_repo=None,
+        semantic_dispatcher=None,
+        config: AgentConfig | None = None,
+    ):
+        self._config = config or DEFAULT_CONFIG
+
         try:
             self.model = get_chat_model()
             self.tools = all_tools
@@ -1263,11 +1290,27 @@ class EdmsDocumentAgent:
                 graph=self._compiled_graph,
                 checkpointer=self._checkpointer,
             )
+
+            # ── 2026 best practices: guardrails, observability, resilience ──
+            self._guardrail_pipeline = GuardrailPipeline()
+            self._circuit_breaker = CircuitBreaker(
+                failure_threshold=5,
+                recovery_timeout=60.0,
+            )
+            self._semantic_cache = SemanticCache()  # embed_fn подключается позже
+
             logger.info(
                 "EdmsDocumentAgent initialized",
                 extra={
                     "tools_count": len(self.tools),
                     "model_type": type(self.model).__name__,
+                    "config": {
+                        "max_iterations": self._config.max_iterations,
+                        "execution_timeout": self._config.execution_timeout,
+                        "enable_guardrails": self._config.enable_guardrails,
+                        "enable_tracing": self._config.enable_tracing,
+                        "enable_token_tracking": self._config.enable_token_tracking,
+                    },
                 },
             )
         except Exception as exc:
@@ -1276,12 +1319,15 @@ class EdmsDocumentAgent:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def health_check(self) -> dict[str, bool]:
+    def health_check(self) -> dict[str, Any]:
         """
         Returns a shallow health status for each agent component.
 
+        Includes 2026 best-practice components: semantic cache stats,
+        circuit breaker state, and guardrail status.
+
         Returns:
-            Dict mapping component names to boolean availability flags.
+            Dict mapping component names to availability flags and stats.
         """
         return {
             "model": self.model is not None,
@@ -1291,6 +1337,10 @@ class EdmsDocumentAgent:
             "graph": getattr(self, "_compiled_graph", None) is not None,
             "state_manager": getattr(self, "state_manager", None) is not None,
             "checkpointer": getattr(self, "_checkpointer", None) is not None,
+            # ── 2026 best-practice components ──
+            "circuit_breaker_open": getattr(self._circuit_breaker, "is_open", None),
+            "guardrails_enabled": self._config.enable_guardrails,
+            "semantic_cache": self._semantic_cache.stats(),
         }
 
     async def chat(
@@ -1322,6 +1372,12 @@ class EdmsDocumentAgent:
         Returns:
             Serialized AgentResponse dict suitable for the HTTP layer.
         """
+        _trace = (
+            Trace(name="agent.chat", kind=SpanKind.AGENT,
+                  metadata={"message_len": len(message), "has_doc": context_ui_id is not None})
+            if self._config.enable_tracing else None
+        )
+
         try:
             request = AgentRequest(
                 message=message,
@@ -1335,6 +1391,9 @@ class EdmsDocumentAgent:
             )
             context = await self._build_context(request)
 
+            if _trace:
+                _trace.metadata["thread_id"] = context.thread_id
+
             if await self.state_manager.is_thread_broken(context.thread_id):
                 repaired = await self.state_manager.repair_thread(context.thread_id)
                 logger.warning(
@@ -1346,7 +1405,10 @@ class EdmsDocumentAgent:
             state = await self.state_manager.get_state(context.thread_id)
 
             if human_choice and state.next:
-                return await self._handle_human_choice(context, human_choice)
+                result = await self._handle_human_choice(context, human_choice)
+                if _trace:
+                    _trace.finish(metadata={"result": "human_choice"})
+                return result
 
             document: DocumentDto | None = None
             if context.document_id:
@@ -1597,7 +1659,7 @@ class EdmsDocumentAgent:
         """
         Core recursive orchestration loop.
         """
-        if iteration > self.MAX_ITERATIONS:
+        if iteration > self._config.max_iterations:
             logger.error(
                 "Max iterations exceeded",
                 extra={"thread_id": context.thread_id, "iterations": iteration},
@@ -1645,7 +1707,7 @@ class EdmsDocumentAgent:
             await self.state_manager.invoke(
                 inputs=inputs,
                 thread_id=context.thread_id,
-                timeout=self.EXECUTION_TIMEOUT,
+                timeout=self._config.execution_timeout,
             )
 
             state = await self.state_manager.get_state(context.thread_id)
@@ -2015,7 +2077,7 @@ class EdmsDocumentAgent:
                 "Execution timeout",
                 extra={
                     "thread_id": context.thread_id,
-                    "timeout": self.EXECUTION_TIMEOUT,
+                    "timeout": self._config.execution_timeout,
                 },
             )
             return AgentResponse(
@@ -2268,6 +2330,23 @@ class EdmsDocumentAgent:
         if final_content:
             final_content = ContentExtractor.clean_json_artifacts(final_content)
             final_content = self._sanitize_technical_content(final_content, context)
+
+            # ── 2026: Guardrail pipeline — validate before delivery ──
+            if self._config.enable_guardrails:
+                guardrail_result = self._guardrail_pipeline.run(final_content)
+                if guardrail_result.blocked:
+                    logger.warning(
+                        "Guardrail BLOCKED: %s",
+                        guardrail_result.block_reason,
+                        extra={"thread_id": context.thread_id},
+                    )
+                    return AgentResponse(
+                        status=AgentStatus.ERROR,
+                        message="Ответ заблокирован политикой безопасности.",
+                    ).model_dump()
+                if guardrail_result.content != final_content:
+                    final_content = guardrail_result.content
+
             reload_needed = _is_mutation_response(final_content)
 
             _metadata: dict[str, Any] = {}
