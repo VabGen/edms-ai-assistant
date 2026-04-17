@@ -1,6 +1,6 @@
 /**
- * ComplianceResult.tsx
- * Кликабельные карточки расхождений + кнопка «Исправить все».
+ * ComplianceResult.tsx — Кликабельные карточки расхождений + кнопка «Исправить все».
+ * Поддержка автоматического обновления страницы после doc_update_field
  */
 
 import {useState, memo, useCallback} from 'react'
@@ -33,6 +33,7 @@ interface Props {
     threadId: string | null
     onFieldFixed: (fieldKey: string, newValue: string) => void
     onAllFixed: () => void
+    onRefreshNeeded?: () => void
 }
 
 const STATUS_CFG = {
@@ -94,15 +95,34 @@ async function applyFix(
     correctValue: string,
     documentId: string,
     threadId: string | null,
-): Promise<void> {
+): Promise<{ success: boolean; requires_reload?: boolean }> {
     const token = getAuthToken() ?? ''
-    await sendMsg('sendChatMessage', {
-        message: `Исправь поле "${updateField}" на "${correctValue}"`,
-        user_token: token,
-        context_ui_id: documentId,
-        thread_id: threadId,
-        human_choice: `fix_field:${updateField}:${correctValue}`,
-    })
+
+    try {
+        const res = await sendMsg('sendChatMessage', {
+            message: `Исправь поле "${updateField}" на "${correctValue}"`,
+            user_token: token,
+            context_ui_id: documentId,
+            thread_id: threadId,
+            human_choice: `fix_field:${updateField}:${correctValue}`,
+        })
+
+        const payload = res && typeof res === 'object' && 'data' in res
+            ? (res as { data: any }).data
+            : res
+
+        // сигнал от бэкенда
+        const metadata = payload?.metadata
+        const requiresReload = metadata?.requires_reload === true
+
+        return {
+            success: true,
+            requires_reload: requiresReload
+        }
+    } catch (error) {
+        console.error('applyFix error:', error)
+        return {success: false, requires_reload: false}
+    }
 }
 
 interface FieldCardProps {
@@ -111,28 +131,37 @@ interface FieldCardProps {
     threadId: string | null
     onFixed: (fieldKey: string, newValue: string) => void
     disabled: boolean
+    onRefreshNeeded?: () => void
 }
 
-const FieldCard = memo(({field, documentId, threadId, onFixed, disabled}: FieldCardProps) => {
+const FieldCard = memo(({field, documentId, threadId, onFixed, disabled, onRefreshNeeded}: FieldCardProps) => {
     const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
-
     const effectiveStatus = state === 'done' ? 'ok' : field.status
     const cfg = STATUS_CFG[effectiveStatus]
     const {Icon} = cfg
-
     const canFix = field.status === 'mismatch' && !!field.correct_value && state === 'idle' && !disabled
 
     const handleClick = useCallback(async () => {
         if (!canFix) return
+
         setState('loading')
         try {
-            await applyFix(field.update_field, field.correct_value!, documentId, threadId)
+            const result = await applyFix(field.update_field, field.correct_value!, documentId, threadId)
+
             setState('done')
             onFixed(field.field_key, field.correct_value!)
-        } catch {
+
+            if (result.requires_reload && onRefreshNeeded) {
+                // задержка для анимации "Исправлено"
+                setTimeout(() => {
+                    onRefreshNeeded()
+                }, 600)
+            }
+        } catch (error) {
+            console.error('Fix failed:', error)
             setState('idle')
         }
-    }, [canFix, field, documentId, threadId, onFixed])
+    }, [canFix, field.update_field, field.correct_value, documentId, threadId, onFixed, onRefreshNeeded])
 
     return (
         <div
@@ -149,12 +178,12 @@ const FieldCard = memo(({field, documentId, threadId, onFixed, disabled}: FieldC
                 transition: 'all 0.15s',
                 opacity: state === 'loading' ? 0.6 : 1,
             }}
-            onMouseEnter={canFix ? e => {
+            onMouseEnter={canFix ? (e) => {
                 const el = e.currentTarget as HTMLDivElement
                 el.style.background = 'rgba(217,119,6,0.13)'
                 el.style.borderColor = 'rgba(217,119,6,0.38)'
             } : undefined}
-            onMouseLeave={canFix ? e => {
+            onMouseLeave={canFix ? (e) => {
                 const el = e.currentTarget as HTMLDivElement
                 el.style.background = cfg.bg
                 el.style.borderColor = cfg.border
@@ -216,7 +245,7 @@ const FieldCard = memo(({field, documentId, threadId, onFixed, disabled}: FieldC
 })
 FieldCard.displayName = 'FieldCard'
 
-export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}: Props) => {
+export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed, onRefreshNeeded}: Props) => {
     const [fixingAll, setFixingAll] = useState(false)
     const [fixedKeys, setFixedKeys] = useState<Set<string>>(new Set())
 
@@ -239,6 +268,7 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
 
     const handleFixAll = useCallback(async () => {
         if (fixingAll || pendingMismatches.length === 0) return
+
         setFixingAll(true)
         try {
             for (const field of pendingMismatches) {
@@ -246,13 +276,18 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                 setFixedKeys(prev => new Set([...prev, field.field_key]))
                 await new Promise(res => setTimeout(res, 400))
             }
-            onAllFixed()
+
+            if (onRefreshNeeded) {
+                onRefreshNeeded()
+            } else {
+                onAllFixed()
+            }
         } catch (err) {
             console.error('Fix all failed:', err)
         } finally {
             setFixingAll(false)
         }
-    }, [fixingAll, pendingMismatches, documentId, threadId, onAllFixed])
+    }, [fixingAll, pendingMismatches, documentId, threadId, onAllFixed, onRefreshNeeded])
 
     return (
         <div style={{display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4}}>
@@ -300,12 +335,12 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                         cursor: fixingAll ? 'not-allowed' : 'pointer',
                         transition: 'all 0.15s', opacity: fixingAll ? 0.6 : 1,
                     }}
-                    onMouseEnter={!fixingAll ? e => {
+                    onMouseEnter={!fixingAll ? (e) => {
                         const el = e.currentTarget as HTMLButtonElement
                         el.style.background = 'rgba(99,102,241,0.15)'
                         el.style.borderColor = 'rgba(99,102,241,0.40)'
                     } : undefined}
-                    onMouseLeave={!fixingAll ? e => {
+                    onMouseLeave={!fixingAll ? (e) => {
                         const el = e.currentTarget as HTMLButtonElement
                         el.style.background = 'rgba(99,102,241,0.09)'
                         el.style.borderColor = 'rgba(99,102,241,0.25)'
@@ -332,9 +367,15 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                         Расхождения — нажмите для исправления
                     </div>
                     {mismatchFields.map(field => (
-                        <FieldCard key={field.field_key} field={field}
-                            documentId={documentId} threadId={threadId}
-                            onFixed={handleFieldFixed} disabled={fixingAll}/>
+                        <FieldCard
+                            key={field.field_key}
+                            field={field}
+                            documentId={documentId}
+                            threadId={threadId}
+                            onFixed={handleFieldFixed}
+                            disabled={fixingAll}
+                            onRefreshNeeded={onRefreshNeeded}
+                        />
                     ))}
                 </div>
             )}
@@ -349,9 +390,15 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                         Не найдено в файле
                     </div>
                     {notFoundFields.map(field => (
-                        <FieldCard key={field.field_key} field={field}
-                            documentId={documentId} threadId={threadId}
-                            onFixed={handleFieldFixed} disabled={fixingAll}/>
+                        <FieldCard
+                            key={field.field_key}
+                            field={field}
+                            documentId={documentId}
+                            threadId={threadId}
+                            onFixed={handleFieldFixed}
+                            disabled={fixingAll}
+                            onRefreshNeeded={onRefreshNeeded}
+                        />
                     ))}
                 </div>
             )}
@@ -366,9 +413,15 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                         Проверено
                     </div>
                     {okFields.map(field => (
-                        <FieldCard key={field.field_key} field={field}
-                            documentId={documentId} threadId={threadId}
-                            onFixed={handleFieldFixed} disabled={false}/>
+                        <FieldCard
+                            key={field.field_key}
+                            field={field}
+                            documentId={documentId}
+                            threadId={threadId}
+                            onFixed={handleFieldFixed}
+                            disabled={false}
+                            onRefreshNeeded={onRefreshNeeded}
+                        />
                     ))}
                 </div>
             )}

@@ -12,7 +12,7 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage
 
-from edms_ai_assistant.agent import (
+from edms_ai_assistant.model import (
     AgentResponse,
     AgentStatus,
     ContextParams,
@@ -70,7 +70,7 @@ class ResponseAssembler:
 
         Returns a serialized AgentResponse dict (compatible with HTTP layer).
         """
-        # 1. Interactive status takes priority (disambiguation, choice selection)
+        from edms_ai_assistant.agent import ContentExtractor
         interactive = self._interactive_detector.detect(messages)
         if interactive:
             logger.info(

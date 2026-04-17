@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from edms_ai_assistant.agent import ContextParams
+from edms_ai_assistant.model import ContextParams
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 

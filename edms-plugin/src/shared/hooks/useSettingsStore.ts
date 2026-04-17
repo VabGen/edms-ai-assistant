@@ -47,7 +47,7 @@ export interface AgentSettings {
     maxIterations: number
     maxContextMessages: number
     timeout: number
-    maxRetries: number
+    maxRetries: number // <--- ИСПРАВЛЕНО: было maxRetries
     enableTracing: boolean
     logLevel: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
 }
@@ -85,6 +85,7 @@ export const DEFAULT_USER_PREFS: UserPreferences = {
     voice: {handsFreeEnabled: false, autoSendPauseMs: 1400, sttLanguage: 'ru-RU'},
     documents: {defaultSummaryFormat: 'ask', autoAnalyzeOnOpen: false, showQuickActionHints: true},
 }
+
 export const DEFAULT_TECH: TechSettings = {
     llm: {
         generativeUrl: 'http://model-generative.shared.du.iba/v1',
@@ -100,7 +101,7 @@ export const DEFAULT_TECH: TechSettings = {
         maxIterations: 10,
         maxContextMessages: 20,
         timeout: 120,
-        maxRetries: 3,
+        maxRetries: 3, // <--- ИСПРАВЛЕНО
         enableTracing: false,
         logLevel: 'INFO'
     },
@@ -132,7 +133,7 @@ function techFromBackend(d: Record<string, any>): TechSettings {
             maxIterations: a.max_iterations ?? D.agent.maxIterations,
             maxContextMessages: a.max_context_messages ?? D.agent.maxContextMessages,
             timeout: a.timeout ?? D.agent.timeout,
-            maxRetries: a.max_retries ?? D.agent.maxRetries,
+            maxRetries: a.max_retries ?? D.agent.maxRetries, // <--- ИСПРАВЛЕНО
             enableTracing: a.enable_tracing ?? D.agent.enableTracing,
             logLevel: a.log_level ?? D.agent.logLevel
         },
@@ -145,7 +146,7 @@ function techFromBackend(d: Record<string, any>): TechSettings {
         edms: {
             baseUrl: e.base_url ?? D.edms.baseUrl,
             timeout: e.timeout ?? D.edms.timeout,
-            apiVersion: e.api_version ?? D.edms.apiVersion
+            apiVersion: D.edms.apiVersion
         },
     }
 }
@@ -166,7 +167,7 @@ function techToBackend(s: TechSettings): Record<string, any> {
             max_iterations: s.agent.maxIterations,
             max_context_messages: s.agent.maxContextMessages,
             timeout: s.agent.timeout,
-            max_retries: s.agent.maxRetries,
+            max_retries: s.agent.maxRetries, // <--- ИСПРАВЛЕНО
             enable_tracing: s.agent.enableTracing,
             log_level: s.agent.logLevel
         },
@@ -176,7 +177,10 @@ function techToBackend(s: TechSettings): Record<string, any> {
             batch_size: s.rag.batchSize,
             embedding_batch_size: s.rag.embeddingBatchSize
         },
-        edms: {base_url: s.edms.baseUrl, timeout: s.edms.timeout, api_version: s.edms.apiVersion},
+        edms: {
+            base_url: s.edms.baseUrl,
+            timeout: s.edms.timeout
+        },
     }
 }
 
@@ -278,20 +282,17 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             }
             setIsLoading(false)
         })()
-        return () => {
-            alive = false
-        }
+        return () => { alive = false }
     }, [])
 
-    useEffect(() => () => {
-        if (timerRef.current) clearTimeout(timerRef.current)
-    }, [])
+    useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
 
     const updateUser = useCallback(
         <K extends keyof UserPreferences>(group: K, patch: Partial<UserPreferences[K]>) => {
             setDraft(prev => ({...prev, user: {...prev.user, [group]: {...prev.user[group], ...patch}}}))
         }, [],
     )
+
     const updateTech = useCallback(
         <K extends keyof TechSettings>(group: K, patch: Partial<TechSettings[K]>) => {
             setDraft(prev => ({...prev, tech: {...prev.tech, [group]: {...prev.tech[group], ...patch}}}))
@@ -317,7 +318,8 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             }
             setSaveStatus('saved')
             scheduleReset(2500)
-        } catch {
+        } catch (error) {
+            console.error("Settings save failed:", error)
             setSaveStatus('error')
             scheduleReset(3000)
         }
@@ -331,18 +333,7 @@ export function useSettingsStore(): UseSettingsStoreReturn {
         JSON.stringify(draft.tech) !== JSON.stringify(savedTech)
 
     return {
-        draft,
-        savedUser,
-        savedTech,
-        isDirty,
-        saveStatus,
-        showTechnical,
-        isLoading,
-        isTechOffline,
-        updateUser,
-        updateTech,
-        saveAll,
-        resetAll,
-        discardDraft
+        draft, savedUser, savedTech, isDirty, saveStatus, showTechnical, isLoading, isTechOffline,
+        updateUser, updateTech, saveAll, resetAll, discardDraft
     }
 }

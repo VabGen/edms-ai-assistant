@@ -19,6 +19,7 @@ from .introduction import introduction_create_tool
 from .local_file_tool import read_local_file_content
 from .summarization import doc_summarize_text
 from .task import task_create_tool
+from .update_settings import update_settings_tool
 
 all_tools = [
     # Documents
@@ -44,6 +45,8 @@ all_tools = [
     doc_send_notification,
     # Compliance
     doc_compliance_check,
+    # System
+    update_settings_tool,
 ]
 
 __all__ = [
@@ -64,4 +67,5 @@ __all__ = [
     "task_create_tool",
     "create_document_from_file",
     "doc_compliance_check",
+    "update_settings_tool",
 ]

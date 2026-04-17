@@ -11,7 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.messages import BaseMessage
 
-from edms_ai_assistant.agent import ContextParams
+from edms_ai_assistant.model import ContextParams
 
 
 @runtime_checkable

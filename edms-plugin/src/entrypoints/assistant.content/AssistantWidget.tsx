@@ -37,9 +37,10 @@ interface Thread {
     preview: string
     date: string
 }
+
 const MAX_THREADS = 20
 const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
-const CHOICE_LABELS: Record<string, string> = { abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы' }
+const CHOICE_LABELS: Record<string, string> = {abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы'}
 
 function persistThreads(threads: Thread[]): void {
     chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
@@ -918,6 +919,43 @@ export function AssistantWidget() {
         )
     }, [])
 
+    const handleDocumentDataRefresh = useCallback(async () => {
+        const docId = extractDocIdFromUrl()
+
+        try {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
+
+            if (tab?.id) {
+                const results = await chrome.scripting.executeScript({
+                    target: {tabId: tab.id},
+                    func: () => {
+                        const refreshFunc =
+                            (window as any).__edms_refresh_data__ ||
+                            (window as any).__edms_refresh__ ||
+                            (window as any).refreshDocumentData
+
+                        if (typeof refreshFunc === 'function') {
+                            refreshFunc()
+                            return {success: true, method: 'soft'}
+                        }
+
+                        return {success: false, method: 'none'}
+                    },
+                })
+
+                if (results?.[0]?.result?.success) {
+                    console.log('✅ Document data refreshed softly')
+                    toast.success('Данные документа обновлены', 'Готово')
+                    return
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Soft refresh failed, falling back to reload', error)
+        }
+        refreshDocumentPage(docId)
+    }, [])
+
+
     const abort = () => {
         if (!requestIdRef.current) return
         chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
@@ -1254,6 +1292,7 @@ export function AssistantWidget() {
                                                     onFieldFixed={(fieldKey, newValue) => {
                                                         setMessages(prev => prev.map(m => {
                                                             if (m.id !== msg.id || !m.compliance) return m
+
                                                             const updatedFields = m.compliance.fields.map(f =>
                                                                 f.field_key === fieldKey
                                                                     ? {
@@ -1264,7 +1303,9 @@ export function AssistantWidget() {
                                                                     }
                                                                     : f
                                                             )
+
                                                             const anyMismatch = updatedFields.some(f => f.status === 'mismatch')
+
                                                             return {
                                                                 ...m,
                                                                 compliance: {
@@ -1277,6 +1318,9 @@ export function AssistantWidget() {
                                                     }}
                                                     onAllFixed={() => {
                                                         setTimeout(() => window.location.reload(), 1500)
+                                                    }}
+                                                    onRefreshNeeded={() => {
+                                                        handleDocumentDataRefresh()
                                                     }}
                                                 />
                                             )}

@@ -15,7 +15,7 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
-from edms_ai_assistant.agent import ActionType, AgentResponse, AgentStatus
+from edms_ai_assistant.model import ActionType, AgentResponse, AgentStatus
 
 logger = logging.getLogger(__name__)
 
