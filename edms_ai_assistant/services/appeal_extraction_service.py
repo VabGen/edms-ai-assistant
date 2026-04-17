@@ -171,32 +171,81 @@ class AppealExtractionService:
             )
             return AppealFields()
 
+    def _extract_index_from_text(self, text: str, address: str | None = None) -> str | None:
+        """
+        Fallback-извлечение почтового индекса из текста.
+
+        Приоритет:
+        1. Индекс рядом с адресом (в ±3 строки)
+        2. Индекс в последних 30 строках документа
+        3. Первый найденный 6-значный индекс в формате 2XXXXX (Беларусь)
+        """
+        patterns = [
+            r"\b(2[012345]\d{4})\b",  # 220004, 225040 и т.д.
+            r"\b2[012345]\d{2}([\s\-]?)\d{2}\b",  # 220-004 или 220 004
+        ]
+
+        def _find_index(fragment: str) -> str | None:
+            for pattern in patterns:
+                match = re.search(pattern, fragment)
+                if match:
+                    raw_match = match.group(0)
+                    idx = re.sub(r"[\s\-]", "", raw_match)
+                    if len(idx) == 6:
+                        return idx
+            return None
+
+        # 1. Контекст вокруг адреса (±3 строки)
+        if address and text:
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                addr_start = address[:30].lower()
+                if addr_start in line.lower() or any(
+                        word in line.lower() for word in ["адрес", "ул.", "пр.", "пер.", "индекс"]
+                ):
+                    context = "\n".join(lines[max(0, i - 3):i + 4])
+                    idx = _find_index(context)
+                    if idx:
+                        logger.info("Extracted index from address context: %s", idx)
+                        return idx
+
+        # 2. Последние 30 строк (реквизиты документа)
+        if text:
+            tail = "\n".join(text.split("\n")[-30:])
+            idx = _find_index(tail)
+            if idx:
+                logger.info("Extracted index from document tail: %s", idx)
+                return idx
+
+        # 3. По всему тексту (менее надёжно, но как последний шанс)
+        if text:
+            idx = _find_index(text)
+            if idx:
+                logger.info("Extracted index from full text: %s", idx)
+                return idx
+
+        return None
+
     def _post_process_fields(self, fields: AppealFields, text: str) -> AppealFields:
         """
         Post-processing для извлечения данных, которые LLM мог пропустить.
-
-        Fixes:
-        1. Парсинг даты из correspondentOrgNumber если dateDocCorrespondentOrg пуст
-        2. Извлечение города из fullAddress если cityName пуст
         """
+        # ── 1. Дата из номера документа ────────────────────────────────
         if fields.declarantType == "ENTITY":
             if not fields.dateDocCorrespondentOrg and fields.correspondentOrgNumber:
-                parsed_date = self._parse_date_from_number(
-                    fields.correspondentOrgNumber
-                )
+                parsed_date = self._parse_date_from_number(fields.correspondentOrgNumber)
                 if parsed_date:
                     fields.dateDocCorrespondentOrg = parsed_date
-                    logger.info(
-                        f"Parsed date from correspondentOrgNumber: {parsed_date}"
-                    )
+                    logger.info(f"Parsed date from correspondentOrgNumber: {parsed_date}")
 
+        # ── 2. Город из адреса ────────────────────────────────────────
         if not fields.cityName and fields.fullAddress:
             extracted_city = self._extract_city_from_address(fields.fullAddress)
             if extracted_city:
                 fields.cityName = extracted_city
                 logger.info(f"Extracted city from address: {extracted_city}")
 
-        # Оставляем в signed только ФИО, убираем должность
+        # ── 3. Очистка signed (только ФИО) ──────────────────────────
         if fields.signed and len(fields.signed) > 20:
             cleaned_signed = self._extract_fio_from_signed(fields.signed)
             if cleaned_signed != fields.signed:
@@ -205,36 +254,34 @@ class AppealExtractionService:
                 )
                 fields.signed = cleaned_signed
 
-        if fields.index and fields.fullAddress:
-            if fields.index not in fields.fullAddress:
-                logger.info(
-                    "index '%s' not in fullAddress '%s' — clearing",
+        if fields.index:
+            clean_index = re.sub(r"[\s\-]", "", str(fields.index))
+
+            if not re.match(r"^\d{6}$", clean_index):
+                logger.warning(
+                    "Index '%s' invalid format (expected 6 digits) → cleared",
                     fields.index,
-                    fields.fullAddress[:60],
                 )
                 fields.index = None
-        elif fields.index and not fields.fullAddress:
-            # Нет адреса заявителя — индекс невозможно верифицировать
-            logger.info("index '%s' cleared: fullAddress is empty", fields.index)
-            fields.index = None
+            elif fields.fullAddress and clean_index not in re.sub(r"[\s\-]", "", fields.fullAddress):
+                logger.info(
+                    "index '%s' not found in fullAddress (keeping anyway)",
+                    fields.index,
+                )
 
+        # ── 4. Организация для ENTITY ────────────────────────────────
         if fields.declarantType == "ENTITY" and not fields.organizationName:
             proximity = self._recover_org_from_address_proximity(text)
             if proximity:
                 fields.organizationName = proximity
-                logger.info(
-                    "organizationName from address proximity: %s", proximity[:60]
-                )
+                logger.info("organizationName from address proximity: %s", proximity[:60])
             else:
                 recovered = self._recover_org_name_from_text(text)
                 if recovered:
                     fields.organizationName = recovered
-                    logger.info(
-                        "Recovered organizationName from Russian text: %s",
-                        recovered[:60],
-                    )
+                    logger.info("Recovered organizationName from Russian text: %s", recovered[:60])
 
-        # Fallback: если city всё ещё None — ищем по всему тексту вокруг контактов
+        # ── 5. Fallback: город из полного текста ─────────────────────
         if not fields.cityName and self._last_raw_text:
             fallback_city = self._extract_city_from_full_text(
                 self._last_raw_text,
@@ -251,6 +298,15 @@ class AppealExtractionService:
                     fields.email,
                     fields.index,
                 )
+
+        if not fields.index:
+            fallback_index = self._extract_index_from_text(
+                self._last_raw_text,
+                address=fields.fullAddress,
+            )
+            if fallback_index:
+                fields.index = fallback_index
+                logger.info("Recovered index via fallback: %s", fallback_index)
 
         return fields
 
@@ -864,6 +920,17 @@ class AppealExtractionService:
    - ❌ "администрация Советского района" → null (название организации)
    - ❌ "В производстве суда Октябрьского района..." → null (содержание письма)
    - Если не уверен → null. Система определит по городу автоматически.
+
+🔟 **index** (Почтовый индекс заявителя):
+     * Извлекай 6-значный почтовый индекс из адреса заявителя
+     * Форматы: "220004", "220 004", "220-004"
+     * Ищи в полях: Адрес заявителя, реквизиты, контактные данные
+     * Примеры: 
+       - "220004, г. Минск, ул. Ленина 12" → index="220004"
+       - "индекс: 225040" → index="225040"
+       - "пр. Победителей 23, к.2, 220004" → index="220004"
+     * Если индекс не указан явно → null
+     * ВАЖНО: извлекай даже если он не входит в fullAddress!
 
    ПРИМЕРЫ:
 

@@ -792,7 +792,11 @@ export function ChatMessage({content, role, timestamp, isError, onAttachmentClic
                                     ol: ({children}) => <ol style={{paddingLeft: 20, marginBottom: 6}}>{children}</ol>,
                                     li: ({children}) => <li style={{marginBottom: 2}}>{children}</li>,
                                     h2: ({children}) => {
-                                        const text = typeof children === 'string' ? children : Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : ''
+                                        // const text = typeof children === 'string' ? children : Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : ''
+                                        const text = typeof children === 'string' ? children : ''
+                                        if (text.includes('Открой любой документ')) {
+                                            return null
+                                        }
                                         const clean = text.replace(/^\d+\s+/, '').replace(/^[①②③④⑤⑥⑦⑧⑨⑩]\s*/, '').trim()
                                         return <p style={{
                                             fontWeight: 700, fontSize: 13.5, marginTop: 12, marginBottom: 5,

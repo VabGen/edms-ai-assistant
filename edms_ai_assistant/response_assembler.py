@@ -1,115 +1,136 @@
-# edms_ai_assistant/response_assembler.py
+# edms_ai_assistant/response_assembler.py  (ПЕРЕРАБОТАН)
 """
-Response Assembler - extracted from EdmsDocumentAgent._build_final_response.
+ResponseAssembler — Single Responsibility: assemble the final AgentResponse
+from a message chain, using injected collaborators for each sub-task.
 
-Single Responsibility: takes raw messages + context and produces
-a clean AgentResponse with all post-processing applied.
+Depends on abstractions (Protocols), not on EdmsDocumentAgent concretions.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import BaseMessage
 
 from edms_ai_assistant.agent import (
     AgentResponse,
     AgentStatus,
-    ActionType,
-    ContentExtractor,
     ContextParams,
     _is_mutation_response,
 )
-
-if TYPE_CHECKING:
-    from edms_ai_assistant.guardrails import GuardrailPipeline
+from edms_ai_assistant.agent_config import AgentConfig
+from edms_ai_assistant.response_protocols import (
+    IComplianceExtractor,
+    IInteractiveStatusDetector,
+    INavigateUrlExtractor,
+    ISanitizer,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ResponseAssembler:
     """
-    Assembles the final AgentResponse from a LangGraph message chain.
+    Assembles final AgentResponse from a LangGraph message chain.
 
-    Pipeline:
-    1. Extract final content from messages
-    2. Clean JSON artifacts
-    3. Sanitize technical content (UUIDs, paths, tokens)
-    4. Run guardrails (if enabled)
-    5. Detect interactive status (disambiguation, confirmation)
-    6. Build AgentResponse with requires_reload, navigate_url, etc.
+    All sub-tasks are delegated to injected collaborators:
+    - ISanitizer: remove UUIDs / paths from text
+    - IInteractiveStatusDetector: detect disambiguation / choice prompts
+    - INavigateUrlExtractor: find navigate_url in tool results
+    - IComplianceExtractor: find compliance check data
+    - GuardrailPipeline: validate content before delivery
+
+    Single Responsibility: orchestrate the response assembly pipeline.
+    Does NOT implement any sub-task logic itself.
     """
 
     def __init__(
         self,
-        guardrail_pipeline: "GuardrailPipeline | None" = None,
-        enable_guardrails: bool = True,
+        sanitizer: ISanitizer,
+        interactive_detector: IInteractiveStatusDetector,
+        navigate_extractor: INavigateUrlExtractor,
+        compliance_extractor: IComplianceExtractor,
+        guardrail_pipeline: Any | None = None,
+        config: AgentConfig | None = None,
     ) -> None:
-        self._guardrail_pipeline = guardrail_pipeline
-        self._enable_guardrails = enable_guardrails
+        self._sanitizer = sanitizer
+        self._interactive_detector = interactive_detector
+        self._navigate_extractor = navigate_extractor
+        self._compliance_extractor = compliance_extractor
+        self._guardrails = guardrail_pipeline
+        self._config = config
 
     def assemble(
         self,
         messages: list[BaseMessage],
         context: ContextParams,
-        *,
-        sanitize_fn: Any = None,
-        detect_interactive_fn: Any = None,
-        extract_navigate_url_fn: Any = None,
-    ) -> AgentResponse:
-        """Build the final AgentResponse from the message chain."""
-        # 1. Extract final content
-        final_content = ContentExtractor.extract_final_content(messages)
-        if not final_content:
-            return AgentResponse(
-                status=AgentStatus.ERROR,
-                message="No content could be extracted from the agent response.",
-            )
+    ) -> dict[str, Any]:
+        """
+        Build the final response dict from the message chain.
 
-        # 2. Clean JSON artifacts
+        Returns a serialized AgentResponse dict (compatible with HTTP layer).
+        """
+        # 1. Interactive status takes priority (disambiguation, choice selection)
+        interactive = self._interactive_detector.detect(messages)
+        if interactive:
+            logger.info(
+                "Interactive status detected",
+                extra={"status": interactive.get("status")},
+            )
+            return interactive
+
+        # 2. Extract compliance data (attached as metadata)
+        compliance_data = self._compliance_extractor.extract(messages)
+
+        # 3. Extract final text content
+        from edms_ai_assistant.agent import ContentExtractor
+        final_content = ContentExtractor.extract_final_content(messages)
+        navigate_url = self._navigate_extractor.extract(messages)
+
+        if not final_content:
+            logger.warning("No final content found in message chain")
+            meta: dict[str, Any] = {}
+            if compliance_data:
+                meta["compliance"] = compliance_data
+            return AgentResponse(
+                status=AgentStatus.SUCCESS,
+                content="Операция завершена.",
+                navigate_url=navigate_url,
+                metadata=meta,
+            ).model_dump()
+
+        # 4. Clean JSON wrappers
         final_content = ContentExtractor.clean_json_artifacts(final_content)
 
-        # 3. Sanitize technical content (UUIDs, paths, tokens)
-        if sanitize_fn is not None:
-            final_content = sanitize_fn(final_content, context)
+        # 5. Sanitize technical content
+        final_content = self._sanitizer.sanitize(final_content, context)
 
-        # 4. Guardrails
-        if self._enable_guardrails and self._guardrail_pipeline is not None:
-            guardrail_result = self._guardrail_pipeline.run(final_content)
-            if guardrail_result and guardrail_result.get("blocked"):
-                logger.warning(
-                    "Guardrail blocked response: %s",
-                    guardrail_result.get("reason", "unknown"),
-                )
-                final_content = guardrail_result.get(
-                    "replacement",
-                    "Response blocked by safety policy.",
-                )
+        # 6. Guardrails
+        if self._config and self._config.enable_guardrails and self._guardrails:
+            result = self._guardrails.run(final_content)
+            if result.blocked:
+                logger.warning("Guardrail BLOCKED: %s", result.block_reason)
+                return AgentResponse(
+                    status=AgentStatus.ERROR,
+                    message="Ответ заблокирован политикой безопасности.",
+                ).model_dump()
+            final_content = result.content
 
-        # 5. Detect interactive status
-        action_type: ActionType | None = None
-        interactive_data: dict | None = None
-        if detect_interactive_fn is not None:
-            action_type, interactive_data = detect_interactive_fn(messages)
-
-        # 6. Extract navigate_url
-        navigate_url: str | None = None
-        if extract_navigate_url_fn is not None:
-            navigate_url = extract_navigate_url_fn(messages)
-
-        # 7. Determine requires_reload
+        # 7. Build response
         requires_reload = _is_mutation_response(final_content)
-
-        # 8. Build response
         metadata: dict[str, Any] = {}
-        if interactive_data:
-            metadata["interactive_data"] = interactive_data
+        if compliance_data:
+            metadata["compliance"] = compliance_data
+            logger.info(
+                "Compliance added to metadata: overall=%s fields=%d",
+                compliance_data.get("overall"),
+                len(compliance_data.get("fields", [])),
+            )
 
         return AgentResponse(
             status=AgentStatus.SUCCESS,
             content=final_content,
-            action_type=action_type,
             requires_reload=requires_reload,
             navigate_url=navigate_url,
             metadata=metadata,
-        )
+        ).model_dump()

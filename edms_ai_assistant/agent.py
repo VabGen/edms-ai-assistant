@@ -48,6 +48,11 @@ from edms_ai_assistant.services.nlp_service import (
     UserIntent,
 )
 from edms_ai_assistant.tools import all_tools
+from edms_ai_assistant.utils.datetime_utils import (
+    now_local,
+    today_local,
+    format_date_for_display,
+)
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
@@ -183,6 +188,8 @@ class ContextParams:
         user_name: Display name for the system prompt.
         user_first_name: First name for personalized greetings.
         current_date: Formatted date string injected into the prompt.
+        current_time: Текущее время с timezone.
+        timezone_info: Информация о timezone для промпта.
         user_context: Full user context dict (preferred_summary_format, etc.).
         intent: Primary user intent, set in chat() after semantic analysis.
             Used by tool router to select minimal relevant toolset.
@@ -198,24 +205,92 @@ class ContextParams:
     user_full_name: str | None = None
     user_id: str | None = None
     current_date: str = field(
-        default_factory=lambda: datetime.now().strftime("%d.%m.%Y")
+        default_factory=lambda: format_date_for_display(today_local(), "%d.%m.%Y")
+        if today_local() else datetime.now().strftime("%d.%m.%Y")
     )
-    current_year: str = field(default_factory=lambda: str(datetime.now().year))
+
+    current_year: str = field(
+        default_factory=lambda: str(today_local().year)
+        if today_local() else str(datetime.now().year)
+    )
+
+    current_time: str = field(
+        default_factory=lambda: now_local().strftime("%H:%M")
+        if now_local() else datetime.now().strftime("%H:%M")
+    )
+
+    current_datetime_iso: str = field(
+        default_factory=lambda: now_local().isoformat()
+        if now_local() else datetime.now().isoformat()
+    )
+
+    timezone_offset: str = field(
+        default_factory=lambda: (
+            f"{now_local().utcoffset().total_seconds() / 3600:+.1f}h"
+            if now_local() else "+0.0h"
+        )
+    )
+
     uploaded_file_name: str | None = None
     user_context: dict = field(default_factory=dict)
     intent: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        """Validate and enrich context after initialization."""
         if not self.user_token or not isinstance(self.user_token, str):
             raise ValueError("user_token must be a non-empty string")
+
         if self.file_path and not self.uploaded_file_name:
             fp = str(self.file_path).strip()
             if not _is_valid_uuid(fp):
                 self.uploaded_file_name = Path(fp).name
+
         if not self.user_full_name:
             parts = [p for p in (self.user_last_name, self.user_first_name) if p]
             if parts:
                 self.user_full_name = " ".join(parts)
+
+        logger.debug(
+            "ContextParams created",
+            extra={
+                "current_date": self.current_date,
+                "current_time": self.current_time,
+                "timezone_offset": self.timezone_offset,
+            },
+        )
+
+    def get_time_context_for_prompt(self) -> str:
+        """
+        Генерирует корректную строку времени для system prompt.
+
+        Returns:
+            Строка вида: "Текущее время: 13:51 (+03:00), 17.04.2026"
+        """
+        now = now_local()
+        date_str = format_date_for_display(now, "%d.%m.%Y")
+        time_str = now.strftime("%H:%M")
+        offset_str = self.timezone_offset
+
+        return (
+            f"Текущее время: {time_str} (UTC{offset_str}), {date_str}\n"
+            f"Часовой пояс сервера: UTC{offset_str}\n"
+            f"⚠️ Важно: используй указанное выше время. Не выдумывай текущее время."
+        )
+
+    def get_full_context_dict(self) -> dict[str, Any]:
+        """Возвращает полный словарь контекста для логирования."""
+        return {
+            "user_name": self.user_name,
+            "user_first_name": self.user_first_name,
+            "document_id": self.document_id,
+            "file_path": self.file_path[:50] if self.file_path else None,
+            "thread_id": self.thread_id,
+            "current_date": self.current_date,
+            "current_time": self.current_time,
+            "timezone_offset": self.timezone_offset,
+            "datetime_iso": self.current_datetime_iso,
+            "has_intent": self.intent is not None,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -390,12 +465,17 @@ class PromptBuilder:
 - Пользователь (имя): {user_name}
 - Пользователь (фамилия): {user_last_name}
 - Пользователь (полное имя): {user_full_name}
-- Текущая дата: {current_date} (год: {current_year})
+- Текущее время: {current_time} (локальное время сервера, UTC{timezone_offset})
+- Сегодняшняя дата: {current_date}
 - Активный документ в EDMS: {context_ui_id}
 - Загруженный файл/вложение: {local_file}
 - Имя загруженного файла (показывай пользователю): {uploaded_file_name}
 <local_file_path>{local_file}</local_file_path>
 </context>
+
+<time_context>
+{time_context_block}
+</time_context>
 
 <current_user_rules>
 Когда пользователь говорит "добавь меня", "я", "моя фамилия" и т.п.:
@@ -505,7 +585,9 @@ class PromptBuilder:
 
     <context>
     Пользователь: {user_name} ({user_last_name})
-    Дата: {current_date} (год: {current_year})
+    Текущее время: {current_time} (UTC{timezone_offset})
+    Сегодняшняя дата: {current_date}
+    {time_context_block}
     Документ: {context_ui_id}
     Файл: {local_file}
     </context>
@@ -528,12 +610,12 @@ class PromptBuilder:
 
     @classmethod
     def build(
-        cls,
-        context: ContextParams,
-        intent: UserIntent,
-        semantic_xml: str,
-        *,
-        lean: bool = False,
+            cls,
+            context: ContextParams,
+            intent: UserIntent,
+            semantic_xml: str,
+            *,
+            lean: bool = False,
     ) -> str:
         """Assembles the full system prompt from context, intent snippet, and semantic XML.
 
@@ -546,7 +628,12 @@ class PromptBuilder:
 
         Returns:
             Complete system prompt string ready for SystemMessage.
+
+        Note:
+            context.get_time_context_for_prompt(), а не при импорте модуля!
         """
+        time_context_block = context.get_time_context_for_prompt()
+
         if lean:
             base = cls.LEAN_TEMPLATE.format(
                 user_name=context.user_first_name or context.user_name,
@@ -554,6 +641,9 @@ class PromptBuilder:
                 user_full_name=context.user_full_name or context.user_name,
                 current_date=context.current_date,
                 current_year=context.current_year,
+                current_time=context.current_time,
+                timezone_offset=context.timezone_offset,
+                time_context_block=time_context_block,
                 context_ui_id=context.document_id or "Не указан",
                 local_file=context.file_path or "Не загружен",
             )
@@ -566,6 +656,9 @@ class PromptBuilder:
             user_full_name=context.user_full_name or context.user_name,
             current_date=context.current_date,
             current_year=context.current_year,
+            current_time=context.current_time,
+            timezone_offset=context.timezone_offset,
+            time_context_block=time_context_block,
             context_ui_id=context.document_id or "Не указан",
             local_file=context.file_path or "Не загружен",
             uploaded_file_name=context.uploaded_file_name or "Не определено",
@@ -2864,11 +2957,16 @@ class EdmsDocumentAgent:
         Returns:
             XML string block appended to the system prompt.
         """
+        from edms_ai_assistant.utils.datetime_utils import now_local
+
+        analysis_time = now_local().strftime("%H:%M:%S")
+
         return (
             "\n<semantic_context>\n"
             f"  <intent>{semantic_context.query.intent.value}</intent>\n"
             f"  <complexity>{semantic_context.query.complexity.value}</complexity>\n"
             f"  <original>{semantic_context.query.original}</original>\n"
             f"  <refined>{semantic_context.query.refined}</refined>\n"
+            f"  <!-- Сформировано в {analysis_time} (локальное время сервера) -->\n"
             "</semantic_context>"
         )

@@ -103,7 +103,7 @@ def get_chat_model() -> BaseLanguageModel:
                 num_predict=512,
                 num_ctx=4096,
                 timeout=timeout,
-                streaming=False,
+                streaming=True,
                 seed=42,
                 top_p=0.9,
             )
@@ -130,7 +130,7 @@ def get_chat_model() -> BaseLanguageModel:
                 "temperature": temperature,
                 "timeout": timeout,
                 "max_retries": max_retries,
-                "streaming": False,
+                "streaming": True,
             }
             if max_tokens:
                 llm_params["max_tokens"] = max_tokens
@@ -165,7 +165,7 @@ def get_chat_model() -> BaseLanguageModel:
             "temperature": temperature,
             "timeout": timeout,
             "max_retries": max_retries,
-            "streaming": False,
+            "streaming": True,
         }
         if max_tokens:
             llm_params["max_tokens"] = max_tokens
