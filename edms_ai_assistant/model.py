@@ -1,6 +1,12 @@
 # edms_ai_assistant/model.py
 """
 EDMS AI Assistant — Public data contracts (Pydantic v2).
+
+Changes vs prev:
+  - UserInput: added user_context field
+  - AgentRequest: added user_context field
+  - ContextParams: dataclass with full field set
+  - _is_mutation_response: exported utility
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ class AgentState(TypedDict):
 
 
 class UserContext(BaseModel):
+    """Optional user context for richer prompts."""
     firstName: str | None = Field(None, max_length=100)
     lastName: str | None = Field(None, max_length=100)
     middleName: str | None = Field(None, max_length=100)
@@ -47,11 +54,19 @@ def _is_valid_uuid(value: str) -> bool:
 
 
 class UserInput(BaseModel):
-    """HTTP request to /chat endpoint."""
+    """HTTP request body for /chat and /actions/summarize endpoints."""
+
     message: str = Field(..., min_length=1, max_length=8000)
     user_token: str = Field(..., min_length=10)
     context_ui_id: str | None = Field(None)
     context: UserContext | None = None
+
+    # Structured context dict (merged with employee data server-side)
+    user_context: dict[str, Any] | None = Field(
+        None,
+        description="Arbitrary user context dict (firstName, lastName, ...)"
+    )
+
     file_path: str | None = Field(None, max_length=500)
     file_name: str | None = None
     human_choice: str | None = Field(None, max_length=200)
@@ -69,10 +84,13 @@ class UserInput(BaseModel):
 # Response models
 # ─────────────────────────────────────────────────────────────
 
-ResponseStatus = Literal["success", "error", "requires_action", "processing", "requires_confirmation"]
+ResponseStatus = Literal[
+    "success", "error", "requires_action", "processing", "requires_confirmation"
+]
 
 
 class AssistantResponse(BaseModel):
+    """HTTP response body for all chat / action endpoints."""
     status: ResponseStatus = "success"
     response: str | None = None
     action_type: str | None = None
@@ -107,6 +125,7 @@ class ActionType(str, Enum):
 
 
 class AgentResponse(BaseModel):
+    """Internal agent response — serialised to dict before returning from agent.chat()."""
     status: AgentStatus
     content: str | None = None
     message: str | None = None
@@ -119,7 +138,8 @@ class AgentResponse(BaseModel):
 
 
 class AgentRequest(BaseModel):
-    """Validated incoming request to the agent."""
+    """Validated incoming request — created inside agent.chat()."""
+
     message: str = Field(default="", max_length=8000)
     user_token: str = Field(..., min_length=10)
     context_ui_id: str | None = Field(
@@ -157,7 +177,6 @@ class AgentRequest(BaseModel):
         - Absolute path: /tmp/file.docx or C:\\path\\file.docx
         - Relative path with separator: uploads/file.docx
         - Plain filename: Заявление.docx, document.pdf
-          (sent by /actions/summarize when passing attachment name)
         """
         if not v:
             return None
@@ -177,14 +196,24 @@ class AgentRequest(BaseModel):
         if re.match(r"^[^/\\]+[/\\]", stripped):
             return stripped
 
-        # Plain filename (no path separators) — accept as-is
-        # Covers: "document.docx", "Заявление_об_увеличении.docx", "att-uuid.pdf"
+        # Plain filename — accept as-is (covers "document.docx", "Заявление.docx")
         return stripped
+
+
+# ─────────────────────────────────────────────────────────────
+# Context dataclass
+# ─────────────────────────────────────────────────────────────
 
 
 @dataclass
 class ContextParams:
-    """Immutable execution context passed through the agent lifecycle."""
+    """
+    Immutable execution context passed through the agent lifecycle.
+
+    Built once per request from AgentRequest by EdmsDocumentAgent._build_context().
+    Never mutated after construction except for intent (set after semantic dispatch).
+    """
+
     user_token: str
     document_id: str | None = None
     file_path: str | None = None
@@ -203,10 +232,14 @@ class ContextParams:
     def __post_init__(self) -> None:
         if not self.user_token or not isinstance(self.user_token, str):
             raise ValueError("user_token must be a non-empty string")
+
+        # Auto-derive uploaded_file_name from file_path
         if self.file_path and not self.uploaded_file_name:
             fp = str(self.file_path).strip()
             if not UUID_RE.match(fp):
                 self.uploaded_file_name = Path(fp).name
+
+        # Auto-derive user_full_name
         if not self.user_full_name:
             parts = [p for p in (self.user_last_name, self.user_first_name) if p]
             if parts:
@@ -224,10 +257,14 @@ _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "задача создана", "заголовок обновлен", "заголовок изменен",
     "адрес заявителя обновлен", "телефон в карточке обновлен",
     "изменение выполнено успешно", "операция выполнена успешно",
+    "автозаполнен", "обращение автоматически заполнен",
+    "карточка обращения заполнен", "поле успешно обновлено",
+    "✅",  # emoji marker used by tools
 )
 
 
 def _is_mutation_response(content: str | None) -> bool:
+    """Return True if content indicates a write operation succeeded."""
     if not content:
         return False
     lower = content.lower()

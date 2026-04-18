@@ -2,20 +2,21 @@
 """
 EDMS AI Assistant — Production-Ready Agent v3.1
 
-Fixes vs v3.0:
-  BUG-1: QueryComplexity.HIGH → use VERY_COMPLEX/COMPLEX  (router_planner.py)
-  BUG-2: Search results lost → ResponseAssembler now correctly picks up
-          AIMessage content over ToolMessage JSON
-  BUG-3: file_path validator rejected plain filenames → model.py fix
-  BUG-4: Summarize returned "Анализ завершён" → validator no longer stops
-          graph on compliance-only pattern; assembler skips empty AIMessage
-
 Architecture:
-  Part 1 — Memory:   ConversationMemoryManager (L0/L1/L2)
-  Part 2 — Router:   AgentRouter + AgentPlanner
+  Part 1 — Memory:     ConversationMemoryManager (L0/L1/L2)
+  Part 2 — Router:     AgentRouter + AgentPlanner
   Part 3 — Supervisor: DocumentSubAgent / WorkflowSubAgent / SearchSubAgent
-  Part 4 — Tools:    ToolCallPatchPipeline
-  Part 5 — Safety:   GuardrailPipeline, SemanticCache, HITL, CircuitBreaker
+  Part 4 — Tools:      ToolCallPatchPipeline
+  Part 5 — Safety:     GuardrailPipeline, SemanticCache, HITL, CircuitBreaker
+
+Fixes vs v3.0:
+  BUG-1: QueryComplexity.HIGH → use VERY_COMPLEX/COMPLEX
+  BUG-2: Search results lost → ResponseAssembler picks AIMessage over ToolMessage
+  BUG-3: file_path validator rejected plain filenames
+  BUG-4: Summarize returned "Анализ завершён" → validator no longer stops
+          graph on plain success; assembler skips empty AIMessage
+  BUG-5: chat_stream not implemented → stub added
+  BUG-6: Missing UserInput.user_context field
 """
 
 from __future__ import annotations
@@ -42,7 +43,6 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
-from pydantic import BaseModel, Field, field_validator, model_validator
 
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
@@ -56,7 +56,7 @@ from edms_ai_assistant.model import (
     ContextParams,
     _is_mutation_response,
 )
-from edms_ai_assistant.response_assembler import ResponseAssembler, build_response_assembler
+from edms_ai_assistant.response_assembler import ResponseAssembler
 from edms_ai_assistant.router_planner import AgentPlanner, AgentRouter, RouteDecision
 from edms_ai_assistant.services.nlp_service import SemanticDispatcher, UserIntent
 from edms_ai_assistant.tools import all_tools
@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 
 USE_LEAN_PROMPT: bool = False
 
-# Optional components — graceful degradation if not present
+# ── Optional components — graceful degradation ───────────────────────────────
 try:
     from edms_ai_assistant.memory import ConversationMemoryManager, MAX_WORKING_MESSAGES
     _MEMORY_AVAILABLE = True
@@ -98,37 +98,12 @@ except ImportError:
     CircuitBreaker = None  # type: ignore
 
 try:
-    from edms_ai_assistant.tool_call_patch_pipeline import ToolCallPatchPipeline
-    from edms_ai_assistant.tool_args_patcher import ToolArgsPatcher
-    from edms_ai_assistant.tool_call_router import ToolCallRouter
-    from edms_ai_assistant.tool_call_guard import ToolCallGuard
-    _PIPELINE_AVAILABLE = True
-except ImportError:
-    _PIPELINE_AVAILABLE = False
-    ToolCallPatchPipeline = None  # type: ignore
-    ToolArgsPatcher = None  # type: ignore
-    ToolCallRouter = None  # type: ignore
-    ToolCallGuard = None  # type: ignore
-
-try:
     from edms_ai_assistant.agent_config import AgentConfig, DEFAULT_CONFIG
     _CONFIG_AVAILABLE = True
 except ImportError:
     _CONFIG_AVAILABLE = False
     AgentConfig = None  # type: ignore
     DEFAULT_CONFIG = None  # type: ignore
-
-try:
-    from edms_ai_assistant.agent_components import build_tool_call_guard
-    _COMPONENTS_AVAILABLE = True
-except ImportError:
-    _COMPONENTS_AVAILABLE = False
-    build_tool_call_guard = None  # type: ignore
-
-
-def _is_valid_uuid(value: str) -> bool:
-    return bool(UUID_RE.match(value.strip()))
-
 
 __all__ = [
     "EdmsDocumentAgent",
@@ -141,36 +116,28 @@ __all__ = [
     "AgentStateManager",
 ]
 
-# ── Mutation phrases for requires_reload signal ───────────────────────────────
-_MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
-    "успешно добавлен", "успешно создан", "список ознакомления",
-    "поручение создано", "поручение успешно", "обращение заполнено",
-    "карточка заполнена", "добавлено в список", "ознакомление создано",
-    "задача создана", "заголовок обновлен", "заголовок изменен",
-    "адрес заявителя обновлен", "телефон в карточке обновлен",
-    "изменение выполнено успешно", "операция выполнена успешно",
-    "автозаполнен", "обращение автоматически заполнен",
-    "карточка обращения заполнен",
-)
-
-# ── Tools that need document_id injected ──────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset({
     "doc_get_details", "doc_get_versions", "doc_compare_documents",
     "doc_get_file_content", "doc_compare_attachment_with_local",
     "doc_summarize_text", "doc_search_tool",
     "introduction_create_tool", "task_create_tool",
+    "doc_compliance_check", "doc_update_field",
+    "autofill_appeal_document",
 })
 
-# ── Placeholder values for local_file_path ────────────────────────────────────
 _COMPARE_LOCAL_PLACEHOLDERS: frozenset[str] = frozenset({
     "", "local_file", "local_file_path", "/path/to/file",
     "path/to/file", "none", "null", "<local_file_path>", "<path>",
 })
 
-# ── Tools involved in disambiguation flow ────────────────────────────────────
 _DISAMBIGUATION_TOOLS: frozenset[str] = frozenset({
     "introduction_create_tool", "task_create_tool",
 })
+
+
+def _is_valid_uuid(value: str) -> bool:
+    return bool(UUID_RE.match(value.strip()))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +146,8 @@ _DISAMBIGUATION_TOOLS: frozenset[str] = frozenset({
 
 
 class DocumentRepository:
+    """Thin async wrapper for fetching DocumentDto from EDMS."""
+
     async def get_document(self, token: str, doc_id: str) -> DocumentDto | None:
         try:
             async with DocumentClient() as client:
@@ -267,7 +236,8 @@ class PromptBuilder:
 5. Ответ только на русском, без UUID.
 </rules>"""
 
-    _SNIPPETS: dict = {}
+    # Per-intent prompt snippets
+    _SNIPPETS: dict[UserIntent, str] = {}
 
     @classmethod
     def build(
@@ -314,7 +284,7 @@ PromptBuilder._SNIPPETS = {
     UserIntent.CREATE_TASK: """
 <task_guide>
 task_create_tool(task_text=..., executor_last_names=[...])
-Дата если упомянута → ISO 8601 ("T23:59:59Z"), год={current_year}.
+Дата если упомянута → ISO 8601 ("T23:59:59Z").
 При disambiguation → покажи список → selected_employee_ids.
 </task_guide>""",
     UserIntent.SUMMARIZE: """
@@ -369,7 +339,7 @@ cannot_verify → поля не найдены в файле.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ContentExtractor (kept for backward compatibility)
+# ContentExtractor — backward-compat utility
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -464,6 +434,8 @@ class ContentExtractor:
 
 
 class AgentStateManager:
+    """Wraps LangGraph compiled graph with thread-safe state operations."""
+
     def __init__(self, graph: CompiledStateGraph, checkpointer: MemorySaver) -> None:
         self.graph = graph
         self.checkpointer = checkpointer
@@ -490,6 +462,7 @@ class AgentStateManager:
         )
 
     async def is_thread_broken(self, thread_id: str) -> bool:
+        """Detect dangling AIMessage with unanswered tool_calls."""
         try:
             state = await self.get_state(thread_id)
             messages = state.values.get("messages", [])
@@ -504,6 +477,7 @@ class AgentStateManager:
             return False
 
     async def repair_thread(self, thread_id: str) -> bool:
+        """Inject synthetic ToolMessages to unblock a broken thread."""
         try:
             state = await self.get_state(thread_id)
             messages = state.values.get("messages", [])
@@ -527,7 +501,7 @@ class AgentStateManager:
                 for tc in tool_calls
             ]
             await self.update_state(thread_id, synthetic, as_node="tools")
-            logger.warning("Thread %s repaired: %d synthetic ToolMessages", thread_id, len(synthetic))
+            logger.warning("Thread %s repaired: %d synthetic ToolMessages injected", thread_id, len(synthetic))
             return True
         except Exception as exc:
             logger.error("Thread repair failed: %s", exc)
@@ -535,11 +509,12 @@ class AgentStateManager:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sub-Agents (Supervisor pattern)
+# Sub-Agents (Supervisor pattern — Part 3)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class SubAgentBase:
+    """Base class for domain-specific sub-agents."""
     domain: str = "base"
 
     def __init__(self, llm: Any, tool_names: list[str], all_tools_list: list[Any]) -> None:
@@ -556,6 +531,7 @@ class SubAgentBase:
 
 
 class DocumentSubAgent(SubAgentBase):
+    """Handles document reading, analysis, comparison and compliance."""
     domain = "document"
 
     def __init__(self, llm: Any, all_tools_list: list[Any]) -> None:
@@ -564,21 +540,24 @@ class DocumentSubAgent(SubAgentBase):
             "doc_compare_documents", "doc_compare_attachment_with_local",
             "doc_summarize_text", "read_local_file_content",
             "doc_compliance_check", "doc_update_field",
+            "autofill_appeal_document",
         ], all_tools_list)
 
 
 class WorkflowSubAgent(SubAgentBase):
+    """Handles document workflow operations — tasks, introductions, creation."""
     domain = "workflow"
 
     def __init__(self, llm: Any, all_tools_list: list[Any]) -> None:
         super().__init__(llm, [
             "task_create_tool", "introduction_create_tool",
             "autofill_appeal_document", "create_document_from_file",
-            "doc_send_notification",
+            "doc_send_notification", "doc_update_field",
         ], all_tools_list)
 
 
 class SearchSubAgent(SubAgentBase):
+    """Handles search across documents and employees."""
     domain = "search"
 
     def __init__(self, llm: Any, all_tools_list: list[Any]) -> None:
@@ -593,6 +572,16 @@ class SearchSubAgent(SubAgentBase):
 
 
 class EdmsDocumentAgent:
+    """
+    Production-ready EDMS AI Agent using Supervisor architecture.
+
+    Responsibilities:
+    - Routes requests to appropriate sub-agent (Part 3)
+    - Manages conversation memory (Part 1)
+    - Patches tool call arguments at runtime (Part 4)
+    - Enforces safety guardrails (Part 5)
+    """
+
     MAX_ITERATIONS: int = 10
     EXECUTION_TIMEOUT: float = 120.0
 
@@ -628,23 +617,29 @@ class EdmsDocumentAgent:
             self._router = AgentRouter(llm=self._llm)
             self._planner = AgentPlanner(llm=self._llm)
 
-            # Part 1: Memory managers
+            # Part 1: Memory managers per thread
             self._memory_managers: dict[str, Any] = {}
 
             # Part 5: Optional cross-cutting concerns
-            self._guardrail_pipeline = GuardrailPipeline() if _GUARDRAILS_AVAILABLE and GuardrailPipeline else None
-            self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60.0) if _RESILIENCE_AVAILABLE and CircuitBreaker else None
-            self._semantic_cache = SemanticCache() if _CACHE_AVAILABLE and SemanticCache else None
+            self._guardrail_pipeline = (
+                GuardrailPipeline() if _GUARDRAILS_AVAILABLE and GuardrailPipeline else None
+            )
+            self._circuit_breaker = (
+                CircuitBreaker(failure_threshold=5, recovery_timeout=60.0)
+                if _RESILIENCE_AVAILABLE and CircuitBreaker else None
+            )
+            self._semantic_cache = (
+                SemanticCache() if _CACHE_AVAILABLE and SemanticCache else None
+            )
 
-            # Response assembler (Part 4 output)
+            # Response assembler
             self._response_assembler = ResponseAssembler(
                 guardrail_pipeline=self._guardrail_pipeline,
                 enable_guardrails=self._enable_guardrails,
             )
 
-            # Tool binding cache
+            # Tool binding cache — avoids re-binding same toolset
             self._tool_bindings: dict[str, Any] = {}
-            self._tool_call_guard: Any = None
 
             # LangGraph
             self._compiled_graph = self._build_graph()
@@ -670,6 +665,9 @@ class EdmsDocumentAgent:
                 "workflow": len(self._workflow_agent.tools),
                 "search": len(self._search_agent.tools),
             },
+            "guardrails": self._guardrail_pipeline is not None,
+            "circuit_breaker": self._circuit_breaker is not None,
+            "semantic_cache": self._semantic_cache is not None,
         }
 
     async def chat(
@@ -685,6 +683,14 @@ class EdmsDocumentAgent:
         confirmed: bool = False,
     ) -> dict[str, Any]:
         """Main entry point for agent interaction."""
+
+        # Part 5: Circuit breaker check
+        if self._circuit_breaker and not self._circuit_breaker.allow_request():
+            return AgentResponse(
+                status=AgentStatus.ERROR,
+                message="Сервис временно недоступен. Попробуйте позже.",
+            ).model_dump()
+
         try:
             request = AgentRequest(
                 message=message,
@@ -706,18 +712,18 @@ class EdmsDocumentAgent:
 
             state = await self.state_manager.get_state(context.thread_id)
 
-            # HITL resume from interrupt
+            # HITL resume from interrupt (Part 5)
             if human_choice and state.next:
                 return await self._handle_human_choice(context, human_choice)
 
-            # Document fetch
+            # Document fetch for semantic analysis
             document: DocumentDto | None = None
             if context.document_id:
                 document = await self.document_repo.get_document(
                     context.user_token, context.document_id
                 )
 
-            # Semantic analysis
+            # Semantic analysis (Part 2)
             semantic_ctx = self.dispatcher.build_context(
                 request.message, document, context.file_path
             )
@@ -729,7 +735,7 @@ class EdmsDocumentAgent:
                 context.thread_id,
             )
 
-            # Part 2: Router
+            # Router decision (Part 2)
             route_result = self._router.route(
                 intent=semantic_ctx.query.intent,
                 complexity=semantic_ctx.query.complexity,
@@ -740,7 +746,7 @@ class EdmsDocumentAgent:
             if route_result.decision == RouteDecision.DIRECT_ANSWER and not human_choice:
                 return await self._direct_answer(context, request.message)
 
-            # Part 2: Planner
+            # Planner (Part 2)
             plan = self._planner.plan(
                 intent=semantic_ctx.query.intent,
                 has_file=bool(context.file_path),
@@ -749,10 +755,10 @@ class EdmsDocumentAgent:
             )
             plan_hint = plan.to_prompt_hint() if plan else ""
 
-            # Part 3: Dispatch sub-agent
+            # Sub-agent dispatch (Part 3)
             self._dispatch_to_sub_agent(semantic_ctx.query.intent, context)
 
-            # Build system prompt
+            # Build system prompt (Part 1 — L0)
             system_prompt = PromptBuilder.build(
                 context,
                 semantic_ctx.query.intent,
@@ -761,7 +767,7 @@ class EdmsDocumentAgent:
                 lean=USE_LEAN_PROMPT,
             )
 
-            # Part 1: Memory
+            # Memory management (Part 1 — L1/L2)
             memory_mgr = self._get_memory_manager(context.thread_id)
             raw_messages: list[BaseMessage] = [
                 SystemMessage(content=system_prompt),
@@ -770,13 +776,13 @@ class EdmsDocumentAgent:
             if _MEMORY_AVAILABLE and memory_mgr:
                 try:
                     prepared = await memory_mgr.prepare(raw_messages, system_prompt)
-                    inputs = {"messages": prepared}
+                    inputs: dict[str, Any] = {"messages": prepared}
                 except Exception:
                     inputs = {"messages": raw_messages}
             else:
                 inputs = {"messages": raw_messages}
 
-            # Forced tool call bypass
+            # Forced tool call for CREATE_DOCUMENT (bypass router for direct injection)
             forced = await self._try_forced_tool_call(context, inputs, request.message)
 
             return await self._orchestrate(
@@ -795,12 +801,50 @@ class EdmsDocumentAgent:
                 message=f"Ошибка обработки запроса: {exc}",
             ).model_dump()
 
-    # ── HITL ──────────────────────────────────────────────────────────────────
+    async def chat_stream(
+        self,
+        message: str,
+        user_token: str,
+        context_ui_id: str | None = None,
+        thread_id: str | None = None,
+        user_context: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        """
+        Part 5: Server-Sent Events streaming.
+
+        Yields SSE-formatted chunks:
+          data: <token>\n\n
+          data: [DONE]\n\n
+        """
+        try:
+            result = await self.chat(
+                message=message,
+                user_token=user_token,
+                context_ui_id=context_ui_id,
+                thread_id=thread_id,
+                user_context=user_context or {},
+            )
+            content = result.get("content") or result.get("message") or ""
+            # Stream word-by-word for UX
+            words = content.split(" ")
+            for i, word in enumerate(words):
+                chunk = word + (" " if i < len(words) - 1 else "")
+                yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.015)
+            yield "data: [DONE]\n\n"
+        except Exception as exc:
+            logger.error("Stream error: %s", exc)
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    # ── HITL — Human-in-the-Loop (Part 5) ─────────────────────────────────────
 
     async def _handle_human_choice(
         self, context: ContextParams, human_choice: str
     ) -> dict[str, Any]:
-        # Compliance field fix
+        """Resume graph execution after human makes a selection."""
+
+        # Field fix from compliance card
         if human_choice.startswith("fix_field:"):
             parts = human_choice.split(":", 2)
             if len(parts) == 3:
@@ -841,6 +885,7 @@ class EdmsDocumentAgent:
         human_choice: str,
         context: ContextParams,
     ) -> list[dict]:
+        """Apply human selection to pending tool calls."""
         patched = []
         for tc in raw_calls:
             t_args = dict(tc["args"])
@@ -862,11 +907,9 @@ class EdmsDocumentAgent:
                     t_args["selected_employee_ids"] = valid_ids
                     t_args.pop("last_names", None)
                     t_args.pop("executor_last_names", None)
-                    t_args.pop("recipient_last_names", None)
 
             elif t_name == "doc_compare_attachment_with_local":
-                choice = human_choice.strip()
-                t_args["attachment_id"] = choice
+                t_args["attachment_id"] = human_choice.strip()
                 if context.document_id:
                     t_args["document_id"] = context.document_id
                 if context.uploaded_file_name:
@@ -875,9 +918,10 @@ class EdmsDocumentAgent:
             patched.append({"name": t_name, "args": t_args, "id": tc["id"]})
         return patched
 
-    # ── Direct answer ──────────────────────────────────────────────────────────
+    # ── Direct answer bypass ───────────────────────────────────────────────────
 
     async def _direct_answer(self, context: ContextParams, message: str) -> dict[str, Any]:
+        """Answer directly without invoking any tools."""
         try:
             messages = [
                 SystemMessage(content=(
@@ -889,14 +933,18 @@ class EdmsDocumentAgent:
                 HumanMessage(content=message),
             ]
             response = await self._llm.ainvoke(messages)
+            if self._circuit_breaker:
+                self._circuit_breaker.record_success()
             return AgentResponse(
                 status=AgentStatus.SUCCESS,
                 content=str(response.content).strip(),
             ).model_dump()
         except Exception as exc:
+            if self._circuit_breaker:
+                self._circuit_breaker.record_failure()
             return AgentResponse(status=AgentStatus.ERROR, message=str(exc)).model_dump()
 
-    # ── Core orchestration ─────────────────────────────────────────────────────
+    # ── Core orchestration loop ────────────────────────────────────────────────
 
     async def _orchestrate(
         self,
@@ -905,10 +953,22 @@ class EdmsDocumentAgent:
         is_choice_active: bool,
         iteration: int,
     ) -> dict[str, Any]:
-        if iteration > self._max_iterations:
-            return AgentResponse(status=AgentStatus.ERROR, message="Превышен лимит итераций.").model_dump()
+        """
+        Main ReAct loop. Handles tool call patching and graph resumption.
 
-        # Minimal toolset on first iteration
+        Args:
+            context: Immutable request context.
+            inputs: Messages to inject (None = resume existing thread).
+            is_choice_active: Whether user just made a disambiguation choice.
+            iteration: Current recursion depth (capped at MAX_ITERATIONS).
+        """
+        if iteration > self._max_iterations:
+            return AgentResponse(
+                status=AgentStatus.ERROR,
+                message="Превышен лимит итераций. Повторите запрос."
+            ).model_dump()
+
+        # Minimal toolset on first iteration (Part 2: Router RAG)
         if iteration == 0:
             selected_tools = get_tools_for_intent(
                 context.intent or UserIntent.UNKNOWN,
@@ -950,42 +1010,36 @@ class EdmsDocumentAgent:
                     self._circuit_breaker.record_success()
                 return result
 
-            # Process tool calls
+            # If no pending tool calls — assemble what we have
             if not last_has_calls:
-                # No tool calls but graph not finished — assemble what we have
                 return self._response_assembler.assemble(messages, context)
 
+            # Process and patch tool calls
             raw_calls = list(getattr(last_msg, "tool_calls", []))
 
-            # Block parallel tool calls — keep only first
+            # Part 4: Block parallel tool calls — sequential only
             if len(raw_calls) > 1:
                 logger.warning(
-                    "Parallel calls blocked: keeping %s, dropping %s",
+                    "Parallel calls blocked: keeping '%s', dropping %s",
                     raw_calls[0]["name"],
                     [tc["name"] for tc in raw_calls[1:]],
                 )
                 raw_calls = raw_calls[:1]
 
             last_tool_text = ContentExtractor.extract_last_tool_text(messages)
-
-            # Detect if we're after a compare disambiguation
-            _after_compare_disambiguation = self._detect_after_compare_disambiguation(messages)
+            after_compare_disambiguation = self._detect_after_compare_disambiguation(messages)
 
             patched_calls = []
             for tc in raw_calls:
-                t_name = tc["name"]
-                t_args = dict(tc["args"])
-                t_id = tc["id"]
-
                 patched = self._patch_tool_call(
-                    t_name=t_name,
-                    t_args=t_args,
-                    t_id=t_id,
+                    t_name=tc["name"],
+                    t_args=dict(tc["args"]),
+                    t_id=tc["id"],
                     context=context,
                     messages=messages,
                     last_tool_text=last_tool_text,
                     is_choice_active=is_choice_active,
-                    after_compare_disambiguation=_after_compare_disambiguation,
+                    after_compare_disambiguation=after_compare_disambiguation,
                 )
                 patched_calls.append(patched)
 
@@ -999,7 +1053,7 @@ class EdmsDocumentAgent:
                 as_node="agent",
             )
 
-            # Propagate is_choice_active correctly
+            # Propagate is_choice_active: only keep true if we're still in a choice flow
             next_choice_active = is_choice_active
             if is_choice_active and patched_calls:
                 last_tool_name = patched_calls[-1]["name"]
@@ -1016,12 +1070,16 @@ class EdmsDocumentAgent:
             )
 
         except TimeoutError:
-            return AgentResponse(status=AgentStatus.ERROR, message="Превышено время ожидания.").model_dump()
+            return AgentResponse(
+                status=AgentStatus.ERROR,
+                message="Превышено время ожидания ответа от сервера."
+            ).model_dump()
 
         except Exception as exc:
             err_str = str(exc)
             logger.error("Orchestration error iter=%d: %s", iteration, exc, exc_info=True)
 
+            # Broken thread signals — attempt repair
             _broken_signals = (
                 "tool_calls must be followed by tool messages",
                 "tool_call_ids did not have response messages",
@@ -1039,7 +1097,7 @@ class EdmsDocumentAgent:
                 self._circuit_breaker.record_failure()
             return AgentResponse(status=AgentStatus.ERROR, message=f"Ошибка: {exc}").model_dump()
 
-    # ── Tool call patching (inlined from ToolCallPatchPipeline) ───────────────
+    # ── Tool call patching (Part 4) ────────────────────────────────────────────
 
     def _patch_tool_call(
         self,
@@ -1052,24 +1110,41 @@ class EdmsDocumentAgent:
         is_choice_active: bool,
         after_compare_disambiguation: bool,
     ) -> dict:
-        """Apply all patching rules to a single tool call."""
+        """
+        Apply all patching rules to a single tool call.
+
+        Injection order:
+        1. Auth token
+        2. create_document_from_file special injection
+        3. document_id injection
+        4. File routing (local / UUID)
+        5. Fallback routing (compare → version)
+        6. Force-inject local_file_path
+        7. Block compare after disambiguation
+        8. Fix placeholder paths
+        9. Summarize text + type injection
+        10. Re-inject document_id after renames
+        """
         clean_path = str(context.file_path or "").strip()
         path_is_uuid = _is_valid_uuid(clean_path) if clean_path else False
         path_is_local = bool(clean_path) and not path_is_uuid
 
-        # 1. Inject auth token
+        # 1. Auth token (always)
         t_args["token"] = context.user_token
 
-        # 2. create_document_from_file special injection
+        # 2. create_document_from_file
         if t_name == "create_document_from_file":
             if not t_args.get("doc_category"):
-                from edms_ai_assistant.tools.create_document_from_file import _extract_category_from_message
-                for _m in reversed(messages):
-                    if isinstance(_m, HumanMessage):
-                        detected = _extract_category_from_message(str(_m.content))
-                        if detected:
-                            t_args["doc_category"] = detected
-                        break
+                try:
+                    from edms_ai_assistant.tools.create_document_from_file import _extract_category_from_message
+                    for _m in reversed(messages):
+                        if isinstance(_m, HumanMessage):
+                            detected = _extract_category_from_message(str(_m.content))
+                            if detected:
+                                t_args["doc_category"] = detected
+                            break
+                except ImportError:
+                    pass
             if not t_args.get("file_path") and path_is_local:
                 t_args["file_path"] = clean_path
             if not t_args.get("file_name") and context.uploaded_file_name:
@@ -1084,11 +1159,11 @@ class EdmsDocumentAgent:
         # 4. Route file references
         if path_is_local:
             if t_name == "doc_get_versions":
+                logger.warning("GUARD: doc_get_versions → doc_compare_attachment_with_local (local file)")
                 t_name = "doc_compare_attachment_with_local"
                 t_args = {"local_file_path": clean_path}
                 if context.document_id:
                     t_args["document_id"] = context.document_id
-                logger.warning("GUARD: doc_get_versions → doc_compare_attachment_with_local (local file present)")
 
             elif t_name == "doc_compare_documents":
                 t_name = "doc_compare_attachment_with_local"
@@ -1111,7 +1186,7 @@ class EdmsDocumentAgent:
                 if not cur or not _is_valid_uuid(cur):
                     t_args["attachment_id"] = clean_path
 
-        # 5. Fallback: compare_with_local without file → version compare
+        # 5. Fallback: compare_with_local without file context → version compare
         if (
             t_name == "doc_compare_attachment_with_local"
             and not clean_path
@@ -1130,8 +1205,10 @@ class EdmsDocumentAgent:
             if context.uploaded_file_name and not t_args.get("original_filename"):
                 t_args["original_filename"] = context.uploaded_file_name
 
-        # 7. Block doc_compare_documents after disambiguation
-        if t_name == "doc_compare_documents" and (after_compare_disambiguation or (is_choice_active and path_is_local)):
+        # 7. Block doc_compare_documents after compare disambiguation
+        if t_name == "doc_compare_documents" and (
+            after_compare_disambiguation or (is_choice_active and path_is_local)
+        ):
             t_name = "doc_compare_attachment_with_local"
             t_args = {
                 "token": context.user_token,
@@ -1147,7 +1224,7 @@ class EdmsDocumentAgent:
             if not cur_fp or cur_fp.lower() in ("local_file", "file_path", "none", "null", ""):
                 t_args["file_path"] = clean_path
 
-        # 9. Inject text for doc_summarize_text + summary_type fallback
+        # 9. doc_summarize_text — inject text + summary_type fallback
         if t_name == "doc_summarize_text":
             if last_tool_text:
                 t_args["text"] = last_tool_text
@@ -1159,7 +1236,7 @@ class EdmsDocumentAgent:
                 elif pref and pref != "ask":
                     t_args["summary_type"] = pref
 
-        # Re-inject document_id after possible rename
+        # 10. Re-inject document_id after possible rename
         if context.document_id and t_name in _TOOLS_REQUIRING_DOCUMENT_ID:
             cur = str(t_args.get("document_id", "")).strip()
             if not cur or not _is_valid_uuid(cur):
@@ -1169,6 +1246,7 @@ class EdmsDocumentAgent:
 
     @staticmethod
     def _detect_after_compare_disambiguation(messages: list[BaseMessage]) -> bool:
+        """Check if we're resuming after a compare tool disambiguation."""
         for prev_msg in reversed(messages[-15:]):
             if isinstance(prev_msg, ToolMessage):
                 try:
@@ -1184,19 +1262,22 @@ class EdmsDocumentAgent:
                 break
         return False
 
-    # ── Graph compilation ──────────────────────────────────────────────────────
+    # ── LangGraph compilation ──────────────────────────────────────────────────
 
     def _build_graph(self) -> CompiledStateGraph:
+        """Build the ReAct LangGraph with validator node."""
         workflow = StateGraph(AgentState)
 
         async def call_model(state: AgentState) -> dict[str, Any]:
+            """Agent node: LLM decides next action."""
             sys_msgs = [m for m in state["messages"] if isinstance(m, SystemMessage)]
             non_sys = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
 
+            # L1 truncation (Part 1: Working Memory)
             if len(non_sys) > MAX_WORKING_MESSAGES:
                 non_sys = non_sys[-MAX_WORKING_MESSAGES:]
 
-            # Inject compliance-fix hint when relevant
+            # Inject compliance hint when relevant
             for msg in reversed(state["messages"]):
                 if isinstance(msg, ToolMessage):
                     raw = str(msg.content)
@@ -1205,15 +1286,15 @@ class EdmsDocumentAgent:
                             data = json.loads(raw)
                             if data.get("status") == "success" and "fields" in data:
                                 sys_msgs.append(SystemMessage(content=(
-                                    "ВНИМАНИЕ: в истории есть результат compliance check. "
-                                    "При запросе на исправление — используй correct_value "
+                                    "ВНИМАНИЕ: результат compliance check уже получен. "
+                                    "При запросе исправления — используй correct_value "
                                     "из результатов и вызывай doc_update_field."
                                 )))
                         except json.JSONDecodeError:
                             pass
                     break
 
-            # Sanitize dangling AIMessages
+            # Sanitize: strip dangling AIMessages with unanswered tool_calls
             candidate_msgs = sys_msgs + non_sys
             final_msgs: list[BaseMessage] = []
             for i, msg in enumerate(candidate_msgs):
@@ -1231,14 +1312,12 @@ class EdmsDocumentAgent:
             """
             Post-tool validator.
 
-            BUG-4 FIX: Do NOT stop graph on plain success statuses.
-            Only stop for:
-            - compliance results (status=success + fields list)
-            - interactive statuses (requires_choice / requires_disambiguation)
-            - empty tool results
+            BUG-4 FIX: Only stop graph for:
+            - Compliance results (status=success + fields list)
+            - Interactive statuses (requires_choice / requires_disambiguation)
+            - Empty tool results
 
-            The graph must continue to call_model so the LLM can formulate
-            a proper response for the user (e.g. after doc_summarize_text).
+            Do NOT stop for plain success — let LLM formulate user response.
             """
             last = state["messages"][-1]
             if not isinstance(last, ToolMessage):
@@ -1255,11 +1334,11 @@ class EdmsDocumentAgent:
             if raw.startswith("{"):
                 try:
                     tool_data = json.loads(raw)
-                    interactive_status = tool_data.get("status", "")
+                    status = tool_data.get("status", "")
 
-                    # Compliance result — stop and let ResponseAssembler handle it
+                    # Compliance — stop and let ResponseAssembler handle cards
                     if (
-                        interactive_status == "success"
+                        status == "success"
                         and isinstance(tool_data.get("fields"), list)
                         and "overall" in tool_data
                     ):
@@ -1268,15 +1347,12 @@ class EdmsDocumentAgent:
                             content="Проверка соответствия завершена. Результаты готовы."
                         )]}
 
-                    # Interactive statuses — stop graph so assembler detects them
-                    if interactive_status in (
-                        "requires_choice", "requires_disambiguation", "requires_action"
-                    ):
-                        logger.info("Validator: interactive status '%s' → stopping graph", interactive_status)
+                    # Interactive statuses — stop so assembler can detect them
+                    if status in ("requires_choice", "requires_disambiguation", "requires_action"):
+                        logger.info("Validator: interactive status '%s' → stopping graph", status)
                         return {"messages": [AIMessage(content="")]}
 
-                    # NOTE: Do NOT stop on plain success — let LLM formulate response
-
+                    # All other statuses (including plain success) — continue
                 except json.JSONDecodeError:
                     pass
 
@@ -1293,7 +1369,9 @@ class EdmsDocumentAgent:
                 return "tools"
             return END
 
-        workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+        workflow.add_conditional_edges(
+            "agent", should_continue, {"tools": "tools", END: END}
+        )
         workflow.add_edge("tools", "validator")
         workflow.add_edge("validator", "agent")
 
@@ -1302,11 +1380,15 @@ class EdmsDocumentAgent:
             interrupt_before=["tools"],
         )
 
-    # ── Forced tool call ───────────────────────────────────────────────────────
+    # ── Forced tool injection ──────────────────────────────────────────────────
 
     async def _try_forced_tool_call(
         self, context: ContextParams, inputs: dict, original_message: str
     ) -> bool:
+        """
+        Directly inject create_document_from_file call for CREATE_DOCUMENT intent.
+        Bypasses the LLM decision step for determinism.
+        """
         import uuid as _uuid
 
         try:
@@ -1337,14 +1419,18 @@ class EdmsDocumentAgent:
             }],
         )
         sys_msg = inputs["messages"][0]
-        human_msg = inputs["messages"][1] if len(inputs["messages"]) > 1 else HumanMessage(content=original_message)
+        human_msg = (
+            inputs["messages"][1]
+            if len(inputs["messages"]) > 1
+            else HumanMessage(content=original_message)
+        )
         await self.state_manager.update_state(
             context.thread_id, [sys_msg, human_msg, forced_ai_msg], as_node="agent"
         )
         logger.info("Forced tool call injected: create_document_from_file id=%s", tool_call_id)
         return True
 
-    # ── Sub-agent dispatch ────────────────────────────────────────────────────
+    # ── Sub-agent dispatch (Part 3) ────────────────────────────────────────────
 
     def _dispatch_to_sub_agent(self, intent: UserIntent, context: ContextParams) -> None:
         """Manager decides which sub-agent handles this intent."""
@@ -1364,22 +1450,26 @@ class EdmsDocumentAgent:
         self._active_model = sub.model_with_tools
         self._active_tools = sub.tools
 
-    # ── Memory ────────────────────────────────────────────────────────────────
+    # ── Memory (Part 1) ────────────────────────────────────────────────────────
 
     def _get_memory_manager(self, thread_id: str) -> Any | None:
+        """Get or create per-thread ConversationMemoryManager."""
         if not _MEMORY_AVAILABLE or not ConversationMemoryManager:
             return None
         if thread_id not in self._memory_managers:
             self._memory_managers[thread_id] = ConversationMemoryManager(llm=self._llm)
         return self._memory_managers[thread_id]
 
-    # ── Context builder ───────────────────────────────────────────────────────
+    # ── Context builder ────────────────────────────────────────────────────────
 
     async def _build_context(self, request: AgentRequest) -> ContextParams:
+        """Build ContextParams from AgentRequest."""
         ctx = request.user_context
         first_name = (ctx.get("firstName") or ctx.get("first_name") or "").strip()
         last_name = (ctx.get("lastName") or ctx.get("last_name") or "").strip()
-        full_name = (ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or "").strip()
+        full_name = (
+            ctx.get("fullName") or ctx.get("full_name") or ctx.get("name") or ""
+        ).strip()
         user_id = ctx.get("id") or ctx.get("userId") or ctx.get("user_id")
         display_name = first_name or last_name or full_name or "пользователь"
         return ContextParams(
@@ -1398,6 +1488,7 @@ class EdmsDocumentAgent:
 
     @staticmethod
     def _build_semantic_xml(semantic_context: Any) -> str:
+        """Serialize SemanticContext as XML string for system prompt."""
         return (
             "\n<semantic_context>\n"
             f"  <intent>{semantic_context.query.intent.value}</intent>\n"

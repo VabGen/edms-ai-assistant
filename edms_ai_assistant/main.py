@@ -1,11 +1,13 @@
+# edms_ai_assistant/main.py
 """
 FastAPI application — production-ready with streaming & caching support.
 
-Architecture (v3 merge):
+Architecture (v3.1):
 - Standard /chat with smart file cleanup
 - /chat/stream (SSE) for real-time responses (Part 5: Streaming)
-- /actions/summarize with smart caching & EDMS fallback resolution
+- /actions/summarize with DB caching, Redis caching & EDMS fallback resolution
 - confirmed=True support for destructive operations (Part 5: HITL)
+- /appeal/autofill endpoint
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, AsyncIterator
+from typing import Annotated, Any, AsyncIterator
 
 import aiofiles
 import uvicorn
@@ -32,6 +34,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from starlette.middleware.cors import CORSMiddleware
 
@@ -50,10 +53,11 @@ from edms_ai_assistant.model import (
 )
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.services.document_service import close_redis, init_redis
+from edms_ai_assistant.services.summarize_service import SummarizeService
 from edms_ai_assistant.utils.hash_utils import get_file_hash
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
-# ─── Logging & Config ────────────────────────────────────────────────────────
+# ─── Logging ─────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
@@ -63,7 +67,7 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 
-# ─── Module-level Constants (DRY) ───────────────────────────────────────────
+# ─── Constants ───────────────────────────────────────────────────────────────
 
 _MIME_TO_EXT: dict[str, str] = {
     "application/pdf": ".pdf",
@@ -72,7 +76,6 @@ _MIME_TO_EXT: dict[str, str] = {
     "text/plain": ".txt",
 }
 
-# Слова, при наличии которых локальный файл НЕ удаляется после ответа
 _FILE_OPERATION_KEYWORDS = (
     "сравни", "сравнение", "сравн", "compare", "отличи",
     "анализ", "проанализируй", "суммаризир", "прочит",
@@ -85,9 +88,10 @@ _SUMMARY_TYPE_LABELS = {
     "thesis": "структурированный тезисный план",
 }
 
-# ─── Application Setup ───────────────────────────────────────────────────────
+# ─── Application state ────────────────────────────────────────────────────────
 
 _agent: EdmsDocumentAgent | None = None
+_summarize_service: SummarizeService | None = None
 
 
 def get_agent() -> EdmsDocumentAgent:
@@ -96,18 +100,36 @@ def get_agent() -> EdmsDocumentAgent:
     return _agent
 
 
+def get_summarize_service() -> SummarizeService:
+    if _summarize_service is None:
+        raise HTTPException(status_code=503, detail="SummarizeService не инициализирован.")
+    return _summarize_service
+
+
+# ─── Lifespan ─────────────────────────────────────────────────────────────────
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global _agent
+    global _agent, _summarize_service
+
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
     logger.info("Initializing services...")
-    await init_db()
-    await init_redis()
 
+    await init_db()
+    redis_client = await init_redis()
+
+    # Init SummarizeService with Redis
+    try:
+        _summarize_service = SummarizeService(redis_client)
+        logger.info("SummarizeService initialized with Redis")
+    except Exception as exc:
+        logger.warning("SummarizeService fallback to no-cache: %s", exc)
+        _summarize_service = SummarizeService(None)
+
+    # Init Agent
     try:
         _agent = EdmsDocumentAgent()
-        logger.info("EDMS AI Assistant started (v3)", extra={"health": _agent.health_check()})
+        logger.info("EDMS AI Assistant started (v3.1)", extra={"health": _agent.health_check()})
     except Exception:
         logger.critical("Agent initialization failed — /chat will return 503", exc_info=True)
 
@@ -119,16 +141,18 @@ async def lifespan(_app: FastAPI):
         logger.info("Temporary upload directory removed")
 
 
+# ─── App ──────────────────────────────────────────────────────────────────────
+
 app = FastAPI(
     title="EDMS AI Assistant API",
-    version="3.0.0",
+    version="3.1.0",
     description="AI-powered EDMS assistant — Supervisor architecture with streaming.",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS if hasattr(settings, "CORS_ORIGINS") else ["*"],
+    allow_origins=getattr(settings, "CORS_ORIGINS", ["*"]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -138,7 +162,7 @@ app.include_router(settings_router)
 app.include_router(cache_router)
 
 
-# ─── Core Helpers ────────────────────────────────────────────────────────────
+# ─── Core helpers ─────────────────────────────────────────────────────────────
 
 def _is_system_attachment(file_path: str | None) -> bool:
     return bool(file_path and UUID_RE.match(str(file_path)))
@@ -173,20 +197,19 @@ def _should_defer_file_cleanup(message: str | None, result: dict) -> bool:
     is_continuation = bool(result.get("human_choice"))
     is_disambiguation = result.get("action_type") in ("requires_disambiguation", "summarize_selection")
     is_requires_action = result.get("status") == "requires_action"
-
     return is_file_kw or is_continuation or is_disambiguation or is_requires_action
 
 
-# ─── Summarize Helpers (Extracted SRP) ──────────────────────────────────────
+# ─── Summarize helpers ────────────────────────────────────────────────────────
 
 def _strict_normalize(s: str) -> str:
     return re.sub(r"[^a-zA-Zа-яА-Я0-9]", "", s.lower()) if s else ""
 
 
 async def _resolve_file_identifier(
-        current_path: str, context_ui_id: str | None, user_token: str
+    current_path: str, context_ui_id: str | None, user_token: str
 ) -> tuple[str | None, bool]:
-    """Resolves local file or EDMS UUID into a stable cache identifier."""
+    """Resolves local file path or EDMS attachment name into a stable cache identifier."""
     is_uuid = _is_system_attachment(current_path)
 
     if is_uuid:
@@ -195,7 +218,7 @@ async def _resolve_file_identifier(
     if current_path and Path(current_path).exists():
         return get_file_hash(current_path), False
 
-    # Fallback: search in EDMS document attachments by name
+    # Fallback: fuzzy-search in EDMS document attachments by name
     if context_ui_id:
         try:
             async with DocumentClient() as doc_client:
@@ -221,6 +244,7 @@ async def _resolve_file_identifier(
 
 
 async def _get_cached_summary(identifier: str, summary_type: str) -> str | None:
+    """Check PostgreSQL summarization cache."""
     try:
         async with AsyncSessionLocal() as db:
             stmt = select(SummarizationCache).where(
@@ -230,7 +254,7 @@ async def _get_cached_summary(identifier: str, summary_type: str) -> str | None:
             result = await db.execute(stmt)
             cached_row = result.scalar_one_or_none()
             if cached_row:
-                logger.info("Summarization cache HIT", extra={"identifier": identifier})
+                logger.info("Summarization DB cache HIT", extra={"identifier": identifier[:16]})
                 return cached_row.content
     except Exception as db_err:
         logger.error("Cache read error", extra={"error": str(db_err)})
@@ -238,6 +262,7 @@ async def _get_cached_summary(identifier: str, summary_type: str) -> str | None:
 
 
 async def _save_summary_to_cache(identifier: str, summary_type: str, content: str) -> None:
+    """Persist summarization result to PostgreSQL."""
     if not content or not content.strip():
         return
     try:
@@ -249,19 +274,59 @@ async def _save_summary_to_cache(identifier: str, summary_type: str, content: st
                     summary_type=summary_type,
                     content=content,
                 ))
-        logger.info("Summarization cache SAVED", extra={"identifier": identifier})
+        logger.info("Summarization DB cache SAVED", extra={"identifier": identifier[:16]})
     except Exception as db_exc:
         logger.error("Cache save error", extra={"error": str(db_exc)})
 
 
-# ─── Endpoints: Chat ────────────────────────────────────────────────────────
+# ─── Pydantic models for new endpoints ───────────────────────────────────────
+
+
+class SummarizeRequest(BaseModel):
+    """Request body for POST /actions/summarize (v2 with Redis + forced_refresh)."""
+    user_token: str = Field(..., min_length=10)
+    context_ui_id: str | None = None
+    attachment_id: str | None = None
+    file_path: str | None = None
+    file_name: str | None = None
+    thread_id: str | None = None
+    summary_type: str | None = Field(
+        None,
+        description="'thesis' | 'extractive' | 'abstractive' | None (asks user)"
+    )
+    forced_refresh: bool = Field(
+        default=False,
+        description="If True: bypass cache and re-run analysis"
+    )
+    preferred_summary_format: str | None = None
+
+
+class AppealAutofillRequest(BaseModel):
+    """Request body for POST /appeal/autofill."""
+    user_token: str = Field(..., min_length=10)
+    context_ui_id: str = Field(..., description="UUID документа (APPEAL)")
+    attachment_id: str | None = None
+    message: str | None = None
+    file_path: str | None = None
+
+
+# ─── Endpoints: Chat ──────────────────────────────────────────────────────────
+
 
 @app.post("/chat", response_model=AssistantResponse, tags=["Chat"])
 async def chat_endpoint(
-        user_input: UserInput,
-        background_tasks: BackgroundTasks,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    user_input: UserInput,
+    background_tasks: BackgroundTasks,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> AssistantResponse:
+    """
+    Main chat endpoint.
+
+    Part 5 features:
+    - HITL: confirmed=True for destructive operations
+    - Smart file cleanup: keeps file alive while disambiguation is pending
+    - preferred_summary_format: injected from user preferences
+    """
     user_id = extract_user_id_from_token(user_input.user_token)
     thread_id = user_input.thread_id or f"user_{user_id}_doc_{user_input.context_ui_id or 'general'}"
 
@@ -291,10 +356,15 @@ async def chat_endpoint(
         confirmed=confirmed,
     )
 
-    # Smart file cleanup logic
+    # Part 5: Smart file cleanup
     if user_input.file_path and not _is_system_attachment(user_input.file_path):
         if result.get("requires_reload") and not _should_defer_file_cleanup(user_input.message, result):
             background_tasks.add_task(_cleanup_file, user_input.file_path)
+
+    # Pass cache metadata from result to frontend
+    metadata = result.get("metadata", {})
+    if user_input.file_path:
+        metadata.setdefault("cache_context_ui_id", user_input.context_ui_id)
 
     return AssistantResponse(
         status=result.get("status") or "success",
@@ -304,7 +374,7 @@ async def chat_endpoint(
         thread_id=thread_id,
         requires_reload=result.get("requires_reload", False),
         navigate_url=result.get("navigate_url"),
-        metadata=result.get("metadata", {}),
+        metadata=metadata,
     )
 
 
@@ -316,7 +386,13 @@ async def chat_stream_endpoint(
     thread_id: str | None = None,
     agent: EdmsDocumentAgent = Depends(get_agent),
 ) -> StreamingResponse:
-    """Part 5: Server-Sent Events stream for real-time token delivery."""
+    """
+    Part 5: Server-Sent Events stream for real-time token delivery.
+
+    Frontend connects with EventSource:
+      const es = new EventSource('/chat/stream?message=...&user_token=...')
+      es.onmessage = (e) => { if (e.data === '[DONE]') es.close(); else appendToken(JSON.parse(e.data).content) }
+    """
     user_id = extract_user_id_from_token(user_token)
     resolved_thread_id = thread_id or f"user_{user_id}_doc_{context_ui_id or 'general'}"
 
@@ -332,15 +408,20 @@ async def chat_stream_endpoint(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
 @app.get("/chat/history/{thread_id}", tags=["Chat"])
 async def get_history(
-        thread_id: str,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    thread_id: str,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
+    """Return chat history for a given thread."""
     try:
         state = await agent.state_manager.get_state(thread_id)
         messages = state.values.get("messages", [])
@@ -357,6 +438,7 @@ async def get_history(
 
 @app.post("/chat/new", tags=["Chat"])
 async def create_new_thread(request: NewChatRequest) -> dict:
+    """Create a fresh conversation thread."""
     try:
         user_id = extract_user_id_from_token(request.user_token)
         return {"status": "success", "thread_id": f"chat_{user_id}_{uuid.uuid4().hex[:8]}"}
@@ -364,81 +446,249 @@ async def create_new_thread(request: NewChatRequest) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
 
-# ─── Endpoints: Actions ─────────────────────────────────────────────────────
+# ─── Endpoints: Actions ───────────────────────────────────────────────────────
+
 
 @app.post("/actions/summarize", response_model=AssistantResponse, tags=["Actions"])
-async def api_direct_summarize(
-        user_input: UserInput,
-        background_tasks: BackgroundTasks,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+async def summarize_endpoint(
+    request: SummarizeRequest,
+    background_tasks: BackgroundTasks,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    svc: Annotated[SummarizeService, Depends(get_summarize_service)],
 ) -> AssistantResponse:
-    """Smart summarization with DB caching and EDMS attachment fallback."""
-    user_id = extract_user_id_from_token(user_input.user_token)
-    new_thread_id = f"action_{user_id}_{uuid.uuid4().hex[:8]}"
-    summary_type = user_input.human_choice or "extractive"
-    current_path = (user_input.file_path or "").strip()
+    """
+    Smart summarization with two-tier caching (Redis + PostgreSQL) and EDMS fallback.
 
-    try:
-        file_identifier, is_uuid = await _resolve_file_identifier(
-            current_path, user_input.context_ui_id, user_input.user_token
+    Flow:
+    1. forced_refresh=False AND Redis cache hit → instant cached response
+    2. forced_refresh=False AND DB cache hit → instant cached response
+    3. forced_refresh=True → invalidate caches → re-run agent
+    4. Cache miss → run agent → save to both caches
+    5. summary_type=None → agent asks user to select type (requires_choice)
+
+    Frontend «Обновить» button logic:
+      metadata.can_refresh=True + metadata.summary_type → render button
+      Click → POST { ..., forced_refresh: true }
+    """
+    user_id = extract_user_id_from_token(request.user_token)
+    thread_id = request.thread_id or f"sum_{user_id}_{request.context_ui_id or 'local'}"
+    summary_type = request.summary_type or ""
+
+    # Determine file reference
+    file_ref = (
+        request.attachment_id
+        or request.file_path
+        or request.file_name
+        or ""
+    ).strip()
+
+    # ── Step 1: Redis cache check ──────────────────────────────────────────
+    if summary_type and not request.forced_refresh:
+        cached = await svc.get_cached(
+            document_id=request.context_ui_id,
+            attachment_id=request.attachment_id,
+            file_name=request.file_name,
+            summary_type=summary_type,
         )
+        if cached:
+            response_data = SummarizeService.build_cached_response(
+                cached_data=cached,
+                summary_type=summary_type,
+                attachment_id=request.attachment_id,
+            )
+            return AssistantResponse(
+                status=response_data["status"],
+                response=response_data.get("content") or response_data.get("message"),
+                thread_id=thread_id,
+                requires_reload=False,
+                metadata={
+                    **response_data["metadata"],
+                    "cache_file_identifier": request.attachment_id or request.file_name,
+                    "cache_summary_type": summary_type,
+                    "cache_context_ui_id": request.context_ui_id,
+                },
+            )
 
-        # Check Cache
-        if file_identifier:
-            cached_text = await _get_cached_summary(file_identifier, summary_type)
+    # ── Step 2: PostgreSQL DB cache check ──────────────────────────────────
+    if summary_type and not request.forced_refresh and file_ref:
+        db_identifier, is_uuid = await _resolve_file_identifier(
+            file_ref, request.context_ui_id, request.user_token
+        )
+        if db_identifier:
+            cached_text = await _get_cached_summary(db_identifier, summary_type)
             if cached_text:
                 return AssistantResponse(
                     status="success",
                     response=cached_text,
-                    thread_id=new_thread_id,
-                    metadata={"cache_file_identifier": file_identifier, "from_cache": True},
+                    thread_id=thread_id,
+                    metadata={
+                        "cached": True,
+                        "can_refresh": True,
+                        "summary_type": summary_type,
+                        "summary_type_label": SummarizeService._SUMMARY_TYPE_LABELS.get(summary_type, summary_type),
+                        "cache_file_identifier": db_identifier,
+                        "cache_summary_type": summary_type,
+                        "cache_context_ui_id": request.context_ui_id,
+                    },
                 )
 
-        # Fallback to Agent if no cache
-        user_context = await _resolve_user_context(user_input, user_id)
-        type_label = _SUMMARY_TYPE_LABELS.get(summary_type, summary_type)
-        instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
-        agent_msg = f"{instructions}Проанализируй этот файл и выдели {type_label}."
-
-        agent_result = await agent.chat(
-            message=agent_msg,
-            user_token=user_input.user_token,
-            context_ui_id=user_input.context_ui_id,
-            thread_id=new_thread_id,
-            user_context=user_context,
-            file_path=current_path if is_uuid else current_path,
-            human_choice=summary_type,
+    # ── Step 3: Invalidate on forced refresh ───────────────────────────────
+    if request.forced_refresh and summary_type:
+        await svc.invalidate(
+            document_id=request.context_ui_id,
+            attachment_id=request.attachment_id,
+            file_name=request.file_name,
+            summary_type=summary_type,
         )
 
-        response_text = agent_result.get("content") or agent_result.get("response")
+    # ── Step 4: Build and run agent ────────────────────────────────────────
+    if request.attachment_id:
+        target = f"вложение {request.attachment_id}"
+    elif request.file_name:
+        target = f"файл «{request.file_name}»"
+    elif request.context_ui_id:
+        target = "документ"
+    else:
+        target = "файл"
 
-        # Save to Cache on success
-        if file_identifier and agent_result.get("status") == "success":
-            await _save_summary_to_cache(file_identifier, summary_type, response_text or "")
+    type_hint = f" в формате «{summary_type}»" if summary_type else ""
+    agent_msg = f"Сделай анализ {target}{type_hint}"
 
-        # Cleanup local file if used
-        if current_path and not is_uuid:
-            background_tasks.add_task(_cleanup_file, current_path)
+    user_context: dict[str, Any] = {
+        "preferred_summary_format": summary_type or "ask",
+    }
 
-        return AssistantResponse(
-            status=agent_result.get("status", "success"),
-            response=response_text or "Анализ завершён.",
-            thread_id=new_thread_id,
-            metadata={"cache_file_identifier": file_identifier, "from_cache": False},
+    result = await agent.chat(
+        message=agent_msg,
+        user_token=request.user_token,
+        context_ui_id=request.context_ui_id,
+        thread_id=thread_id,
+        user_context=user_context,
+        file_path=request.attachment_id or request.file_path or request.file_name,
+        file_name=request.file_name,
+    )
+
+    # ── Step 5: Cache successful result ───────────────────────────────────
+    result_status = result.get("status", "")
+    response_text = result.get("content") or result.get("message") or ""
+
+    if summary_type and result_status == "success" and response_text:
+        # Save to Redis
+        await svc.save_result(
+            document_id=request.context_ui_id,
+            attachment_id=request.attachment_id,
+            file_name=request.file_name,
+            summary_type=summary_type,
+            result=result,
+        )
+        # Save to PostgreSQL
+        if file_ref:
+            db_identifier, _ = await _resolve_file_identifier(
+                file_ref, request.context_ui_id, request.user_token
+            )
+            if db_identifier:
+                await _save_summary_to_cache(db_identifier, summary_type, response_text)
+
+    # ── Step 6: Cleanup local file if not a UUID ───────────────────────────
+    if request.file_path and not _is_system_attachment(request.file_path):
+        if result_status == "success":
+            background_tasks.add_task(_cleanup_file, request.file_path)
+
+    # ── Step 7: Enrich metadata ────────────────────────────────────────────
+    if summary_type and result_status == "success":
+        result = SummarizeService.enrich_fresh_response(
+            result=result,
+            summary_type=summary_type,
+            attachment_id=request.attachment_id,
         )
 
+    metadata = result.get("metadata", {})
+    metadata.update({
+        "cache_file_identifier": request.attachment_id or request.file_name,
+        "cache_summary_type": summary_type or None,
+        "cache_context_ui_id": request.context_ui_id,
+    })
+
+    return AssistantResponse(
+        status=result.get("status") or "success",
+        response=response_text or "Анализ завершён.",
+        action_type=result.get("action_type"),
+        message=result.get("message"),
+        thread_id=thread_id,
+        requires_reload=result.get("requires_reload", False),
+        navigate_url=result.get("navigate_url"),
+        metadata=metadata,
+    )
+
+
+@app.post("/appeal/autofill", response_model=AssistantResponse, tags=["Actions"])
+async def appeal_autofill_endpoint(
+    request: AppealAutofillRequest,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+) -> AssistantResponse:
+    """
+    Auto-fill appeal (APPEAL) document card from attachment content.
+
+    Calls autofill_appeal_document tool directly via agent.
+    """
+    user_id = extract_user_id_from_token(request.user_token)
+    thread_id = f"autofill_{user_id}_{request.context_ui_id}"
+
+    msg = request.message or "Автоматически заполни карточку обращения из вложения"
+
+    result = await agent.chat(
+        message=msg,
+        user_token=request.user_token,
+        context_ui_id=request.context_ui_id,
+        thread_id=thread_id,
+        user_context={},
+        file_path=request.attachment_id or request.file_path,
+    )
+
+    return AssistantResponse(
+        status=result.get("status") or "success",
+        response=result.get("content") or result.get("message"),
+        action_type=result.get("action_type"),
+        message=result.get("message"),
+        thread_id=thread_id,
+        requires_reload=result.get("requires_reload", True),
+        navigate_url=result.get("navigate_url"),
+        metadata=result.get("metadata", {}),
+    )
+
+
+# ─── Endpoints: Documents ─────────────────────────────────────────────────────
+
+
+@app.get("/document/{document_id}", tags=["Documents"])
+async def get_document_endpoint(
+    document_id: str,
+    token: str,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+) -> dict:
+    """Refresh document data — used by frontend after field updates."""
+    try:
+        async with DocumentClient() as client:
+            raw = await client.get_document_metadata(token, document_id)
+            return {"status": "success", "document": raw}
     except Exception as exc:
-        logger.error("Summarize endpoint error", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-# ─── Endpoints: Files & System ──────────────────────────────────────────────
+# ─── Endpoints: Files ─────────────────────────────────────────────────────────
+
 
 @app.post("/upload-file", response_model=FileUploadResponse, tags=["Files"])
 async def upload_file(
-        user_token: Annotated[str, Form(...)],
-        file: Annotated[UploadFile, File(...)],
+    user_token: Annotated[str, Form(...)],
+    file: Annotated[UploadFile, File(...)],
 ) -> FileUploadResponse:
+    """
+    Upload a local file for agent processing.
+
+    Saves to temp directory with sanitized filename.
+    Returns file_path and file_name for use in subsequent /chat calls.
+    """
     try:
         extract_user_id_from_token(user_token)
         if not file.filename:
@@ -467,10 +717,26 @@ async def upload_file(
         raise HTTPException(status_code=500, detail="Ошибка при сохранении файла") from exc
 
 
-@app.get("/health", tags=["System"])
-async def health_check(agent: Annotated[EdmsDocumentAgent, Depends(get_agent)]) -> dict:
-    return {"status": "ok", "version": app.version, "components": agent.health_check()}
+# ─── Endpoints: System ────────────────────────────────────────────────────────
 
+
+@app.get("/health", tags=["System"])
+async def health_check(
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+) -> dict:
+    return {
+        "status": "ok",
+        "version": app.version,
+        "components": agent.health_check(),
+    }
+
+
+@app.get("/", tags=["System"])
+async def root() -> dict:
+    return {"name": "EDMS AI Assistant", "version": app.version, "status": "running"}
+
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     uvicorn.run(
