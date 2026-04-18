@@ -271,8 +271,12 @@ async def chat_endpoint(
 
     # Part 5: HITL confirmation detection
     confirmed = (
+        user_input.confirmed
+        or (
             user_input.human_choice is not None
-            and user_input.human_choice.lower().strip() in ("confirm", "да", "yes", "подтверждаю")
+            and user_input.human_choice.lower().strip()
+            in ("confirm", "да", "yes", "подтверждаю")
+        )
     )
 
     result = await agent.chat(

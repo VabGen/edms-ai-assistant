@@ -6,8 +6,8 @@ EDMS AI Assistant — Public data contracts (Pydantic v2).
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from dataclasses import field, dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -26,14 +26,6 @@ from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 
 class AgentState(TypedDict):
-    """
-    Состояние LangGraph графа.
-
-    Единственное каноническое определение — используется
-    как в _build_graph, так и везде, где нужен тип состояния.
-    Reducer add_messages обеспечивает корректное слияние.
-    """
-
     messages: Annotated[list[BaseMessage], add_messages]
 
 
@@ -43,8 +35,6 @@ class AgentState(TypedDict):
 
 
 class UserContext(BaseModel):
-    """Профиль пользователя из EDMS."""
-
     firstName: str | None = Field(None, max_length=100)
     lastName: str | None = Field(None, max_length=100)
     middleName: str | None = Field(None, max_length=100)
@@ -52,42 +42,26 @@ class UserContext(BaseModel):
     post: str | None = Field(None, max_length=200)
 
 
+def _is_valid_uuid(value: str) -> bool:
+    return bool(UUID_RE.match(value.strip()))
+
+
 class UserInput(BaseModel):
-    """
-    Входное сообщение от клиента к /chat эндпоинту.
-
-    Валидация здесь минимальна — детальная валидация
-    делегируется AgentRequest в agent.py (Service Layer).
-    """
-
+    """HTTP request to /chat endpoint."""
     message: str = Field(..., min_length=1, max_length=8000)
     user_token: str = Field(..., min_length=10)
-    context_ui_id: str | None = Field(
-        None,
-        description="UUID активного документа в UI EDMS",
-    )
+    context_ui_id: str | None = Field(None)
     context: UserContext | None = None
-    file_path: str | None = Field(
-        None,
-        max_length=500,
-        description="UUID вложения EDMS или путь к локальному файлу",
-    )
+    file_path: str | None = Field(None, max_length=500)
     file_name: str | None = None
-    human_choice: str | None = Field(
-        None,
-        max_length=200,
-        description=(
-            "Выбор пользователя: тип суммаризации (extractive/abstractive/thesis) "
-            "или UUID сотрудников через запятую для disambiguation"
-        ),
-    )
+    human_choice: str | None = Field(None, max_length=200)
     thread_id: str | None = Field(None, max_length=255)
     preferred_summary_format: str | None = None
+    confirmed: bool = Field(default=False)
 
     @field_validator("message")
     @classmethod
     def strip_message(cls, v: str) -> str:
-        """Removes surrounding whitespace from the message."""
         return v.strip()
 
 
@@ -95,54 +69,26 @@ class UserInput(BaseModel):
 # Response models
 # ─────────────────────────────────────────────────────────────
 
-ResponseStatus = Literal["success", "error", "requires_action", "processing"]
+ResponseStatus = Literal["success", "error", "requires_action", "processing", "requires_confirmation"]
 
 
 class AssistantResponse(BaseModel):
-    """
-    Стандартизированный ответ агента клиенту.
-
-    Fields:
-        status: Машиночитаемый статус выполнения.
-        response: Текстовый ответ для отображения пользователю.
-        action_type: Тип требуемого действия (если requires_action).
-        message: Системное или пользовательское сообщение.
-        thread_id: ID треда для продолжения диалога.
-        requires_reload: True если EDMS нужно перезагрузить страницу
-                         (после мутирующих операций: ознакомление, поручение и т.д.)
-    """
-
     status: ResponseStatus = "success"
     response: str | None = None
     action_type: str | None = None
     message: str | None = None
     thread_id: str | None = None
-    requires_reload: bool = Field(
-        default=False,
-        description=(
-            "Сигнал фронтенду перезагрузить страницу EDMS "
-            "после успешного выполнения мутирующих операций"
-        ),
-    )
+    requires_reload: bool = False
     navigate_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-# ─────────────────────────────────────────────────────────────
-# Auxiliary request/response models
-# ─────────────────────────────────────────────────────────────
-
-
 class FileUploadResponse(BaseModel):
-    """Ответ на загрузку файла."""
-
     file_path: str
     file_name: str
 
 
 class NewChatRequest(BaseModel):
-    """Запрос на создание нового треда диалога."""
-
     user_token: str = Field(..., min_length=10)
 
 
@@ -151,7 +97,13 @@ class AgentStatus(str, Enum):
     ERROR = "error"
     REQUIRES_ACTION = "requires_action"
     PROCESSING = "processing"
-    REQUIRES_CONFIRMATION = "requires_confirmation"  # <--- ДОБАВЛЕНО
+    REQUIRES_CONFIRMATION = "requires_confirmation"
+
+
+class ActionType(str, Enum):
+    SUMMARIZE_SELECTION = "summarize_selection"
+    DISAMBIGUATION = "requires_disambiguation"
+    CONFIRMATION = "requires_confirmation"
 
 
 class AgentResponse(BaseModel):
@@ -166,13 +118,8 @@ class AgentResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ActionType(str, Enum):
-    SUMMARIZE_SELECTION = "summarize_selection"
-    DISAMBIGUATION = "requires_disambiguation"
-    CONFIRMATION = "requires_confirmation"
-
-
 class AgentRequest(BaseModel):
+    """Validated incoming request to the agent."""
     message: str = Field(default="", max_length=8000)
     user_token: str = Field(..., min_length=10)
     context_ui_id: str | None = Field(
@@ -184,6 +131,7 @@ class AgentRequest(BaseModel):
     file_path: str | None = Field(None, max_length=500)
     file_name: str | None = Field(None, max_length=260)
     human_choice: str | None = Field(None, max_length=200)
+    confirmed: bool = Field(default=False)
 
     @field_validator("message")
     @classmethod
@@ -191,7 +139,7 @@ class AgentRequest(BaseModel):
         return v.strip()
 
     @model_validator(mode="after")
-    def validate_message_or_choice(self) -> AgentRequest:
+    def validate_message_or_choice(self) -> "AgentRequest":
         has_message = bool(self.message and self.message.strip())
         has_choice = bool(self.human_choice and self.human_choice.strip())
         if not has_message and not has_choice:
@@ -203,22 +151,40 @@ class AgentRequest(BaseModel):
     @field_validator("file_path")
     @classmethod
     def validate_file_path(cls, v: str | None) -> str | None:
+        """
+        Accept any of:
+        - UUID v4 (attachment from EDMS)
+        - Absolute path: /tmp/file.docx or C:\\path\\file.docx
+        - Relative path with separator: uploads/file.docx
+        - Plain filename: Заявление.docx, document.pdf
+          (sent by /actions/summarize when passing attachment name)
+        """
         if not v:
             return None
         stripped = v.strip()
-        if UUID_RE.match(stripped):
+        if not stripped or len(stripped) > 500:
+            return None
+
+        # UUID attachment identifier
+        if _is_valid_uuid(stripped):
             return stripped
-        if len(stripped) < 500:
-            if stripped.startswith("/") or re.match(r"^[A-Za-z]:\\", stripped) or re.match(r"^[^/\\]+[\\/]", stripped):
-                return stripped
-        raise ValueError(f"Invalid file_path format: {v!r}")
+
+        # Absolute Unix/Windows path
+        if stripped.startswith("/") or re.match(r"^[A-Za-z]:\\", stripped):
+            return stripped
+
+        # Relative path with separator
+        if re.match(r"^[^/\\]+[/\\]", stripped):
+            return stripped
+
+        # Plain filename (no path separators) — accept as-is
+        # Covers: "document.docx", "Заявление_об_увеличении.docx", "att-uuid.pdf"
+        return stripped
 
 
 @dataclass
 class ContextParams:
-    """
-    Immutable execution context passed through the entire agent lifecycle.
-    """
+    """Immutable execution context passed through the agent lifecycle."""
     user_token: str
     document_id: str | None = None
     file_path: str | None = None
@@ -248,7 +214,7 @@ class ContextParams:
 
 
 # ─────────────────────────────────────────────────────────────
-# Shared Utility Functions (to avoid circular imports)
+# Shared utility
 # ─────────────────────────────────────────────────────────────
 
 _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
@@ -260,8 +226,8 @@ _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "изменение выполнено успешно", "операция выполнена успешно",
 )
 
+
 def _is_mutation_response(content: str | None) -> bool:
-    """Returns True if the response describes a successful mutating EDMS operation."""
     if not content:
         return False
     lower = content.lower()
