@@ -2,12 +2,14 @@
 """
 FastAPI application — production-ready with streaming & caching support.
 
-Architecture (v3.1):
-- Standard /chat with smart file cleanup
-- /chat/stream (SSE) for real-time responses (Part 5: Streaming)
-- /actions/summarize with DB caching, Redis caching & EDMS fallback resolution
-- confirmed=True support for destructive operations (Part 5: HITL)
-- /appeal/autofill endpoint
+Architecture (v3.2):
+- /chat — standard chat with smart file cleanup
+- /chat/stream — SSE streaming (Part 5)
+- /actions/summarize — ВАЖНО: принимает UserInput (как старый main.py),
+  чтобы не ломать фронтенд. Внутри — двухуровневый кэш (Redis + PostgreSQL)
+  и EDMS-резолвинг имени вложения в UUID.
+- /appeal/autofill — автозаполнение обращения
+- /document/{id} — обновление данных документа
 """
 
 from __future__ import annotations
@@ -76,13 +78,14 @@ _MIME_TO_EXT: dict[str, str] = {
     "text/plain": ".txt",
 }
 
-_FILE_OPERATION_KEYWORDS = (
+# Keywords that indicate file operation — defer cleanup
+_FILE_OPERATION_KEYWORDS: tuple[str, ...] = (
     "сравни", "сравнение", "сравн", "compare", "отличи",
     "анализ", "проанализируй", "суммаризир", "прочит",
     "содержим", "прочти", "что в файл", "читай", "изучи",
 )
 
-_SUMMARY_TYPE_LABELS = {
+_SUMMARY_TYPE_LABELS: dict[str, str] = {
     "extractive": "ключевые факты, даты, суммы",
     "abstractive": "краткое изложение своими словами",
     "thesis": "структурированный тезисный план",
@@ -96,14 +99,17 @@ _summarize_service: SummarizeService | None = None
 
 def get_agent() -> EdmsDocumentAgent:
     if _agent is None:
-        raise HTTPException(status_code=503, detail="ИИ-Агент не инициализирован.")
+        raise HTTPException(
+            status_code=503,
+            detail="ИИ-Агент не инициализирован. Повторите попытку позже.",
+        )
     return _agent
 
 
 def get_summarize_service() -> SummarizeService:
-    if _summarize_service is None:
-        raise HTTPException(status_code=503, detail="SummarizeService не инициализирован.")
-    return _summarize_service
+    # Returns None-wrapped service if not initialized — never raises 503
+    # because summarize can degrade gracefully without Redis
+    return _summarize_service or SummarizeService(None)
 
 
 # ─── Lifespan ─────────────────────────────────────────────────────────────────
@@ -118,20 +124,26 @@ async def lifespan(_app: FastAPI):
     await init_db()
     redis_client = await init_redis()
 
-    # Init SummarizeService with Redis
+    # SummarizeService with Redis — graceful fallback if Redis unavailable
     try:
         _summarize_service = SummarizeService(redis_client)
-        logger.info("SummarizeService initialized with Redis")
+        logger.info("SummarizeService initialized (Redis available)")
     except Exception as exc:
-        logger.warning("SummarizeService fallback to no-cache: %s", exc)
+        logger.warning("SummarizeService fallback to no-Redis mode: %s", exc)
         _summarize_service = SummarizeService(None)
 
-    # Init Agent
+    # Agent
     try:
         _agent = EdmsDocumentAgent()
-        logger.info("EDMS AI Assistant started (v3.1)", extra={"health": _agent.health_check()})
+        logger.info(
+            "EDMS AI Assistant started (v3.2)",
+            extra={"health": _agent.health_check()},
+        )
     except Exception:
-        logger.critical("Agent initialization failed — /chat will return 503", exc_info=True)
+        logger.critical(
+            "Agent initialization failed — /chat will return 503",
+            exc_info=True,
+        )
 
     yield
 
@@ -145,7 +157,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="EDMS AI Assistant API",
-    version="3.1.0",
+    version="3.2.0",
     description="AI-powered EDMS assistant — Supervisor architecture with streaming.",
     lifespan=lifespan,
 )
@@ -165,7 +177,8 @@ app.include_router(cache_router)
 # ─── Core helpers ─────────────────────────────────────────────────────────────
 
 def _is_system_attachment(file_path: str | None) -> bool:
-    return bool(file_path and UUID_RE.match(str(file_path)))
+    """True if file_path is an EDMS attachment UUID."""
+    return bool(file_path and UUID_RE.match(str(file_path).strip()))
 
 
 def _cleanup_file(file_path: str) -> None:
@@ -173,12 +186,13 @@ def _cleanup_file(file_path: str) -> None:
         p = Path(file_path)
         if p.exists():
             p.unlink()
-            logger.debug("Temp file removed", extra={"path": file_path})
+            logger.debug("Temp file removed: %s", file_path)
     except Exception as exc:
-        logger.warning("Failed to remove temp file", extra={"path": file_path, "error": str(exc)})
+        logger.warning("Failed to remove temp file %s: %s", file_path, exc)
 
 
 async def _resolve_user_context(user_input: UserInput, user_id: str) -> dict:
+    """Fetch employee context from EDMS; fall back to minimal dict."""
     if user_input.context:
         return user_input.context.model_dump(exclude_none=True)
     try:
@@ -187,15 +201,20 @@ async def _resolve_user_context(user_input: UserInput, user_id: str) -> dict:
             if ctx:
                 return ctx
     except Exception as exc:
-        logger.warning("Failed to fetch employee context", extra={"user_id": user_id, "error": str(exc)})
+        logger.warning(
+            "Failed to fetch employee context: %s", exc,
+            extra={"user_id": user_id},
+        )
     return {"firstName": "Коллега"}
 
 
 def _should_defer_file_cleanup(message: str | None, result: dict) -> bool:
-    """Determines if a temp file should be kept for the next turn."""
+    """True when temp file must be kept alive for the next turn."""
     is_file_kw = any(kw in (message or "").lower() for kw in _FILE_OPERATION_KEYWORDS)
     is_continuation = bool(result.get("human_choice"))
-    is_disambiguation = result.get("action_type") in ("requires_disambiguation", "summarize_selection")
+    is_disambiguation = result.get("action_type") in (
+        "requires_disambiguation", "summarize_selection"
+    )
     is_requires_action = result.get("status") == "requires_action"
     return is_file_kw or is_continuation or is_disambiguation or is_requires_action
 
@@ -203,48 +222,90 @@ def _should_defer_file_cleanup(message: str | None, result: dict) -> bool:
 # ─── Summarize helpers ────────────────────────────────────────────────────────
 
 def _strict_normalize(s: str) -> str:
+    """Strip all non-alphanumeric chars for fuzzy name matching."""
     return re.sub(r"[^a-zA-Zа-яА-Я0-9]", "", s.lower()) if s else ""
 
 
 async def _resolve_file_identifier(
-    current_path: str, context_ui_id: str | None, user_token: str
+    current_path: str,
+    context_ui_id: str | None,
+    user_token: str,
 ) -> tuple[str | None, bool]:
-    """Resolves local file path or EDMS attachment name into a stable cache identifier."""
-    is_uuid = _is_system_attachment(current_path)
+    """
+    Resolve local file path OR attachment name into a stable cache key.
 
-    if is_uuid:
-        return current_path, True
+    Returns (identifier, is_uuid):
+      - UUID attachment  → (uuid_str, True)
+      - Local file       → (sha256_hash, False)
+      - EDMS name match  → (att_uuid, True)
+      - Fallback first   → (first_att_uuid, True)
+      - Nothing          → (None, False)
+    """
+    # Already a UUID — use directly
+    if _is_system_attachment(current_path):
+        return current_path.strip(), True
 
+    # Local file exists — hash it
     if current_path and Path(current_path).exists():
-        return get_file_hash(current_path), False
+        file_hash = get_file_hash(current_path)
+        logger.info("CACHE: local file → hash %s", file_hash[:16])
+        return file_hash, False
 
-    # Fallback: fuzzy-search in EDMS document attachments by name
+    # Fallback: fuzzy-match attachment name in EDMS document
     if context_ui_id:
         try:
             async with DocumentClient() as doc_client:
-                doc_dto = await doc_client.get_document_metadata(user_token, context_ui_id)
-                attachments = getattr(doc_dto, "attachmentDocument", None) or []
+                doc_dto = await doc_client.get_document_metadata(
+                    user_token, context_ui_id
+                )
+                # Support both Pydantic model and raw dict
+                if hasattr(doc_dto, "attachmentDocument"):
+                    attachments = doc_dto.attachmentDocument or []
+                elif isinstance(doc_dto, dict):
+                    attachments = doc_dto.get("attachmentDocument") or []
+                else:
+                    attachments = []
+
+                if not attachments:
+                    logger.warning("CACHE: No attachments found in document %s", context_ui_id[:8])
+                    return None, False
 
                 clean_input = _strict_normalize(current_path)
-                if clean_input and attachments:
+
+                # Fuzzy name match
+                if clean_input:
                     for att in attachments:
-                        att_name = (getattr(att, "name", "") or "").strip()
-                        att_id = str(getattr(att, "id", "") or "")
+                        if isinstance(att, dict):
+                            att_name = (att.get("name", "") or "").strip()
+                            att_id = str(att.get("id", "") or "")
+                        else:
+                            att_name = (getattr(att, "name", "") or "").strip()
+                            att_id = str(getattr(att, "id", "") or "")
+
                         if clean_input in _strict_normalize(att_name):
+                            logger.info(
+                                "CACHE: name match '%s' → %s", att_name, att_id[:8]
+                            )
                             return att_id, True
 
-                # Ultimate fallback: first attachment
-                if attachments:
-                    first_id = str(getattr(attachments[0], "id", "") or "")
+                # Fallback: first attachment
+                first = attachments[0]
+                first_id = str(
+                    (first.get("id") if isinstance(first, dict) else getattr(first, "id", ""))
+                    or ""
+                )
+                if first_id:
+                    logger.info("CACHE: using first attachment %s", first_id[:8])
                     return first_id, True
+
         except Exception as exc:
-            logger.error("EDMS attachment resolution failed", extra={"error": str(exc)})
+            logger.error("CACHE: EDMS resolution failed: %s", exc)
 
     return None, False
 
 
-async def _get_cached_summary(identifier: str, summary_type: str) -> str | None:
-    """Check PostgreSQL summarization cache."""
+async def _get_db_cached_summary(identifier: str, summary_type: str) -> str | None:
+    """Check PostgreSQL summarization cache. Returns content string or None."""
     try:
         async with AsyncSessionLocal() as db:
             stmt = select(SummarizationCache).where(
@@ -254,15 +315,19 @@ async def _get_cached_summary(identifier: str, summary_type: str) -> str | None:
             result = await db.execute(stmt)
             cached_row = result.scalar_one_or_none()
             if cached_row:
-                logger.info("Summarization DB cache HIT", extra={"identifier": identifier[:16]})
+                logger.info(
+                    "DB cache HIT: id=%s type=%s", identifier[:16], summary_type
+                )
                 return cached_row.content
-    except Exception as db_err:
-        logger.error("Cache read error", extra={"error": str(db_err)})
+    except Exception as exc:
+        logger.error("DB cache read error: %s", exc)
     return None
 
 
-async def _save_summary_to_cache(identifier: str, summary_type: str, content: str) -> None:
-    """Persist summarization result to PostgreSQL."""
+async def _save_db_cache(
+    identifier: str, summary_type: str, content: str
+) -> None:
+    """Persist summarization result to PostgreSQL cache."""
     if not content or not content.strip():
         return
     try:
@@ -274,31 +339,13 @@ async def _save_summary_to_cache(identifier: str, summary_type: str, content: st
                     summary_type=summary_type,
                     content=content,
                 ))
-        logger.info("Summarization DB cache SAVED", extra={"identifier": identifier[:16]})
-    except Exception as db_exc:
-        logger.error("Cache save error", extra={"error": str(db_exc)})
+        logger.info("DB cache SAVED: id=%s type=%s", identifier[:16], summary_type)
+    except Exception as exc:
+        # UniqueConstraint violation on duplicate — not an error, just skip
+        logger.warning("DB cache save skipped (probably duplicate): %s", exc)
 
 
-# ─── Pydantic models for new endpoints ───────────────────────────────────────
-
-
-class SummarizeRequest(BaseModel):
-    """Request body for POST /actions/summarize (v2 with Redis + forced_refresh)."""
-    user_token: str = Field(..., min_length=10)
-    context_ui_id: str | None = None
-    attachment_id: str | None = None
-    file_path: str | None = None
-    file_name: str | None = None
-    thread_id: str | None = None
-    summary_type: str | None = Field(
-        None,
-        description="'thesis' | 'extractive' | 'abstractive' | None (asks user)"
-    )
-    forced_refresh: bool = Field(
-        default=False,
-        description="If True: bypass cache and re-run analysis"
-    )
-    preferred_summary_format: str | None = None
+# ─── Pydantic models ──────────────────────────────────────────────────────────
 
 
 class AppealAutofillRequest(BaseModel):
@@ -322,19 +369,20 @@ async def chat_endpoint(
     """
     Main chat endpoint.
 
-    Part 5 features:
-    - HITL: confirmed=True for destructive operations
-    - Smart file cleanup: keeps file alive while disambiguation is pending
-    - preferred_summary_format: injected from user preferences
+    Accepts UserInput with optional file_path, human_choice, preferred_summary_format.
+    Handles HITL confirmation via confirmed=True or human_choice='да'/'confirm'.
     """
     user_id = extract_user_id_from_token(user_input.user_token)
-    thread_id = user_input.thread_id or f"user_{user_id}_doc_{user_input.context_ui_id or 'general'}"
+    thread_id = (
+        user_input.thread_id
+        or f"user_{user_id}_doc_{user_input.context_ui_id or 'general'}"
+    )
 
     user_context = await _resolve_user_context(user_input, user_id)
     if user_input.preferred_summary_format and user_input.preferred_summary_format != "ask":
         user_context["preferred_summary_format"] = user_input.preferred_summary_format
 
-    # Part 5: HITL confirmation detection
+    # HITL confirmation detection
     confirmed = (
         user_input.confirmed
         or (
@@ -356,12 +404,13 @@ async def chat_endpoint(
         confirmed=confirmed,
     )
 
-    # Part 5: Smart file cleanup
+    # Smart file cleanup
     if user_input.file_path and not _is_system_attachment(user_input.file_path):
-        if result.get("requires_reload") and not _should_defer_file_cleanup(user_input.message, result):
+        if result.get("requires_reload") and not _should_defer_file_cleanup(
+            user_input.message, result
+        ):
             background_tasks.add_task(_cleanup_file, user_input.file_path)
 
-    # Pass cache metadata from result to frontend
     metadata = result.get("metadata", {})
     if user_input.file_path:
         metadata.setdefault("cache_context_ui_id", user_input.context_ui_id)
@@ -386,15 +435,11 @@ async def chat_stream_endpoint(
     thread_id: str | None = None,
     agent: EdmsDocumentAgent = Depends(get_agent),
 ) -> StreamingResponse:
-    """
-    Part 5: Server-Sent Events stream for real-time token delivery.
-
-    Frontend connects with EventSource:
-      const es = new EventSource('/chat/stream?message=...&user_token=...')
-      es.onmessage = (e) => { if (e.data === '[DONE]') es.close(); else appendToken(JSON.parse(e.data).content) }
-    """
+    """SSE stream for real-time token delivery."""
     user_id = extract_user_id_from_token(user_token)
-    resolved_thread_id = thread_id or f"user_{user_id}_doc_{context_ui_id or 'general'}"
+    resolved_thread_id = (
+        thread_id or f"user_{user_id}_doc_{context_ui_id or 'general'}"
+    )
 
     async def event_generator() -> AsyncIterator[str]:
         async for chunk in agent.chat_stream(
@@ -421,18 +466,24 @@ async def get_history(
     thread_id: str,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
-    """Return chat history for a given thread."""
+    """Return filtered chat history for a thread."""
     try:
         state = await agent.state_manager.get_state(thread_id)
         messages = state.values.get("messages", [])
         filtered = [
-            {"type": "human" if isinstance(m, HumanMessage) else "ai", "content": m.content}
+            {
+                "type": "human" if isinstance(m, HumanMessage) else "ai",
+                "content": m.content,
+            }
             for m in messages
             if isinstance(m, (HumanMessage, AIMessage)) and m.content
         ]
         return {"messages": filtered}
     except Exception as exc:
-        logger.error("History retrieval failed", extra={"thread_id": thread_id, "error": str(exc)})
+        logger.error(
+            "History retrieval failed",
+            extra={"thread_id": thread_id, "error": str(exc)},
+        )
         return {"messages": []}
 
 
@@ -441,7 +492,10 @@ async def create_new_thread(request: NewChatRequest) -> dict:
     """Create a fresh conversation thread."""
     try:
         user_id = extract_user_id_from_token(request.user_token)
-        return {"status": "success", "thread_id": f"chat_{user_id}_{uuid.uuid4().hex[:8]}"}
+        return {
+            "status": "success",
+            "thread_id": f"chat_{user_id}_{uuid.uuid4().hex[:8]}",
+        }
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
@@ -450,173 +504,175 @@ async def create_new_thread(request: NewChatRequest) -> dict:
 
 
 @app.post("/actions/summarize", response_model=AssistantResponse, tags=["Actions"])
-async def summarize_endpoint(
-    request: SummarizeRequest,
+async def api_direct_summarize(
+    user_input: UserInput,  # ← сохраняем UserInput как в старом main.py
     background_tasks: BackgroundTasks,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
-    svc: Annotated[SummarizeService, Depends(get_summarize_service)],
 ) -> AssistantResponse:
     """
-    Smart summarization with two-tier caching (Redis + PostgreSQL) and EDMS fallback.
+    Smart summarization with two-tier caching (Redis + PostgreSQL).
 
-    Flow:
-    1. forced_refresh=False AND Redis cache hit → instant cached response
-    2. forced_refresh=False AND DB cache hit → instant cached response
-    3. forced_refresh=True → invalidate caches → re-run agent
-    4. Cache miss → run agent → save to both caches
-    5. summary_type=None → agent asks user to select type (requires_choice)
+    ВАЖНО: принимает UserInput (не SummarizeRequest) — фронтенд шлёт именно его.
+    Поля фронтенда:
+      file_path    = имя файла ИЛИ UUID вложения ИЛИ локальный путь
+      human_choice = тип анализа ('extractive' | 'abstractive' | 'thesis')
+      context_ui_id = UUID документа (для EDMS резолвинга)
 
-    Frontend «Обновить» button logic:
-      metadata.can_refresh=True + metadata.summary_type → render button
-      Click → POST { ..., forced_refresh: true }
+    Порядок работы:
+    1. Резолвим file_path → стабильный file_identifier (UUID или хэш)
+    2. Redis cache hit → мгновенный ответ
+    3. DB (PostgreSQL) cache hit → мгновенный ответ
+    4. Cache miss → запускаем агента → сохраняем в оба кэша
     """
-    user_id = extract_user_id_from_token(request.user_token)
-    thread_id = request.thread_id or f"sum_{user_id}_{request.context_ui_id or 'local'}"
-    summary_type = request.summary_type or ""
+    user_id = extract_user_id_from_token(user_input.user_token)
+    new_thread_id = f"action_{user_id}_{uuid.uuid4().hex[:8]}"
+    summary_type = (user_input.human_choice or "extractive").strip()
 
-    # Determine file reference
-    file_ref = (
-        request.attachment_id
-        or request.file_path
-        or request.file_name
-        or ""
-    ).strip()
+    # ── Шаг 1: резолвим file_identifier ──────────────────────────────────────
+    current_path = (user_input.file_path or "").strip()
 
-    # ── Step 1: Redis cache check ──────────────────────────────────────────
-    if summary_type and not request.forced_refresh:
-        cached = await svc.get_cached(
-            document_id=request.context_ui_id,
-            attachment_id=request.attachment_id,
-            file_name=request.file_name,
-            summary_type=summary_type,
+    logger.info(
+        "SUMMARIZE START: path='%s' context=%s type=%s",
+        current_path, user_input.context_ui_id, summary_type,
+    )
+
+    file_identifier, is_uuid = await _resolve_file_identifier(
+        current_path=current_path,
+        context_ui_id=user_input.context_ui_id,
+        user_token=user_input.user_token,
+    )
+
+    # После резолвинга: если получили UUID вложения — использовать его как file_path
+    effective_path = file_identifier if is_uuid else current_path
+
+    logger.info(
+        "SUMMARIZE: file_identifier=%s is_uuid=%s effective_path=%s",
+        (file_identifier or "None")[:16], is_uuid, (effective_path or "None")[:32],
+    )
+
+    svc = get_summarize_service()
+
+    # ── Шаг 2: Redis cache check ──────────────────────────────────────────────
+    redis_cached = await svc.get_cached(
+        document_id=user_input.context_ui_id,
+        attachment_id=file_identifier if is_uuid else None,
+        file_name=user_input.file_path if not is_uuid else None,
+        summary_type=summary_type,
+    )
+    if redis_cached:
+        logger.info("SUMMARIZE: Redis cache HIT")
+        return AssistantResponse(
+            status="success",
+            response=redis_cached.get("content") or redis_cached.get("response"),
+            thread_id=new_thread_id,
+            metadata={
+                **redis_cached.get("metadata", {}),
+                "cache_file_identifier": file_identifier,
+                "cache_summary_type": summary_type,
+                "cache_context_ui_id": user_input.context_ui_id,
+                "from_cache": True,
+            },
         )
-        if cached:
-            response_data = SummarizeService.build_cached_response(
-                cached_data=cached,
-                summary_type=summary_type,
-                attachment_id=request.attachment_id,
-            )
+
+    # ── Шаг 3: PostgreSQL DB cache check ──────────────────────────────────────
+    if file_identifier:
+        db_cached_text = await _get_db_cached_summary(file_identifier, summary_type)
+        if db_cached_text:
+            logger.info("SUMMARIZE: DB cache HIT")
             return AssistantResponse(
-                status=response_data["status"],
-                response=response_data.get("content") or response_data.get("message"),
-                thread_id=thread_id,
-                requires_reload=False,
+                status="success",
+                response=db_cached_text,
+                thread_id=new_thread_id,
                 metadata={
-                    **response_data["metadata"],
-                    "cache_file_identifier": request.attachment_id or request.file_name,
+                    "cached": True,
+                    "can_refresh": True,
+                    "summary_type": summary_type,
+                    "summary_type_label": SummarizeService._SUMMARY_TYPE_LABELS.get(
+                        summary_type, summary_type
+                    ),
+                    "cache_file_identifier": file_identifier,
                     "cache_summary_type": summary_type,
-                    "cache_context_ui_id": request.context_ui_id,
+                    "cache_context_ui_id": user_input.context_ui_id,
+                    "from_cache": True,
                 },
             )
 
-    # ── Step 2: PostgreSQL DB cache check ──────────────────────────────────
-    if summary_type and not request.forced_refresh and file_ref:
-        db_identifier, is_uuid = await _resolve_file_identifier(
-            file_ref, request.context_ui_id, request.user_token
-        )
-        if db_identifier:
-            cached_text = await _get_cached_summary(db_identifier, summary_type)
-            if cached_text:
-                return AssistantResponse(
-                    status="success",
-                    response=cached_text,
-                    thread_id=thread_id,
-                    metadata={
-                        "cached": True,
-                        "can_refresh": True,
-                        "summary_type": summary_type,
-                        "summary_type_label": SummarizeService._SUMMARY_TYPE_LABELS.get(summary_type, summary_type),
-                        "cache_file_identifier": db_identifier,
-                        "cache_summary_type": summary_type,
-                        "cache_context_ui_id": request.context_ui_id,
-                    },
-                )
+    # ── Шаг 4: запускаем агента ───────────────────────────────────────────────
+    type_label = _SUMMARY_TYPE_LABELS.get(summary_type, summary_type)
+    user_context = await _resolve_user_context(user_input, user_id)
+    user_context["preferred_summary_format"] = summary_type
 
-    # ── Step 3: Invalidate on forced refresh ───────────────────────────────
-    if request.forced_refresh and summary_type:
-        await svc.invalidate(
-            document_id=request.context_ui_id,
-            attachment_id=request.attachment_id,
-            file_name=request.file_name,
-            summary_type=summary_type,
-        )
-
-    # ── Step 4: Build and run agent ────────────────────────────────────────
-    if request.attachment_id:
-        target = f"вложение {request.attachment_id}"
-    elif request.file_name:
-        target = f"файл «{request.file_name}»"
-    elif request.context_ui_id:
-        target = "документ"
+    if is_uuid and effective_path:
+        instructions = f"Работай с вложением {effective_path}. "
     else:
-        target = "файл"
+        instructions = ""
 
-    type_hint = f" в формате «{summary_type}»" if summary_type else ""
-    agent_msg = f"Сделай анализ {target}{type_hint}"
+    agent_msg = f"{instructions}Проанализируй этот файл и выдели {type_label}."
 
-    user_context: dict[str, Any] = {
-        "preferred_summary_format": summary_type or "ask",
-    }
+    logger.info("SUMMARIZE: calling agent, path='%s'", effective_path or "None")
 
-    result = await agent.chat(
+    agent_result = await agent.chat(
         message=agent_msg,
-        user_token=request.user_token,
-        context_ui_id=request.context_ui_id,
-        thread_id=thread_id,
+        user_token=user_input.user_token,
+        context_ui_id=user_input.context_ui_id,
+        thread_id=new_thread_id,
         user_context=user_context,
-        file_path=request.attachment_id or request.file_path or request.file_name,
-        file_name=request.file_name,
+        file_path=effective_path or current_path or None,
+        file_name=user_input.file_name,
+        human_choice=summary_type,
     )
 
-    # ── Step 5: Cache successful result ───────────────────────────────────
-    result_status = result.get("status", "")
-    response_text = result.get("content") or result.get("message") or ""
+    response_text = agent_result.get("content") or agent_result.get("response") or ""
+    result_status = agent_result.get("status", "")
 
-    if summary_type and result_status == "success" and response_text:
-        # Save to Redis
+    # ── Шаг 5: сохраняем в кэши при успехе ───────────────────────────────────
+    if result_status == "success" and response_text.strip() and file_identifier:
+        # Redis
         await svc.save_result(
-            document_id=request.context_ui_id,
-            attachment_id=request.attachment_id,
-            file_name=request.file_name,
+            document_id=user_input.context_ui_id,
+            attachment_id=file_identifier if is_uuid else None,
+            file_name=user_input.file_path if not is_uuid else None,
             summary_type=summary_type,
-            result=result,
+            result={
+                "status": "success",
+                "content": response_text,
+                "metadata": agent_result.get("metadata", {}),
+            },
         )
-        # Save to PostgreSQL
-        if file_ref:
-            db_identifier, _ = await _resolve_file_identifier(
-                file_ref, request.context_ui_id, request.user_token
-            )
-            if db_identifier:
-                await _save_summary_to_cache(db_identifier, summary_type, response_text)
+        # PostgreSQL
+        await _save_db_cache(file_identifier, summary_type, response_text)
+        logger.info(
+            "SUMMARIZE: result cached (Redis + DB) for id=%s", file_identifier[:16]
+        )
 
-    # ── Step 6: Cleanup local file if not a UUID ───────────────────────────
-    if request.file_path and not _is_system_attachment(request.file_path):
-        if result_status == "success":
-            background_tasks.add_task(_cleanup_file, request.file_path)
+    # ── Шаг 6: cleanup локального файла ──────────────────────────────────────
+    if current_path and not is_uuid and result_status == "success":
+        background_tasks.add_task(_cleanup_file, current_path)
 
-    # ── Step 7: Enrich metadata ────────────────────────────────────────────
+    # ── Шаг 7: обогащаем метаданные ответа ───────────────────────────────────
     if summary_type and result_status == "success":
-        result = SummarizeService.enrich_fresh_response(
-            result=result,
+        agent_result = SummarizeService.enrich_fresh_response(
+            result=agent_result,
             summary_type=summary_type,
-            attachment_id=request.attachment_id,
+            attachment_id=file_identifier if is_uuid else None,
         )
 
-    metadata = result.get("metadata", {})
+    metadata = agent_result.get("metadata", {})
     metadata.update({
-        "cache_file_identifier": request.attachment_id or request.file_name,
-        "cache_summary_type": summary_type or None,
-        "cache_context_ui_id": request.context_ui_id,
+        "cache_file_identifier": file_identifier,
+        "cache_summary_type": summary_type,
+        "cache_context_ui_id": user_input.context_ui_id,
+        "from_cache": False,
     })
 
     return AssistantResponse(
-        status=result.get("status") or "success",
+        status=result_status or "success",
         response=response_text or "Анализ завершён.",
-        action_type=result.get("action_type"),
-        message=result.get("message"),
-        thread_id=thread_id,
-        requires_reload=result.get("requires_reload", False),
-        navigate_url=result.get("navigate_url"),
+        action_type=agent_result.get("action_type"),
+        message=agent_result.get("message"),
+        thread_id=new_thread_id,
+        requires_reload=agent_result.get("requires_reload", False),
+        navigate_url=agent_result.get("navigate_url"),
         metadata=metadata,
     )
 
@@ -626,14 +682,9 @@ async def appeal_autofill_endpoint(
     request: AppealAutofillRequest,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> AssistantResponse:
-    """
-    Auto-fill appeal (APPEAL) document card from attachment content.
-
-    Calls autofill_appeal_document tool directly via agent.
-    """
+    """Auto-fill appeal document card from attachment content."""
     user_id = extract_user_id_from_token(request.user_token)
     thread_id = f"autofill_{user_id}_{request.context_ui_id}"
-
     msg = request.message or "Автоматически заполни карточку обращения из вложения"
 
     result = await agent.chat(
@@ -661,11 +712,7 @@ async def appeal_autofill_endpoint(
 
 
 @app.get("/document/{document_id}", tags=["Documents"])
-async def get_document_endpoint(
-    document_id: str,
-    token: str,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
-) -> dict:
+async def get_document_endpoint(document_id: str, token: str) -> dict:
     """Refresh document data — used by frontend after field updates."""
     try:
         async with DocumentClient() as client:
@@ -683,14 +730,10 @@ async def upload_file(
     user_token: Annotated[str, Form(...)],
     file: Annotated[UploadFile, File(...)],
 ) -> FileUploadResponse:
-    """
-    Upload a local file for agent processing.
-
-    Saves to temp directory with sanitized filename.
-    Returns file_path and file_name for use in subsequent /chat calls.
-    """
+    """Upload a local file for in-chat analysis. Returns file_path and file_name."""
     try:
         extract_user_id_from_token(user_token)
+
         if not file.filename:
             raise HTTPException(status_code=400, detail="Имя файла не указано")
 
@@ -707,14 +750,19 @@ async def upload_file(
             while chunk := await file.read(1024 * 1024):
                 await out_file.write(chunk)
 
-        logger.info("File uploaded", extra={"orig": file.filename, "dest": str(dest_path)})
+        logger.info(
+            "File uploaded",
+            extra={"orig": file.filename, "dest": str(dest_path)},
+        )
         return FileUploadResponse(file_path=str(dest_path), file_name=file.filename)
 
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("File upload failed", exc_info=True)
-        raise HTTPException(status_code=500, detail="Ошибка при сохранении файла") from exc
+        raise HTTPException(
+            status_code=500, detail="Ошибка при сохранении файла"
+        ) from exc
 
 
 # ─── Endpoints: System ────────────────────────────────────────────────────────
@@ -733,7 +781,11 @@ async def health_check(
 
 @app.get("/", tags=["System"])
 async def root() -> dict:
-    return {"name": "EDMS AI Assistant", "version": app.version, "status": "running"}
+    return {
+        "name": "EDMS AI Assistant",
+        "version": app.version,
+        "status": "running",
+    }
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

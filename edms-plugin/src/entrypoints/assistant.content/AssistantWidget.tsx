@@ -486,6 +486,7 @@ export function AssistantWidget() {
     const [userContext, setUserContext] = useState<Record<string, string>>({})
     const [pendingDelete, setPendingDelete] = useState<{ id: string; thread: Thread } | null>(null)
     const [handsFree, setHandsFree] = useState(false)
+    const [complianceKey, setComplianceKey] = useState(0)
 
     const {rootClassName, rootStyle, prefs: userPrefs} = useApplyPreferences()
 
@@ -814,6 +815,10 @@ export function AssistantWidget() {
             const cacheFileIdentifier: string | null = payload?.metadata?.cache_file_identifier ?? null
             const complianceData: ComplianceData | null = payload?.metadata?.compliance ?? null
             const cacheSummaryType: string | null = payload?.metadata?.cache_summary_type ?? null
+
+            if (payload?.metadata?.compliance_cleared) {
+                setComplianceKey(k => k + 1)
+            }
 
             const assistantMsg: Message = {
                 role: 'assistant',
@@ -1287,6 +1292,7 @@ export function AssistantWidget() {
                                             <DisambiguationButtons msg={msg} loading={loading} onSend={sendWithLabel}/>
                                             {msg.compliance && (
                                                 <ComplianceResult
+                                                    key={complianceKey}
                                                     data={msg.compliance}
                                                     threadId={threadId}
                                                     onFieldFixed={(fieldKey, newValue) => {
