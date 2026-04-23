@@ -2,8 +2,6 @@
 """
 EDMS AI Assistant — Intent-Based Tool Router.
 
-Слой: Interface (Tools).
-
 Отвечает за два вопроса:
   1. Какой минимальный набор инструментов нужно передать в bind_tools
      для данного интента? (LLM видит только этот subset — меньше токенов,
@@ -37,7 +35,6 @@ logger = logging.getLogger(__name__)
 # Примерная стоимость токенов одного инструмента в bind_tools (среднее по schemas)
 _AVG_TOKENS_PER_TOOL: int = 120
 
-
 # ─── Tool name constants ──────────────────────────────────────────────────────
 
 # Documents
@@ -60,12 +57,18 @@ _TASK_CREATE = "task_create_tool"
 _APPEAL_AUTOFILL = "autofill_appeal_document"
 _CREATE_DOCUMENT_FROM_FILE = "create_document_from_file"
 
+# Control
+_DOC_CONTROL = "doc_control"
+
 # People
 _EMPLOYEE_SEARCH = "employee_search_tool"
 
 # Notifications
 _DOC_SEND_NOTIFICATION = "doc_send_notification"
 
+# Compliance
+_DOC_COMPLIANCE_CHECK = "doc_compliance_check"
+_DOC_UPDATE_FIELD = "doc_update_field"
 
 # ─── Intent → tool names mapping ─────────────────────────────────────────────
 
@@ -100,6 +103,7 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _READ_LOCAL_FILE,
         _DOC_SUMMARIZE,
         _DOC_SEARCH,
+        _DOC_CONTROL,
     ],
     # Вопрос о документе / сотруднике
     UserIntent.QUESTION: [
@@ -107,6 +111,7 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _DOC_GET_FILE,
         _EMPLOYEE_SEARCH,
         _DOC_SEARCH,
+        _DOC_CONTROL,
     ],
     # Анализ загруженного файла (без создания документа)
     UserIntent.FILE_ANALYSIS: [
@@ -126,19 +131,39 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _EMPLOYEE_SEARCH,
     ],
     # Уведомления и напоминания
-    UserIntent.NOTIFICATION: [
-        _EMPLOYEE_SEARCH,
-        _DOC_SEND_NOTIFICATION,
-        _DOC_GET_DETAILS,
-    ],
+    # UserIntent.NOTIFICATION: [
+    #     _EMPLOYEE_SEARCH,
+    #     _DOC_SEND_NOTIFICATION,
+    #     _DOC_GET_DETAILS,
+    # ],
     # Автозаполнение обращения (отдельный сценарий)
     UserIntent.EXTRACT: [
         _APPEAL_AUTOFILL,
         _DOC_GET_DETAILS,
         _DOC_GET_FILE,
     ],
+    # Проверка соответствия документа
+    UserIntent.COMPLIANCE_CHECK: [
+        _DOC_COMPLIANCE_CHECK,
+        _DOC_UPDATE_FIELD,
+        _DOC_GET_DETAILS,
+    ],
+    # Управление контролем
+    UserIntent.CONTROL: [
+        _DOC_CONTROL,
+        _EMPLOYEE_SEARCH,
+        _DOC_GET_DETAILS,
+    ],
+    # UPDATE: изменение полей документа + контроль
+    UserIntent.UPDATE: [
+        _DOC_CONTROL,
+        _DOC_UPDATE_FIELD,
+        _DOC_GET_DETAILS,
+        _EMPLOYEE_SEARCH,
+    ],
 }
 
+# DELETE — полный набор (может удалять разные сущности)
 _FULL_TOOLSET_INTENTS: frozenset[UserIntent] = frozenset(
     {
         UserIntent.UNKNOWN,

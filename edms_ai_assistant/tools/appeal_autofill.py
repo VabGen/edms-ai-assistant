@@ -544,6 +544,7 @@ class AppealFieldsBuilder:
                 "correspondentOrgNumber": None,
                 "indexDateCoverLetter": None,
                 "reviewProgress": None,
+                "submissionForm": None,
                 "subjectId": None,
                 "solutionResultId": None,
                 "nomenclatureAffairId": None,
@@ -776,6 +777,16 @@ class AppealFieldsBuilder:
             else fields.reviewProgress
         )
 
+        submission_form = getattr(d, "submissionForm", None)
+        if not ValueSanitizer.is_empty(submission_form):
+            payload["submissionForm"] = submission_form
+            logger.debug("submissionForm from document: %s", submission_form)
+        else:
+            payload["submissionForm"] = "WRITTEN"
+            logger.warning(
+                "submissionForm not set in document — using fallback 'WRITTEN'"
+            )
+
     def _add_db_only_fields(self, d: Any, payload: dict) -> None:
         if d.subjectId:
             payload["subjectId"] = str(d.subjectId)
@@ -785,15 +796,25 @@ class AppealFieldsBuilder:
             payload["nomenclatureAffairId"] = str(d.nomenclatureAffairId)
 
     def _filter_payload(self, payload: dict) -> dict[str, Any]:
+        _ALWAYS_INCLUDE = {
+            "correspondentAppeal",
+            "correspondentAppealId",
+            "submissionForm",
+        }
+
         filtered = {}
         for k, v in payload.items():
-            if k in ("correspondentAppeal", "correspondentAppealId") or (
+            if k in _ALWAYS_INCLUDE or (
                 v is not None and not ValueSanitizer.is_empty(v)
             ):
                 filtered[k] = v
 
         if not filtered.get("declarantType"):
             raise ValueError("declarantType обязателен, но не установлен")
+
+        if not filtered.get("submissionForm"):
+            filtered["submissionForm"] = "WRITTEN"
+            logger.warning("submissionForm missing after filter — forced to 'WRITTEN'")
 
         logger.info(
             "Final payload: %s",
@@ -842,7 +863,14 @@ class AppealAutofillOrchestrator:
             raw_document = await client.get_document_metadata(
                 self.token, self.document_id
             )
-            return DocumentDto.model_validate(raw_document)
+            doc = DocumentDto.model_validate(raw_document)
+
+            appeal = getattr(doc, "documentAppeal", None)
+            logger.info(
+                "documentAppeal.submissionForm = %s",
+                getattr(appeal, "submissionForm", "ATTR_NOT_FOUND"),
+            )
+            return doc
 
     def _validate_document_category(self, document: DocumentDto) -> None:
         if document.docCategoryConstant != "APPEAL":

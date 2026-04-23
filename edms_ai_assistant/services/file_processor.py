@@ -7,6 +7,7 @@ EDMS AI Assistant - Enhanced File Processor Service.
 
 import asyncio
 import logging
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,86 @@ def _extract_docx_via_docx2txt(file_path: str) -> str:
     import docx2txt  # type: ignore[import]
 
     return docx2txt.process(file_path) or ""
+
+
+# ── Utility: DOC to DOCX conversion ─────────────────────────────────────
+
+
+def _convert_doc_to_docx(doc_path: str) -> str:
+    """Convert legacy .doc (Word 97-2003) to modern .docx using LibreOffice.
+
+    Requires LibreOffice installed and 'soffice' in PATH.
+    Windows: https://www.libreoffice.org/download/download/
+    Linux: sudo apt install libreoffice
+
+    Args:
+        doc_path: Absolute path to .doc file.
+
+    Returns:
+        Absolute path to converted .docx file.
+
+    Raises:
+        RuntimeError: If conversion fails or LibreOffice not found.
+    """
+    import subprocess
+    from pathlib import Path
+
+    doc_path_obj = Path(doc_path)
+    out_dir = doc_path_obj.parent
+
+    try:
+        soffice_cmd = "soffice"
+        if not shutil.which(soffice_cmd):
+            possible_paths = [
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ]
+            for p in possible_paths:
+                if Path(p).exists():
+                    soffice_cmd = p
+                    break
+
+        result = subprocess.run(
+            [
+                soffice_cmd,
+                "--headless",
+                "--convert-to",
+                "docx:MS Word 2007 XML",
+                "--outdir",
+                str(out_dir),
+                str(doc_path_obj),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+
+        converted_path = out_dir / f"{doc_path_obj.stem}.docx"
+        if converted_path.exists():
+            logger.info(
+                "DOC converted to DOCX via LibreOffice: %s → %s",
+                doc_path,
+                converted_path,
+            )
+            return str(converted_path)
+        else:
+            raise RuntimeError(f"Converted file not found: {converted_path}")
+
+    except FileNotFoundError:
+        raise RuntimeError(
+            "LibreOffice not found. Install from https://www.libreoffice.org/ "
+            "and ensure 'soffice' is in PATH or specify full path."
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"LibreOffice conversion timed out for: {doc_path}")
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            "LibreOffice conversion failed: %s (stderr: %s)",
+            e,
+            e.stderr,
+        )
+        raise RuntimeError(f"Conversion failed: {e.stderr or e}")
 
 
 class FileProcessorService:
@@ -225,10 +306,53 @@ class FileProcessorService:
         except Exception as mammoth_err:
             logger.warning("mammoth failed for .doc '%s': %s", file_path, mammoth_err)
 
+        try:
+            logger.info("Attempting LibreOffice conversion for .doc: %s", file_path)
+            docx_path = _convert_doc_to_docx(file_path)
+
+            # Extract from converted .docx using existing pipeline
+            text = cls._extract_docx(docx_path)
+
+            # Clean up converted file (optional: keep for debugging)
+            try:
+                Path(docx_path).unlink()
+                logger.debug("Removed temporary converted file: %s", docx_path)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Failed to remove temp file %s: %s", docx_path, cleanup_err
+                )
+
+            if text and len(text.strip()) > 10:
+                logger.info(
+                    "DOC extracted via LibreOffice conversion → docx pipeline",
+                    extra={
+                        "original": file_path,
+                        "converted": docx_path,
+                        "chars": len(text),
+                    },
+                )
+                return text
+
+        except RuntimeError as conv_err:
+            logger.warning(
+                "LibreOffice conversion failed for '%s': %s",
+                file_path,
+                conv_err,
+            )
+        except Exception as e:
+            logger.error(
+                "Unexpected error during DOC extraction for '%s': %s",
+                file_path,
+                e,
+                exc_info=True,
+            )
+
         return (
-            "Не удалось извлечь текст из файла .doc. "
-            "Файл может быть повреждён или в неподдерживаемом бинарном формате. "
-            "Попробуйте пересохранить документ в формате .docx."
+            "Не удалось извлечь текст из файла .doc.\n"
+            "Возможные причины:\n"
+            "• Файл повреждён или в неподдерживаемом бинарном формате.\n"
+            "• LibreOffice не установлен (требуется для конвертации).\n"
+            "Рекомендация: пересохраните документ в формате .docx через Microsoft Word или LibreOffice."
         )
 
     @classmethod
@@ -368,7 +492,9 @@ class FileProcessorService:
             if ext == ".xlsx":
                 for sheet_name in wb.sheetnames:
                     sheet = wb[sheet_name]
-                    extracted_text.append(f"\n{'='*50}\nЛИСТ: {sheet_name}\n{'='*50}\n")
+                    extracted_text.append(
+                        f"\n{'=' * 50}\nЛИСТ: {sheet_name}\n{'=' * 50}\n"
+                    )
                     for row in sheet.iter_rows(values_only=True):
                         if any(cell is not None for cell in row):
                             row_text = " | ".join(
@@ -378,7 +504,9 @@ class FileProcessorService:
             else:
                 for sheet_idx in range(wb.nsheets):
                     sheet = wb.sheet_by_index(sheet_idx)
-                    extracted_text.append(f"\n{'='*50}\nЛИСТ: {sheet.name}\n{'='*50}\n")
+                    extracted_text.append(
+                        f"\n{'=' * 50}\nЛИСТ: {sheet.name}\n{'=' * 50}\n"
+                    )
                     for row_idx in range(sheet.nrows):
                         row = sheet.row_values(row_idx)
                         if any(cell for cell in row):

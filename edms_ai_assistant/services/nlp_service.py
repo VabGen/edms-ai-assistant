@@ -12,6 +12,13 @@ from typing import Any
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+from edms_ai_assistant.utils.datetime_utils import (
+    LOCAL_TZ,
+    to_local_timezone,
+    now_local,
+    today_local,
+    DateTimeEncoder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +76,9 @@ class UserIntent(Enum):
     UNKNOWN = "unknown"
     FILE_ANALYSIS = "file_analysis"
     CREATE_DOCUMENT = "create_document"
-    NOTIFICATION = "notification"
+    # NOTIFICATION = "notification"
+    COMPLIANCE_CHECK = "compliance_check"
+    CONTROL = "control"
 
 
 class QueryComplexity(Enum):
@@ -197,17 +206,18 @@ class EntityExtractor:
         text: str,
         base_date: datetime | None = None,
     ) -> list[Entity]:
-        """Extract and normalise date expressions from text.
+        """
+        Extract and normalise date expressions from text.
 
         Args:
             text: Source text.
-            base_date: Reference date for relative expressions.
+            base_date: Reference date for relative expressions (default: now in GMT+3).
 
         Returns:
-            List of date entities with ISO-formatted normalised values.
+            List of date entities with ISO-formatted normalised values (+03:00).
         """
         if base_date is None:
-            base_date = datetime.now()
+            base_date = now_local()
 
         dates: list[Entity] = []
 
@@ -216,11 +226,12 @@ class EntityExtractor:
                 raw = match.group(0)
                 try:
                     normalized: datetime
+
                     if handler == "month_name":
                         day = int(match.group(1))
                         month = self.MONTH_NAMES[match.group(2)]
                         year = int(match.group(3)) if match.group(3) else base_date.year
-                        normalized = datetime(year, month, day)
+                        normalized = datetime(year, month, day, tzinfo=LOCAL_TZ)
 
                     elif handler == "relative_day":
                         delta_map = {
@@ -251,12 +262,21 @@ class EntityExtractor:
                         month = int(match.group(2))
                         if not (1 <= month <= 12 and 1 <= day <= 31):
                             continue
-                        normalized = datetime(base_date.year, month, day)
+                        normalized = datetime(
+                            base_date.year, month, day, tzinfo=LOCAL_TZ
+                        )
                         if normalized < base_date:
-                            normalized = datetime(base_date.year + 1, month, day)
+                            normalized = datetime(
+                                base_date.year + 1, month, day, tzinfo=LOCAL_TZ
+                            )
 
                     elif callable(handler):
-                        normalized = datetime.fromisoformat(handler(match.groups()))
+                        parsed = datetime.fromisoformat(handler(match.groups()))
+                        normalized = (
+                            parsed.replace(tzinfo=LOCAL_TZ)
+                            if parsed.tzinfo is None
+                            else parsed.astimezone(LOCAL_TZ)
+                        )
 
                     else:
                         continue
@@ -266,7 +286,7 @@ class EntityExtractor:
                             type=EntityType.DATE,
                             value=normalized,
                             raw_text=raw,
-                            normalized_value=normalized.isoformat(),
+                            normalized_value=to_local_timezone(normalized),
                         )
                     )
                 except (ValueError, KeyError) as exc:
@@ -445,6 +465,48 @@ class QueryRefiner:
         "объясни": "опиши",
     }
 
+    CONTROL_DOMAIN_SYNONYMS = {
+        # Постановка на контроль
+        "поставь контроль": "управление контролем документа поставить",
+        "поставить контроль": "управление контролем документа поставить",
+        "добавь контроль": "управление контролем документа поставить",
+        "добавить контроль": "управление контролем документа поставить",
+        "назначь контролёра": "управление контролем документа поставить",
+        "назначить контролёра": "управление контролем документа поставить",
+        "поставь на контроль": "управление контролем документа поставить",
+        "поставить на контроль": "управление контролем документа поставить",
+        "взять на контроль": "управление контролем документа поставить",
+        "добавь контролёра": "управление контролем документа поставить",
+        "добавить контролёра": "управление контролем документа поставить",
+        # Изменение контроля
+        "измени контроль": "управление контролем документа изменить",
+        "изменить контроль": "управление контролем документа изменить",
+        "перенеси срок контроля": "управление контролем документа изменить",
+        "перенести срок контроля": "управление контролем документа изменить",
+        "поменяй контролёра": "управление контролем документа изменить",
+        "поменять контролёра": "управление контролем документа изменить",
+        "обнови контроль": "управление контролем документа изменить",
+        "обновить контроль": "управление контролем документа изменить",
+        "продли контроль": "управление контролем документа изменить",
+        "продлить контроль": "управление контролем документа изменить",
+        # Снятие с контроля
+        "сними с контроля": "управление контролем документа снять",
+        "снять с контроля": "управление контролем документа снять",
+        "убери с контроля": "управление контролем документа снять",
+        "убрать с контроля": "управление контролем документа снять",
+        "снять контроль": "управление контролем документа снять",
+        "завершить контроль": "управление контролем документа снять",
+        "завершить контроль документа": "управление контролем документа снять",
+        # Удаление контроля
+        "удали контроль": "управление контролем документа удалить",
+        "удалить контроль": "управление контролем документа удалить",
+        # Просмотр
+        "кто контролёр": "управление контролем документа посмотреть",
+        "на контроле ли": "управление контролем документа посмотреть",
+        "покажи контроль": "управление контролем документа посмотреть",
+        "статус контроля": "управление контролем документа посмотреть",
+    }
+
     EDMS_DOMAIN_SYNONYMS: dict[str, str] = {
         # Версионирование / история (базовые формы + падежи)
         "история документа": "сравни версии документа",
@@ -617,11 +679,11 @@ class QueryRefiner:
             else:
                 hints.append("версии: авто (первая↔последняя)")
 
-        elif intent == UserIntent.NOTIFICATION:
-            if "persons" in entities:
-                hints.append(f"получатель: {entities['persons'][0].value}")
-            if "dates" in entities:
-                hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
+        # elif intent == UserIntent.NOTIFICATION:
+        #     if "persons" in entities:
+        #         hints.append(f"получатель: {entities['persons'][0].value}")
+        #     if "dates" in entities:
+        #         hints.append(f"дедлайн: {entities['dates'][0].raw_text}")
 
         elif intent == UserIntent.SUMMARIZE:
             if "numbers" in entities:
@@ -695,8 +757,15 @@ class SemanticDispatcher:
                 "поставь задачу",
                 "назначь исполнителя",
             ],
-            "secondary": ["исполнитель", "срок исполнения", "контроль", "выполнить"],
-            "negative": [],
+            "secondary": ["исполнитель", "срок исполнения", "выполнить"],
+            "negative": [
+                "контролёра",
+                "контролёр",
+                "на контроль",
+                "с контроля",
+                "контрольная дата",
+                "тип контроля",
+            ],
         },
         UserIntent.SUMMARIZE: {
             "primary": [
@@ -808,19 +877,64 @@ class SemanticDispatcher:
             ],
             "negative": [],
         },
-        UserIntent.NOTIFICATION: {
+        # UserIntent.NOTIFICATION: {
+        #     "primary": [
+        #         "уведоми",
+        #         "напомни",
+        #         "отправь напоминание",
+        #         "уведомление",
+        #         "напоминание",
+        #         "предупреди",
+        #         "сообщи",
+        #         "отправь уведомление",
+        #     ],
+        #     "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+        #     "negative": [],
+        # },
+        UserIntent.COMPLIANCE_CHECK: {
             "primary": [
-                "уведоми",
-                "напомни",
-                "отправь напоминание",
-                "уведомление",
-                "напоминание",
-                "предупреди",
-                "сообщи",
-                "отправь уведомление",
+                "проверить документ",
+                "проверь документ",
+                "проверка документа",
+                "соответствие документа",
+                "корректность заполнения",
+                "всё ли правильно заполнено",
+                "соответствует ли карточка",
+                "перед отправкой проверь",
             ],
-            "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
+            "secondary": [
+                "проверить поля",
+                "проверить данные",
+                "расхождения",
+                "несоответствие",
+                "ошибки в карточке",
+            ],
             "negative": [],
+        },
+        UserIntent.CONTROL: {
+            "primary": [
+                "управление контролем",
+                "контроль документа",
+                "поставить на контроль",
+                "снять с контроля",
+                "назначить контролёра",
+                "изменить контроль",
+                "удалить контроль",
+                "контролёр",
+            ],
+            "secondary": [
+                "контроль",
+                "срок контроля",
+                "дата контроля",
+                "тип контроля",
+                "контрольная дата",
+                "снять контроль",
+            ],
+            "negative": [
+                "задачу",
+                "поручение",
+                "исполнителя поручения",
+            ],
         },
     }
 
@@ -1201,17 +1315,19 @@ class EDMSNaturalLanguageService:
 
     @staticmethod
     def format_date(instant: Any) -> str | None:
-        """Format an Instant-like value to DD.MM.YYYY.
+        """
+        Format an Instant-like value to DD.MM.YYYY (display-friendly).
 
-        Args:
-            instant: datetime object or ISO string.
-
-        Returns:
-            Formatted date string or None.
+        Для UI-отображения — timezone не важен, только дата.
         """
         if not instant:
             return None
         try:
+            local_str = to_local_timezone(instant)
+            if local_str and "T" in local_str:
+                dt = datetime.fromisoformat(local_str)
+                return dt.strftime("%d.%m.%Y")
+
             if hasattr(instant, "strftime"):
                 return instant.strftime("%d.%m.%Y")
             s = str(instant)
@@ -1226,17 +1342,17 @@ class EDMSNaturalLanguageService:
 
     @staticmethod
     def format_datetime(instant: Any) -> str | None:
-        """Format an Instant-like value to DD.MM.YYYY HH:MM.
-
-        Args:
-            instant: datetime object or ISO string.
-
-        Returns:
-            Formatted datetime string or None.
+        """
+        Format an Instant-like value to DD.MM.YYYY HH:MM (display-friendly).
         """
         if not instant:
             return None
         try:
+            local_str = to_local_timezone(instant)
+            if local_str and "T" in local_str:
+                dt = datetime.fromisoformat(local_str)
+                return dt.strftime("%d.%m.%Y %H:%M")
+
             if hasattr(instant, "strftime"):
                 return instant.strftime("%d.%m.%Y %H:%M")
             s = str(instant)
@@ -1249,6 +1365,20 @@ class EDMSNaturalLanguageService:
         except Exception as exc:
             logger.debug("Error formatting datetime: %s", exc)
             return None
+
+    @staticmethod
+    def format_date_iso(instant: Any) -> str | None:
+        """
+        Используйте когда нужна полная дата с timezone для API/логики.
+
+        Returns:
+            Строка вида "2025-01-15T10:30:00+03:00" или None.
+        """
+        return to_local_timezone(instant)
+
+    @staticmethod
+    def format_datetime_iso(instant: Any) -> str | None:
+        return to_local_timezone(instant)
 
     def get_safe(self, obj: Any, path: str, default: Any = None) -> Any:
         """Safely traverse a dot-separated attribute path.
@@ -1281,19 +1411,7 @@ class EDMSNaturalLanguageService:
             return default
 
     def process_document(self, doc: Any) -> dict[str, Any]:
-        """Produce a full structured analysis of a DocumentDto.
-
-        Covers ALL nested entities defined in the Java EDMS DTO schema:
-        tasks with executors, attachments, recipients, process route,
-        introduction list, nomenclature affairs, and category-specific
-        sections (APPEAL, MEETING, MEETING_QUESTION, CONTRACT, QUESTION).
-
-        Args:
-            doc: DocumentDto instance (generated Pydantic model).
-
-        Returns:
-            Nested dict with all document sections, cleaned of None/empty values.
-        """
+        """Produce a full structured analysis of a DocumentDto."""
         if not doc:
             logger.warning("Attempted to process None document")
             return {}
@@ -1306,6 +1424,9 @@ class EDMSNaturalLanguageService:
             )
 
             # ── 1. Базовая информация ─────────────────────────────────────────
+            reg_date_raw = getattr(doc, "regDate", None)
+            create_date_raw = getattr(doc, "createDate", None)
+
             base_info = {
                 "id": str(doc.id) if getattr(doc, "id", None) else None,
                 "категория": category_value,
@@ -1316,16 +1437,24 @@ class EDMSNaturalLanguageService:
                 "гриф_ДСП": getattr(doc, "dspFlag", None),
                 "вид_документа": self.get_safe(doc, "documentType.typeName"),
                 "способ_создания": self.get_safe(doc, "createType"),
+                "_reg_date_iso": self.format_date_iso(reg_date_raw),
+                "_create_date_iso": self.format_date_iso(create_date_raw),
             }
 
             # ── 2. Регистрация ────────────────────────────────────────────────
+            out_reg_date_raw = getattr(doc, "outRegDate", None)
+
             registration = {
                 "рег_номер": getattr(doc, "regNumber", None)
                 or getattr(doc, "reservedRegNumber", None),
-                "дата_регистрации": self.format_date(getattr(doc, "regDate", None)),
-                "дата_создания": self.format_datetime(getattr(doc, "createDate", None)),
+                # Красивые форматы (для UI/человека)
+                "дата_регистрации": self.format_date(reg_date_raw),
+                "дата_создания": self.format_datetime(create_date_raw),
                 "исходящий_номер": getattr(doc, "outRegNumber", None),
-                "исходящая_дата": self.format_date(getattr(doc, "outRegDate", None)),
+                "исходящая_дата": self.format_date(out_reg_date_raw),
+                "_reg_date_iso": self.format_date_iso(reg_date_raw),
+                "_create_date_iso": self.format_date_iso(create_date_raw),
+                "_out_reg_date_iso": self.format_date_iso(out_reg_date_raw),
                 "журнал_регистрации": self.get_safe(
                     doc, "registrationJournal.journalName"
                 ),
@@ -1444,15 +1573,17 @@ class EDMSNaturalLanguageService:
                 "дней_на_исполнение": getattr(doc, "daysExecution", None),
             }
             if control_obj:
+                control_start_raw = self.get_safe(doc, "control.controlDateStart")
+                control_end_raw = self.get_safe(doc, "control.controlPlanDateEnd")
+
                 control_info.update(
                     {
                         "тип_контроля": self.get_safe(doc, "control.controlType.name"),
-                        "дата_начала_контроля": self.format_date(
-                            self.get_safe(doc, "control.controlDateStart")
-                        ),
-                        "плановая_дата_снятия": self.format_date(
-                            self.get_safe(doc, "control.controlPlanDateEnd")
-                        ),
+                        # UI-форматы
+                        "дата_начала_контроля": self.format_date(control_start_raw),
+                        "плановая_дата_снятия": self.format_date(control_end_raw),
+                        "_control_start_iso": self.format_date_iso(control_start_raw),
+                        "_control_end_iso": self.format_date_iso(control_end_raw),
                         "контролёр": self.format_user(
                             self.get_safe(doc, "control.controlEmployee")
                         ),
@@ -1624,9 +1755,11 @@ class EDMSNaturalLanguageService:
             appeal_obj = getattr(doc, "documentAppeal", None)
             if appeal_obj or category_value == "APPEAL":
                 if appeal_obj:
+                    receipt_date_raw = getattr(appeal_obj, "receiptDate", None)
                     repeat_list = (
                         getattr(appeal_obj, "repeatIdenticalAppeals", None) or []
                     )
+
                     specialized["обращение"] = {
                         "заявитель": getattr(appeal_obj, "fioApplicant", None),
                         "тип_заявителя": self.get_safe(appeal_obj, "declarantType"),
@@ -1636,9 +1769,8 @@ class EDMSNaturalLanguageService:
                         "вид_обращения": self.get_safe(appeal_obj, "citizenType.name"),
                         "коллективное": getattr(appeal_obj, "collective", None),
                         "анонимное": getattr(appeal_obj, "anonymous", None),
-                        "дата_поступления": self.format_datetime(
-                            getattr(appeal_obj, "receiptDate", None)
-                        ),
+                        "дата_поступления": self.format_datetime(receipt_date_raw),
+                        "_receipt_date_iso": self.format_date_iso(receipt_date_raw),
                         "страна": getattr(appeal_obj, "countryAppealName", None),
                         "регион": getattr(appeal_obj, "regionName", None),
                         "район": getattr(appeal_obj, "districtName", None),
@@ -1845,6 +1977,7 @@ class EDMSNaturalLanguageService:
                 "контакты": {
                     "email": getattr(emp, "email", None),
                     "телефон": getattr(emp, "phone", None),
+                    "адрес": getattr(emp, "address", None),
                 },
                 "структура": {
                     "код_департамента": self.get_safe(emp, "department.departmentCode"),

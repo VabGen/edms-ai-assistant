@@ -20,9 +20,10 @@ import {
 function Field({label, hint, children}: { label: string; hint?: string; children: React.ReactNode }) {
     return (
         <div className="flex flex-col gap-1.5">
-            <span className="text-[9px] font-bold uppercase tracking-[0.12em]" style={{color: '#64748b'}}>{label}</span>
+            <span className="text-[9px] font-bold uppercase tracking-[0.12em]"
+                  style={{color: '#64748b'}}>{label}</span>
             {children}
-            {hint && <p className="text-[9px] leading-relaxed" style={{color: '#64748b'}}>{hint}</p>}
+            {hint && <p className="text-[9px] leading-relaxed" style={{color: '#94a3b8'}}>{hint}</p>}
         </div>
     )
 }
@@ -31,16 +32,17 @@ function Segmented<T extends string | number>({value, onChange, options}: {
     value: T; onChange: (v: T) => void; options: { value: T; label: string }[]
 }) {
     return (
-        <div className="flex gap-0.5 rounded-xl p-[3px]" style={{background: 'rgba(0,0,0,0.06)'}}>
+        <div className="flex gap-0.5 rounded-xl p-[3px]"
+             style={{background: 'rgba(0,0,0,0.04)'}}>
             {options.map((o) => {
                 const active = String(value) === String(o.value)
                 return (
                     <button key={String(o.value)} type="button" onClick={() => onChange(o.value)}
-                            className="flex-1 py-1.5 rounded-lg text-[10px] font-semibold transition-all duration-150 select-none"
+                            className="flex-1 py-1.5 rounded-lg text-[10px] font-semibold transition-all duration-200 select-none"
                             style={{
-                                background: active ? 'white' : 'transparent',
-                                color: active ? '#4338ca' : '#475569',
-                                boxShadow: active ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                                background: active ? '#ffffff' : 'transparent',
+                                color: active ? '#4338ca' : '#94a3b8',
+                                boxShadow: active ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
                             }}>
                         {o.label}
                     </button>
@@ -60,15 +62,18 @@ function ToggleRow({label, hint, value, onChange}: {
         <div className="flex items-center justify-between gap-3">
             <div className="flex-1 min-w-0">
                 <p className="text-[11px] font-medium leading-snug" style={{color: '#1e293b'}}>{label}</p>
-                {hint && <p className="text-[9px] mt-0.5 leading-snug" style={{color: '#64748b'}}>{hint}</p>}
+                {hint && <p className="text-[9px] mt-0.5 leading-snug" style={{color: '#94a3b8'}}>{hint}</p>}
             </div>
             <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
                     className="shrink-0 focus:outline-none">
-                <div className="relative w-8 h-[18px] rounded-full transition-colors duration-200"
-                     style={{background: value ? '#6366f1' : 'rgba(148,163,184,0.6)'}}>
+                <div className="relative w-9 h-5 rounded-full transition-colors duration-200"
+                     style={{background: value ? '#6366f1' : 'rgba(148,163,184,0.35)'}}>
                     <div
-                        className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-all duration-200"
-                        style={{left: value ? '18px' : '2px'}}/>
+                        className="absolute top-[2.5px] w-4 h-4 rounded-full bg-white transition-all duration-200"
+                        style={{
+                            left: value ? '18px' : '2.5px',
+                            boxShadow: value ? '0 1px 4px rgba(99,102,241,0.30)' : '0 1px 2px rgba(0,0,0,0.10)',
+                        }}/>
                 </div>
             </button>
         </div>
@@ -82,14 +87,16 @@ function SliderField({label, hint, value, onChange, min, max, step, fmt}: {
     const pct = ((value - min) / (max - min)) * 100
     return (
         <Field label={label} hint={hint}>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
                 <input type="range" min={min} max={max} step={step} value={value}
                        onChange={(e) => onChange(Number(e.target.value))}
-                       className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                       style={{background: `linear-gradient(to right, rgba(99,102,241,0.75) ${pct}%, rgba(0,0,0,0.12) ${pct}%)`}}
+                       className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
+                       style={{
+                           background: `linear-gradient(to right, #6366f1 ${pct}%, rgba(0,0,0,0.08) ${pct}%)`,
+                       }}
                 />
-                <span className="min-w-[40px] text-center text-[10px] font-mono px-1.5 py-0.5 rounded-md tabular-nums"
-                      style={{color: '#4338ca', background: 'rgba(99,102,241,0.08)'}}>
+                <span className="min-w-[40px] text-center text-[10px] font-mono px-2 py-0.5 rounded-md tabular-nums"
+                      style={{color: '#4338ca', background: 'rgba(99,102,241,0.06)'}}>
                     {fmt ? fmt(value) : value}
                 </span>
             </div>
@@ -104,11 +111,22 @@ function TextInput({value, onChange, type = 'text', min, max, mono, placeholder}
     return (
         <input type={type} value={value} min={min} max={max} placeholder={placeholder}
                onChange={(e) => onChange(e.target.value)}
-               className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400 transition-all ${mono ? 'font-mono' : ''}`}
+               className={`w-full px-3 py-2 rounded-xl text-[11px] focus:outline-none transition-all duration-200 ${mono ? 'font-mono' : ''}`}
                style={{
-                   background: 'rgba(255,255,255,0.70)',
-                   border: '1px solid rgba(203,213,225,0.80)',
-                   color: '#0f172a'
+                   background: '#ffffff',
+                   border: '1px solid rgba(0,0,0,0.06)',
+                   color: '#0f172a',
+                   boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+               }}
+               onFocus={e => {
+                   const el = e.currentTarget as HTMLInputElement
+                   el.style.borderColor = 'rgba(99,102,241,0.30)'
+                   el.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.08), 0 1px 2px rgba(0,0,0,0.03)'
+               }}
+               onBlur={e => {
+                   const el = e.currentTarget as HTMLInputElement
+                   el.style.borderColor = 'rgba(0,0,0,0.06)'
+                   el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
                }}
         />
     )
@@ -167,8 +185,8 @@ function VoiceTab({s, on}: { s: UserPreferences['voice']; on: (p: Partial<UserPr
                                         }, {value: 'en-US', label: 'Eng'}]}
                 />
             </Field>
-            <div className="px-2.5 py-2 rounded-lg"
-                 style={{background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)'}}>
+            <div className="px-3 py-2.5 rounded-xl"
+                 style={{background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.10)'}}>
                 <p className="text-[9px] leading-relaxed" style={{color: '#4338ca'}}>
                     Голосовой ввод работает в Chrome/Edge. Требует разрешения на микрофон.
                 </p>
@@ -186,19 +204,31 @@ function DocumentsTab({s, on}: {
             <Field label="Формат суммаризации" hint="Убирает шаг выбора при каждом запросе">
                 <select value={s.defaultSummaryFormat}
                         onChange={(e) => on({defaultSummaryFormat: e.target.value as SummaryFormat})}
-                        className="w-full px-2.5 py-1.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+                        className="w-full px-3 py-2 rounded-xl text-[11px] focus:outline-none cursor-pointer transition-all duration-200"
                         style={{
-                            background: 'rgba(255,255,255,0.70)',
-                            border: '1px solid rgba(203,213,225,0.80)',
-                            color: '#0f172a'
-                        }}>
+                            background: '#ffffff',
+                            border: '1px solid rgba(0,0,0,0.06)',
+                            color: '#0f172a',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                        }}
+                        onFocus={e => {
+                            const el = e.currentTarget as HTMLSelectElement
+                            el.style.borderColor = 'rgba(99,102,241,0.30)'
+                            el.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.08)'
+                        }}
+                        onBlur={e => {
+                            const el = e.currentTarget as HTMLSelectElement
+                            el.style.borderColor = 'rgba(0,0,0,0.06)'
+                            el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
+                        }}
+                >
                     <option value="ask">Спрашивать каждый раз</option>
                     <option value="abstractive">Пересказ (abstractive)</option>
                     <option value="extractive">Факты (extractive)</option>
                     <option value="thesis">Тезисы (thesis)</option>
                 </select>
             </Field>
-            <div className="h-px" style={{background: 'rgba(0,0,0,0.06)'}}/>
+            <div className="h-px" style={{background: 'rgba(0,0,0,0.04)'}}/>
             <ToggleRow label="Автоанализ при открытии" hint="Анализировать документ сразу при открытии"
                        value={s.autoAnalyzeOnOpen} onChange={(v) => on({autoAnalyzeOnOpen: v})}
             />
@@ -220,7 +250,7 @@ function LLMTab({s, on}: { s: TechSettings['llm']; on: (p: Partial<TechSettings[
                                                     type="url" mono/></Field>
             <Field label="Embedding Model"><TextInput value={s.embeddingModel} onChange={(v) => on({embeddingModel: v})}
                                                       mono/></Field>
-            <div className="h-px" style={{background: 'rgba(0,0,0,0.06)'}}/>
+            <div className="h-px" style={{background: 'rgba(0,0,0,0.04)'}}/>
             <SliderField label="Temperature" value={s.temperature} onChange={(v) => on({temperature: v})} min={0}
                          max={2} step={0.1} fmt={(v) => v.toFixed(1)}/>
             <SliderField label="Max Tokens" value={s.maxTokens} onChange={(v) => on({maxTokens: v})} min={256}
@@ -244,16 +274,28 @@ function AgentTab({s, on}: { s: TechSettings['agent']; on: (p: Partial<TechSetti
                                                     type="number" min={10} max={600}/></Field>
             <Field label="Max Retries"><TextInput value={s.maxRetries} onChange={(v) => on({maxRetries: Number(v)})}
                                                   type="number" min={0} max={10}/></Field>
-            <div className="h-px" style={{background: 'rgba(0,0,0,0.06)'}}/>
+            <div className="h-px" style={{background: 'rgba(0,0,0,0.04)'}}/>
             <Field label="Log Level">
                 <select value={s.logLevel}
                         onChange={(e) => on({logLevel: e.target.value as TechSettings['agent']['logLevel']})}
-                        className="w-full px-2.5 py-1.5 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+                        className="w-full px-3 py-2 rounded-xl text-[11px] focus:outline-none cursor-pointer transition-all duration-200"
                         style={{
-                            background: 'rgba(255,255,255,0.70)',
-                            border: '1px solid rgba(203,213,225,0.80)',
-                            color: '#0f172a'
-                        }}>
+                            background: '#ffffff',
+                            border: '1px solid rgba(0,0,0,0.06)',
+                            color: '#0f172a',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                        }}
+                        onFocus={e => {
+                            const el = e.currentTarget as HTMLSelectElement
+                            el.style.borderColor = 'rgba(99,102,241,0.30)'
+                            el.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.08)'
+                        }}
+                        onBlur={e => {
+                            const el = e.currentTarget as HTMLSelectElement
+                            el.style.borderColor = 'rgba(0,0,0,0.06)'
+                            el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
+                        }}
+                >
                     {(['DEBUG', 'INFO', 'WARNING', 'ERROR'] as const).map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
             </Field>
@@ -285,8 +327,6 @@ function EDMSTab({s, on}: { s: TechSettings['edms']; on: (p: Partial<TechSetting
         <div className="flex flex-col gap-3">
             <Field label="Base URL"><TextInput value={s.baseUrl} onChange={(v) => on({baseUrl: v})} type="url"
                                                mono/></Field>
-            {/*<Field label="API Version"><TextInput value={s.apiVersion} onChange={(v) => on({apiVersion: v})}*/}
-            {/*                                      mono/></Field>*/}
             <Field label="Timeout (сек)"><TextInput value={s.timeout} onChange={(v) => on({timeout: Number(v)})}
                                                     type="number" min={10} max={600}/></Field>
         </div>
@@ -309,16 +349,17 @@ const TECH_TABS: TabDef[] = [
 
 function TabBar({tabs, active, onChange}: { tabs: TabDef[]; active: SettingsTab; onChange: (t: SettingsTab) => void }) {
     return (
-        <div className="flex gap-0.5 rounded-xl p-[3px]" style={{background: 'rgba(0,0,0,0.06)'}}>
+        <div className="flex gap-0.5 rounded-xl p-[3px]"
+             style={{background: 'rgba(0,0,0,0.04)'}}>
             {tabs.map((t) => {
                 const isActive = t.id === active
                 return (
                     <button key={t.id} type="button" onClick={() => onChange(t.id)}
-                            className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-[9px] text-[8px] font-bold uppercase tracking-wider transition-all duration-150 select-none"
+                            className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-[9px] text-[8px] font-bold uppercase tracking-wider transition-all duration-200 select-none"
                             style={{
-                                background: isActive ? 'white' : 'transparent',
+                                background: isActive ? '#ffffff' : 'transparent',
                                 color: isActive ? '#4338ca' : '#94a3b8',
-                                boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                                boxShadow: isActive ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
                             }}>
                         {t.icon}{t.label}
                     </button>
@@ -335,7 +376,7 @@ function SaveButton({status, isDirty, onSave}: { status: SaveStatus; isDirty: bo
         idle: {
             icon: <Save size={11}/>,
             label: 'Сохранить',
-            bg: isDirty ? '#6366f1' : 'rgba(0,0,0,0.06)',
+            bg: isDirty ? '#6366f1' : 'rgba(0,0,0,0.04)',
             color: isDirty ? 'white' : '#94a3b8'
         },
         saving: {
@@ -350,8 +391,13 @@ function SaveButton({status, isDirty, onSave}: { status: SaveStatus; isDirty: bo
     const v = variants[status]
     return (
         <button type="button" onClick={onSave} disabled={disabled}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
-                style={{background: v.bg, color: v.color, cursor: disabled ? 'not-allowed' : 'pointer'}}>
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-semibold transition-all duration-200"
+                style={{
+                    background: v.bg,
+                    color: v.color,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    boxShadow: isDirty && status === 'idle' ? '0 2px 8px rgba(99,102,241,0.25)' : 'none',
+                }}>
             {v.icon}<span>{v.label}</span>
         </button>
     )
@@ -395,7 +441,7 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                     discardDraft();
                     onClose()
                 }}
-                        className="p-1.5 rounded-lg transition-all shrink-0"
+                        className="p-1.5 rounded-lg transition-all duration-200 shrink-0"
                         style={{color: '#94a3b8'}}
                         title="Назад">
                     <ArrowLeft size={13}/>
@@ -408,7 +454,7 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                                   title="Есть несохранённые изменения"/>}
                 {isDirty && (
                     <button type="button" onClick={resetAll} title="Сбросить к дефолтам"
-                            className="p-1.5 rounded-lg transition-all shrink-0"
+                            className="p-1.5 rounded-lg transition-all duration-200 shrink-0"
                             style={{color: '#94a3b8'}}>
                         <RotateCcw size={11}/>
                     </button>
@@ -416,8 +462,8 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
             </div>
 
             {isTechOffline && showTechnical && (
-                <div className="flex items-start gap-1.5 px-2 py-1.5 mb-2 rounded-lg shrink-0"
-                     style={{background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.25)'}}>
+                <div className="flex items-start gap-1.5 px-2.5 py-2 mb-2 rounded-xl shrink-0"
+                     style={{background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)'}}>
                     <WifiOff size={10} className="shrink-0 mt-0.5" style={{color: '#f59e0b'}}/>
                     <p className="text-[9px] leading-relaxed" style={{color: '#92400e'}}>Сервер недоступен — тех.
                         настройки из кэша</p>
@@ -445,10 +491,10 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                 {showTechnical && (
                     <>
                         <div className="flex items-center gap-2 py-1 shrink-0">
-                            <div className="flex-1 h-px" style={{background: 'rgba(0,0,0,0.08)'}}/>
+                            <div className="flex-1 h-px" style={{background: 'rgba(0,0,0,0.05)'}}/>
                             <span className="text-[7px] font-bold uppercase tracking-[0.15em]"
                                   style={{color: '#94a3b8'}}>Технические</span>
-                            <div className="flex-1 h-px" style={{background: 'rgba(0,0,0,0.08)'}}/>
+                            <div className="flex-1 h-px" style={{background: 'rgba(0,0,0,0.05)'}}/>
                         </div>
                         <TabBar tabs={TECH_TABS} active={isTechTab ? activeTab : TECH_TABS[0].id}
                                 onChange={setActiveTab}/>
@@ -466,9 +512,10 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
             </div>
 
             <div className="flex items-center justify-between pt-2.5 mt-1 shrink-0"
-                 style={{borderTop: '1px solid rgba(0,0,0,0.08)'}}>
+                 style={{borderTop: '1px solid rgba(0,0,0,0.05)'}}>
                 {isDirty && saveStatus === 'idle' ? (
-                    <button type="button" onClick={discardDraft} className="text-[10px] transition-colors"
+                    <button type="button" onClick={discardDraft}
+                            className="text-[10px] transition-colors duration-200"
                             style={{color: '#94a3b8'}}>
                         Отменить
                     </button>

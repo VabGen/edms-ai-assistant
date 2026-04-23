@@ -20,23 +20,6 @@ class Base(DeclarativeBase):
     pass
 
 
-# class SummarizationCache(Base):
-#     __tablename__ = "summarization_cache"  # type: ignore
-#
-#     __table_args__ = (
-#         UniqueConstraint(
-#             "file_identifier", "summary_type", name="_file_summary_type_uc"
-#         ),
-#         {"schema": "edms"}
-#     )
-#
-#     id = Column(String, primary_key=True)
-#     file_identifier = Column(String, index=True, nullable=False)
-#     summary_type = Column(String, index=True, nullable=False)
-#     content = Column(Text, nullable=False)
-#     created_at = Column(DateTime, server_default=func.now())
-
-
 class SummarizationCache(Base):
     __tablename__ = "summarization_cache"
 

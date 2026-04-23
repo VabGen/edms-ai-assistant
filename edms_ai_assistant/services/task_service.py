@@ -322,7 +322,7 @@ class TaskService:
         """
         # Нормализация дедлайна
         if not planed_date_end:
-            planed_date_end = datetime.now(UTC) + timedelta(days=7)
+            planed_date_end = datetime.now(UTC) + timedelta(days=5)
         elif planed_date_end.tzinfo is None:
             planed_date_end = planed_date_end.replace(tzinfo=UTC)
 

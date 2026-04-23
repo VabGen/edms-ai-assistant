@@ -37,6 +37,11 @@ from edms_ai_assistant.services.nlp_service import (
     SemanticDispatcher,
     UserIntent,
 )
+from edms_ai_assistant.utils.datetime_utils import (
+    now_local,
+    today_local,
+    format_date_for_display,
+)
 from edms_ai_assistant.tools import all_tools
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
@@ -60,6 +65,13 @@ _MUTATION_SUCCESS_PHRASES: tuple[str, ...] = (
     "обращение автоматически заполнен",
     "карточка обращения заполнен",
     "автозаполнен",
+    "заголовок обновлен",
+    "заголовок изменен",
+    "адрес заявителя обновлен",
+    "адрес заявителя изменен",
+    "телефон в карточке обновлен",
+    "изменение выполнино успешно",
+    "операция выполнина успешно",
     # Уведомления
     # "уведомление отправлено",
     # "напоминание отправлено",
@@ -84,7 +96,7 @@ _TOOLS_REQUIRING_DOCUMENT_ID: frozenset[str] = frozenset(
         "doc_search_tool",
         "introduction_create_tool",
         "task_create_tool",
-        "doc_send_notification",
+        # "doc_send_notification",
     }
 )
 
@@ -108,7 +120,7 @@ _DISAMBIGUATION_TOOLS: frozenset[str] = frozenset(
     {
         "introduction_create_tool",
         "task_create_tool",
-        "doc_send_notification",
+        "doc_control",
     }
 )
 
@@ -154,6 +166,54 @@ class ActionType(str, Enum):
     CONFIRMATION = "requires_confirmation"
 
 
+# @dataclass
+# class ContextParams:
+#     """
+#     Immutable execution context passed through the entire agent lifecycle.
+#
+#     Attributes:
+#         user_token: JWT authorization token.
+#         document_id: UUID of the active EDMS document.
+#         file_path: UUID of an EDMS attachment or local filesystem path.
+#         thread_id: LangGraph conversation thread identifier.
+#         user_name: Display name for the system prompt.
+#         user_first_name: First name for personalized greetings.
+#         current_date: Formatted date string injected into the prompt.
+#         user_context: Full user context dict (preferred_summary_format, etc.).
+#         intent: Primary user intent, set in chat() after semantic analysis.
+#             Used by tool router to select minimal relevant toolset.
+#     """
+#
+#     user_token: str
+#     document_id: str | None = None
+#     file_path: str | None = None
+#     thread_id: str = "default"
+#     user_name: str = "пользователь"
+#     user_first_name: str | None = None
+#     user_last_name: str | None = None
+#     user_full_name: str | None = None
+#     user_id: str | None = None
+#     current_date: str = field(
+#         default_factory=lambda: datetime.now().strftime("%d.%m.%Y")
+#     )
+#     current_year: str = field(default_factory=lambda: str(datetime.now().year))
+#     uploaded_file_name: str | None = None
+#     user_context: dict = field(default_factory=dict)
+#     intent: Any = field(default=None, repr=False)
+#
+#     def __post_init__(self) -> None:
+#         if not self.user_token or not isinstance(self.user_token, str):
+#             raise ValueError("user_token must be a non-empty string")
+#         if self.file_path and not self.uploaded_file_name:
+#             fp = str(self.file_path).strip()
+#             if not _is_valid_uuid(fp):
+#                 self.uploaded_file_name = Path(fp).name
+#         if not self.user_full_name:
+#             parts = [p for p in (self.user_last_name, self.user_first_name) if p]
+#             if parts:
+#                 self.user_full_name = " ".join(parts)
+
+
 @dataclass
 class ContextParams:
     """
@@ -167,6 +227,8 @@ class ContextParams:
         user_name: Display name for the system prompt.
         user_first_name: First name for personalized greetings.
         current_date: Formatted date string injected into the prompt.
+        current_time: Текущее время с timezone.
+        timezone_info: Информация о timezone для промпта.
         user_context: Full user context dict (preferred_summary_format, etc.).
         intent: Primary user intent, set in chat() after semantic analysis.
             Used by tool router to select minimal relevant toolset.
@@ -182,24 +244,101 @@ class ContextParams:
     user_full_name: str | None = None
     user_id: str | None = None
     current_date: str = field(
-        default_factory=lambda: datetime.now().strftime("%d.%m.%Y")
+        default_factory=lambda: (
+            format_date_for_display(today_local(), "%d.%m.%Y")
+            if today_local()
+            else datetime.now().strftime("%d.%m.%Y")
+        )
     )
-    current_year: str = field(default_factory=lambda: str(datetime.now().year))
+
+    current_year: str = field(
+        default_factory=lambda: (
+            str(today_local().year) if today_local() else str(datetime.now().year)
+        )
+    )
+
+    current_time: str = field(
+        default_factory=lambda: (
+            now_local().strftime("%H:%M")
+            if now_local()
+            else datetime.now().strftime("%H:%M")
+        )
+    )
+
+    current_datetime_iso: str = field(
+        default_factory=lambda: (
+            now_local().isoformat() if now_local() else datetime.now().isoformat()
+        )
+    )
+
+    timezone_offset: str = field(
+        default_factory=lambda: (
+            f"{now_local().utcoffset().total_seconds() / 3600:+.1f}h"
+            if now_local()
+            else "+0.0h"
+        )
+    )
+
     uploaded_file_name: str | None = None
     user_context: dict = field(default_factory=dict)
     intent: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        """Validate and enrich context after initialization."""
         if not self.user_token or not isinstance(self.user_token, str):
             raise ValueError("user_token must be a non-empty string")
+
         if self.file_path and not self.uploaded_file_name:
             fp = str(self.file_path).strip()
             if not _is_valid_uuid(fp):
                 self.uploaded_file_name = Path(fp).name
+
         if not self.user_full_name:
             parts = [p for p in (self.user_last_name, self.user_first_name) if p]
             if parts:
                 self.user_full_name = " ".join(parts)
+
+        logger.debug(
+            "ContextParams created",
+            extra={
+                "current_date": self.current_date,
+                "current_time": self.current_time,
+                "timezone_offset": self.timezone_offset,
+            },
+        )
+
+    def get_time_context_for_prompt(self) -> str:
+        """
+        Генерирует корректную строку времени для system prompt.
+
+        Returns:
+            Строка вида: "Текущее время: 13:51 (+03:00), 17.04.2026"
+        """
+        now = now_local()
+        date_str = format_date_for_display(now, "%d.%m.%Y")
+        time_str = now.strftime("%H:%M")
+        offset_str = self.timezone_offset
+
+        return (
+            f"Текущее время: {time_str} (UTC{offset_str}), {date_str}\n"
+            f"Часовой пояс сервера: UTC{offset_str}\n"
+            f"⚠️ Важно: используй указанное выше время. Не выдумывай текущее время."
+        )
+
+    def get_full_context_dict(self) -> dict[str, Any]:
+        """Возвращает полный словарь контекста для логирования."""
+        return {
+            "user_name": self.user_name,
+            "user_first_name": self.user_first_name,
+            "document_id": self.document_id,
+            "file_path": self.file_path[:50] if self.file_path else None,
+            "thread_id": self.thread_id,
+            "current_date": self.current_date,
+            "current_time": self.current_time,
+            "timezone_offset": self.timezone_offset,
+            "datetime_iso": self.current_datetime_iso,
+            "has_intent": self.intent is not None,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -374,7 +513,8 @@ class PromptBuilder:
 - Пользователь (имя): {user_name}
 - Пользователь (фамилия): {user_last_name}
 - Пользователь (полное имя): {user_full_name}
-- Текущая дата: {current_date} (год: {current_year})
+- Текущее время: {current_time} (локальное время сервера, UTC{timezone_offset})
+- Сегодняшняя дата: {current_date}
 - Активный документ в EDMS: {context_ui_id}
 - Загруженный файл/вложение: {local_file}
 - Имя загруженного файла (показывай пользователю): {uploaded_file_name}
@@ -435,6 +575,38 @@ class PromptBuilder:
    - Параметр doc_category берётся из запроса пользователя:
      "обращение" → APPEAL, "входящий" → INCOMING, "исходящий" → OUTGOING,
      "внутренний" → INTERN, "договор" → CONTRACT.
+
+ 9. **Формат результатов поиска**:
+    - Результаты doc_search_tool выводи ТОЛЬКО в виде markdown-таблицы
+    - Колонки ОБЯЗАТЕЛЬНО: | № | id | Рег. номер | Дата | Краткое содержание | Автор | Статус |
+    - Колонка `id` — UUID документа из ответа инструмента — ОБЯЗАТЕЛЬНА для навигации.
+    - Никогда не убирай колонку id из таблицы поиска.
+
+ 10. **Проверка соответствия (Compliance)**:
+    - Вызови doc_compliance_check ОДИН РАЗ — не больше.
+    - После получения ответа инструмента — СРАЗУ формируй финальный ответ пользователю.
+    - ЗАПРЕЩЕНО: вызывать doc_compliance_check повторно в одном запросе.
+    - ЗАПРЕЩЕНО: самостоятельно вызывать doc_update_field после compliance — 
+      это делает пользователь через клик на карточку.
+    - Твой ответ должен быть КРАТКИМ: 1-2 предложения с итогом проверки.
+    - Не перечисляй все поля в тексте — фронтенд покажет карточки сам.
+    - КРИТИЧНО: после получения результата doc_compliance_check
+      НЕМЕДЛЕННО формулируй ответ пользователю.
+      НЕ вызывай doc_compliance_check повторно — данные уже получены.
+      НЕ вызывай doc_get_details после compliance — это лишний запрос.
+
+ 11. **Контроль документа — строго через doc_control, НЕ task_create_tool**:
+    - Слова «контроль», «контролёр», «поставь контроль», «назначь контролёра»,
+      «сними с контроля» → ВСЕГДА doc_control.
+    - Если контролёр не называл — спроси фамилию.
+    - Если employee_search нашёл 1 человека — UUID подставится автоматически.
+    - Если нашёл несколько — покажи карточки (disambiguation), жди выбора.
+    - control_type_id НЕ нужен — всегда опускай, автоподбор.
+    - НИКОГДА не проси пользователя вводить UUID вручную.
+    - Workflow: «поставь контроль, контролёр Иванов» →
+        employee_search_tool(last_name="Иванов") →
+        [если 1 результат: UUID автоинжектируется] →
+        doc_control(action="set", control_employee_id=<UUID>, date_control_end=<дата>)
 </critical_rules>
 
 <available_tools_guide>
@@ -449,9 +621,11 @@ class PromptBuilder:
 | Поиск документов в базе EDMS             | doc_search_tool                                              |
 | Поиск сотрудника                         | employee_search_tool                                         |
 | Добавление в лист ознакомления           | introduction_create_tool                                     |
-| Создание поручения                       | task_create_tool                                             |
+| Создание поручения (задачи)              | task_create_tool                                             |
+| Контроль документа (поставить/изменить)  | employee_search_tool → doc_control                           |
+| Снять/удалить контроль                   | doc_control(action="remove"/"delete")                        |
+| Просмотр контроля                        | doc_control(action="get")                                    |
 | Автозаполнение обращения                 | autofill_appeal_document                                     |
-| Уведомление / напоминание                | employee_search_tool → doc_send_notification                 |
 | Создать документ из файла                | create_document_from_file                                    |
 | Вопрос без документа                     | Ответь напрямую из контекста                                 |
 </available_tools_guide>
@@ -469,7 +643,9 @@ class PromptBuilder:
 
     <context>
     Пользователь: {user_name} ({user_last_name})
-    Дата: {current_date} (год: {current_year})
+    Текущее время: {current_time} (UTC{timezone_offset})
+    Сегодняшняя дата: {current_date}
+    {time_context_block}
     Документ: {context_ui_id}
     Файл: {local_file}
     </context>
@@ -514,24 +690,26 @@ class PromptBuilder:
         if lean:
             base = cls.LEAN_TEMPLATE.format(
                 user_name=context.user_first_name or context.user_name,
-                user_last_name=context.user_last_name or "Не указана",
-                user_full_name=context.user_full_name or context.user_name,
+                user_last_name=context.user_last_name or "",
                 current_date=context.current_date,
-                current_year=context.current_year,
-                context_ui_id=context.document_id or "Не указан",
-                local_file=context.file_path or "Не загружен",
+                current_time=context.current_time,
+                timezone_offset=context.timezone_offset,
+                time_context_block=context.get_time_context_for_prompt(),
+                context_ui_id=context.document_id or "Не выбран",
+                local_file=context.file_path or "Нет",
             )
             snippet = cls._LEAN_SNIPPETS.get(intent, "")
             return base + snippet + semantic_xml
 
         base = cls.CORE_TEMPLATE.format(
             user_name=context.user_first_name or context.user_name,
-            user_last_name=context.user_last_name or "Не указана",
+            user_last_name=context.user_last_name or "",
             user_full_name=context.user_full_name or context.user_name,
             current_date=context.current_date,
-            current_year=context.current_year,
-            context_ui_id=context.document_id or "Не указан",
-            local_file=context.file_path or "Не загружен",
+            current_time=context.current_time,
+            timezone_offset=context.timezone_offset,
+            context_ui_id=context.document_id or "Не выбран",
+            local_file=context.file_path or "Нет",
             uploaded_file_name=context.uploaded_file_name or "Не определено",
         )
         snippet = cls._SNIPPETS.get(intent, "")
@@ -547,10 +725,18 @@ PromptBuilder._LEAN_SNIPPETS = {
     <workflow>Ознакомление: introduction_create_tool(last_names=[...]). При requires_disambiguation → покажи список → повторный вызов с selected_employee_ids.</workflow>""",
     UserIntent.CREATE_TASK: """
     <workflow>Поручение: task_create_tool(task_text=..., executor_last_names=[...]). Дата: если упомянута → ISO 8601, иначе не передавай. При disambiguation → покажи список → selected_employee_ids.</workflow>""",
-    UserIntent.NOTIFICATION: """
-    <workflow>Уведомление: employee_search_tool(last_name=...) → doc_send_notification(recipient_ids=[uuid], message=...).</workflow>""",
+    # UserIntent.NOTIFICATION: """
+    #     <notification_guide>
+    #     При отправке уведомлений и напоминаний:
+    #     1. Если сотрудник не известен (нет UUID), сначала вызови employee_search_tool(last_name="...").
+    #     2. Если сотрудник один — используй его UUID.
+    #     3. Если найдено несколько — попроси пользователя уточнить выбор.
+    #     4. Вызови doc_send_notification(document_id=..., recipient_ids=[uuid], message=..., notification_type=...).
+    #        - notification_type: REMINDER (напоминание), DEADLINE (срок), CUSTOM (произвольное).
+    #     </notification_guide>
+    #     """,
     UserIntent.SEARCH: """
-    <workflow>Поиск: doc_search_tool(short_summary=...) или employee_search_tool(last_name=...). После поиска можно передать id в doc_get_details.</workflow>""",
+    <workflow>Поиск: doc_search_tool(short_summary=...) или employee_search_tool(last_name=...). После поиска передавай id в doc_get_details.</workflow>""",
     UserIntent.ANALYZE: """
     <workflow>Анализ: doc_get_details → doc_get_file_content → doc_summarize_text(summary_type='thesis').</workflow>""",
     UserIntent.QUESTION: """
@@ -559,6 +745,31 @@ PromptBuilder._LEAN_SNIPPETS = {
     <workflow>Анализ файла: read_local_file_content(file_path=...) → doc_summarize_text(text=..., summary_type=...). Путь берётся из <context>.</workflow>""",
     UserIntent.CREATE_DOCUMENT: """
     <workflow>Создание документа: create_document_from_file(file_path=<из контекста>, doc_category=<APPEAL/INCOMING/...>). Один вызов — всё остальное автоматически.</workflow>""",
+    UserIntent.COMPLIANCE_CHECK: """
+    <compliance_workflow>
+    ШАГ 1: Вызови doc_compliance_check(document_id=<из контекста>, check_all=True)
+            Один вызов — результат готов сразу.
+
+    ШАГ 2: НЕМЕДЛЕННО формулируй ответ пользователю.
+            НЕ ВЫЗЫВАЙ doc_compliance_check повторно — ЗАПРЕЩЕНО.
+            НЕ ВЫЗЫВАЙ doc_get_details — это лишнее.
+
+    ШАГ 3: Формат ответа:
+      - overall="ok"             → все поля совпадают, документ готов
+      - overall="has_mismatches" → перечисли расхождения, предложи исправить
+      - overall="cannot_verify"  → объясни что не найдено в файле
+      - requires_disambiguation  → покажи список вложений, жди выбора
+    </compliance_workflow>""",
+    UserIntent.CONTROL: """
+    <workflow>
+    Контроль документа (НЕ поручение!): "
+        "1) Если контролёр не назван — спроси фамилию. "
+        "2) employee_search_tool(last_name=...) → UUID. "
+        "3) doc_control(action=set/edit/remove/delete/get, "
+        "control_employee_id=<UUID>, date_control_end=<ISO>). "
+        "control_type_id НЕ нужен. "
+        "Никогда не используй task_create_tool для контроля.
+    </workflow>""",
 }
 
 PromptBuilder._SNIPPETS = {
@@ -584,9 +795,9 @@ Workflow создания листа ознакомления:
 Примеры (текущий год = {current_year}):
 - "к 15 апреля" → "{current_year}-04-15T23:59:59Z"
 - "до 1 мая" → "{current_year}-05-01T23:59:59Z"
-- "через неделю" → текущая дата ({current_date}) + 7 дней + "T23:59:59Z"
+- "через неделю" → текущая дата ({current_date}) + 5 дней + "T23:59:59Z"
 - "до конца месяца" → последний день текущего месяца + "T23:59:59Z"
-- "срочно" / без даты → НЕ передавай planed_date_end (сервис поставит +7 дней)
+- "срочно" / без даты → НЕ передавай planed_date_end (сервис поставит +5 дней)
 Всегда добавляй суффикс 'Z' (UTC). Год = {current_year} если не указан явно.
 
 Disambiguation: если исполнитель не найден однозначно → покажи список, дождись выбора.
@@ -682,7 +893,7 @@ Workflow суммаризации документа:
 - Поиск сотрудника по фамилии: employee_search_tool
 - Информация о текущем документе из контекста: doc_get_details
 - Если нужна информация из текста документа: doc_get_file_content → ответь на основе текста
-После doc_search_tool можно передать id найденного документа в doc_get_details или doc_get_file_content.
+После doc_search_tool передавай id найденного документа в doc_get_details или doc_get_file_content.
 </search_guide>""",
     UserIntent.ANALYZE: """
 <analyze_guide>
@@ -700,16 +911,16 @@ Workflow суммаризации документа:
 - Вопросы о сотрудниках: employee_search_tool
 - Общие вопросы без документа: отвечай напрямую из контекста
 </question_guide>""",
-    UserIntent.NOTIFICATION: """
-<notification_guide>
-При отправке уведомлений и напоминаний:
-- Инструмент: doc_send_notification(document_id=..., recipient_ids=[...], message=..., notification_type=..., deadline=...)
-  - recipient_ids — UUID сотрудников (получи через employee_search_tool если не известны)
-  - notification_type: REMINDER (напоминание), DEADLINE (срок), CUSTOM (произвольное)
-  - deadline — опциональная дата дедлайна в ISO 8601
-- Workflow: employee_search_tool → doc_send_notification
-- Если сотрудник один и найден однозначно — сразу передавай его UUID.
-</notification_guide>""",
+    #     UserIntent.NOTIFICATION: """
+    # <notification_guide>
+    # При отправке уведомлений и напоминаний:
+    # - Инструмент: doc_send_notification(document_id=..., recipient_ids=[...], message=..., notification_type=..., deadline=...)
+    #   - recipient_ids — UUID сотрудников (получи через employee_search_tool если не известны)
+    #   - notification_type: REMINDER (напоминание), DEADLINE (срок), CUSTOM (произвольное)
+    #   - deadline — опциональная дата дедлайна в ISO 8601
+    # - Workflow: employee_search_tool → doc_send_notification
+    # - Если сотрудник один и найден однозначно — сразу передавай его UUID.
+    # </notification_guide>""",
     UserIntent.FILE_ANALYSIS: """
 <file_analysis_guide>
 При анализе загруженного файла:
@@ -720,7 +931,7 @@ Workflow суммаризации документа:
 </file_analysis_guide>""",
     UserIntent.CREATE_DOCUMENT: """
 <create_document_guide>
-    Создание нового документа из загруженного файла:
+Создание нового документа из загруженного файла:
 
     ТРИГГЕРЫ (когда вызывать create_document_from_file):
       - Пользователь загрузил файл (есть <local_file_path>) И говорит:
@@ -750,7 +961,73 @@ Workflow суммаризации документа:
     ПОСЛЕ получения navigate_url:
       - Скажи пользователю: "Документ создан, открываю карточку..."
       - navigate_url обрабатывается фронтендом автоматически
-    </create_document_guide>""",
+</create_document_guide>""",
+    UserIntent.COMPLIANCE_CHECK: """
+<compliance_check_guide>
+    КРИТИЧНО — строго следуй этой последовательности:
+
+    ШАГ 1: Вызови ОДИН РАЗ:
+      doc_compliance_check(document_id=<автоматически>, check_all=True)
+
+    ШАГ 2: СРАЗУ после получения ответа — формулируй ФИНАЛЬНЫЙ ответ пользователю.
+      НЕ ВЫЗЫВАЙ повторно: ни doc_compliance_check, ни doc_get_details.
+      Данные УЖЕ ЕСТЬ в ответе инструмента.
+
+    ШАГ 3: Формат ответа:
+      overall="ok":
+        «Все заполненные поля (ФИО, телефон, email...) совпадают с данными в файле.
+         Документ готов к отправке.»
+
+      overall="has_mismatches":
+        «Обнаружены расхождения:
+         • Телефон: в карточке +375 29 000-00-01, в файле +375 29 000-00-00
+         • Email: в карточке ivan@mail.ru, в файле ivanov@mail.ru
+         Нажмите на карточку для автоисправления или «Исправить все».»
+
+      overall="cannot_verify":
+        «Поля [список] не найдены в тексте файла.
+         Вероятно, они заполнены оператором вручную — это допустимо.»
+
+      requires_disambiguation:
+        Покажи список вложений. Дождись выбора. Повторный вызов с attachment_id=<UUID>.
+</compliance_check_guide>""",
+    UserIntent.CONTROL: """
+<control_guide>
+⛔ КОНТРОЛЬ — это НЕ поручение. Используй doc_control, НЕ task_create_tool.
+
+КОГДА ИСПОЛЬЗОВАТЬ:
+  «поставь на контроль», «назначь контролёра»  → action="set"
+  «измени контроль», «перенеси срок»            → action="edit"
+  «сними с контроля»                            → action="remove"
+  «удали контроль»                              → action="delete"
+  «кто контролёр?», «на контроле ли?»           → action="get"
+
+WORKFLOW ДЛЯ set/edit:
+
+  ШАГ 1 — Контролёр не передан?
+    Если пользователь НЕ назвал фамилию контролёра:
+      → Спроси: «Укажите фамилию сотрудника-контролёра»
+    Если назвал — используй employee_search_tool(last_name="Фамилия")
+
+  ШАГ 2 — employee_search_tool нашёл сотрудника:
+    • Найден 1 — UUID подставляется АВТОМАТИЧЕСКИ, вызывай doc_control сразу
+    • Найдено несколько — покажи карточки пользователю, дождись выбора
+    • Не найден — сообщи об этом, спроси другую фамилию
+
+  ШАГ 3 — Вызови doc_control:
+    doc_control(
+        action="set",
+        control_employee_id="<UUID>",      # ← из ШАГа 2
+        date_control_end="<ISO 8601>",     # ← из запроса пользователя
+        # control_type_id НЕ НУЖЕН — автоподбор
+    )
+
+ЗАПРЕЩЕНО:
+  ❌ Просить пользователя вводить UUID вручную
+  ❌ Использовать task_create_tool для управления контролем
+  ❌ Передавать control_type_id если неизвестен
+  ❌ Вызывать doc_control без control_employee_id (для set/edit)
+</control_guide> """,
 }
 
 
@@ -1324,24 +1601,75 @@ class EdmsDocumentAgent:
 
     # ── Human-in-the-Loop ─────────────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_compliance_data(messages: list[BaseMessage]) -> dict | None:
+        """Извлекает compliance результат из последних ToolMessage.
+
+        Ищет по структуре (status=success + fields + overall) — надёжнее
+        чем по name т.к. ToolMessage.name может быть None.
+        """
+        for m in reversed(messages[-10:]):
+            if not isinstance(m, ToolMessage):
+                continue
+            try:
+                data = json.loads(str(m.content))
+                if (
+                    data.get("status") == "success"
+                    and isinstance(data.get("fields"), list)
+                    and "overall" in data
+                ):
+                    return data
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                pass
+        return None
+
     async def _handle_human_choice(
         self, context: ContextParams, human_choice: str
     ) -> dict[str, Any]:
-        """
-        Resumes a paused graph after the user resolves a disambiguation or
-        selects a summarization type.
+        if human_choice and human_choice.startswith("fix_field:"):
+            parts = human_choice.split(":", 2)
+            if len(parts) == 3:
+                _, update_field, correct_value = parts
+                logger.info(
+                    "Compliance fix: field=%s value=%r",
+                    update_field,
+                    correct_value[:60],
+                )
+                new_inputs = {
+                    "messages": [
+                        HumanMessage(
+                            content=(
+                                f'Исправь поле "{update_field}" '
+                                f'на значение "{correct_value}"'
+                            )
+                        ),
+                    ]
+                }
+                return await self._orchestrate(
+                    context=context,
+                    inputs=new_inputs,
+                    is_choice_active=True,
+                    iteration=0,
+                )
+            return AgentResponse(
+                status=AgentStatus.ERROR,
+                message="Неверный формат команды исправления поля.",
+            ).model_dump()
 
-        Patches the pending AIMessage tool_calls with the user's choice,
-        then resumes orchestration.
-
-        Args:
-            context: Immutable execution context.
-            human_choice: Raw user choice: UUID list or summary type string.
-
-        Returns:
-            Serialized AgentResponse dict.
-        """
         state = await self.state_manager.get_state(context.thread_id)
+
+        if not state.next:
+            logger.warning(
+                "human_choice arrived after graph END: %s — treating as new message",
+                human_choice[:40],
+            )
+            return await self._orchestrate(
+                context=context,
+                inputs={"messages": [HumanMessage(content=human_choice)]},
+                is_choice_active=False,
+                iteration=0,
+            )
+
         last_msg: AIMessage = state.values["messages"][-1]
         raw_calls = getattr(last_msg, "tool_calls", [])
 
@@ -1374,22 +1702,34 @@ class EdmsDocumentAgent:
                     _TOOL_ID_FIELD: dict[str, str] = {
                         "introduction_create_tool": "selected_employee_ids",
                         "task_create_tool": "selected_employee_ids",
-                        "doc_send_notification": "recipient_ids",
+                        "doc_control": "control_employee_id",
                     }
                     id_field = _TOOL_ID_FIELD.get(t_name, "selected_employee_ids")
-                    t_args[id_field] = valid_ids
+
+                    if t_name == "doc_control":
+                        t_args["control_employee_id"] = valid_ids[0]
+                        logger.info(
+                            "Human choice: doc_control employee resolved",
+                            extra={
+                                "employee_id": valid_ids[0][:8],
+                                "thread_id": context.thread_id,
+                            },
+                        )
+                    else:
+                        t_args[id_field] = valid_ids
+                        logger.info(
+                            "Human choice: employee disambiguation resolved",
+                            extra={
+                                "tool": t_name,
+                                "id_field": id_field,
+                                "count": len(valid_ids),
+                                "thread_id": context.thread_id,
+                            },
+                        )
+
                     t_args.pop("last_names", None)
                     t_args.pop("executor_last_names", None)
                     t_args.pop("recipient_last_names", None)
-                    logger.info(
-                        "Human choice: employee disambiguation resolved",
-                        extra={
-                            "tool": t_name,
-                            "id_field": id_field,
-                            "count": len(valid_ids),
-                            "thread_id": context.thread_id,
-                        },
-                    )
 
             elif t_name == "doc_compare_attachment_with_local":
                 choice = human_choice.strip()
@@ -1409,7 +1749,6 @@ class EdmsDocumentAgent:
 
                     if context.document_id:
                         doc_id = str(context.document_id).strip()
-
                         if _is_valid_uuid(doc_id):
                             t_args["document_id"] = doc_id
 
@@ -1631,6 +1970,38 @@ class EdmsDocumentAgent:
                             )
                     if t_args.get("file_name") is None and context.uploaded_file_name:
                         t_args["file_name"] = context.uploaded_file_name
+
+                if t_name == "doc_control" and not t_args.get("control_employee_id"):
+                    for _prev in reversed(messages[-8:]):
+                        if isinstance(_prev, HumanMessage):
+                            break
+                        if not isinstance(_prev, ToolMessage):
+                            continue
+                        try:
+                            _prev_data = json.loads(str(_prev.content))
+                            if (
+                                _prev_data.get("status") == "found"
+                                and _prev_data.get("total") == 1
+                            ):
+                                _emp_card = _prev_data.get("employee_card") or {}
+
+                                _emp_id = (
+                                    _prev_data.get("id")
+                                    or _emp_card.get("id")
+                                    or ((_prev_data.get("choices") or [{}])[0]).get(
+                                        "id"
+                                    )
+                                )
+                                if _emp_id and _is_valid_uuid(str(_emp_id)):
+                                    t_args["control_employee_id"] = str(_emp_id)
+                                    logger.info(
+                                        "AUTO-INJECT: control_employee_id=%s... "
+                                        "from employee_search (single result)",
+                                        str(_emp_id)[:8],
+                                    )
+                                    break
+                        except (json.JSONDecodeError, AttributeError, IndexError):
+                            continue
 
                 # ── 1а. Инжект document_id ────────────────────────────────
                 if context.document_id and t_name in _TOOLS_REQUIRING_DOCUMENT_ID:
@@ -1938,40 +2309,45 @@ class EdmsDocumentAgent:
     def _build_graph(self) -> CompiledStateGraph:
         """
         Compiles the LangGraph ReAct workflow.
-
-        Nodes:
-        - ``agent``: invokes the LLM with bound tools
-        - ``tools``: executes tool_calls via ToolNode
-        - ``validator``: injects system notifications for tool errors
-
-        Edges:
-        - START → agent
-        - agent → tools (if tool_calls present) | END
-        - tools → validator → agent
-
-        Interrupt:
-        - ``interrupt_before=["tools"]`` pauses execution for Human-in-the-Loop
-          (human choice injection in _orchestrate / _handle_human_choice)
-
-        Returns:
-            Compiled state graph ready for ainvoke/aget_state/aupdate_state.
-
-        Raises:
-            RuntimeError: If LangGraph compilation fails.
         """
         workflow: StateGraph = StateGraph(AgentState)
 
-        # ── Нода: вызов LLM ──────────────────────────────────────────────────
         async def call_model(state: AgentState) -> dict[str, Any]:
             """
             Invokes the LLM with bound tools.
+            Injects dynamic hints based on context (e.g., pending compliance fixes).
             """
             _MAX_HISTORY_MSGS = 40
+
             sys_msgs = [m for m in state["messages"] if isinstance(m, SystemMessage)]
             non_sys = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
+
             if len(non_sys) > _MAX_HISTORY_MSGS:
                 non_sys = non_sys[-_MAX_HISTORY_MSGS:]
-            candidate_msgs = ([sys_msgs[-1]] if sys_msgs else []) + non_sys
+
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, ToolMessage):
+                    raw = str(msg.content)
+                    if raw.startswith("{"):
+                        try:
+                            data = json.loads(raw)
+                            if data.get("status") == "success" and "fields" in data:
+                                hint_content = (
+                                    "ВНИМАНИЕ: В истории сообщений есть результат проверки документа (compliance check). "
+                                    "Если пользователь просит 'исправить', 'обновить' или 'применить': "
+                                    "1. БЕРИ значения из 'correct_value' в результатах проверки. "
+                                    "2. ВЫЗЫВАЙ инструмент `doc_update_field` для КАЖДОГО поля с ошибкой. "
+                                    "3. НЕ пиши текст ответа, пока не вызовешь все инструменты."
+                                )
+                                sys_msgs.append(SystemMessage(content=hint_content))
+                                logger.debug(
+                                    "Injected compliance-fix hint into system prompt"
+                                )
+                        except json.JSONDecodeError:
+                            pass
+                    break
+
+            candidate_msgs = sys_msgs + non_sys
 
             final_msgs = []
             for i, msg in enumerate(candidate_msgs):
@@ -2023,6 +2399,19 @@ class EdmsDocumentAgent:
                 try:
                     tool_data = json.loads(raw)
                     interactive_status = tool_data.get("status", "")
+
+                    if interactive_status == "success" and "fields" in tool_data:
+                        logger.info(
+                            "Validator: compliance result received — stopping graph"
+                        )
+                        return {
+                            "messages": [
+                                AIMessage(
+                                    content="Анализ документа завершен. Обнаружены расхождения в полях."
+                                )
+                            ]
+                        }
+
                     if interactive_status in (
                         "requires_choice",
                         "requires_disambiguation",
@@ -2091,28 +2480,11 @@ class EdmsDocumentAgent:
             logger.error("Graph compilation failed", exc_info=True)
             raise RuntimeError(f"Failed to compile graph: {exc}") from exc
 
-    # ── Private helpers ───────────────────────────────────────────────────────
-
     def _build_final_response(
         self, messages: list[BaseMessage], context: ContextParams
     ) -> dict[str, Any]:
         """
         Extracts final content and wraps it into an AgentResponse.
-
-        Before extracting text content, scans the last ToolMessage for
-        structured interactive statuses:
-        - ``requires_choice``       : Summarisation format selection needed.
-        - ``requires_disambiguation``: Attachment or employee disambiguation needed.
-
-        These statuses bypass text extraction and are returned directly to
-        the HTTP layer so the frontend can render the appropriate widget.
-
-        Args:
-            messages: Complete LangGraph message chain.
-            context: Execution context (thread_id, file info for sanitization).
-
-        Returns:
-            Serialized AgentResponse dict.
         """
         interactive = self._detect_interactive_status(messages)
         if interactive:
@@ -2125,6 +2497,14 @@ class EdmsDocumentAgent:
             )
             return interactive
 
+        compliance_data = {}
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                break
+            if isinstance(msg, ToolMessage):
+                compliance_data = self._extract_compliance_data(messages)
+                break
+
         final_content = ContentExtractor.extract_final_content(messages)
         navigate_url = self._extract_navigate_url(messages)
 
@@ -2133,35 +2513,32 @@ class EdmsDocumentAgent:
             final_content = self._sanitize_technical_content(final_content, context)
             reload_needed = _is_mutation_response(final_content)
 
-            if navigate_url:
+            _metadata: dict[str, Any] = {}
+            if compliance_data:
+                _metadata["compliance"] = compliance_data
                 logger.info(
-                    "Execution completed with navigation",
-                    extra={
-                        "thread_id": context.thread_id,
-                        "navigate_url": navigate_url,
-                    },
+                    "Compliance added to metadata: overall=%s fields=%d",
+                    compliance_data.get("overall"),
+                    len(compliance_data.get("fields", [])),
                 )
-            else:
-                logger.info(
-                    "Execution completed",
-                    extra={
-                        "thread_id": context.thread_id,
-                        "content_length": len(final_content),
-                        "requires_reload": reload_needed,
-                    },
-                )
+
             return AgentResponse(
                 status=AgentStatus.SUCCESS,
                 content=final_content,
                 requires_reload=reload_needed,
                 navigate_url=navigate_url,
+                metadata=_metadata,
             ).model_dump()
 
         logger.warning("No final content found", extra={"thread_id": context.thread_id})
+        _meta_fallback: dict[str, Any] = {}
+        if compliance_data:
+            _meta_fallback["compliance"] = compliance_data
         return AgentResponse(
             status=AgentStatus.SUCCESS,
             content="Операция завершена.",
             navigate_url=navigate_url,
+            metadata=_meta_fallback,
         ).model_dump()
 
     @staticmethod
@@ -2493,17 +2870,6 @@ class EdmsDocumentAgent:
         """
         Removes technical artifacts from user-visible response content.
 
-        Применяет замены в строго определённом порядке, чтобы избежать
-        артефактов от частичной замены составных имён temp-файлов.
-
-        Порядок замен:
-        1. Абсолютные пути (/tmp/..., C:\\...) → original filename label
-        2. Составное имя UUID_hex32.ext (полный паттерн temp-файла) → filename label
-        3. hex32.ext без UUID-prefix → filename label
-        4. UUID с дефисами (оставшиеся) → «документ»
-        5. UUID без дефисов — 32 hex chars → «документ»
-        6. Финальная очистка артефактов «документ»«...» → «...»
-
         Args:
             content: Raw extracted response content.
             context: Execution context with file_path and uploaded_file_name.
@@ -2517,57 +2883,55 @@ class EdmsDocumentAgent:
             else "«загруженный файл»"
         )
 
+        lines = content.split("\n")
+        sanitized_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("|"):
+                sanitized_lines.append(line)
+                continue
+
+            sanitized_lines.append(self._sanitize_line(line, context, file_label))
+
+        return "\n".join(sanitized_lines)
+
+    def _sanitize_line(self, line: str, context: ContextParams, file_label: str) -> str:
+        """Sanitize a single non-table line."""
+        import re
+
         # 1. Абсолютные пути файловой системы
-        content = re.sub(
+        line = re.sub(
             r"[A-Za-z]:\\[^\s,;)'\"]{3,}|/(?:tmp|var|home|uploads)/[^\s,;)'\"]{3,}",
             file_label,
-            content,
+            line,
         )
 
-        # 2. Составное имя: UUID-с-дефисами_hex32.ext (полный temp-файл паттерн)
-        content = re.sub(
+        line = re.sub(
             r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
             r"_[0-9a-f]{32}\.[a-zA-Z]{2,5}",
             file_label,
-            content,
+            line,
             flags=re.I,
         )
 
-        # 3. hex32.ext (с опциональным ведущим _) — частичный temp-файл паттерн
-        content = re.sub(
+        line = re.sub(
             r"_?[0-9a-f]{32}\.[a-zA-Z]{2,5}\b",
             file_label,
-            content,
+            line,
             flags=re.I,
         )
 
-        # 4. Конкретный UUID загруженного файла или документа (с дефисами)
         if context.file_path and _is_valid_uuid(str(context.file_path).strip()):
-            content = content.replace(str(context.file_path).strip(), file_label)
+            line = line.replace(str(context.file_path).strip(), file_label)
+
         if context.document_id and _is_valid_uuid(context.document_id):
-            content = content.replace(context.document_id, "«текущего документа»")
+            line = line.replace(context.document_id, "«текущего документа»")
 
-        # 5. Оставшиеся UUID с дефисами
-        content = re.sub(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-            "«документ»",
-            content,
-            flags=re.I,
-        )
+        line = re.sub(r"«документ»\s*(?=«)", "", line)
+        line = re.sub(r"«документ»_\s*", "", line)
 
-        # 6. UUID без дефисов — 32 hex chars (uuid4().hex)
-        content = re.sub(
-            r"(?<![a-zA-Z0-9])[0-9a-f]{32}(?![a-zA-Z0-9])",
-            "«документ»",
-            content,
-            flags=re.I,
-        )
-
-        # 7. Артефакты вида "«документ»«имя файла»" → "«имя файла»"
-        content = re.sub(r"«документ»\s*(?=«)", "", content)
-        content = re.sub(r"«документ»_\s*", "", content)
-
-        return content
+        return line
 
     async def _try_forced_tool_call(
         self,
@@ -2602,15 +2966,13 @@ class EdmsDocumentAgent:
             _extract_category_from_message,
         )
 
-        # Только для CREATE_DOCUMENT с локальным файлом
         if context.intent != UserIntent.CREATE_DOCUMENT:
             return False
 
         clean_path = str(context.file_path or "").strip()
         if not clean_path or _is_valid_uuid(clean_path):
-            return False  # нет файла или это UUID вложения — пусть LLM решает
+            return False
 
-        # Определяем категорию из сообщения пользователя
         doc_category = _extract_category_from_message(original_message) or "APPEAL"
 
         logger.info(
@@ -2664,11 +3026,16 @@ class EdmsDocumentAgent:
         Returns:
             XML string block appended to the system prompt.
         """
+        from edms_ai_assistant.utils.datetime_utils import now_local
+
+        analysis_time = now_local().strftime("%H:%M:%S")
+
         return (
             "\n<semantic_context>\n"
             f"  <intent>{semantic_context.query.intent.value}</intent>\n"
             f"  <complexity>{semantic_context.query.complexity.value}</complexity>\n"
             f"  <original>{semantic_context.query.original}</original>\n"
             f"  <refined>{semantic_context.query.refined}</refined>\n"
+            f"  <!-- Сформировано в {analysis_time} (локальное время сервера) -->\n"
             "</semantic_context>"
         )

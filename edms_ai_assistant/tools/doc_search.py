@@ -4,30 +4,30 @@ EDMS AI Assistant — Document Search Tool.
 
 Поиск документов в EDMS по широкому набору параметров фильтрации.
 
-Маппинг параметров инструмента → поля DocumentFilter (resources_openapi.py):
-    short_summary                   → DocumentFilter.shortSummary
-    reg_number                      → DocumentFilter.regNumber
-    out_reg_number                  → DocumentFilter.outRegNumber
-    doc_category                    → DocumentFilter.categoryConstants      (list[DocCategory])
-    status                          → DocumentFilter.status                 (list[Status2])
-    date_from                       → DocumentFilter.dateRegStart           (datetime ISO 8601)
-    date_to                         → DocumentFilter.dateRegEnd             (datetime ISO 8601)
-    date_control_start              → DocumentFilter.dateControlStart       (datetime ISO 8601)
-    date_control_end                → DocumentFilter.dateControlEnd         (datetime ISO 8601)
-    author_last_name                → DocumentFilter.authorLastName
-    correspondent_name              → DocumentFilter.correspondentName
-    recipient_name                  → DocumentFilter.recipientName
-    task_executor_last_name         → DocumentFilter.taskExecutorLastName
-    author_current_user             → DocumentFilter.authorCurrentUser      (bool)
-    process_executor_current_user   → DocumentFilter.processExecutorCurrentUser (bool)
-    task_executor_current_user      → DocumentFilter.taskExecutorCurrentUser (bool)
-    control_user_current_user       → DocumentFilter.controlUserCurrentUser (bool)
-    introduction_current_user       → DocumentFilter.introductionCurrentUser (bool)
+Маппинг параметров инструмента → поля DocumentFilter (Java):
+    short_summary        → shortSummary         (String, like)
+    reg_number           → regNumber            (String, like)
+    out_reg_number       → outRegNumber         (String, like)
+    doc_category         → categoryConstants    (DocumentCategoryConstants[])
+    date_from            → dateRegStart         (Instant ISO 8601)
+    date_to              → dateRegEnd           (Instant ISO 8601)
+    date_control_start   → dateControlStart     (Instant ISO 8601)
+    date_control_end     → dateControlEnd       (Instant ISO 8601)
+    author_last_name     → authorLastName       (String, like)
+    correspondent_name   → correspondentName    (String, like)
+    recipient_name       → recipientName        (String, like)
+    task_executor_last_name → taskExecutorLastName (String, like)
+    author_current_user  → authorCurrentUser    (Boolean)
+    process_executor_current_user → processExecutorCurrentUser (Boolean)
+    task_executor_current_user    → taskExecutorCurrentUser    (Boolean)
+    control_user_current_user     → controlUserCurrentUser     (Boolean)
+    introduction_current_user     → introductionCurrentUser    (Boolean)
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from langchain_core.tools import tool
@@ -37,10 +37,8 @@ from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 
-# Максимальное количество документов в одном ответе агенту
-_MAX_RESULTS: int = 10
+_MAX_RESULTS: int = 20
 
-# Допустимые значения DocCategory из resources_openapi.py
 _VALID_CATEGORIES: frozenset[str] = frozenset(
     {
         "INTERN",
@@ -55,7 +53,6 @@ _VALID_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 
-# Допустимые значения Status2 из resources_openapi.py
 _VALID_STATUSES: frozenset[str] = frozenset(
     {
         "FORMING",
@@ -71,24 +68,13 @@ _VALID_STATUSES: frozenset[str] = frozenset(
     }
 )
 
-# Шаблон ISO-даты для валидации полей date_*
 _DATE_PATTERN: str = r"^\d{4}-\d{2}-\d{2}$|^$"
 
 
 class DocSearchInput(BaseModel):
-    """Validated input schema for the document search tool.
-
-    Покрывает наиболее востребованные агентом поля DocumentFilter.
-    Поля сгруппированы по смысловым блокам:
-      - Идентификация документа (номера, категория, статус)
-      - Даты регистрации и контроля
-      - Участники (автор, корреспондент, адресат, исполнитель поручения)
-      - Флаги текущего пользователя
-    """
+    """Validated input schema for the document search tool."""
 
     token: str = Field(..., description="JWT токен авторизации пользователя")
-
-    # ── Идентификация документа ───────────────────────────────────────────────
 
     short_summary: str | None = Field(
         None,
@@ -118,16 +104,24 @@ class DocSearchInput(BaseModel):
             "MEETING_QUESTION (вопросы заседания), CUSTOM (произвольные)."
         ),
     )
-    status: list[str] | None = Field(
+    status: str | None = Field(
         None,
         description=(
-            "Статусы документов для фильтрации (список). Допустимые значения: "
-            "FORMING, REGISTRATION, IN_PROGRESS, COMPLETED, CANCELLED, ARCHIVE, "
-            "ON_SIGNING, ON_AGREEMENT, ON_REVIEW, ON_STATEMENT."
+            "Статус документа для фильтрации. Допустимые значения: "
+            "FORMING (формирование), "
+            "REGISTRATION (на регистрации), "
+            "IN_PROGRESS (в работе / на исполнении), "
+            "COMPLETED (завершён / исполнен), "
+            "CANCELLED (аннулирован), "
+            "ARCHIVE (в архиве), "
+            "ON_SIGNING (на подписании), "
+            "ON_AGREEMENT (на согласовании), "
+            "ON_REVIEW (на рассмотрении), "
+            "ON_STATEMENT (на утверждении). "
+            "ВАЖНО: передавай ОДНУ строку, не список. "
+            "Если статус не известен точно — не передавай это поле."
         ),
     )
-
-    # ── Даты регистрации ──────────────────────────────────────────────────────
 
     date_from: str | None = Field(
         None,
@@ -140,14 +134,9 @@ class DocSearchInput(BaseModel):
         pattern=_DATE_PATTERN,
     )
 
-    # ── Даты контроля ─────────────────────────────────────────────────────────
-
     date_control_start: str | None = Field(
         None,
-        description=(
-            "Начало диапазона дат постановки на контроль. Формат: YYYY-MM-DD. "
-            "Используй когда пользователь спрашивает о документах на контроле за период."
-        ),
+        description="Начало диапазона дат постановки на контроль. Формат: YYYY-MM-DD.",
         pattern=_DATE_PATTERN,
     )
     date_control_end: str | None = Field(
@@ -156,76 +145,46 @@ class DocSearchInput(BaseModel):
         pattern=_DATE_PATTERN,
     )
 
-    # ── Участники документа ───────────────────────────────────────────────────
-
     author_last_name: str | None = Field(
         None,
         max_length=150,
-        description=(
-            "Фамилия автора документа. "
-            "Пример: 'Иванов'. Используй когда ищут документы конкретного сотрудника."
-        ),
+        description="Фамилия автора документа. Пример: 'Иванов'.",
     )
     correspondent_name: str | None = Field(
         None,
         max_length=300,
-        description=(
-            "Наименование организации-корреспондента (отправитель/получатель). "
-            "Пример: 'ООО Альфа', 'Министерство финансов'."
-        ),
+        description="Наименование организации-корреспондента. Пример: 'ООО Альфа'.",
     )
     recipient_name: str | None = Field(
         None,
         max_length=300,
-        description=(
-            "Наименование адресата документа. " "Пример: 'Акимат города', 'ТОО Бета'."
-        ),
+        description="Наименование адресата документа.",
     )
     task_executor_last_name: str | None = Field(
         None,
         max_length=150,
-        description=(
-            "Фамилия исполнителя поручения по документу. "
-            "Используй когда ищут документы с поручением на конкретного сотрудника."
-        ),
+        description="Фамилия исполнителя поручения по документу.",
     )
-
-    # ── Флаги текущего пользователя ──────────────────────────────────────────
 
     author_current_user: bool | None = Field(
         None,
-        description=(
-            "True — только документы, где автор = текущий пользователь. "
-            "Используй для: 'мои документы', 'документы которые я создал'."
-        ),
+        description="True — только документы, где автор = текущий пользователь.",
     )
     process_executor_current_user: bool | None = Field(
         None,
-        description=(
-            "True — документы, где текущий пользователь участник активного процесса. "
-            "Используй для: 'документы на моём рассмотрении', 'что мне нужно обработать'."
-        ),
+        description="True — документы, где текущий пользователь участник активного процесса.",
     )
     task_executor_current_user: bool | None = Field(
         None,
-        description=(
-            "True — документы, по которым текущий пользователь является исполнителем поручения. "
-            "Используй для: 'мои поручения', 'документы по которым я исполнитель'."
-        ),
+        description="True — документы, по которым текущий пользователь является исполнителем поручения.",
     )
     control_user_current_user: bool | None = Field(
         None,
-        description=(
-            "True — документы, где текущий пользователь является контролёром. "
-            "Используй для: 'документы на моём контроле'."
-        ),
+        description="True — документы, где текущий пользователь является контролёром.",
     )
     introduction_current_user: bool | None = Field(
         None,
-        description=(
-            "True — документы на ознакомлении у текущего пользователя. "
-            "Используй для: 'документы для ознакомления', 'что мне нужно ознакомиться'."
-        ),
+        description="True — документы на ознакомлении у текущего пользователя.",
     )
 
     # ── Валидаторы ────────────────────────────────────────────────────────────
@@ -242,7 +201,6 @@ class DocSearchInput(BaseModel):
     )
     @classmethod
     def strip_and_none(cls, v: str | None) -> str | None:
-        """Strips surrounding whitespace; converts empty string to None."""
         if v is None:
             return None
         stripped = v.strip()
@@ -251,11 +209,6 @@ class DocSearchInput(BaseModel):
     @field_validator("doc_category", mode="before")
     @classmethod
     def validate_category(cls, v: str | None) -> str | None:
-        """Uppercases and validates category against DocCategory enum.
-
-        Raises:
-            ValueError: If the value is not a known DocCategory constant.
-        """
         if v is None:
             return None
         upper = v.strip().upper()
@@ -270,34 +223,40 @@ class DocSearchInput(BaseModel):
 
     @field_validator("status", mode="before")
     @classmethod
-    def validate_statuses(cls, v: list[str] | None) -> list[str] | None:
-        """Uppercases and validates each status value against Status2 enum.
-
-        Raises:
-            ValueError: If any value is not a known Status2 constant.
+    def validate_status(cls, v: Any) -> str | None:
         """
-        if not v:
+        Нормализует статус в одну строку.
+
+        Защита от случая когда LLM передаёт список вместо строки:
+        ["IN_PROGRESS"] → "IN_PROGRESS"
+        "IN_PROGRESS"   → "IN_PROGRESS"
+        """
+        if v is None:
             return None
-        result: list[str] = []
-        for item in v:
-            upper = item.strip().upper()
-            if upper not in _VALID_STATUSES:
-                raise ValueError(
-                    f"Неизвестный статус документа: '{upper}'. "
-                    f"Допустимые значения: {sorted(_VALID_STATUSES)}"
-                )
-            result.append(upper)
-        return result if result else None
+
+        if isinstance(v, list):
+            if not v:
+                return None
+            v = v[0]
+
+        if not isinstance(v, str):
+            v = str(v)
+
+        upper = v.strip().upper()
+        if not upper:
+            return None
+
+        if upper not in _VALID_STATUSES and len(upper) > 2:
+            logger.warning(
+                "Possibly invalid status value '%s'. Valid: %s",
+                upper,
+                sorted(_VALID_STATUSES),
+            )
+
+        return upper
 
     @model_validator(mode="after")
     def at_least_one_search_param(self) -> DocSearchInput:
-        """Ensures that at least one meaningful filter parameter is provided.
-
-        token не считается фильтром — проверяем все остальные поля.
-
-        Raises:
-            ValueError: If all filter fields are None.
-        """
         filter_fields = [
             self.short_summary,
             self.reg_number,
@@ -327,6 +286,51 @@ class DocSearchInput(BaseModel):
         return self
 
 
+def _build_params_list(
+    doc_filter: dict[str, Any],
+    pageable: dict[str, Any],
+    includes: list[str],
+) -> list[tuple[str, Any]]:
+    """
+    Строит список кортежей (key, value) для GET-запроса.
+
+    httpx корректно передаёт повторяющиеся параметры через список кортежей:
+    [("categoryConstants", "INCOMING"), ("includes", "DOCUMENT_TYPE"), ...]
+    → ?categoryConstants=INCOMING&includes=DOCUMENT_TYPE&...
+
+    Spring @RequestParam List<T> / T[] ожидает именно такой формат.
+
+    Args:
+        doc_filter: Словарь фильтров (значения могут быть списками).
+        pageable: Параметры пагинации.
+        includes: Список includes.
+
+    Returns:
+        Список кортежей (key, value).
+    """
+    params: list[tuple[str, Any]] = []
+
+    for key, val in doc_filter.items():
+        if val is None:
+            continue
+        if isinstance(val, list):
+            for item in val:
+                params.append((key, str(item)))
+        elif isinstance(val, bool):
+            params.append((key, str(val).lower()))
+        else:
+            params.append((key, val))
+
+    for key, val in pageable.items():
+        if val is not None:
+            params.append((key, val))
+
+    for inc in includes:
+        params.append(("includes", inc))
+
+    return params
+
+
 @tool("doc_search_tool", args_schema=DocSearchInput)
 async def doc_search_tool(
     token: str,
@@ -334,7 +338,7 @@ async def doc_search_tool(
     reg_number: str | None = None,
     out_reg_number: str | None = None,
     doc_category: str | None = None,
-    status: list[str] | None = None,
+    status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     date_control_start: str | None = None,
@@ -352,25 +356,22 @@ async def doc_search_tool(
     """
     Searches documents in EDMS by a wide range of filter criteria.
 
+    ВАЖНО про статусы: передавай ОДНУ строку (не список!):
+    «в работе» → IN_PROGRESS, «на согласовании» → ON_AGREEMENT,
+    «завершённые» → COMPLETED, «аннулированные» → CANCELLED.
+    Если не уверен в точном статусе — НЕ передавай поле status.
+    НЕ убирай и не меняй колонку id
+
     Use when the user asks:
     - «Найди договоры с ООО Альфа»                → correspondent_name + doc_category=CONTRACT
     - «Покажи входящие документы за март 2026»    → doc_category=INCOMING + date_from/date_to
     - «Есть ли документ ВХ-2026-001?»             → reg_number
-    - «Обращения граждан за последний месяц»      → doc_category=APPEAL + date_from/date_to
+    - «Входящие в работе за январь»               → doc_category=INCOMING + status=IN_PROGRESS + dates
     - «Мои документы на согласовании»             → process_executor_current_user=True
-    - «Документы, которые я создал в этом году»  → author_current_user=True + date_from
-    - «Документы на моём контроле»                → control_user_current_user=True
-    - «Поручения исполнителя Иванова»             → task_executor_last_name='Иванов'
-    - «Документы на ознакомлении у меня»         → introduction_current_user=True
-    - «Входящие со статусом В работе за январь»  → doc_category + status + date range
-
-    Returns up to 10 documents with: id, registration number, date,
-    short summary, category, author, and status.
     """
-    # Формируем DocumentFilter согласно полной модели из resources_openapi.py
+    # ── Строим фильтр без status (передаём отдельно для пост-фильтрации) ─────
     doc_filter: dict[str, Any] = {}
 
-    # ── Идентификация документа ───────────────────────────────────────────────
     if short_summary:
         doc_filter["shortSummary"] = short_summary
     if reg_number:
@@ -378,25 +379,15 @@ async def doc_search_tool(
     if out_reg_number:
         doc_filter["outRegNumber"] = out_reg_number
     if doc_category:
-        # categoryConstants принимает list[DocCategory]
         doc_filter["categoryConstants"] = [doc_category]
-    if status:
-        # status принимает list[Status2]
-        doc_filter["status"] = status
-
-    # ── Даты регистрации ──────────────────────────────────────────────────────
     if date_from:
         doc_filter["dateRegStart"] = _to_iso_start(date_from)
     if date_to:
         doc_filter["dateRegEnd"] = _to_iso_end(date_to)
-
-    # ── Даты контроля ─────────────────────────────────────────────────────────
     if date_control_start:
         doc_filter["dateControlStart"] = _to_iso_start(date_control_start)
     if date_control_end:
         doc_filter["dateControlEnd"] = _to_iso_end(date_control_end)
-
-    # ── Участники документа ───────────────────────────────────────────────────
     if author_last_name:
         doc_filter["authorLastName"] = author_last_name
     if correspondent_name:
@@ -405,111 +396,110 @@ async def doc_search_tool(
         doc_filter["recipientName"] = recipient_name
     if task_executor_last_name:
         doc_filter["taskExecutorLastName"] = task_executor_last_name
-
-    # ── Флаги текущего пользователя ──────────────────────────────────────────
-    # Передаём только True: False не сужает выборку в этой API-семантике
-    if author_current_user is True:
+    if author_current_user:
         doc_filter["authorCurrentUser"] = True
-    if process_executor_current_user is True:
+    if process_executor_current_user:
         doc_filter["processExecutorCurrentUser"] = True
-    if task_executor_current_user is True:
+    if task_executor_current_user:
         doc_filter["taskExecutorCurrentUser"] = True
-    if control_user_current_user is True:
+    if control_user_current_user:
         doc_filter["controlUserCurrentUser"] = True
-    if introduction_current_user is True:
+    if introduction_current_user:
         doc_filter["introductionCurrentUser"] = True
 
     pageable: dict[str, Any] = {"page": 0, "size": _MAX_RESULTS}
+    includes = ["DOCUMENT_TYPE", "CORRESPONDENT", "REGISTRATION_JOURNAL"]
 
     logger.info(
         "Document search requested",
-        extra={"filter_keys": list(doc_filter.keys())},
+        extra={"filter_keys": list(doc_filter.keys()), "status_filter": status},
     )
+
+    params_list = _build_params_list(doc_filter, pageable, includes)
+    logger.debug("Search params: %s", params_list)
+
+    content: list[dict[str, Any]] = []
 
     try:
         async with DocumentClient() as client:
-            raw_docs = await client.search_documents(
+            result = await client._make_request(
+                "GET",
+                "api/document",
                 token=token,
-                doc_filter=doc_filter,
-                pageable=pageable,
+                params=params_list,
             )
 
-        if not raw_docs:
-            return {
-                "status": "success",
-                "message": "По вашему запросу документы не найдены.",
-                "documents": [],
-                "total": 0,
-            }
-
-        documents: list[dict[str, Any]] = [
-            _serialize_document(d) for d in raw_docs[:_MAX_RESULTS]
-        ]
-
-        logger.info(
-            "Document search completed",
-            extra={"found": len(documents), "filter_keys": list(doc_filter.keys())},
-        )
-
-        return {
-            "status": "success",
-            "total": len(documents),
-            "documents": documents,
-            "message": f"Найдено {len(documents)} документ(ов).",
-        }
+            if isinstance(result, dict):
+                content = result.get("content") or []
+            elif isinstance(result, list):
+                content = result
 
     except Exception as exc:
-        logger.error(
-            "Document search failed",
-            exc_info=True,
-            extra={"filter_keys": list(doc_filter.keys())},
-        )
+        logger.error("Document search failed: %s", exc, exc_info=True)
         return {
             "status": "error",
             "message": f"Ошибка поиска документов: {exc}",
         }
+
+    # ── Пост-фильтрация по статусу на стороне Python ─────────────────────────
+    if status and content:
+        status_upper = status.strip().upper()
+        filtered = [
+            d for d in content if str(d.get("status", "")).upper() == status_upper
+        ]
+        logger.info(
+            "Post-filter by status=%s: %d → %d documents",
+            status_upper,
+            len(content),
+            len(filtered),
+        )
+        content = filtered
+
+    if not content:
+        hint = ""
+        if status:
+            hint = f" со статусом «{status}»"
+        return {
+            "status": "success",
+            "message": f"По вашему запросу документы не найдены{hint}.",
+            "documents": [],
+            "total": 0,
+        }
+
+    documents = [_serialize_document(d) for d in content[:10]]
+
+    logger.info("Document search completed, found %d", len(documents))
+
+    return {
+        "status": "success",
+        "total": len(content),
+        "shown": len(documents),
+        "documents": documents,
+        "message": f"Найдено {len(content)} документ(ов), показано {len(documents)}.",
+    }
 
 
 # ── Вспомогательные функции ───────────────────────────────────────────────────
 
 
 def _to_iso_start(date_str: str) -> str:
-    """Converts a YYYY-MM-DD string to start-of-day ISO 8601 datetime string.
-
-    Args:
-        date_str: Date string in YYYY-MM-DD format.
-
-    Returns:
-        ISO 8601 datetime string, e.g. '2026-03-01T00:00:00'.
-    """
-    return f"{date_str}T00:00:00"
+    """Converts YYYY-MM-DD to start-of-day ISO 8601 with milliseconds."""
+    dt = datetime.fromisoformat(date_str)
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z"
+    )
 
 
 def _to_iso_end(date_str: str) -> str:
-    """Converts a YYYY-MM-DD string to end-of-day ISO 8601 datetime string.
-
-    Args:
-        date_str: Date string in YYYY-MM-DD format.
-
-    Returns:
-        ISO 8601 datetime string, e.g. '2026-03-31T23:59:59'.
-    """
-    return f"{date_str}T23:59:59"
+    """Converts YYYY-MM-DD to end-of-day ISO 8601 with milliseconds."""
+    dt = datetime.fromisoformat(date_str)
+    return dt.replace(hour=23, minute=59, second=59, microsecond=999000).strftime(
+        "%Y-%m-%dT%H:%M:%S.999Z"
+    )
 
 
 def _serialize_document(d: dict[str, Any]) -> dict[str, Any]:
-    """Converts a raw DocumentDto dict into a compact agent-friendly representation.
-
-    Keeps only fields relevant for the user-facing response.
-    Truncates shortSummary to 200 chars to preserve context window.
-
-    Args:
-        d: Raw DocumentDto dict from EDMS API.
-
-    Returns:
-        Compact dict with: id, reg_number, reg_date, category,
-        short_summary, author, status.
-    """
+    """Converts raw DocumentDto dict into a compact agent-friendly representation."""
     return {
         "id": str(d.get("id", "")),
         "reg_number": d.get("regNumber") or d.get("reservedRegNumber") or "—",
@@ -522,28 +512,12 @@ def _serialize_document(d: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_date(raw: Any) -> str:
-    """Extracts the date part (YYYY-MM-DD) from an ISO datetime value.
-
-    Args:
-        raw: Raw date value from API response (str, datetime, or None).
-
-    Returns:
-        'YYYY-MM-DD' string, or '—' if absent or unparseable.
-    """
     if not raw:
         return "—"
     return str(raw)[:10]
 
 
 def _format_author(author: dict[str, Any] | None) -> str:
-    """Formats an author dict into a human-readable full name string.
-
-    Args:
-        author: Dict with optional keys: lastName, firstName, middleName.
-
-    Returns:
-        Space-joined full name string, or '—' if author is absent.
-    """
     if not author:
         return "—"
     parts = [

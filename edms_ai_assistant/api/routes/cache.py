@@ -1,206 +1,295 @@
 # edms_ai_assistant/api/routes/cache.py
+"""
+EDMS AI Assistant — Cache Management Router.
+
+Endpoints for listing, invalidating, and inspecting the summarization cache.
+
+KEY DESIGN:
+  The DB stores file_identifier as sha256(original_uuid::type::PROMPT_VERSION)[:48]
+  All DELETE/GET endpoints receive the *original* UUID from the client and must
+  compute the same hash before querying — they never store/query the raw UUID.
+
+  _make_cache_key() is re-exported from summarization_orchestrator so both
+  modules always use identical hashing logic.
+"""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import delete, select
-from sqlalchemy.exc import SQLAlchemyError
 
 from edms_ai_assistant.db.database import AsyncSessionLocal, SummarizationCache
+from edms_ai_assistant.services.summarization_orchestrator import _make_cache_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/cache", tags=["Cache"])
 
-_VALID_SUMMARY_TYPES: frozenset[str] = frozenset(
-    {"extractive", "abstractive", "thesis"}
-)
+_VALID_SUMMARY_TYPES = {"extractive", "abstractive", "thesis"}
 
 
-@router.get("/summarization", summary="List all cached summarizations")
-async def list_cache() -> dict[str, Any]:
-    """Return all cached summarization entries ordered by creation date.
+# ─── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _validate_summary_type(summary_type: str) -> str:
+    """Normalize and validate summary_type path parameter.
+
+    Args:
+        summary_type: Raw path segment from the URL.
 
     Returns:
-        Dict with total count and list of cache entries with previews.
+        Lowercase validated summary type string.
+
+    Raises:
+        HTTPException 400: If value is not in the allowed set.
+    """
+    normalized = summary_type.strip().lower()
+    if normalized not in _VALID_SUMMARY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid summary_type '{summary_type}'. "
+                f"Allowed: {', '.join(sorted(_VALID_SUMMARY_TYPES))}"
+            ),
+        )
+    return normalized
+
+
+# ─── endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/summarization",
+    summary="List all cached summarization entries",
+    response_model=list[dict[str, Any]],
+)
+async def list_cache() -> list[dict[str, Any]]:
+    """Return all rows from summarization_cache (id, file_identifier, summary_type).
+
+    Content field is excluded to keep response size manageable.
     """
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(SummarizationCache).order_by(
-                    SummarizationCache.created_at.desc()
-                )
-            )
-            rows = result.scalars().all()
-
-        entries = [
+            rows = (await db.scalars(select(SummarizationCache))).all()
+        return [
             {
-                "file_identifier": row.file_identifier,
-                "summary_type": row.summary_type,
-                "content_preview": (
-                    row.content[:120] + "…" if len(row.content) > 120 else row.content
-                ),
-                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "id": str(r.id),
+                "file_identifier": r.file_identifier,
+                "summary_type": r.summary_type,
             }
-            for row in rows
+            for r in rows
         ]
-
-        return {"status": "success", "total": len(entries), "entries": entries}
-
-    except SQLAlchemyError as exc:
-        logger.error("Failed to list cache: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка чтения кэша: {exc}",
-        ) from exc
+    except Exception as exc:
+        logger.error("Cache list error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.delete(
-    "/summarization",
-    status_code=status.HTTP_200_OK,
-    summary="Clear entire summarization cache",
+@router.get(
+    "/summarization/{file_identifier}/{summary_type}",
+    summary="Check if a cache entry exists for given file + type",
 )
-async def clear_all_cache() -> dict[str, Any]:
-    """Delete all summarization cache entries.
+async def get_cache_entry(
+    file_identifier: str,
+    summary_type: str,
+) -> dict[str, Any]:
+    """Return metadata for a cache entry identified by the original file UUID.
 
-    Returns:
-        Dict with count of deleted entries.
-    """
-    try:
-        async with AsyncSessionLocal() as db, db.begin():
-            result = await db.execute(delete(SummarizationCache))
-            deleted = result.rowcount
-
-        logger.info("Summarization cache cleared: %d entries deleted", deleted)
-        return {
-            "status": "success",
-            "deleted": deleted,
-            "message": f"Удалено {deleted} записей из кэша.",
-        }
-
-    except SQLAlchemyError as exc:
-        logger.error("Failed to clear cache: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка очистки кэша: {exc}",
-        ) from exc
-
-
-@router.delete(
-    "/summarization/{file_identifier}",
-    status_code=status.HTTP_200_OK,
-    summary="Delete all cached analyses for a specific file",
-)
-async def delete_file_cache(file_identifier: str) -> dict[str, Any]:
-    """Delete all summary types cached for the given file_identifier.
+    The endpoint computes the internal hash key from the provided UUID so
+    callers never need to know about the internal hashing scheme.
 
     Args:
-        file_identifier: UUID of EDMS attachment or SHA-256 hash of local file.
+        file_identifier: Original attachment UUID or local file SHA-256.
+        summary_type: extractive | abstractive | thesis.
 
     Returns:
-        Dict with count of deleted entries.
-
-    Raises:
-        HTTPException 404: If no cache entries found for this identifier.
+        Dict with exists=True/False and entry metadata.
     """
+    stype = _validate_summary_type(summary_type)
+    # Compute the same hash the orchestrator uses when saving
+    cache_key = _make_cache_key(file_identifier, stype)
+
     try:
-        async with AsyncSessionLocal() as db, db.begin():
-            result = await db.execute(
-                delete(SummarizationCache).where(
-                    SummarizationCache.file_identifier == file_identifier
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
+                select(SummarizationCache).where(
+                    SummarizationCache.file_identifier == cache_key,
+                    SummarizationCache.summary_type == stype,
                 )
             )
-            deleted = result.rowcount
-
-        if deleted == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Кэш для файла '{file_identifier}' не найден.",
-            )
-
-        logger.info(
-            "Cache deleted for file_identifier=%s: %d entries",
-            file_identifier[:16],
-            deleted,
-        )
+        if row:
+            return {
+                "exists": True,
+                "id": str(row.id),
+                "file_identifier_original": file_identifier,
+                "file_identifier_hashed": cache_key,
+                "summary_type": row.summary_type,
+            }
         return {
-            "status": "success",
-            "file_identifier": file_identifier,
-            "deleted": deleted,
-            "message": f"Удалено {deleted} запис(ей) кэша для файла.",
+            "exists": False,
+            "file_identifier_original": file_identifier,
+            "file_identifier_hashed": cache_key,
+            "summary_type": stype,
         }
-
-    except HTTPException:
-        raise
-    except SQLAlchemyError as exc:
-        logger.error("Failed to delete cache: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка удаления кэша: {exc}",
-        ) from exc
+    except Exception as exc:
+        logger.error("Cache GET error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.delete(
     "/summarization/{file_identifier}/{summary_type}",
-    status_code=status.HTTP_200_OK,
-    summary="Delete a specific summary type for a file",
+    summary="Invalidate one cache entry for given file + type",
+    status_code=200,
 )
-async def delete_file_cache_by_type(
-    file_identifier: str, summary_type: str
+async def delete_cache_entry(
+    file_identifier: str,
+    summary_type: str,
 ) -> dict[str, Any]:
-    """Delete a single cache entry by file_identifier and summary_type.
+    """Delete one cache entry by original file UUID and summary type.
+
+    ROOT FIX: The client sends the raw UUID; this endpoint hashes it
+    exactly as _make_cache_key() does before issuing the DELETE, so the
+    key always matches what was stored by the orchestrator.
+
+    Previously the router queried by raw UUID → row never found → 404.
 
     Args:
-        file_identifier: UUID of EDMS attachment or SHA-256 hash of local file.
-        summary_type: One of: extractive, abstractive, thesis.
+        file_identifier: Original attachment UUID or file hash.
+        summary_type: extractive | abstractive | thesis.
 
     Returns:
-        Dict confirming deletion.
-
-    Raises:
-        HTTPException 400: If summary_type is invalid.
-        HTTPException 404: If the cache entry is not found.
+        Dict with deleted=True and matched row id, or deleted=False if not found.
     """
-    if summary_type not in _VALID_SUMMARY_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Недопустимый тип: '{summary_type}'. Допустимые: {sorted(_VALID_SUMMARY_TYPES)}",
-        )
+    stype = _validate_summary_type(summary_type)
+    cache_key = _make_cache_key(file_identifier, stype)
+
+    logger.info(
+        "Cache DELETE: original=%s... hashed=%s... type=%s",
+        file_identifier[:8],
+        cache_key[:8],
+        stype,
+    )
 
     try:
         async with AsyncSessionLocal() as db, db.begin():
-            result = await db.execute(
-                delete(SummarizationCache).where(
-                    SummarizationCache.file_identifier == file_identifier,
-                    SummarizationCache.summary_type == summary_type,
+            # First check the row exists so we can return a meaningful response
+            row = await db.scalar(
+                select(SummarizationCache).where(
+                    SummarizationCache.file_identifier == cache_key,
+                    SummarizationCache.summary_type == stype,
                 )
             )
-            deleted = result.rowcount
+            if not row:
+                logger.warning(
+                    "Cache DELETE: no entry found for key=%s... type=%s",
+                    cache_key[:8],
+                    stype,
+                )
+                # Return 200 (idempotent delete) — not 404
+                return {
+                    "deleted": False,
+                    "message": "No cache entry found (already deleted or never existed).",
+                    "file_identifier_original": file_identifier,
+                    "file_identifier_hashed": cache_key,
+                    "summary_type": stype,
+                }
 
-        if deleted == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Кэш для файла '{file_identifier}' с типом '{summary_type}' не найден.",
+            row_id = str(row.id)
+            await db.execute(
+                delete(SummarizationCache).where(
+                    SummarizationCache.file_identifier == cache_key,
+                    SummarizationCache.summary_type == stype,
+                )
             )
 
         logger.info(
-            "Cache entry deleted: file=%s type=%s", file_identifier[:16], summary_type
+            "Cache DELETE: removed id=%s key=%s... type=%s",
+            row_id,
+            cache_key[:8],
+            stype,
         )
         return {
-            "status": "success",
-            "file_identifier": file_identifier,
-            "summary_type": summary_type,
-            "deleted": deleted,
-            "message": f"Кэш типа '{summary_type}' для файла удалён.",
+            "deleted": True,
+            "id": row_id,
+            "file_identifier_original": file_identifier,
+            "file_identifier_hashed": cache_key,
+            "summary_type": stype,
         }
+    except Exception as exc:
+        logger.error("Cache DELETE error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    except HTTPException:
-        raise
-    except SQLAlchemyError as exc:
-        logger.error("Failed to delete cache entry: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка удаления записи кэша: {exc}",
-        ) from exc
+
+@router.delete(
+    "/summarization/{file_identifier}",
+    summary="Invalidate ALL cache entries for a given file (all summary types)",
+    status_code=200,
+)
+async def delete_all_cache_for_file(file_identifier: str) -> dict[str, Any]:
+    """Delete all cache entries (all summary types) for one file.
+
+    Useful when a file is updated in EDMS and all cached summaries become stale.
+
+    Args:
+        file_identifier: Original attachment UUID.
+
+    Returns:
+        Dict with count of deleted rows.
+    """
+    deleted_ids: list[str] = []
+
+    try:
+        async with AsyncSessionLocal() as db, db.begin():
+            for stype in _VALID_SUMMARY_TYPES:
+                cache_key = _make_cache_key(file_identifier, stype)
+                rows = (
+                    await db.scalars(
+                        select(SummarizationCache).where(
+                            SummarizationCache.file_identifier == cache_key,
+                            SummarizationCache.summary_type == stype,
+                        )
+                    )
+                ).all()
+                for row in rows:
+                    deleted_ids.append(str(row.id))
+                    await db.delete(row)
+
+        logger.info(
+            "Cache DELETE ALL: file=%s... removed %d entries",
+            file_identifier[:8],
+            len(deleted_ids),
+        )
+        return {
+            "deleted": len(deleted_ids) > 0,
+            "count": len(deleted_ids),
+            "ids": deleted_ids,
+            "file_identifier_original": file_identifier,
+        }
+    except Exception as exc:
+        logger.error("Cache DELETE ALL error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/summarization",
+    summary="Clear the entire summarization cache",
+    status_code=200,
+)
+async def clear_all_cache() -> dict[str, Any]:
+    """Delete every row in summarization_cache. Use with caution.
+
+    Returns:
+        Dict with count of deleted rows.
+    """
+    try:
+        async with AsyncSessionLocal() as db, db.begin():
+            result = await db.execute(delete(SummarizationCache))
+            count = result.rowcount
+
+        logger.warning("Cache CLEAR ALL: removed %d entries", count)
+        return {"deleted": True, "count": count}
+    except Exception as exc:
+        logger.error("Cache CLEAR ALL error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
