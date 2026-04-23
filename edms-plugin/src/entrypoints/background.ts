@@ -71,6 +71,14 @@ export default defineBackground({
                     doDeleteCache(msg.payload, sendResponse)
                     return true
 
+                case 'reloadActiveTab': {
+                    chrome.tabs.query({active: true, currentWindow: true}).then(([tab]) => {
+                        if (tab?.id) chrome.tabs.reload(tab.id)
+                    })
+                    sendResponse({success: true})
+                    return true
+                }
+
                 default:
                     return false
             }

@@ -32,7 +32,7 @@ interface Props {
     data: ComplianceData
     threadId: string | null
     onFieldFixed: (fieldKey: string, newValue: string) => void
-    onAllFixed: () => void
+    onAllFixed: (fixedFields: Array<{ fieldKey: string; label: string; newValue: string }>) => void
 }
 
 const STATUS_CFG = {
@@ -240,13 +240,19 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
     const handleFixAll = useCallback(async () => {
         if (fixingAll || pendingMismatches.length === 0) return
         setFixingAll(true)
+        const fixedFields: Array<{ fieldKey: string; label: string; newValue: string }> = []
         try {
             for (const field of pendingMismatches) {
                 await applyFix(field.update_field, field.correct_value!, documentId, threadId)
                 setFixedKeys(prev => new Set([...prev, field.field_key]))
+                fixedFields.push({
+                    fieldKey: field.field_key,
+                    label: field.label,
+                    newValue: field.correct_value!,
+                })
                 await new Promise(res => setTimeout(res, 400))
             }
-            onAllFixed()
+            onAllFixed(fixedFields)
         } catch (err) {
             console.error('Fix all failed:', err)
         } finally {
@@ -333,8 +339,8 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                     </div>
                     {mismatchFields.map(field => (
                         <FieldCard key={field.field_key} field={field}
-                            documentId={documentId} threadId={threadId}
-                            onFixed={handleFieldFixed} disabled={fixingAll}/>
+                                   documentId={documentId} threadId={threadId}
+                                   onFixed={handleFieldFixed} disabled={fixingAll}/>
                     ))}
                 </div>
             )}
@@ -350,8 +356,8 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                     </div>
                     {notFoundFields.map(field => (
                         <FieldCard key={field.field_key} field={field}
-                            documentId={documentId} threadId={threadId}
-                            onFixed={handleFieldFixed} disabled={fixingAll}/>
+                                   documentId={documentId} threadId={threadId}
+                                   onFixed={handleFieldFixed} disabled={fixingAll}/>
                     ))}
                 </div>
             )}
@@ -367,8 +373,8 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                     </div>
                     {okFields.map(field => (
                         <FieldCard key={field.field_key} field={field}
-                            documentId={documentId} threadId={threadId}
-                            onFixed={handleFieldFixed} disabled={false}/>
+                                   documentId={documentId} threadId={threadId}
+                                   onFixed={handleFieldFixed} disabled={false}/>
                     ))}
                 </div>
             )}
@@ -376,3 +382,5 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
     )
 })
 ComplianceResult.displayName = 'ComplianceResult'
+
+// 5

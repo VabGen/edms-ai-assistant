@@ -37,9 +37,10 @@ interface Thread {
     preview: string
     date: string
 }
+
 const MAX_THREADS = 20
 const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
-const CHOICE_LABELS: Record<string, string> = { abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы' }
+const CHOICE_LABELS: Record<string, string> = {abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы'}
 
 function persistThreads(threads: Thread[]): void {
     chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
@@ -87,6 +88,41 @@ function buildThreadPreview(messages: Message[]): string {
     return (meaningful?.content ?? 'Диалог').trim().slice(0, 50)
 }
 
+function tryCallRefreshFn(): boolean {
+    try {
+        const s = document.createElement('script')
+        s.textContent = `if(typeof window.__edms_refresh__==='function'){window.__edms_refresh__();window.__edms_rf_ok__=true;}else{window.__edms_rf_ok__=false;}`
+        document.head.appendChild(s)
+        s.remove()
+        const ok = (window as any).__edms_rf_ok__ === true
+        delete (window as any).__edms_rf_ok__
+        return ok
+    } catch {
+        return false
+    }
+}
+
+function fallbackReloadPage(): void {
+    try {
+        chrome.runtime.sendMessage({type: 'reloadActiveTab'}).catch(() => {
+            window.location.reload()
+        })
+    } catch {
+        window.location.reload()
+    }
+}
+
+function normalizeSpeechText(text: string): string {
+    if (!text.trim()) return text
+    let result = text.trim()
+    result = result.charAt(0).toUpperCase() + result.slice(1)
+    if (!/[.!?…]$/.test(result)) {
+        result += '.'
+    }
+    result = result.replace(/\s+/g, ' ')
+    return result
+}
+
 function SoundWave() {
     return (
         <div style={{
@@ -119,11 +155,8 @@ function TypingDots() {
             alignItems: 'center',
             gap: 5,
             padding: '12px 18px',
-            // background: '#ffffff',
             borderRadius: 22,
             width: 'fit-content',
-            // boxShadow: 'var(--edms-shadow-sm)',
-            // border: '1px solid rgba(0,0,0,0.03)',
             animation: 'edms-fade-in-up .3s ease-out',
         }}>
             {[0, 180, 360].map(d => (
@@ -495,6 +528,12 @@ export function AssistantWidget() {
     const sendRef = useRef<() => void>(() => {
     })
 
+    const handsFreeRef = useRef(handsFree)
+    handsFreeRef.current = handsFree
+
+    const toggleMicRef = useRef<() => void>(() => {
+    })
+
     const {
         isListening,
         interimTranscript,
@@ -504,20 +543,47 @@ export function AssistantWidget() {
         stop: stopMic,
     } = useSpeechRecognition({
         lang: userPrefs.voice.sttLanguage,
-        silenceMs: 3000,
+        silenceMs: handsFree
+            ? (userPrefs.voice.autoSendPauseMs ?? 1400) + 1000
+            : 999999,
         autoSend: handsFree,
-        autoSendMs: userPrefs.voice.autoSendPauseMs,
+        autoSendMs: userPrefs.voice.autoSendPauseMs ?? 1400,
         onFinalResult: (deltaText) => {
-            setInput(prev => (prev.trimEnd() ? `${prev.trimEnd()} ` : '') + deltaText)
+            const processed = normalizeSpeechText(deltaText)
+            setInput(prev => (prev.trimEnd() ? `${prev.trimEnd()} ` : '') + processed)
         },
         onAutoSend: () => {
-            stopMicRef.current()
-            sendRef.current()
+            if (handsFreeRef.current) {
+                stopMicRef.current()
+                sendRef.current()
+            }
         },
     })
 
+    toggleMicRef.current = toggleMic
+
     const stopMicRef = useRef(stopMic)
     stopMicRef.current = stopMic
+
+    const isListeningRef = useRef(isListening)
+    isListeningRef.current = isListening
+
+    const didLoadOnceRef = useRef(false)
+
+    useEffect(() => {
+        if (loading) {
+            didLoadOnceRef.current = true
+            return
+        }
+        if (didLoadOnceRef.current && handsFreeRef.current && !isListeningRef.current) {
+            const timer = setTimeout(() => {
+                if (handsFreeRef.current && !isListeningRef.current) {
+                    toggleMicRef.current()
+                }
+            }, 800)
+            return () => clearTimeout(timer)
+        }
+    }, [loading])
 
     const bottomRef = useRef<HTMLDivElement>(null)
     const fileRef = useRef<HTMLInputElement>(null)
@@ -529,12 +595,22 @@ export function AssistantWidget() {
     const refreshPrevContentRef = useRef<Record<string, string>>({})
     messagesRef.current = messages
 
+    const displayInput = isListening && interimTranscript
+        ? input + (input ? ' ' : '') + interimTranscript
+        : input
+
     useEffect(() => {
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto'
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`
         }
-    }, [input])
+    }, [displayInput])
+
+    useEffect(() => {
+        if (!isOpen || messages.length === 0) return
+        const snapshot = {messages, threadId, isOpen: true, savedAt: Date.now()}
+        chrome.storage.local.set({edmsWidgetSnapshot: snapshot})
+    }, [messages, isOpen, threadId])
 
     useEffect(() => {
         chrome.storage.local.get(['assistantEnabled'], r => {
@@ -620,7 +696,7 @@ export function AssistantWidget() {
             const snap = r?.edmsWidgetSnapshot
             if (snap) chrome.storage.local.remove('edmsWidgetSnapshot')
             if (!snap) return
-            if (Date.now() - (snap.savedAt ?? 0) > 30_000) return
+            if (Date.now() - (snap.savedAt ?? 0) > 60_000) return
             if (Array.isArray(snap.messages) && snap.messages.length > 0) setMessages(snap.messages)
             if (snap.threadId) setThreadId(snap.threadId)
             setIsOpen(true)
@@ -656,6 +732,7 @@ export function AssistantWidget() {
             serverPathRef.current = null
             setAttachedFile(null)
             if (fileRef.current) fileRef.current.value = ''
+            chrome.storage.local.remove('edmsWidgetSnapshot')
         } catch (err) {
             toast.error(getToastErrorText(err), 'Не удалось создать диалог')
         } finally {
@@ -743,6 +820,66 @@ export function AssistantWidget() {
         }
     }, [])
 
+    const refreshDocumentPage = async (_documentId: string | null, finalMessages?: Message[]) => {
+        const snapshot = {messages: finalMessages ?? messagesRef.current, threadId, isOpen: true, savedAt: Date.now()}
+        await new Promise<void>(resolve => chrome.storage.local.set({edmsWidgetSnapshot: snapshot}, () => resolve()))
+
+        const refreshed = tryCallRefreshFn()
+        if (!refreshed) {
+            fallbackReloadPage()
+        }
+    }
+
+    const refreshDocumentForm = useCallback((finalMessages?: Message[]) => {
+        const snapshot = {
+            messages: finalMessages ?? messagesRef.current,
+            threadId,
+            isOpen: true,
+            savedAt: Date.now()
+        }
+        chrome.storage.local.set({edmsWidgetSnapshot: snapshot}).then(() => {
+            setTimeout(() => {
+                const refreshed = tryCallRefreshFn()
+                if (!refreshed) {
+                    fallbackReloadPage()
+                }
+            }, 4000)
+        }).catch(() => {
+        })
+    }, [threadId])
+
+    const handleDocumentClick = useCallback((documentId: string) => {
+        const normalizedId = documentId.replace(
+            /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
+            '-'
+        ).trim()
+
+        const currentDocId = extractDocIdFromUrl()?.replace(
+            /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
+            '-'
+        ).trim()
+
+        if (currentDocId && normalizedId === currentDocId) {
+            refreshDocumentForm()
+            return
+        }
+
+        const url = `/document-form/${normalizedId}`
+
+        chrome.runtime.sendMessage(
+            {type: 'navigateTo', payload: {url, newTab: true}},
+            (r) => {
+                if (!r?.success) {
+                    try {
+                        window.open(url, '_blank', 'noopener,noreferrer')
+                    } catch {
+                        toast.info(`Откройте документ: ${url}`)
+                    }
+                }
+            }
+        )
+    }, [refreshDocumentForm])
+
     const send = async (e?: FormEvent | React.KeyboardEvent, humanChoice?: string, humanChoiceLabel?: string) => {
         if (e) e.preventDefault()
         const isChoiceFlow = Boolean(humanChoice)
@@ -750,7 +887,9 @@ export function AssistantWidget() {
         const hasFile = Boolean(attachedFile)
         if (!isChoiceFlow && !hasTextInput && !hasFile) return
         if (loading) return
-        if (isListening) stopMic()
+        if (isListening && !handsFreeRef.current) {
+            stopMic()
+        }
 
         const token = getAuthToken() ?? 'no_token'
         const docId = extractDocIdFromUrl()
@@ -867,57 +1006,6 @@ export function AssistantWidget() {
     const sendWithLabel = (humanChoice: string, label: string) => send(undefined, humanChoice, label)
     sendRef.current = () => send()
 
-    const refreshDocumentPage = async (_documentId: string | null, finalMessages?: Message[]) => {
-        try {
-            const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
-            if (tab?.id) {
-                const results = await chrome.scripting.executeScript({
-                    target: {tabId: tab.id},
-                    func: () => {
-                        const refresh = (window as any).__edms_refresh__
-                        if (typeof refresh === 'function') {
-                            refresh();
-                            return true
-                        }
-                        return false
-                    },
-                })
-                if (results?.[0]?.result === true) return
-            }
-        } catch {
-        }
-        const snapshot = {messages: finalMessages ?? messagesRef.current, threadId, isOpen: true, savedAt: Date.now()}
-        try {
-            chrome.storage.local.set({edmsWidgetSnapshot: snapshot}, () => {
-                window.location.reload()
-            })
-        } catch {
-            window.location.reload()
-        }
-    }
-
-    const handleDocumentClick = useCallback((documentId: string) => {
-        const normalizedId = documentId.replace(
-            /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
-            '-'
-        ).trim()
-
-        const url = `/document-form/${normalizedId}`
-
-        chrome.runtime.sendMessage(
-            {type: 'navigateTo', payload: {url, newTab: true}},
-            (r) => {
-                if (!r?.success) {
-                    try {
-                        window.open(url, '_blank', 'noopener,noreferrer')
-                    } catch {
-                        toast.info(`Откройте документ: ${url}`)
-                    }
-                }
-            }
-        )
-    }, [])
-
     const abort = () => {
         if (!requestIdRef.current) return
         chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
@@ -937,9 +1025,8 @@ export function AssistantWidget() {
         setIsSettingsOpen(false)
     }
 
-    const canSend = input.trim().length > 0 || Boolean(attachedFile)
+    const canSend = displayInput.trim().length > 0 || Boolean(attachedFile)
 
-    // Прозрачность: 0 = непрозрачный, 0.5 = максимально прозрачный
     const glassOpacity = userPrefs.appearance.glassOpacity ?? 0
     const glassAlpha = 1 - glassOpacity
 
@@ -1002,7 +1089,6 @@ export function AssistantWidget() {
                         animation: 'edms-fade-in .35s cubic-bezier(.22,1,.36,1) forwards',
                     }}
                 >
-                    {/* ── Header ─────────────────────────────────────────── */}
                     <header
                         className="flex items-center justify-between px-4 py-3 shrink-0"
                         style={{
@@ -1059,7 +1145,6 @@ export function AssistantWidget() {
                     </header>
 
                     <div className="flex-1 flex overflow-hidden">
-                        {/* ── Sidebar ────────────────────────────────────── */}
                         <aside
                             className={`shrink-0 flex flex-col transition-all duration-300 ease-out overflow-hidden ${isSidebarOpen ? 'w-[232px]' : 'w-0'}`}
                             style={{
@@ -1192,7 +1277,6 @@ export function AssistantWidget() {
                             </div>
                         </aside>
 
-                        {/* ── Main Chat Area ─────────────────────────────── */}
                         <main className="flex-1 flex flex-col min-w-0 overflow-hidden"
                               style={{background: `rgba(255,255,255,${glassAlpha * 0.6})`}}>
                             <div className="flex-1 p-4 overflow-y-auto scrollbar-thin flex flex-col gap-3">
@@ -1252,7 +1336,8 @@ export function AssistantWidget() {
                                                     data={msg.compliance}
                                                     threadId={threadId}
                                                     onFieldFixed={(fieldKey, newValue) => {
-                                                        setMessages(prev => prev.map(m => {
+                                                        const currentMsgs = messagesRef.current
+                                                        const updated = currentMsgs.map(m => {
                                                             if (m.id !== msg.id || !m.compliance) return m
                                                             const updatedFields = m.compliance.fields.map(f =>
                                                                 f.field_key === fieldKey
@@ -1260,23 +1345,76 @@ export function AssistantWidget() {
                                                                         ...f,
                                                                         status: 'ok' as const,
                                                                         card_value: newValue,
-                                                                        correct_value: null
+                                                                        correct_value: null,
                                                                     }
                                                                     : f
                                                             )
-                                                            const anyMismatch = updatedFields.some(f => f.status === 'mismatch')
+                                                            const mismatchesCount = updatedFields.filter(f => f.status === 'mismatch').length
+                                                            const anyMismatch = mismatchesCount > 0
                                                             return {
                                                                 ...m,
                                                                 compliance: {
                                                                     ...m.compliance,
                                                                     fields: updatedFields,
-                                                                    overall: anyMismatch ? 'has_mismatches' : 'ok',
+                                                                    overall: anyMismatch ? 'has_mismatches' as const : 'ok' as const,
+                                                                    stats: {
+                                                                        ...m.compliance.stats,
+                                                                        mismatches: mismatchesCount,
+                                                                        ok: updatedFields.filter(f => f.status === 'ok').length,
+                                                                    },
                                                                 },
                                                             }
-                                                        }))
+                                                        })
+                                                        setMessages(updated)
+                                                        refreshDocumentForm(updated)
                                                     }}
-                                                    onAllFixed={() => {
-                                                        setTimeout(() => window.location.reload(), 1500)
+                                                    onAllFixed={(fixedFields) => {
+                                                        const fixedKeysSet = new Set(fixedFields.map(f => f.fieldKey))
+                                                        const currentMsgs = messagesRef.current
+                                                        const updated = currentMsgs.map(m => {
+                                                            if (m.id !== msg.id || !m.compliance) return m
+                                                            const updatedFields = m.compliance.fields.map(f =>
+                                                                fixedKeysSet.has(f.field_key)
+                                                                    ? {
+                                                                        ...f,
+                                                                        status: 'ok' as const,
+                                                                        card_value: f.correct_value ?? f.card_value,
+                                                                        correct_value: null,
+                                                                    }
+                                                                    : f
+                                                            )
+                                                            const mismatchesCount = updatedFields.filter(f => f.status === 'mismatch').length
+                                                            return {
+                                                                ...m,
+                                                                compliance: {
+                                                                    ...m.compliance,
+                                                                    fields: updatedFields,
+                                                                    overall: mismatchesCount > 0 ? 'has_mismatches' as const : 'ok' as const,
+                                                                    stats: {
+                                                                        ...m.compliance.stats,
+                                                                        mismatches: mismatchesCount,
+                                                                        ok: updatedFields.filter(f => f.status === 'ok').length,
+                                                                    },
+                                                                },
+                                                            }
+                                                        })
+                                                        let finalMsgs = updated
+                                                        if (fixedFields.length > 0) {
+                                                            const summary =
+                                                                `✅ **Исправлены расхождения:**\n` +
+                                                                fixedFields.map(f => `• **${f.label}** → ${f.newValue}`).join('\n')
+                                                            finalMsgs = [
+                                                                ...updated,
+                                                                {
+                                                                    role: 'assistant' as const,
+                                                                    content: summary,
+                                                                    id: newMsgId(),
+                                                                    timestamp: Date.now(),
+                                                                },
+                                                            ]
+                                                        }
+                                                        setMessages(finalMsgs)
+                                                        refreshDocumentForm(finalMsgs)
                                                     }}
                                                 />
                                             )}
@@ -1294,13 +1432,12 @@ export function AssistantWidget() {
                                 <div ref={bottomRef}/>
                             </div>
 
-                            {/* ── Input Area ─────────────────────────────── */}
                             <footer className="px-3 pb-3 pt-1 shrink-0">
                                 {isListening && (
                                     <div className="flex items-center justify-between mb-1"
                                          style={{animation: 'edms-fade-in .2s ease-out'}}>
                                         <SoundWave/>
-                                        {autoSendPending && (
+                                        {autoSendPending && handsFree && (
                                             <span className="font-medium pr-1"
                                                   style={{
                                                       fontSize: 10,
@@ -1344,7 +1481,6 @@ export function AssistantWidget() {
                                     </div>
                                 )}
 
-                                {/* ── Pill Input ─────────────────────────── */}
                                 <div
                                     className={`edms-input-pill ${isFocused ? 'focused' : ''}`}
                                     style={{padding: '4px 4px 4px 2px'}}
@@ -1355,13 +1491,13 @@ export function AssistantWidget() {
                                         gap: 0,
                                         width: '100%',
                                     }}>
-                                        {/* Left: attachment + mic/send toggle */}
                                         <div style={{
                                             display: 'flex',
                                             alignItems: 'center',
                                             gap: 0,
                                             flexShrink: 0,
                                         }}>
+                                            {/* Кнопка прикрепления файла */}
                                             <button
                                                 type="button"
                                                 onClick={() => fileRef.current?.click()}
@@ -1373,31 +1509,24 @@ export function AssistantWidget() {
 
                                             {isSpeechSupported && (
                                                 <>
-                                                    {/* Микрофон ↔ Отправить: при вводе текста микрофон превращается в отправку */}
                                                     <button
                                                         type="button"
-                                                        onClick={canSend ? (e) => send(e) : toggleMic}
-                                                        title={canSend ? 'Отправить' : isListening ? 'Остановить' : 'Голосовой ввод'}
+                                                        onClick={isListening ? stopMic : toggleMic}
+                                                        title={isListening ? 'Остановить запись' : 'Голосовой ввод'}
                                                         className="edms-icon-btn"
-                                                        style={canSend ? {
-                                                            background: 'rgba(99,102,241,0.10)',
-                                                            color: '#6366f1',
-                                                        } : isListening ? {
+                                                        style={isListening ? {
                                                             background: 'rgba(239,68,68,0.08)',
                                                             color: '#ef4444',
                                                             animation: 'edms-pulse-soft 1.5s ease-in-out infinite',
                                                         } : {}}
                                                     >
-                                                        {canSend
-                                                            ? <Send size={17} style={{marginLeft: 1}}/>
-                                                            : isListening
-                                                                ? <StopCircle size={17}/>
-                                                                : <Mic size={18}/>
+                                                        {isListening
+                                                            ? <StopCircle size={17}/>
+                                                            : <Mic size={18}/>
                                                         }
                                                     </button>
 
-                                                    {/* Hands-Free toggle */}
-                                                    {(isListening || handsFree) && !canSend && (
+                                                    {(isListening || handsFree) && (
                                                         <button
                                                             type="button"
                                                             onClick={() => setHandsFree(v => !v)}
@@ -1426,7 +1555,7 @@ export function AssistantWidget() {
                                             <textarea
                                                 ref={textareaRef}
                                                 rows={1}
-                                                value={input}
+                                                value={displayInput}
                                                 onFocus={() => setIsFocused(true)}
                                                 onBlur={() => setIsFocused(false)}
                                                 onChange={e => setInput(e.target.value)}
@@ -1439,9 +1568,9 @@ export function AssistantWidget() {
                                                 placeholder={
                                                     isSidebarOpen
                                                         ? ''
-                                                        : autoSendPending
+                                                        : (autoSendPending && handsFree)
                                                             ? 'Отправляю…'
-                                                            : isListening
+                                                            : isListening && !interimTranscript
                                                                 ? 'Слушаю…'
                                                                 : attachedFile
                                                                     ? 'Добавьте комментарий…'
@@ -1456,26 +1585,23 @@ export function AssistantWidget() {
                                                     minWidth: 0,
                                                 }}
                                             />
-                                            {interimTranscript && (
-                                                <span
-                                                    aria-hidden="true"
-                                                    className="absolute left-1 pointer-events-none"
-                                                    style={{
-                                                        top: '10px',
-                                                        paddingLeft: input ? '0.5ch' : 0,
-                                                        whiteSpace: 'pre-wrap',
-                                                        wordBreak: 'break-word',
-                                                        color: '#cbd5e1',
-                                                        fontSize: 14,
-                                                    }}
-                                                >
-                                                    {input ? `${input} ` : ''}{interimTranscript}
-                                                </span>
-                                            )}
                                         </div>
 
-                                        {/* Right: только стоп при загрузке */}
-                                        <div style={{flexShrink: 0}}>
+                                        <div style={{flexShrink: 0, display: 'flex', gap: 2}}>
+                                            {canSend && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => send(e)}
+                                                    className="edms-icon-btn"
+                                                    title="Отправить"
+                                                    style={{
+                                                        background: 'rgba(99,102,241,0.10)',
+                                                        color: '#6366f1',
+                                                    }}
+                                                >
+                                                    <Send size={17} style={{marginLeft: 1}}/>
+                                                </button>
+                                            )}
                                             {loading && (
                                                 <button
                                                     type="button"
