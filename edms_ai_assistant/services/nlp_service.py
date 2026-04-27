@@ -79,6 +79,7 @@ class UserIntent(Enum):
     # NOTIFICATION = "notification"
     COMPLIANCE_CHECK = "compliance_check"
     CONTROL = "control"
+    ACCESS_GRIEF = 'access_grief'
 
 
 class QueryComplexity(Enum):
@@ -294,15 +295,24 @@ class EntityExtractor:
 
         return dates
 
+    _PERSON_STOP_WORDS = {
+        # Предлоги и наречия
+        "через", "после", "перед", "около", "между", "вокруг",
+        # Глаголы-команды (часто с большой буквы в чатах)
+        "создай", "создать", "добавь", "добавить", "найди", "найти",
+        "покажи", "показать", "сделай", "сделать", "поручи", "поручить",
+        "отправь", "отправить", "напиши", "написать", "проверь", "проверить",
+        "оформи", "оформить", "зарегистрируй", "зарегистрировать",
+        "сравни", "сравнить", "проанализируй", "проанализировать",
+        "удали", "удалить", "измени", "изменить", "поставь", "поставить",
+        "сними", "снять", "завизируй", "завизировать",
+        # EDMS-существительные
+        "документ", "поручение", "ознакомление", "задача", "задачу",
+        "контроль", "уведомление", "резолюция", "обращение", "договор",
+        "совещание", "исполнитель", "контролёр", "автор", "инициатор",
+    }
+
     def extract_persons(self, text: str) -> list[Entity]:
-        """Extract person names (ФИО) from text.
-
-        Args:
-            text: Source text in Russian.
-
-        Returns:
-            List of person entities with normalised name dicts.
-        """
         persons: list[Entity] = []
         pattern = r"\b([А-ЯЁ][а-яё]+)\s+([А-ЯЁ][а-яё]+)(?:\s+([А-ЯЁ][а-яё]+))?\b"
 
@@ -311,7 +321,10 @@ class EntityExtractor:
             first_name = match.group(2)
             middle_name = match.group(3)
 
-            if last_name.lower() in {"через", "после", "перед", "около"}:
+            # Проверяем все части на стоп-слова
+            if last_name.lower() in self._PERSON_STOP_WORDS:
+                continue
+            if first_name.lower() in self._PERSON_STOP_WORDS:
                 continue
 
             persons.append(
@@ -936,6 +949,24 @@ class SemanticDispatcher:
                 "исполнителя поручения",
             ],
         },
+        UserIntent.ACCESS_GRIEF: {
+            "primary": [
+                "покажи сотрудников с грифом",
+                "у кого гриф",
+                "какие грифы у сотрудника",
+                "список всех грифов доступа",
+                "сотрудники с грифом",
+                "гриф",
+                "грифы",
+                "грифом",
+            ],
+            "secondary": [
+                "гриф",
+                "грифы",
+                "грифом",
+            ],
+            "negative": [],
+        }
     }
 
     COMPOSITE_CONNECTORS: tuple[str, ...] = (
@@ -966,6 +997,28 @@ class SemanticDispatcher:
                 ],
             ),
         )
+
+    async def classify(
+            self,
+            message: str,
+            context: Any | None = None,
+    ) -> "UserIntent":
+        """Classify user intent for the agent layer.
+
+        Compatibility wrapper around :meth:`detect_intent` that extracts
+        ``file_path`` from the execution context and returns only the
+        primary *UserIntent*.
+
+        Args:
+            message: Raw user message text.
+            context: :class:`ContextParams` from the agent (optional).
+
+        Returns:
+            Primary detected :class:`UserIntent`.
+        """
+        file_path = getattr(context, "file_path", None) if context else None
+        primary, _secondary, _confidence = self.detect_intent(message, file_path)
+        return primary
 
     def detect_intent(
         self,

@@ -84,6 +84,8 @@ uv sync --no-dev
 ollama serve
 
 https://www.libreoffice.org/download/download/
+
+Get-ChildItem -Path . -Directory -Recurse -Filter "__pycache__" | Remove-Item -Recurse -Force
 ```
 
 ### Dependency groups

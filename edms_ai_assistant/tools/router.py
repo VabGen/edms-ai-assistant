@@ -70,6 +70,8 @@ _DOC_SEND_NOTIFICATION = "doc_send_notification"
 _DOC_COMPLIANCE_CHECK = "doc_compliance_check"
 _DOC_UPDATE_FIELD = "doc_update_field"
 
+_ACCESS_GRIEF = "access_grief_tool"
+
 # ─── Intent → tool names mapping ─────────────────────────────────────────────
 
 _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
@@ -161,6 +163,12 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _DOC_GET_DETAILS,
         _EMPLOYEE_SEARCH,
     ],
+    # ACCESS_GRIEF:
+    UserIntent.ACCESS_GRIEF: [
+        _EMPLOYEE_SEARCH,
+        _DOC_GET_DETAILS,
+        _ACCESS_GRIEF,
+    ]
 }
 
 # DELETE — полный набор (может удалять разные сущности)

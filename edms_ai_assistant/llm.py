@@ -14,6 +14,8 @@ from edms_ai_assistant.config import settings
 
 logger = logging.getLogger(__name__)
 
+_chat_model_instance: BaseLanguageModel | None = None
+
 
 def _normalize_url(url: object) -> str:
     """Strip trailing slash from URL.
@@ -56,7 +58,7 @@ def _detect_backend(base_url: str, model_name: str) -> str:
 
 
 def get_chat_model() -> BaseLanguageModel:
-    """Create a chat model instance from current runtime settings.
+    """Create or return cached chat model instance from current runtime settings.
 
     Бэкенды:
     - ``ollama_local``:  ChatOllama, num_ctx=4096, num_predict=512 (CPU).
@@ -70,6 +72,10 @@ def get_chat_model() -> BaseLanguageModel:
     Raises:
         RuntimeError: If the model cannot be initialized.
     """
+    global _chat_model_instance
+    if _chat_model_instance is not None:
+        return _chat_model_instance
+
     base_url = _normalize_url(settings.LLM_GENERATIVE_URL)
     model_name = settings.LLM_GENERATIVE_MODEL
     temperature = settings.LLM_TEMPERATURE
@@ -96,14 +102,14 @@ def get_chat_model() -> BaseLanguageModel:
         try:
             from langchain_ollama import ChatOllama
 
-            model = ChatOllama(
+            _chat_model_instance = ChatOllama(
                 model=model_name,
                 base_url=base_url,
                 temperature=temperature,
                 num_predict=512,
                 num_ctx=4096,
                 timeout=timeout,
-                streaming=False,
+                streaming=True,
                 seed=42,
                 top_p=0.9,
             )
@@ -111,7 +117,7 @@ def get_chat_model() -> BaseLanguageModel:
                 "ChatOllama (local) initialized: model=%s num_ctx=4096 num_predict=512",
                 model_name,
             )
-            return model
+            return _chat_model_instance
         except Exception as exc:
             logger.error("ChatOllama (local) init failed: %s", exc, exc_info=True)
             raise RuntimeError(f"Failed to initialize ChatOllama local: {exc}") from exc
@@ -130,18 +136,21 @@ def get_chat_model() -> BaseLanguageModel:
                 "temperature": temperature,
                 "timeout": timeout,
                 "max_retries": max_retries,
-                "streaming": False,
+                "streaming": True,
+                "stop": ["\n\n\n", "END_SUMMARY"], # Защита от галлюцинаций
+                # "model_kwargs": {"seed": 42}     # Детерминизм
+                "seed": 42,
             }
             if max_tokens:
                 llm_params["max_tokens"] = max_tokens
 
-            model = ChatOpenAI(**llm_params)
+            _chat_model_instance = ChatOpenAI(**llm_params)
             logger.info(
                 "ChatOpenAI→Ollama initialized: model=%s url=%s",
                 model_name,
                 openai_base,
             )
-            return model
+            return _chat_model_instance
         except Exception as exc:
             logger.error("ChatOpenAI→Ollama init failed: %s", exc, exc_info=True)
             raise RuntimeError(
@@ -165,14 +174,14 @@ def get_chat_model() -> BaseLanguageModel:
             "temperature": temperature,
             "timeout": timeout,
             "max_retries": max_retries,
-            "streaming": False,
+            "streaming": True,
         }
         if max_tokens:
             llm_params["max_tokens"] = max_tokens
 
-        model = ChatOpenAI(**llm_params)
+        _chat_model_instance = ChatOpenAI(**llm_params)
         logger.info("ChatOpenAI initialized: model=%s url=%s", model_name, base_url)
-        return model
+        return _chat_model_instance
 
     except Exception as exc:
         logger.error("ChatOpenAI init failed: %s", exc, exc_info=True)

@@ -27,6 +27,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.routes.cache import router as cache_router
+from edms_ai_assistant.api.routes.summarize import router as summarize_router
 from edms_ai_assistant.api.routes.settings import router as settings_router
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -59,46 +60,31 @@ _agent: EdmsDocumentAgent | None = None
 
 def get_agent() -> EdmsDocumentAgent:
     if _agent is None:
-        raise HTTPException(
-            status_code=503,
-            detail="ИИ-Агент не инициализирован. Повторите попытку позже.",
-        )
+        raise HTTPException(status_code=503, detail="ИИ-Агент не инициализирован.")
     return _agent
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global _agent
-
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Initializing database...")
     await init_db()
-
     await init_redis()
 
     try:
         _agent = EdmsDocumentAgent()
-        logger.info(
-            "EDMS AI Assistant started",
-            extra={"health": _agent.health_check()},
-        )
+        health_status = await _agent.health_check()
+        logger.info("EDMS AI Assistant started", extra={"health": health_status})
     except Exception:
-        logger.critical(
-            "Agent initialization failed — all /chat requests will return 503",
-            exc_info=True,
-        )
+        logger.critical("Agent initialization failed", exc_info=True)
 
     get_orchestrator()
     logger.info("SummarizationOrchestrator ready")
-
     yield
 
     await close_redis()
-
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
-        logger.info("Temporary upload directory removed")
 
 
 app = FastAPI(
@@ -108,14 +94,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-if isinstance(settings.ALLOWED_ORIGINS, list):
-    allowed_origins = settings.ALLOWED_ORIGINS
-else:
-    allowed_origins = ["*"]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=settings.ALLOWED_ORIGINS if isinstance(settings.ALLOWED_ORIGINS, list) else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -123,6 +104,7 @@ app.add_middleware(
 
 app.include_router(settings_router)
 app.include_router(cache_router)
+app.include_router(summarize_router)
 
 
 def _is_system_attachment(file_path: str | None) -> bool:
@@ -387,27 +369,48 @@ async def api_direct_summarize(
                 },
             )
 
-    # ── 3. Extract raw text via agent ──────────────────────────────────────
-    user_context = await _resolve_user_context(user_input, user_id)
-    instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
-    extract_msg = (
-        f"{instructions}Прочитай файл и верни его полное текстовое содержимое. "
-        "Не суммаризируй — верни исходный текст."
-    )
+    # ── 3. Extract raw text DIRECTLY (Bypass Agent to save 15-30 seconds) ──
+    raw_text = ""
+    try:
+        if is_uuid and user_input.context_ui_id:
+            from edms_ai_assistant.tools.attachment import doc_get_file_content
 
-    extract_result = await agent.chat(
-        message=extract_msg,
-        user_token=user_input.user_token,
-        context_ui_id=user_input.context_ui_id,
-        thread_id=new_thread_id,
-        user_context=user_context,
-        file_path=current_path,
-        human_choice=None,
-    )
+            tool_input = {
+                "user_token": user_input.user_token,
+                "context_ui_id": user_input.context_ui_id,
+                "file_path": current_path
+            }
+            raw_text = await doc_get_file_content.ainvoke(tool_input)
+            raw_text = str(raw_text)
+        elif current_path and Path(current_path).exists():
+            # Если файл локальный, читаем его напрямую процессором
+            from edms_ai_assistant.services.file_processor import extract_text_from_file
+            raw_text = await extract_text_from_file(current_path)
 
-    raw_text = _unwrap_text_from_agent_result(
-        extract_result.get("content") or extract_result.get("response") or ""
-    )
+    except Exception as exc:
+        logger.warning(f"Direct text extraction failed ({exc}), falling back to Agent...")
+
+    # Фолбэк на агента, если прямое чтение не сработало (например, сложный формат)
+    if not raw_text or len(raw_text.strip()) < 30:
+        logger.info("Using Agent fallback for text extraction...")
+        user_context = await _resolve_user_context(user_input, user_id)
+        instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
+        extract_msg = (
+            f"{instructions}Прочитай файл и верни его полное текстовое содержимое. "
+            "Не суммаризируй — верни исходный текст."
+        )
+        extract_result = await agent.chat(
+            message=extract_msg,
+            user_token=user_input.user_token,
+            context_ui_id=user_input.context_ui_id,
+            thread_id=new_thread_id,
+            user_context=user_context,
+            file_path=current_path,
+            human_choice=None,
+        )
+        raw_text = _unwrap_text_from_agent_result(
+            extract_result.get("content") or extract_result.get("response") or ""
+        )
 
     # ── 4a. Fallback: insufficient text → let agent do full summarization ──
     if not raw_text or len(raw_text.strip()) < 30:
@@ -509,7 +512,7 @@ async def get_history(
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
     try:
-        state = await agent.state_manager.get_state(thread_id)
+        state = await agent._state_manager.get_state(thread_id)
         messages = state.values.get("messages", [])
 
         filtered = []
@@ -613,10 +616,12 @@ async def upload_file(
 async def health_check(
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
+    # ИСПРАВЛЕНО: добавлено await, так как метод агента асинхронный
+    health_data = await agent.health_check()
     return {
         "status": "ok",
         "version": app.version,
-        "components": agent.health_check(),
+        "components": health_data,
     }
 
 

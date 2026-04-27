@@ -1,45 +1,42 @@
-# edms_ai_assistant/db/database.py
 import logging
-from datetime import datetime
-
-from sqlalchemy import DateTime, String, Text, UniqueConstraint, func, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 from edms_ai_assistant.config import settings
+from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
-
-engine = create_async_engine(settings.DATABASE_URL)
-AsyncSessionLocal = async_sessionmaker(
-    engine, expire_on_commit=False, class_=AsyncSession
-)
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class SummarizationCache(Base):
-    __tablename__ = "summarization_cache"
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    pool_size=20,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600
+)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    file_identifier: Mapped[str] = mapped_column(String, index=True, nullable=False)
-    summary_type: Mapped[str] = mapped_column(String, index=True, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (
-        UniqueConstraint(
-            "file_identifier", "summary_type", name="_file_summary_type_uc"
-        ),
-        {"schema": "edms"},
-    )
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
 
 
-async def get_db():
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
 
 async def init_db():
@@ -47,6 +44,7 @@ async def init_db():
     async with engine.begin() as conn:
         try:
             await conn.execute(text("CREATE SCHEMA IF NOT EXISTS edms"))
+
             await conn.run_sync(Base.metadata.create_all)
 
             logger.info(

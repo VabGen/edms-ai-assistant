@@ -15,6 +15,7 @@ from .document import doc_get_details
 from .document_comparison import doc_compare_documents
 from .document_versions import doc_get_versions
 from .employee_search import employee_search_tool
+from edms_ai_assistant.tools.access_grief_tool import access_grief_tool
 from .file_compare_tool import doc_compare_attachment_with_local
 from .introduction import introduction_create_tool
 from .local_file_tool import read_local_file_content
@@ -47,6 +48,8 @@ all_tools = [
     doc_send_notification,
     # Compliance
     doc_compliance_check,
+    # Access griefs
+    access_grief_tool,
 ]
 
 __all__ = [
@@ -68,4 +71,5 @@ __all__ = [
     "task_create_tool",
     "create_document_from_file",
     "doc_compliance_check",
+    "access_grief_tool",
 ]
