@@ -217,3 +217,8 @@
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-4px); }
 }
+
+@keyframes edms-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}

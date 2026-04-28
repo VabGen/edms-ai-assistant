@@ -30,6 +30,7 @@ interface Message {
     cacheFilePath?: string | null
     cacheContextId?: string | null
     compliance?: ComplianceData | null
+    _streaming?: boolean
 }
 
 interface Thread {
@@ -394,6 +395,7 @@ interface RefreshCacheButtonProps {
     msg: Message
     userToken: string
     onRefreshStart: (msgId: string, prevContent: string) => void
+    onRefreshStreamStart: (msgId: string, typeLabel: string | null) => void
     onRefreshDone: (msgId: string, newContent: string, payload?: any) => void
     onRefreshError: (msgId: string) => void
 }
@@ -408,6 +410,7 @@ const RefreshCacheButton = memo(({
                                      msg,
                                      userToken,
                                      onRefreshStart,
+                                     onRefreshStreamStart,
                                      onRefreshDone,
                                      onRefreshError
                                  }: RefreshCacheButtonProps) => {
@@ -423,9 +426,11 @@ const RefreshCacheButton = memo(({
         : null
 
     const handleRefresh = async () => {
-        if (refreshing) return
+        if (refreshing || msg._streaming) return
         setRefreshing(true)
-        onRefreshStart(msg.id, msg.content)
+        onRefreshStreamStart(msg.id, typeLabel)
+
+        const summaryType = msg.cacheSummaryType ?? 'extractive'
 
         try {
             await sendMsg('deleteCache', {
@@ -433,7 +438,6 @@ const RefreshCacheButton = memo(({
                 summary_type: msg.cacheSummaryType ?? undefined,
             })
 
-            const summaryType = msg.cacheSummaryType ?? 'extractive'
             const res = await sendMsg<any>('summarizeDocument', {
                 message: `Проанализируй вложение`,
                 user_token: userToken,
@@ -442,13 +446,10 @@ const RefreshCacheButton = memo(({
                 human_choice: summaryType,
             })
 
-            const payload = (res && typeof res === 'object' && 'data' in res && (res as any).success)
-                ? (res as any).data
-                : res
+            if (res === 'stream_started') return
 
-            const newContent = payload?.response ?? payload?.content ?? payload?.message ?? 'Анализ завершён.'
-            onRefreshDone(msg.id, newContent, payload)
-
+            const newContent = res?.response ?? res?.content ?? res?.message ?? 'Анализ завершён.'
+            onRefreshDone(msg.id, newContent, res)
             const label = typeLabel ? `«${typeLabel}»` : 'анализ'
             toast.success(`${label} обновлён.`, 'Готово')
         } catch {
@@ -462,7 +463,7 @@ const RefreshCacheButton = memo(({
     return (
         <button
             type="button"
-            disabled={refreshing}
+            disabled={refreshing || !!msg._streaming}
             onClick={handleRefresh}
             title={typeLabel ? `Пересчитать анализ «${typeLabel}»` : 'Пересчитать анализ'}
             className="mt-2 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 self-start"
@@ -488,16 +489,18 @@ const RefreshCacheButton = memo(({
             <svg
                 width="11" height="11" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
-                style={refreshing ? {animation: 'spin 1s linear infinite'} : {}}
+                style={(refreshing || msg._streaming) ? {animation: 'spin 1s linear infinite'} : {}}
             >
                 <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
                 <path d="M21 3v5h-5"/>
                 <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
                 <path d="M8 16H3v5"/>
             </svg>
-            {refreshing
-                ? 'Обновляю…'
-                : typeLabel ? `Обновить «${typeLabel}»` : 'Обновить анализ'}
+            {msg._streaming
+                ? 'Генерирую…'
+                : refreshing
+                    ? 'Обновляю…'
+                    : typeLabel ? `Обновить «${typeLabel}»` : 'Обновить анализ'}
         </button>
     )
 })
@@ -585,6 +588,9 @@ export function AssistantWidget() {
         }
     }, [loading])
 
+    const streamingMsgIdRef = useRef<string | null>(null)
+    const streamingMetaRef = useRef<{ typeLabel: string | null } | null>(null)
+
     const bottomRef = useRef<HTMLDivElement>(null)
     const fileRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -612,6 +618,13 @@ export function AssistantWidget() {
         chrome.storage.local.set({edmsWidgetSnapshot: snapshot})
     }, [messages, isOpen, threadId])
 
+    const finishStreaming = useCallback(() => {
+        streamingMsgIdRef.current = null
+        streamingMetaRef.current = null
+        setLoading(false)
+        requestIdRef.current = null
+    }, [])
+
     useEffect(() => {
         chrome.storage.local.get(['assistantEnabled'], r => {
             if (r.assistantEnabled !== undefined) setIsEnabled(r.assistantEnabled)
@@ -638,8 +651,96 @@ export function AssistantWidget() {
         }
         chrome.storage.onChanged.addListener(onStorage)
 
+        const onChromeMsg = (msg: any) => {
+            if (!msg?.type) return
+
+            if (msg.type === 'summarize_stream_chunk' && msg.token) {
+                const targetId = streamingMsgIdRef.current
+                if (!targetId) return
+                setMessages(prev => {
+                    const exists = prev.some(m => m.id === targetId)
+                    if (!exists) {
+                        return [...prev, {
+                            role: 'assistant' as const,
+                            content: msg.token,
+                            id: targetId,
+                            timestamp: Date.now(),
+                            _streaming: true,
+                        }]
+                    }
+                    return prev.map(m =>
+                        m.id === targetId
+                            ? {...m, content: m.content + msg.token}
+                            : m
+                    )
+                })
+            }
+
+            if (msg.type === 'summarize_stream_cache_hit') {
+                const targetId = streamingMsgIdRef.current
+                if (!targetId) return
+                setMessages(prev => prev.map(m =>
+                    m.id === targetId
+                        ? {
+                            ...m,
+                            content: msg.content ?? 'Анализ завершён.',
+                            _streaming: false,
+                            cacheFileIdentifier: msg.metadata?.cache_file_identifier ?? m.cacheFileIdentifier,
+                            cacheSummaryType: msg.metadata?.cache_summary_type ?? m.cacheSummaryType,
+                            cacheContextId: msg.metadata?.cache_context_ui_id ?? m.cacheContextId,
+                        }
+                        : m
+                ))
+                const label = streamingMetaRef.current?.typeLabel
+                toast.success(label ? `«${label}» загружен из кеша.` : 'Анализ загружен из кеша.', 'Готово')
+                finishStreaming()
+            }
+
+            if (msg.type === 'summarize_stream_metadata') {
+                const targetId = streamingMsgIdRef.current
+                if (!targetId || !msg.metadata) return
+                setMessages(prev => prev.map(m =>
+                    m.id === targetId
+                        ? {
+                            ...m,
+                            cacheFileIdentifier: msg.metadata.file_identifier ?? m.cacheFileIdentifier,
+                            cacheSummaryType: msg.metadata.summary_type ?? m.cacheSummaryType,
+                            cacheContextId: msg.metadata.context_ui_id ?? m.cacheContextId,
+                        }
+                        : m
+                ))
+            }
+
+            if (msg.type === 'summarize_stream_end') {
+                const targetId = streamingMsgIdRef.current
+                if (!targetId) return
+                setMessages(prev => prev.map(m =>
+                    m.id === targetId
+                        ? {...m, _streaming: false}
+                        : m
+                ))
+                const label = streamingMetaRef.current?.typeLabel
+                toast.success(label ? `«${label}» обновлён.` : 'Анализ обновлён.', 'Готово')
+                finishStreaming()
+            }
+
+            if (msg.type === 'summarize_stream_error') {
+                const targetId = streamingMsgIdRef.current
+                if (!targetId) return
+                setMessages(prev => prev.map(m =>
+                    m.id === targetId
+                        ? {...m, content: `__error__:${msg.error ?? 'Stream error'}`, isError: true, _streaming: false}
+                        : m
+                ))
+                toast.error('Не удалось обновить анализ', 'Ошибка')
+                finishStreaming()
+            }
+        }
+        chrome.runtime.onMessage.addListener(onChromeMsg)
+
         const onWindowMsg = (e: MessageEvent) => {
             if (e.data?.type !== 'REFRESH_CHAT_HISTORY') return
+            if (streamingMsgIdRef.current) return
             const {
                 messages: raw,
                 thread_id,
@@ -672,10 +773,19 @@ export function AssistantWidget() {
             }))
             if (thread_id) {
                 setThreadId(thread_id)
-                setMessages(mapped)
-            } else {
-                setMessages(prev => [...prev, ...mapped])
             }
+            setMessages(prev => {
+                const streamingId = streamingMsgIdRef.current
+                const streamingMsg = streamingId ? prev.find(m => m.id === streamingId) : null
+                if (streamingMsg && streamingMsg._streaming) {
+                    return [...mapped, streamingMsg]
+                }
+                if (thread_id) {
+                    return mapped
+                } else {
+                    return [...prev, ...mapped]
+                }
+            })
             setIsOpen(true)
             setIsSidebarOpen(false)
             setTimeout(() => bottomRef.current?.scrollIntoView({behavior: 'smooth'}), 120)
@@ -684,8 +794,9 @@ export function AssistantWidget() {
         return () => {
             chrome.storage.onChanged.removeListener(onStorage)
             window.removeEventListener('message', onWindowMsg)
+            chrome.runtime.onMessage.removeListener(onChromeMsg)
         }
-    }, [])
+    }, [finishStreaming])
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({behavior: 'smooth'})
@@ -790,9 +901,6 @@ export function AssistantWidget() {
 
     const handleRefreshStart = useCallback((msgId: string, prevContent: string) => {
         refreshPrevContentRef.current[msgId] = prevContent
-        setMessages(prev => prev.map(m =>
-            m.id === msgId ? {...m, content: '…'} : m
-        ))
     }, [])
 
     const handleRefreshDone = useCallback((msgId: string, newContent: string, newPayload?: any) => {
@@ -820,14 +928,31 @@ export function AssistantWidget() {
         }
     }, [])
 
+    const handleRefreshStreamStart = useCallback((msgId: string, typeLabel: string | null) => {
+        streamingMsgIdRef.current = msgId
+        streamingMetaRef.current = {typeLabel}
+        setMessages(prev => {
+            const exists = prev.some(m => m.id === msgId)
+            if (!exists) {
+                return [...prev, {
+                    role: 'assistant' as const,
+                    content: '',
+                    id: msgId,
+                    timestamp: Date.now(),
+                    _streaming: true,
+                }]
+            }
+            return prev.map(m =>
+                m.id === msgId ? {...m, content: '', _streaming: true} : m
+            )
+        })
+    }, [])
+
     const refreshDocumentPage = async (_documentId: string | null, finalMessages?: Message[]) => {
         const snapshot = {messages: finalMessages ?? messagesRef.current, threadId, isOpen: true, savedAt: Date.now()}
         await new Promise<void>(resolve => chrome.storage.local.set({edmsWidgetSnapshot: snapshot}, () => resolve()))
-
         const refreshed = tryCallRefreshFn()
-        if (!refreshed) {
-            fallbackReloadPage()
-        }
+        if (!refreshed) fallbackReloadPage()
     }
 
     const refreshDocumentForm = useCallback((finalMessages?: Message[]) => {
@@ -840,9 +965,7 @@ export function AssistantWidget() {
         chrome.storage.local.set({edmsWidgetSnapshot: snapshot}).then(() => {
             setTimeout(() => {
                 const refreshed = tryCallRefreshFn()
-                if (!refreshed) {
-                    fallbackReloadPage()
-                }
+                if (!refreshed) fallbackReloadPage()
             }, 4000)
         }).catch(() => {
         })
@@ -853,19 +976,15 @@ export function AssistantWidget() {
             /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
             '-'
         ).trim()
-
         const currentDocId = extractDocIdFromUrl()?.replace(
             /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g,
             '-'
         ).trim()
-
         if (currentDocId && normalizedId === currentDocId) {
             refreshDocumentForm()
             return
         }
-
         const url = `/document-form/${normalizedId}`
-
         chrome.runtime.sendMessage(
             {type: 'navigateTo', payload: {url, newTab: true}},
             (r) => {
@@ -887,9 +1006,7 @@ export function AssistantWidget() {
         const hasFile = Boolean(attachedFile)
         if (!isChoiceFlow && !hasTextInput && !hasFile) return
         if (loading) return
-        if (isListening && !handsFreeRef.current) {
-            stopMic()
-        }
+        if (isListening && !handsFreeRef.current) stopMic()
 
         const token = getAuthToken() ?? 'no_token'
         const docId = extractDocIdFromUrl()
@@ -944,7 +1061,13 @@ export function AssistantWidget() {
                 filePersistRef.current = null
             }
 
-            const payload = (res && typeof res === 'object' && 'data' in res && res.success) ? (res as any).data : res
+            if (res === 'stream_started') {
+                const streamMsgId = newMsgId()
+                handleRefreshStreamStart(streamMsgId, null)
+                return
+            }
+
+            const payload = res
             const content = payload?.response ?? payload?.content ?? payload?.message
                 ?? (Array.isArray(payload?.messages) ? payload.messages.at(-1)?.content : undefined)
                 ?? 'Анализ завершён.'
@@ -994,8 +1117,10 @@ export function AssistantWidget() {
                 }])
             }
         } finally {
-            setLoading(false)
-            requestIdRef.current = null
+            if (!streamingMsgIdRef.current) {
+                setLoading(false)
+                requestIdRef.current = null
+            }
             if (!isChoiceFlow) {
                 setAttachedFile(null)
                 if (fileRef.current) fileRef.current.value = ''
@@ -1324,6 +1449,20 @@ export function AssistantWidget() {
                                                 }}
                                                 onDocumentClick={handleDocumentClick}
                                             />
+                                            {msg._streaming && (
+                                                <span
+                                                    style={{
+                                                        display: 'inline-block',
+                                                        width: 2,
+                                                        height: 14,
+                                                        background: '#6366f1',
+                                                        marginLeft: 4,
+                                                        marginTop: 4,
+                                                        borderRadius: 1,
+                                                        animation: 'edms-blink 1s step-end infinite',
+                                                    }}
+                                                />
+                                            )}
                                             <ActionButtons
                                                 msg={msg}
                                                 loading={loading}
@@ -1422,6 +1561,7 @@ export function AssistantWidget() {
                                                 msg={msg}
                                                 userToken={getAuthToken() ?? ''}
                                                 onRefreshStart={(id, prev) => handleRefreshStart(id, prev)}
+                                                onRefreshStreamStart={handleRefreshStreamStart}
                                                 onRefreshDone={handleRefreshDone}
                                                 onRefreshError={handleRefreshError}
                                             />
@@ -1497,7 +1637,6 @@ export function AssistantWidget() {
                                             gap: 0,
                                             flexShrink: 0,
                                         }}>
-                                            {/* Кнопка прикрепления файла */}
                                             <button
                                                 type="button"
                                                 onClick={() => fileRef.current?.click()}

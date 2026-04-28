@@ -376,9 +376,9 @@ async def api_direct_summarize(
             from edms_ai_assistant.tools.attachment import doc_get_file_content
 
             tool_input = {
-                "user_token": user_input.user_token,
-                "context_ui_id": user_input.context_ui_id,
-                "file_path": current_path
+                "token": user_input.user_token,
+                "document_id": user_input.context_ui_id,
+                "attachment_id": current_path
             }
             raw_text = await doc_get_file_content.ainvoke(tool_input)
             raw_text = str(raw_text)
