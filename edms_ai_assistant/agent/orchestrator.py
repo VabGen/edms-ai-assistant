@@ -250,6 +250,27 @@ def _extract_available_list(data: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def _find_candidate_name(messages: list[BaseMessage], choice_id: str) -> str:
+    """Find the display name of the selected candidate from the last disambiguation tool output."""
+    last_tool_msg = next((m for m in reversed(messages) if isinstance(m, ToolMessage)), None)
+    if last_tool_msg and isinstance(last_tool_msg.content, str):
+        try:
+            data = json.loads(last_tool_msg.content)
+            candidates = _extract_available_list(data)
+            for c in candidates:
+                if isinstance(c, dict):
+                    c_id = str(c.get("id") or c.get("uuid") or c.get("employeeId") or "")
+                    if c_id == choice_id:
+                        return (
+                                c.get("fullName") or c.get("full_name") or c.get("name") or
+                                " ".join(filter(None, [c.get("lastName"), c.get("firstName"), c.get("middleName")]))
+                                or "Выбранный сотрудник"
+                        ).strip()
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    return ""
+
+
 def _item_to_candidate(item: dict[str, Any]) -> dict[str, str]:
     """Normalise a candidate dict into ``{id, name, dept}``."""
     first = (
@@ -342,7 +363,7 @@ def _is_real_tool_result(msg: ToolMessage) -> bool:
 
 
 def _find_pending_disambiguation_call(
-    messages: list[BaseMessage],
+        messages: list[BaseMessage],
 ) -> AIMessage | None:
     """Find the last AIMessage with tool_calls that has no real ToolMessage response.
 
@@ -719,7 +740,7 @@ class OrchestrationLoop:
 
 
 # ---------------------------------------------------------------------------
-# handle_human_choice  (Bug 1 fix: uses _find_pending_disambiguation_call)
+# handle_human_choice
 # ---------------------------------------------------------------------------
 
 async def handle_human_choice(
@@ -728,32 +749,8 @@ async def handle_human_choice(
         state_manager: AgentStateManager,
         loop: OrchestrationLoop,
 ) -> dict[str, Any]:
-    """Process a Human-in-the-Loop choice and resume graph execution.
-
-    This is a free function (not an ``OrchestrationLoop`` method) so that
-    ``EdmsDocumentAgent.chat()`` can call it without coupling the agent class
-    to the loop internals.
-
-    Supported choice formats:
-      - ``fix_field:<field>:<value>`` — routes to a new agent turn with a
-        plain-text instruction to update the field.
-      - ``<type>`` (extractive | abstractive | thesis) — injects ``summary_type``
-        into the pending ``doc_summarize_text`` tool_call.
-      - ``<UUID>[,<UUID>...]`` — injects selected employee or attachment IDs
-        into the pending disambiguation tool_call.
-
-    Args:
-        context: Immutable execution context.
-        human_choice: The choice string sent by the frontend.
-        state_manager: For state read/write.
-        loop: For ``run()`` re-entry after patching.
-
-    Returns:
-        Serialized ``AgentResponse`` dict.
-    """
     choice = human_choice.strip()
 
-    # --- fix_field prefix ---
     if choice.lower().startswith("fix_field:"):
         parts = choice.split(":", 2)
         if len(parts) == 3:
@@ -768,21 +765,88 @@ async def handle_human_choice(
     state = await state_manager.get_state(context.thread_id)
     messages: list[BaseMessage] = state.values.get("messages", [])
 
-    # --- Find the last AIMessage with pending tool_calls ---
-    # The graph may have completed (next=[]), but the history still contains
-    # an AIMessage with a disambiguation tool_call followed only by an empty
-    # ToolMessage from the validator.  We must find and reuse that call.
     pending_ai: AIMessage | None = _find_pending_disambiguation_call(messages)
 
     if pending_ai is None:
-        # No pending tool_call found — route as a new message
         logger.info(
-            "handle_human_choice: no pending tool_call found — routing as new message",
+            "handle_human_choice: no pending tool_call found — attempting reconstruction",
             extra={"thread_id": context.thread_id, "choice": choice[:40]},
         )
+
+        last_tool_msg = next((m for m in reversed(messages) if isinstance(m, ToolMessage)), None)
+
+        if last_tool_msg and isinstance(last_tool_msg.content, str) and is_valid_uuid(choice):
+            try:
+                data = json.loads(last_tool_msg.content)
+                if data.get("status") in ("requires_disambiguation", "requires_action"):
+                    tool_call_id = getattr(last_tool_msg, "tool_call_id", None)
+                    t_name = getattr(last_tool_msg, "name", None)
+
+                    original_ai_msg = None
+                    for msg in reversed(messages):
+                        if isinstance(msg, AIMessage):
+                            for tc in getattr(msg, "tool_calls", []):
+                                if tc.get("id") == tool_call_id:
+                                    original_ai_msg = msg
+                                    break
+                        if original_ai_msg:
+                            break
+
+                    if original_ai_msg and tool_call_id and t_name:
+                        raw_calls = list(original_ai_msg.tool_calls)
+                        t_args = dict(raw_calls[0]["args"])
+
+                        selected_name = _find_candidate_name(messages, choice)
+
+                        id_field = TOOL_DISAMBIG_ID_FIELD.get(t_name, "selected_employee_ids")
+
+                        selected_ids = [s.strip() for s in choice.replace(";", ",").split(",") if s.strip()]
+                        valid_ids = [sid for sid in selected_ids if is_valid_uuid(sid)]
+
+                        if valid_ids:
+                            t_args[id_field] = valid_ids[0] if t_name == "doc_control" else valid_ids
+                            patched_calls = [{"name": t_name, "args": t_args, "id": tool_call_id}]
+
+                            logger.info(
+                                "Reconstructed tool call %s with %s=%s",
+                                t_name, id_field, valid_ids,
+                                extra={"thread_id": context.thread_id},
+                            )
+
+                            await state_manager.update_state(
+                                context.thread_id,
+                                [AIMessage(
+                                    content=f"Выбран(а): {selected_name}." if selected_name else "",
+                                    tool_calls=patched_calls,
+                                    id=tool_call_id,
+                                )],
+                                as_node="agent",
+                            )
+
+                            return await loop.run(
+                                context=context,
+                                inputs=None,
+                                is_choice_active=True,
+                            )
+            except (json.JSONDecodeError, AttributeError, Exception) as exc:
+                logger.warning("Failed to reconstruct tool call: %s", exc)
+
+        instruction = choice
+        if last_tool_msg and isinstance(last_tool_msg.content, str):
+            try:
+                data = json.loads(last_tool_msg.content)
+                if data.get("status") in ("requires_choice",):
+                    if choice.lower() in {"extractive", "abstractive", "thesis"}:
+                        instruction = (
+                            f"Пользователь выбрал формат анализа: **{choice.lower()}**. "
+                            f"Вызови инструмент `doc_summarize_text` с аргументом summary_type={choice.lower()}."
+                        )
+            except json.JSONDecodeError:
+                pass
+
         return await loop.run(
             context=context,
-            inputs={"messages": [HumanMessage(content=choice)]},
+            inputs={"messages": [HumanMessage(content=instruction)]},
             is_choice_active=True,
         )
 
@@ -790,9 +854,8 @@ async def handle_human_choice(
     t_name: str = raw_calls[0]["name"]
     t_args: dict[str, Any] = dict(raw_calls[0]["args"])
     t_id: str = raw_calls[0]["id"]
-    patched_calls = raw_calls  # default — may be replaced below
+    patched_calls = raw_calls
 
-    # --- doc_summarize_text: inject summary_type ---
     if t_name == "doc_summarize_text":
         valid_types = {"extractive", "abstractive", "thesis"}
         t_args["summary_type"] = choice.lower() if choice.lower() in valid_types else "extractive"
@@ -803,15 +866,9 @@ async def handle_human_choice(
             extra={"thread_id": context.thread_id},
         )
 
-    # --- Disambiguation tools: inject employee or attachment IDs ---
     elif t_name in DISAMBIGUATION_TOOLS:
         id_field = TOOL_DISAMBIG_ID_FIELD.get(t_name, "selected_employee_ids")
-        selected_ids = [
-            s.strip()
-            for s in choice.replace(";", ",").split(",")
-            if s.strip()
-        ]
-        # Validate UUID format — silently drop malformed IDs.
+        selected_ids = [s.strip() for s in choice.replace(";", ",").split(",") if s.strip()]
         valid_ids = [sid for sid in selected_ids if is_valid_uuid(sid)]
         if not valid_ids:
             logger.warning(
@@ -824,7 +881,6 @@ async def handle_human_choice(
                 inputs={"messages": [HumanMessage(content=choice)]},
                 is_choice_active=True,
             )
-        # doc_control expects a single UUID string, not a list.
         t_args[id_field] = valid_ids[0] if t_name == "doc_control" else valid_ids
         patched_calls = [{"name": t_name, "args": t_args, "id": t_id}]
         logger.info(
@@ -833,7 +889,6 @@ async def handle_human_choice(
             extra={"thread_id": context.thread_id},
         )
 
-    # --- doc_compare_attachment_with_local: inject attachment_id ---
     elif t_name == "doc_compare_attachment_with_local":
         candidate = choice.strip()
         if is_valid_uuid(candidate):
@@ -855,11 +910,20 @@ async def handle_human_choice(
                 is_choice_active=True,
             )
 
-    # --- Update state with patched tool_calls ---
+    elif t_name == "task_create_tool":
+        id_field = "selected_employee_ids"
+        selected_ids = [s.strip() for s in choice.replace(";", ",").split(",") if s.strip()]
+        valid_ids = [sid for sid in selected_ids if is_valid_uuid(sid)]
+        if valid_ids:
+            t_args[id_field] = valid_ids
+            patched_calls = [{"name": t_name, "args": t_args, "id": t_id}]
+
+    selected_name = _find_candidate_name(messages, choice)
+
     await state_manager.update_state(
         context.thread_id,
         [AIMessage(
-            content=pending_ai.content or "",
+            content=f"Выбран(а): {selected_name}." if selected_name else (pending_ai.content or ""),
             tool_calls=patched_calls,
             id=pending_ai.id,
         )],
@@ -868,6 +932,6 @@ async def handle_human_choice(
 
     return await loop.run(
         context=context,
-        inputs=None,  # resume from interrupt
+        inputs=None,
         is_choice_active=True,
     )

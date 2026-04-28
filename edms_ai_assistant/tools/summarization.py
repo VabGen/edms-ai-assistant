@@ -159,7 +159,11 @@ async def doc_summarize_text(
     text: str,
     summary_type: SummarizeType | None = None,
 ) -> dict[str, Any]:
-    """Perform intelligent summarisation of document text via LLM.
+    """Use this tool ONLY when the user EXPLICITLY asks to summarize, analyze, extract facts, or make a thesis plan of a document.
+    Do NOT use this tool for simple questions about the document (like 'who is the author?', 'what is the date?', 'find a specific word').
+    For simple queries, answer directly from the text.
+
+    Perform intelligent summarisation of document text via LLM.
 
     Human-in-the-Loop contract:
         When ``summary_type`` is None this tool returns ``requires_choice``
@@ -227,7 +231,7 @@ async def doc_summarize_text(
             "meta": {
                 "format_used": result.format_used,
                 "text_length": result.text_length,
-                "was_truncated": result.was_truncated,
+                # "was_truncated": result.was_truncated,
                 "pipeline": result.pipeline,
                 "chunks_processed": result.chunks_processed,
                 "processing_time_ms": result.processing_time_ms,

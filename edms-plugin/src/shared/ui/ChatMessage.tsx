@@ -425,7 +425,7 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
 
                 {regNum && regNum !== '—'
                     ? <span style={{fontSize: 12, fontWeight: 700, color: '#0f172a', flex: 1}}>{regNum}</span>
-                    : <span style={{fontSize: 12, color: '#94a3b8', flex: 1, fontStyle: 'italic'}}>Без номера</span>
+                    : <span style={{fontSize: 12, color: '#94a3b8', flex: 1}}>—</span>
                 }
 
                 {date && date !== '—' && (
@@ -612,9 +612,23 @@ function SmartTable({children}: { children: React.ReactNode }) {
         )
     }
 
+    const h = headers.join(' ').toLowerCase()
+    const isDocList = /id/.test(h) || /рег.*номер|рег\.номер/.test(h) || (/дата/.test(h) && /категор/.test(h))
+
+    if (isDocList) {
+        return (
+            <div style={{margin: '6px 0'}}>
+                {rows.map((row, i) => <DocCard key={i} headers={headers} row={row} index={i}/>)}
+            </div>
+        )
+    }
+
     return (
-        <div style={{margin: '6px 0'}}>
-            {rows.map((row, i) => <DocCard key={i} headers={headers} row={row} index={i}/>)}
+        <div style={{
+            overflowX: 'auto', margin: '8px 0', borderRadius: 12,
+            border: '1px solid rgba(0,0,0,0.05)', background: '#ffffff'
+        }}>
+            <table style={{width: '100%', fontSize: 12, borderCollapse: 'collapse'}}>{children}</table>
         </div>
     )
 }
