@@ -168,7 +168,7 @@ _INTENT_TOOL_NAMES: dict[UserIntent, list[str]] = {
         _EMPLOYEE_SEARCH,
         _DOC_GET_DETAILS,
         _ACCESS_GRIEF,
-    ]
+    ],
 }
 
 # DELETE — полный набор (может удалять разные сущности)

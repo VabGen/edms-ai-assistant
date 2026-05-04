@@ -1,13 +1,13 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
-from edms_ai_assistant.db.database import Base
 from edms_ai_assistant.config import settings
+from edms_ai_assistant.db.database import Base
 
 # Импортируем все модели здесь, чтобы Alembic их увидел!
 

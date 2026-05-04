@@ -1,16 +1,20 @@
-from pydantic import BaseModel
-from enum import Enum
 import datetime
+from enum import Enum
+
+from pydantic import BaseModel
+
 
 class SummaryFormat(str, Enum):
     EXTRACTIVE = "extractive"
     ABSTRACTIVE = "abstractive"
     THESIS = "thesis"
 
+
 class SummarizeRequest(BaseModel):
     text: str
     summary_type: SummaryFormat = SummaryFormat.EXTRACTIVE
     file_identifier: str | None = None
+
 
 class SummarizationResult(BaseModel):
     status: str = "success"

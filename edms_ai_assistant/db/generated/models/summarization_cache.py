@@ -1,5 +1,7 @@
 import datetime
-from sqlalchemy import Column, String, Text, DateTime
+
+from sqlalchemy import Column, DateTime, String, Text
+
 from edms_ai_assistant.db.database import Base
 
 

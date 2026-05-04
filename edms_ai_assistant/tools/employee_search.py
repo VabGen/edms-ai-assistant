@@ -52,14 +52,16 @@ class EmployeeSearchInput(BaseModel):
     )
 
     last_name: str | None = Field(
-        None, max_length=150,
+        None,
+        max_length=150,
         description=(
             "Фамилия сотрудника. Примеры: 'Иванов', 'Bahdanovich'. "
             "ПЕРЕДАВАЙТЕ ВСЕГДА когда пользователь назвал фамилию."
         ),
     )
     first_name: str | None = Field(
-        None, max_length=100,
+        None,
+        max_length=100,
         description=(
             "Имя сотрудника. Примеры: 'Алексей', 'Tatsiana'. "
             "ПЕРЕДАВАЙТЕ ВСЕГДА когда пользователь назвал имя. "
@@ -67,12 +69,14 @@ class EmployeeSearchInput(BaseModel):
         ),
     )
     middle_name: str | None = Field(
-        None, max_length=150,
+        None,
+        max_length=150,
         description="Отчество сотрудника. Пример: 'Петрович'.",
     )
 
     full_post_name: str | None = Field(
-        None, max_length=300,
+        None,
+        max_length=300,
         description=(
             "Название должности. Примеры: 'главный бухгалтер', 'начальник отдела'. "
             "Используйте когда пользователь ищет по должности."
@@ -87,27 +91,38 @@ class EmployeeSearchInput(BaseModel):
     fired_only: bool | None = Field(None, description="True — только уволенные.")
 
     department_names: list[str] | None = Field(
-        None, description="Названия отделов. UUID резолвится автоматически.",
+        None,
+        description="Названия отделов. UUID резолвится автоматически.",
     )
     department_ids: list[str] | None = Field(
-        None, description="UUID отделов.",
+        None,
+        description="UUID отделов.",
     )
     child_departments: bool | None = Field(
-        None, description="True — включить дочерние подразделения.",
+        None,
+        description="True — включить дочерние подразделения.",
     )
 
     leader_department_name: str | None = Field(
-        None, max_length=300,
+        None,
+        max_length=300,
         description="Отдел, где сотрудник — непосредственный руководитель.",
     )
-    leader_department_id: str | None = Field(None, description="UUID отдела-руководство.")
-    include_child_leaders: bool | None = Field(None, description="Включить руководителей дочерних.")
+    leader_department_id: str | None = Field(
+        None, description="UUID отдела-руководство."
+    )
+    include_child_leaders: bool | None = Field(
+        None, description="Включить руководителей дочерних."
+    )
 
     leader_department_all_name: str | None = Field(
-        None, max_length=300,
+        None,
+        max_length=300,
         description="Отдел, где сотрудник руководитель включая дочерние.",
     )
-    leader_department_all_id: str | None = Field(None, description="UUID отдела-руководство все уровни.")
+    leader_department_all_id: str | None = Field(
+        None, description="UUID отдела-руководство все уровни."
+    )
     only_leaders: bool | None = Field(None, description="True — только руководители.")
 
     org_id: str | None = Field(None, description="Идентификатор филиала.")
@@ -115,19 +130,29 @@ class EmployeeSearchInput(BaseModel):
 
     exclude_ids: list[str] | None = Field(None, description="UUID для исключения.")
     exclude_role_id: str | None = Field(None, description="UUID роли для исключения.")
-    exclude_group_id: str | None = Field(None, description="UUID группы для исключения.")
-    exclude_personal_group_id: str | None = Field(None, description="UUID персональной группы для исключения.")
+    exclude_group_id: str | None = Field(
+        None, description="UUID группы для исключения."
+    )
+    exclude_personal_group_id: str | None = Field(
+        None, description="UUID персональной группы для исключения."
+    )
     exclude_grief_id: str | None = Field(None, description="UUID грифа для исключения.")
 
-    includes: list[str] | None = Field(None, description="POST, DEPARTMENT. По умолчанию оба.")
+    includes: list[str] | None = Field(
+        None, description="POST, DEPARTMENT. По умолчанию оба."
+    )
     fetch_all: bool | None = Field(None, description="True — все записи. ⚠ ОПАСНО.")
 
     page: int | None = Field(None, ge=0, description="Номер страницы.")
     page_size: int | None = Field(None, ge=1, le=100, description="Размер страницы.")
 
     @field_validator(
-        "last_name", "first_name", "middle_name", "full_post_name",
-        "leader_department_name", "leader_department_all_name",
+        "last_name",
+        "first_name",
+        "middle_name",
+        "full_post_name",
+        "leader_department_name",
+        "leader_department_all_name",
         mode="before",
     )
     @classmethod
@@ -151,14 +176,27 @@ class EmployeeSearchInput(BaseModel):
     @model_validator(mode="after")
     def at_least_one_param(self) -> EmployeeSearchInput:
         fields = [
-            self.employee_id, self.last_name, self.first_name, self.middle_name,
-            self.full_post_name, self.post_id, self.active_only, self.fired_only,
-            self.department_names, self.department_ids,
-            self.leader_department_name, self.leader_department_id,
-            self.leader_department_all_name, self.leader_department_all_id,
-            self.org_id, self.employee_ids, self.exclude_ids,
-            self.exclude_role_id, self.exclude_group_id,
-            self.exclude_personal_group_id, self.exclude_grief_id,
+            self.employee_id,
+            self.last_name,
+            self.first_name,
+            self.middle_name,
+            self.full_post_name,
+            self.post_id,
+            self.active_only,
+            self.fired_only,
+            self.department_names,
+            self.department_ids,
+            self.leader_department_name,
+            self.leader_department_id,
+            self.leader_department_all_name,
+            self.leader_department_all_id,
+            self.org_id,
+            self.employee_ids,
+            self.exclude_ids,
+            self.exclude_role_id,
+            self.exclude_group_id,
+            self.exclude_personal_group_id,
+            self.exclude_grief_id,
         ]
         if not any(v is not None for v in fields):
             raise ValueError("Укажите хотя бы один параметр поиска.")
@@ -255,7 +293,9 @@ async def employee_search_tool(
     unresolved_all: list[str] = []
 
     if department_names:
-        newly_resolved, unresolved = await _resolve_department_names(token, department_names)
+        newly_resolved, unresolved = await _resolve_department_names(
+            token, department_names
+        )
         resolved_dept_ids.extend(newly_resolved)
         unresolved_all.extend(unresolved)
 
@@ -266,7 +306,9 @@ async def employee_search_tool(
 
     resolved_leader_id = leader_department_id
     if leader_department_name and not leader_department_id:
-        resolved, unresolved = await _resolve_department_names(token, [leader_department_name])
+        resolved, unresolved = await _resolve_department_names(
+            token, [leader_department_name]
+        )
         if resolved:
             resolved_leader_id = resolved[0]
         else:
@@ -279,7 +321,9 @@ async def employee_search_tool(
 
     resolved_leader_all_id = leader_department_all_id
     if leader_department_all_name and not leader_department_all_id:
-        resolved, unresolved = await _resolve_department_names(token, [leader_department_all_name])
+        resolved, unresolved = await _resolve_department_names(
+            token, [leader_department_all_name]
+        )
         if resolved:
             resolved_leader_all_id = resolved[0]
         else:
@@ -309,10 +353,19 @@ async def employee_search_tool(
 
     if unresolved_all:
         logger.warning("Departments not resolved", extra={"unresolved": unresolved_all})
-        has_other = any([
-            last_name, first_name, middle_name, full_post_name, post_id,
-            employee_ids, resolved_leader_id, resolved_leader_all_id, org_id,
-        ])
+        has_other = any(
+            [
+                last_name,
+                first_name,
+                middle_name,
+                full_post_name,
+                post_id,
+                employee_ids,
+                resolved_leader_id,
+                resolved_leader_all_id,
+                org_id,
+            ]
+        )
         if not resolved_dept_ids and not has_other:
             return {
                 "status": "not_found",
@@ -375,7 +428,9 @@ async def employee_search_tool(
                 emp_card = await _build_enriched_card(token, display_results[0], nlp)
                 return {"status": "found", "total": 1, "employee_card": emp_card}
 
-        choices = [_serialize_employee_brief(r) for r in display_results[:effective_size]]
+        choices = [
+            _serialize_employee_brief(r) for r in display_results[:effective_size]
+        ]
 
         logger.info("Multiple employees found", extra={"count": len(choices)})
 
@@ -506,7 +561,9 @@ def _find_best_match(
     if top_score - second_score >= _SCORE_GAP_THRESHOLD:
         logger.info(
             "Best match selected: score=%d vs %d (gap=%d)",
-            top_score, second_score, top_score - second_score,
+            top_score,
+            second_score,
+            top_score - second_score,
         )
         return top_result
 
@@ -560,7 +617,10 @@ async def _build_enriched_card(
     try:
         async with EmployeeClient() as client:
             roles_raw = await client.get_employee_roles(token, emp_id)
-        card["roles"] = [{"id": str(r.get("id", "")), "name": r.get("name") or "—"} for r in roles_raw]
+        card["roles"] = [
+            {"id": str(r.get("id", "")), "name": r.get("name") or "—"}
+            for r in roles_raw
+        ]
     except Exception:
         card["roles"] = []
 
@@ -568,7 +628,10 @@ async def _build_enriched_card(
         async with EmployeeClient() as client:
             griefs_raw = await client.get_employee_griefs(token, emp_id)
         card["access_griefs"] = [
-            {"id": str((g.get("grief") or g).get("id", "")), "name": (g.get("grief") or g).get("name") or "—"}
+            {
+                "id": str((g.get("grief") or g).get("id", "")),
+                "name": (g.get("grief") or g).get("name") or "—",
+            }
             for g in griefs_raw
         ]
     except Exception:
@@ -578,7 +641,8 @@ async def _build_enriched_card(
 
 
 async def _resolve_department_names(
-    token: str, names: list[str],
+    token: str,
+    names: list[str],
 ) -> tuple[list[str], list[str]]:
     from edms_ai_assistant.clients.department_client import DepartmentClient
 
@@ -604,7 +668,9 @@ async def _resolve_department_names(
 
 
 async def _get_employee_card(
-    token: str, employee_id: str, nlp: EDMSNaturalLanguageService,
+    token: str,
+    employee_id: str,
+    nlp: EDMSNaturalLanguageService,
 ) -> dict[str, Any]:
     try:
         async with EmployeeClient() as client:
@@ -623,7 +689,11 @@ async def _get_employee_card(
 def _serialize_employee_brief(raw: dict[str, Any]) -> dict[str, Any]:
     post = raw.get("post") or {}
     department = raw.get("department") or {}
-    parts = [raw.get("lastName") or "", raw.get("firstName") or "", raw.get("middleName") or ""]
+    parts = [
+        raw.get("lastName") or "",
+        raw.get("firstName") or "",
+        raw.get("middleName") or "",
+    ]
     full_name = " ".join(p for p in parts if p).strip() or "—"
     return {
         "id": str(raw.get("id", "")),
@@ -638,7 +708,11 @@ def _serialize_employee_brief(raw: dict[str, Any]) -> dict[str, Any]:
 def _serialize_employee_full(raw: dict[str, Any]) -> dict[str, Any]:
     post = raw.get("post") or {}
     department = raw.get("department") or {}
-    parts = [raw.get("lastName") or "", raw.get("firstName") or "", raw.get("middleName") or ""]
+    parts = [
+        raw.get("lastName") or "",
+        raw.get("firstName") or "",
+        raw.get("middleName") or "",
+    ]
     full_name = " ".join(p for p in parts if p).strip() or "—"
     return {
         "id": str(raw.get("id", "")),

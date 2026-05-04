@@ -23,11 +23,19 @@ class SubmissionFormAppeal(StrEnum):
 
 class AppealFields(BaseModel):
     deliveryMethod: str | None = Field(None, description="Способ доставки обращения")
-    shortSummary: str | None = Field(None, description="Краткое содержание (до 80 символов)")
+    shortSummary: str | None = Field(
+        None, description="Краткое содержание (до 80 символов)"
+    )
     receiptDate: datetime | None = Field(None, description="Дата поступления обращения")
-    declarantType: DeclarantType | None = Field(None, description="Тип заявителя: INDIVIDUAL (физлицо) или ENTITY (юрлицо)")
-    citizenType: str | None = Field(None, description="Категория обращения (Жалоба, Заявление, Предложение)")
-    submissionForm: SubmissionFormAppeal | None = Field(None, description="Форма подачи: WRITTEN, ELECTRONIC, VERBAL")
+    declarantType: DeclarantType | None = Field(
+        None, description="Тип заявителя: INDIVIDUAL (физлицо) или ENTITY (юрлицо)"
+    )
+    citizenType: str | None = Field(
+        None, description="Категория обращения (Жалоба, Заявление, Предложение)"
+    )
+    submissionForm: SubmissionFormAppeal | None = Field(
+        None, description="Форма подачи: WRITTEN, ELECTRONIC, VERBAL"
+    )
 
     collective: bool | None = Field(None)
     anonymous: bool | None = Field(None)
@@ -75,9 +83,26 @@ class AppealFields(BaseModel):
     @model_validator(mode="after")
     def clean_placeholders(self) -> "AppealFields":
         placeholders = {
-            "none", "null", "nil", "unknown", "n/a", "na", "no", "not specified",
-            "not available", "неизвестно", "н/д", "нет данных", "отсутствует",
-            "не указано", "нет", "—", "-", "–", "...", "___",
+            "none",
+            "null",
+            "nil",
+            "unknown",
+            "n/a",
+            "na",
+            "no",
+            "not specified",
+            "not available",
+            "неизвестно",
+            "н/д",
+            "нет данных",
+            "отсутствует",
+            "не указано",
+            "нет",
+            "—",
+            "-",
+            "–",
+            "...",
+            "___",
         }
 
         for field_name in self.model_fields:

@@ -223,7 +223,7 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
     # ── Связанные данные ──────────────────────────────────────────────────────
 
     async def get_employee_roles(
-            self, token: str, employee_id: str
+        self, token: str, employee_id: str
     ) -> list[dict[str, Any]]:
         """Fetches roles for an employee. GET /api/employee/{id}/role."""
         try:
@@ -246,7 +246,7 @@ class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
             return []
 
     async def get_employee_griefs(
-            self, token: str, employee_id: str
+        self, token: str, employee_id: str
     ) -> list[dict[str, Any]]:
         """Fetches access griefs for an employee. GET /api/employee/{id}/griefs."""
         try:

@@ -149,7 +149,11 @@ class HttpSession:
             EdmsSerializationError: Response body is not valid JSON.
         """
         response = await self._raw_request(
-            method, endpoint, token=token, params=params, json=json,
+            method,
+            endpoint,
+            token=token,
+            params=params,
+            json=json,
             long_timeout=long_timeout,
         )
         if response.status_code == 204 or not response.content:
@@ -177,7 +181,11 @@ class HttpSession:
             EdmsAuthError, EdmsNotFoundError, EdmsHttpError, EdmsTransportError.
         """
         response = await self._raw_request(
-            method, endpoint, token=token, params=params, long_timeout=long_timeout,
+            method,
+            endpoint,
+            token=token,
+            params=params,
+            long_timeout=long_timeout,
         )
         return response.content
 
@@ -221,9 +229,7 @@ class HttpSession:
         }
         timeout = self._config.timeout
 
-        logger.info(
-            "Uploading '%s' (%s) → %s", display_name, content_type, endpoint
-        )
+        logger.info("Uploading '%s' (%s) → %s", display_name, content_type, endpoint)
 
         client = self._assert_open()
         with open(file_path, "rb") as fh:

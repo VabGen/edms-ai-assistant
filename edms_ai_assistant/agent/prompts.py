@@ -214,7 +214,6 @@ _SNIPPETS: Final[dict[UserIntent, str]] = {
 3. Повторный вызов: introduction_create_tool(selected_employee_ids=[...]).
 4. Сообщи об успехе с именами добавленных сотрудников.
 </introduction_workflow>""",
-
     UserIntent.CREATE_TASK: """
 <task_creation_guide>
 Параметры:
@@ -232,7 +231,6 @@ _SNIPPETS: Final[dict[UserIntent, str]] = {
 
 Disambiguation: фамилия неоднозначна → список → selected_employee_ids.
 </task_creation_guide>""",
-
     UserIntent.SUMMARIZE: """
 <summarize_guide>
 ШАГ 1 — Получи текст:
@@ -250,7 +248,6 @@ Disambiguation: фамилия неоднозначна → список → sel
 
 ЗАПРЕЩЕНО: подставлять summary_type без явного указания пользователя.
 </summarize_guide>""",
-
     UserIntent.COMPARE: """
 <compare_decision_tree>
 УСЛОВИЕ: в контексте есть загруженный файл (путь /tmp/... или UUID)?
@@ -278,7 +275,6 @@ Disambiguation: фамилия неоднозначна → список → sel
   Не спрашивай "какие версии" — всё уже сравнено.
   НЕ вызывай doc_compare_documents после doc_get_versions.
 </compare_versions_guide>""",
-
     UserIntent.SEARCH: """
 <search_guide>
 - Поиск документов:  doc_search_tool
@@ -286,7 +282,6 @@ Disambiguation: фамилия неоднозначна → список → sel
 - Текущий документ: doc_get_details
 После поиска передавай id найденного документа в doc_get_details / doc_get_file_content.
 </search_guide>""",
-
     UserIntent.ANALYZE: """
 <analyze_guide>
 1. doc_get_details        — структура, метаданные, поручения.
@@ -294,7 +289,6 @@ Disambiguation: фамилия неоднозначна → список → sel
 3. doc_summarize_text(summary_type='thesis') — тезисный разбор.
 Укажи: тип документа, статус, ключевые участники, сроки.
 </analyze_guide>""",
-
     UserIntent.QUESTION: """
 <question_guide>
 - Метаданные:   doc_get_details
@@ -302,7 +296,6 @@ Disambiguation: фамилия неоднозначна → список → sel
 - Сотрудники:   employee_search_tool
 - Без документа: ответь напрямую из контекста
 </question_guide>""",
-
     UserIntent.FILE_ANALYSIS: """
 <file_analysis_guide>
 - Локальный файл (/tmp/...): read_local_file_content → doc_summarize_text
@@ -310,7 +303,6 @@ Disambiguation: фамилия неоднозначна → список → sel
 - Сравнение с вложением:     doc_compare_attachment_with_local
 Путь к файлу берётся из <local_file_path>.
 </file_analysis_guide>""",
-
     UserIntent.CREATE_DOCUMENT: """
 <create_document_guide>
 ТРИГГЕР: файл загружен (есть <local_file_path>) + "создай обращение/входящий/...".
@@ -327,7 +319,6 @@ Disambiguation: фамилия неоднозначна → список → sel
 
 НЕ нужно: читать файл, спрашивать путь, вызывать doc_get_details.
 </create_document_guide>""",
-
     UserIntent.COMPLIANCE_CHECK: """
 <compliance_check_guide>
 ШАГ 1: doc_compliance_check(document_id=<авто>, check_all=True) — ОДИН вызов.
@@ -338,7 +329,6 @@ Disambiguation: фамилия неоднозначна → список → sel
   cannot_verify  → поля не найдены в файле — допустимо.
   disambiguation → список вложений → жди выбора.
 </compliance_check_guide>""",
-
     UserIntent.CONTROL: """
 <control_guide>
 ⛔ КОНТРОЛЬ — НЕ поручение. Только doc_control.

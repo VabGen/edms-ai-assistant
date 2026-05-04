@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,10 +33,7 @@ async def list_cache(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]
     try:
         rows = (await db.scalars(select(SummarizationCache))).all()
         return [
-            {
-                "file_identifier": r.file_identifier,
-                "summary_type": r.summary_type
-            }
+            {"file_identifier": r.file_identifier, "summary_type": r.summary_type}
             for r in rows
         ]
     except Exception as exc:
@@ -44,39 +41,51 @@ async def list_cache(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/summarization/{file_identifier}/{summary_type}", summary="Check if a cache entry exists")
+@router.get(
+    "/summarization/{file_identifier}/{summary_type}",
+    summary="Check if a cache entry exists",
+)
 async def get_cache_entry(
-        file_identifier: str, summary_type: str, db: AsyncSession = Depends(get_db)
+    file_identifier: str, summary_type: str, db: AsyncSession = Depends(get_db)
 ) -> dict[str, Any]:
     stype = _validate_summary_type(summary_type)
     cache_key = _make_cache_key(file_identifier, stype)
     try:
         row = await db.scalar(
             select(SummarizationCache).where(
-                SummarizationCache.file_identifier == cache_key, SummarizationCache.summary_type == stype
+                SummarizationCache.file_identifier == cache_key,
+                SummarizationCache.summary_type == stype,
             )
         )
         if row:
             return {
                 "exists": True,
                 "file_identifier_hashed": cache_key,
-                "summary_type": row.summary_type
+                "summary_type": row.summary_type,
             }
-        return {"exists": False, "file_identifier_hashed": cache_key, "summary_type": stype}
+        return {
+            "exists": False,
+            "file_identifier_hashed": cache_key,
+            "summary_type": stype,
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.delete("/summarization/{file_identifier}/{summary_type}", summary="Invalidate one cache entry")
+@router.delete(
+    "/summarization/{file_identifier}/{summary_type}",
+    summary="Invalidate one cache entry",
+)
 async def delete_cache_entry(
-        file_identifier: str, summary_type: str, db: AsyncSession = Depends(get_db)
+    file_identifier: str, summary_type: str, db: AsyncSession = Depends(get_db)
 ) -> dict[str, Any]:
     stype = _validate_summary_type(summary_type)
     cache_key = _make_cache_key(file_identifier, stype)
     try:
         row = await db.scalar(
             select(SummarizationCache).where(
-                SummarizationCache.file_identifier == cache_key, SummarizationCache.summary_type == stype
+                SummarizationCache.file_identifier == cache_key,
+                SummarizationCache.summary_type == stype,
             )
         )
         if not row:
@@ -87,31 +96,41 @@ async def delete_cache_entry(
         return {
             "deleted": True,
             "file_identifier": row.file_identifier,
-            "summary_type": row.summary_type
+            "summary_type": row.summary_type,
         }
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.delete("/summarization/{file_identifier}", summary="Invalidate ALL cache entries for a given file")
+@router.delete(
+    "/summarization/{file_identifier}",
+    summary="Invalidate ALL cache entries for a given file",
+)
 async def delete_all_cache_for_file(
-        file_identifier: str, db: AsyncSession = Depends(get_db)
+    file_identifier: str, db: AsyncSession = Depends(get_db)
 ) -> dict[str, Any]:
     deleted_keys = []
     try:
         for stype in _VALID_SUMMARY_TYPES:
             cache_key = _make_cache_key(file_identifier, stype)
-            rows = (await db.scalars(
-                select(SummarizationCache).where(
-                    SummarizationCache.file_identifier == cache_key, SummarizationCache.summary_type == stype
+            rows = (
+                await db.scalars(
+                    select(SummarizationCache).where(
+                        SummarizationCache.file_identifier == cache_key,
+                        SummarizationCache.summary_type == stype,
+                    )
                 )
-            )).all()
+            ).all()
             for row in rows:
                 deleted_keys.append(f"{row.file_identifier}:{row.summary_type}")
                 await db.delete(row)
         await db.commit()
-        return {"deleted": len(deleted_keys) > 0, "count": len(deleted_keys), "keys": deleted_keys}
+        return {
+            "deleted": len(deleted_keys) > 0,
+            "count": len(deleted_keys),
+            "keys": deleted_keys,
+        }
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc

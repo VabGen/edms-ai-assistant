@@ -137,7 +137,7 @@ def get_chat_model() -> BaseLanguageModel:
                 "timeout": timeout,
                 "max_retries": max_retries,
                 "streaming": True,
-                "stop": ["\n\n\n", "END_SUMMARY"], # Защита от галлюцинаций
+                "stop": ["\n\n\n", "END_SUMMARY"],  # Защита от галлюцинаций
                 # "model_kwargs": {"seed": 42}     # Детерминизм
                 "seed": 42,
             }

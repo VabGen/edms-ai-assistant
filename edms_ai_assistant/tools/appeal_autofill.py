@@ -74,8 +74,17 @@ class AutofillResult:
 
 class ValueSanitizer:
     EMPTY_PLACEHOLDERS = {
-        "none", "null", "nil", "n/a", "na", "unknown", "not specified",
-        "no", "нет", "неизвестно", "н/д",
+        "none",
+        "null",
+        "nil",
+        "n/a",
+        "na",
+        "unknown",
+        "not specified",
+        "no",
+        "нет",
+        "неизвестно",
+        "н/д",
     }
 
     @classmethod
@@ -198,10 +207,14 @@ class GeographyResolver:
         await self._resolve_country(document, fields, geo_data)
 
         if region_name:
-            await self._lookup("region", region_name, "regionId", "regionName", geo_data)
+            await self._lookup(
+                "region", region_name, "regionId", "regionName", geo_data
+            )
 
         if district_name:
-            await self._lookup("district", district_name, "districtId", "districtName", geo_data)
+            await self._lookup(
+                "district", district_name, "districtId", "districtName", geo_data
+            )
 
         await self._resolve_city(city_name, document, geo_data)
 
@@ -225,7 +238,9 @@ class GeographyResolver:
             return llm_val
         return None
 
-    async def _resolve_country(self, document: Any, fields: Any, geo_data: dict) -> None:
+    async def _resolve_country(
+        self, document: Any, fields: Any, geo_data: dict
+    ) -> None:
         d = document.documentAppeal
         country_name: str | None = None
 
@@ -236,7 +251,9 @@ class GeographyResolver:
 
         if country_name:
             try:
-                data = await self.ref_client.find_country_with_name(self.token, country_name)
+                data = await self.ref_client.find_country_with_name(
+                    self.token, country_name
+                )
                 if data:
                     geo_data["countryAppealId"] = data["id"]
                     geo_data["countryAppealName"] = data["name"]
@@ -248,45 +265,66 @@ class GeographyResolver:
         elif d and d.countryAppealId:
             geo_data["countryAppealId"] = str(d.countryAppealId)
 
-    async def _lookup(self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict) -> None:
+    async def _lookup(
+        self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict
+    ) -> None:
         try:
             method = getattr(self.ref_client, f"find_{endpoint}_with_name")
             data = await method(self.token, name)
             if data:
                 geo_data[id_key] = data["id"]
                 geo_data[name_key] = data["name"]
-                logger.info("%s: %s → %s (ID: %s)", endpoint, name, data["name"], data["id"])
+                logger.info(
+                    "%s: %s → %s (ID: %s)", endpoint, name, data["name"], data["id"]
+                )
             else:
                 logger.warning("%s not found in reference: %s", endpoint, name)
         except Exception as exc:
             logger.error("%s lookup error for '%s': %s", endpoint, name, exc)
 
-    async def _resolve_city(self, city_name: str | None, document: Any, geo_data: dict) -> None:
+    async def _resolve_city(
+        self, city_name: str | None, document: Any, geo_data: dict
+    ) -> None:
         d = document.documentAppeal
         if city_name:
             try:
-                data = await self.ref_client.find_city_with_hierarchy(self.token, city_name)
+                data = await self.ref_client.find_city_with_hierarchy(
+                    self.token, city_name
+                )
                 if data:
                     geo_data["cityId"] = data["id"]
                     geo_data["cityName"] = data["name"]
-                    logger.info("City resolved: %s → '%s' (ID: %s)", city_name, data["name"], data["id"])
+                    logger.info(
+                        "City resolved: %s → '%s' (ID: %s)",
+                        city_name,
+                        data["name"],
+                        data["id"],
+                    )
 
                     if "districtId" not in geo_data and data.get("districtId"):
                         geo_data["districtId"] = data["districtId"]
-                        logger.info("District from hierarchy: id=%s", data["districtId"])
+                        logger.info(
+                            "District from hierarchy: id=%s", data["districtId"]
+                        )
                     if "districtName" not in geo_data and data.get("districtName"):
                         geo_data["districtName"] = data["districtName"]
-                        logger.info("District name from hierarchy: '%s'", data["districtName"])
+                        logger.info(
+                            "District name from hierarchy: '%s'", data["districtName"]
+                        )
                     if "regionId" not in geo_data and data.get("regionId"):
                         geo_data["regionId"] = data["regionId"]
                         logger.info("Region from hierarchy: id=%s", data["regionId"])
                     if "regionName" not in geo_data and data.get("regionName"):
                         geo_data["regionName"] = data["regionName"]
-                        logger.info("Region name from hierarchy: '%s'", data["regionName"])
+                        logger.info(
+                            "Region name from hierarchy: '%s'", data["regionName"]
+                        )
                 else:
                     logger.warning("City not found in reference: '%s'", city_name)
             except Exception as exc:
-                logger.error("City resolution error for '%s': %s", city_name, exc, exc_info=True)
+                logger.error(
+                    "City resolution error for '%s': %s", city_name, exc, exc_info=True
+                )
         elif d and d.cityId:
             geo_data["cityId"] = str(d.cityId)
             logger.debug("City fallback: DB cityId=%s", d.cityId)
@@ -335,13 +373,19 @@ class AppealFieldsBuilder:
         payload: dict[str, Any] = {}
 
         GEO_KEY_ORDER = [
-            "countryAppealId", "countryAppealName", "regionId", "regionName",
-            "districtId", "districtName", "cityId", "cityName",
+            "countryAppealId",
+            "countryAppealName",
+            "regionId",
+            "regionName",
+            "districtId",
+            "districtName",
+            "cityId",
+            "cityName",
         ]
         for key in GEO_KEY_ORDER:
             if key in geo_data:
                 payload[key] = geo_data[key]
-                
+
         await self._add_correspondent(d, fields, payload)
         self._add_personal_data(d, fields, payload)
         await self._add_classification(d, fields, extracted_text, payload)
@@ -355,10 +399,14 @@ class AppealFieldsBuilder:
     def _create_empty_appeal(self) -> DocumentAppealDto:
         return DocumentAppealDto()
 
-    async def _add_correspondent(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
+    async def _add_correspondent(
+        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+    ) -> None:
         if d.correspondentAppealId:
             payload["correspondentAppealId"] = str(d.correspondentAppealId)
-            payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(d.correspondentAppeal)
+            payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
+                d.correspondentAppeal
+            )
             return
 
         corr_name: str | None = None
@@ -373,53 +421,90 @@ class AppealFieldsBuilder:
             )
             if canonical and _is_good_correspondent_match(corr_name, canonical["name"]):
                 payload["correspondentAppealId"] = canonical["id"]
-                payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(corr_name)
-                logger.info("correspondentAppeal matched: '%s' → '%s'", corr_name[:50], canonical["name"][:50])
+                payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
+                    corr_name
+                )
+                logger.info(
+                    "correspondentAppeal matched: '%s' → '%s'",
+                    corr_name[:50],
+                    canonical["name"][:50],
+                )
             else:
                 if canonical:
-                    logger.info("correspondentAppeal registry rejected: '%s' ≉ '%s' — free-text", corr_name[:50], canonical["name"][:50])
-                payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(corr_name)
+                    logger.info(
+                        "correspondentAppeal registry rejected: '%s' ≉ '%s' — free-text",
+                        corr_name[:50],
+                        canonical["name"][:50],
+                    )
+                payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(
+                    corr_name
+                )
 
         if not payload.get("correspondentAppealId"):
             payload["correspondentAppealId"] = None
             if "correspondentAppeal" not in payload:
                 payload["correspondentAppeal"] = None
 
-    def _add_personal_data(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
+    def _add_personal_data(
+        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+    ) -> None:
         if not ValueSanitizer.is_empty(d.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fioApplicant)
         elif not ValueSanitizer.is_empty(fields.fioApplicant):
-            payload["fioApplicant"] = ValueSanitizer.sanitize_string(fields.fioApplicant)
+            payload["fioApplicant"] = ValueSanitizer.sanitize_string(
+                fields.fioApplicant
+            )
 
         if d.dateDocCorrespondentOrg:
-            payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(d.dateDocCorrespondentOrg)
+            payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(
+                d.dateDocCorrespondentOrg
+            )
         elif not ValueSanitizer.is_empty(fields.dateDocCorrespondentOrg):
-            payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(fields.dateDocCorrespondentOrg)
+            payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(
+                fields.dateDocCorrespondentOrg
+            )
 
-    async def _add_classification(self, d: DocumentAppealDto, fields: AppealFields, extracted_text: str, payload: dict) -> None:
+    async def _add_classification(
+        self,
+        d: DocumentAppealDto,
+        fields: AppealFields,
+        extracted_text: str,
+        payload: dict,
+    ) -> None:
         if d.citizenTypeId:
             payload["citizenTypeId"] = str(d.citizenTypeId)
         elif not ValueSanitizer.is_empty(fields.citizenType):
-            citizen_type_id = await self.ref_client.find_citizen_type(self.token, fields.citizenType)
+            citizen_type_id = await self.ref_client.find_citizen_type(
+                self.token, fields.citizenType
+            )
             if citizen_type_id:
                 payload["citizenTypeId"] = citizen_type_id
 
         if d.subjectId:
             payload["subjectId"] = str(d.subjectId)
         else:
-            subject_id = await self.ref_client.find_best_subject(self.token, extracted_text)
+            subject_id = await self.ref_client.find_best_subject(
+                self.token, extracted_text
+            )
             if subject_id:
                 payload["subjectId"] = subject_id
                 logger.info("Subject determined by LLM: %s", subject_id)
 
-    async def _add_declarant_type(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
+    async def _add_declarant_type(
+        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+    ) -> None:
         if fields.declarantType:
             if isinstance(fields.declarantType, str):
                 try:
-                    payload["declarantType"] = GeneratedDeclarantType[fields.declarantType.upper()]
+                    payload["declarantType"] = GeneratedDeclarantType[
+                        fields.declarantType.upper()
+                    ]
                     logger.info("declarantType from LLM: %s", fields.declarantType)
                 except KeyError:
-                    logger.warning("Unknown declarantType: %s, using INDIVIDUAL", fields.declarantType)
+                    logger.warning(
+                        "Unknown declarantType: %s, using INDIVIDUAL",
+                        fields.declarantType,
+                    )
                     payload["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
             else:
                 payload["declarantType"] = fields.declarantType
@@ -430,7 +515,9 @@ class AppealFieldsBuilder:
             self.warnings.append("declarantType установлен INDIVIDUAL по умолчанию")
             logger.warning("declarantType set to INDIVIDUAL (fallback)")
 
-    async def _add_conditional_fields(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
+    async def _add_conditional_fields(
+        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+    ) -> None:
         if payload.get("declarantType") == GeneratedDeclarantType.ENTITY:
             raw_org: str | None = (
                 d.organizationName
@@ -441,13 +528,25 @@ class AppealFieldsBuilder:
                 corr_data = await self.ref_client._find_entity_with_name(
                     self.token, "correspondent", raw_org, "Организация"
                 )
-                if corr_data and _is_good_correspondent_match(raw_org, corr_data.get("name", "")):
+                if corr_data and _is_good_correspondent_match(
+                    raw_org, corr_data.get("name", "")
+                ):
                     payload["organizationName"] = corr_data["name"]
-                    logger.info("organizationName from registry: '%s' → '%s'", raw_org[:50], corr_data["name"][:50])
+                    logger.info(
+                        "organizationName from registry: '%s' → '%s'",
+                        raw_org[:50],
+                        corr_data["name"][:50],
+                    )
                 else:
                     if corr_data:
-                        logger.info("organizationName registry rejected (low quality): '%s' ≉ '%s' — free-text", raw_org[:50], corr_data.get("name", "")[:50])
-                    payload["organizationName"] = ValueSanitizer.sanitize_string(raw_org)
+                        logger.info(
+                            "organizationName registry rejected (low quality): '%s' ≉ '%s' — free-text",
+                            raw_org[:50],
+                            corr_data.get("name", "")[:50],
+                        )
+                    payload["organizationName"] = ValueSanitizer.sanitize_string(
+                        raw_org
+                    )
             else:
                 payload["organizationName"] = None
 
@@ -455,31 +554,49 @@ class AppealFieldsBuilder:
                 d.signed if not ValueSanitizer.is_empty(d.signed) else fields.signed
             )
             payload["correspondentOrgNumber"] = ValueSanitizer.sanitize_string(
-                d.correspondentOrgNumber if not ValueSanitizer.is_empty(d.correspondentOrgNumber) else fields.correspondentOrgNumber
+                d.correspondentOrgNumber
+                if not ValueSanitizer.is_empty(d.correspondentOrgNumber)
+                else fields.correspondentOrgNumber
             )
         elif payload.get("declarantType") == GeneratedDeclarantType.INDIVIDUAL:
             payload["organizationName"] = None
             payload["signed"] = None
             payload["correspondentOrgNumber"] = None
 
-    def _add_common_fields(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
-        payload["collective"] = fields.collective if fields.collective is not None else d.collective
-        payload["anonymous"] = fields.anonymous if fields.anonymous is not None else d.anonymous
-        payload["reasonably"] = fields.reasonably if fields.reasonably is not None else d.reasonably
-        
+    def _add_common_fields(
+        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+    ) -> None:
+        payload["collective"] = (
+            fields.collective if fields.collective is not None else d.collective
+        )
+        payload["anonymous"] = (
+            fields.anonymous if fields.anonymous is not None else d.anonymous
+        )
+        payload["reasonably"] = (
+            fields.reasonably if fields.reasonably is not None else d.reasonably
+        )
+
         raw_receipt = d.receiptDate if d.receiptDate else fields.receiptDate
         if raw_receipt:
             _receipt_date = raw_receipt if isinstance(raw_receipt, datetime) else None
-            if _receipt_date and abs((_receipt_date.date() - datetime.now(UTC).date()).days) <= 1:
-                logger.info("receiptDate=%s выглядит как today → пропускаем", _receipt_date.date())
+            if (
+                _receipt_date
+                and abs((_receipt_date.date() - datetime.now(UTC).date()).days) <= 1
+            ):
+                logger.info(
+                    "receiptDate=%s выглядит как today → пропускаем",
+                    _receipt_date.date(),
+                )
                 payload["receiptDate"] = None
             else:
                 payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt)
         else:
             payload["receiptDate"] = None
-            
+
         payload["fullAddress"] = ValueSanitizer.sanitize_string(
-            d.fullAddress if not ValueSanitizer.is_empty(d.fullAddress) else fields.fullAddress
+            d.fullAddress
+            if not ValueSanitizer.is_empty(d.fullAddress)
+            else fields.fullAddress
         )
         payload["phone"] = ValueSanitizer.sanitize_string(
             d.phone if not ValueSanitizer.is_empty(d.phone) else fields.phone
@@ -491,17 +608,23 @@ class AppealFieldsBuilder:
             d.index if not ValueSanitizer.is_empty(d.index) else fields.index
         )
         payload["indexDateCoverLetter"] = ValueSanitizer.sanitize_string(
-            d.indexDateCoverLetter if not ValueSanitizer.is_empty(d.indexDateCoverLetter) else fields.indexDateCoverLetter
+            d.indexDateCoverLetter
+            if not ValueSanitizer.is_empty(d.indexDateCoverLetter)
+            else fields.indexDateCoverLetter
         )
         payload["reviewProgress"] = ValueSanitizer.sanitize_string(
-            d.reviewProgress if not ValueSanitizer.is_empty(d.reviewProgress) else fields.reviewProgress
+            d.reviewProgress
+            if not ValueSanitizer.is_empty(d.reviewProgress)
+            else fields.reviewProgress
         )
 
         submission_form = getattr(d, "submissionForm", None)
         if not submission_form and fields.submissionForm:
             submission_form = fields.submissionForm
-            
-        payload["submissionForm"] = submission_form if submission_form else SubmissionFormAppeal.WRITTEN
+
+        payload["submissionForm"] = (
+            submission_form if submission_form else SubmissionFormAppeal.WRITTEN
+        )
 
     def _add_db_only_fields(self, d: DocumentAppealDto, payload: dict) -> None:
         if d.subjectId:
@@ -513,11 +636,22 @@ class AppealFieldsBuilder:
 
     def _filter_payload(self, payload: dict) -> dict[str, Any]:
         _ALLOW_NULL = {
-            "correspondentAppeal", "correspondentAppealId", "submissionForm",
-            "organizationName", "signed", "correspondentOrgNumber",
-            "fioApplicant", "fullAddress", "phone", "email", "index",
-            "receiptDate", "dateDocCorrespondentOrg", "collective", 
-            "anonymous", "reasonably"
+            "correspondentAppeal",
+            "correspondentAppealId",
+            "submissionForm",
+            "organizationName",
+            "signed",
+            "correspondentOrgNumber",
+            "fioApplicant",
+            "fullAddress",
+            "phone",
+            "email",
+            "index",
+            "receiptDate",
+            "dateDocCorrespondentOrg",
+            "collective",
+            "anonymous",
+            "reasonably",
         }
 
         filtered = {}
@@ -553,7 +687,9 @@ class AppealAutofillOrchestrator:
         document = await self._load_document()
         self._validate_document_category(document)
 
-        target_attachment, warnings = AttachmentSelector.select(document, self.attachment_id)
+        target_attachment, warnings = AttachmentSelector.select(
+            document, self.attachment_id
+        )
         self.warnings.extend(warnings)
 
         extracted_text = await self._extract_text(target_attachment)
@@ -571,7 +707,9 @@ class AppealAutofillOrchestrator:
 
     async def _load_document(self) -> DocumentDto:
         async with DocumentClient() as client:
-            raw_document = await client.get_document_metadata(self.token, self.document_id)
+            raw_document = await client.get_document_metadata(
+                self.token, self.document_id
+            )
             doc = DocumentDto.model_validate(raw_document)
 
             appeal = getattr(doc, "documentAppeal", None)
@@ -583,11 +721,15 @@ class AppealAutofillOrchestrator:
 
     def _validate_document_category(self, document: DocumentDto) -> None:
         if document.docCategoryConstant != "APPEAL":
-            raise ValueError(f"Документ должен быть категории APPEAL, а не {document.docCategoryConstant}")
+            raise ValueError(
+                f"Документ должен быть категории APPEAL, а не {document.docCategoryConstant}"
+            )
 
     async def _extract_text(self, attachment: Any) -> str:
         async with EdmsAttachmentClient() as client:
-            file_bytes = await client.get_attachment_content(self.token, self.document_id, str(attachment.id))
+            file_bytes = await client.get_attachment_content(
+                self.token, self.document_id, str(attachment.id)
+            )
         extracted_text = extract_text_from_bytes(file_bytes, attachment.name)
         logger.info("Text extracted: %d chars", len(extracted_text))
         return extracted_text
@@ -604,20 +746,40 @@ class AppealAutofillOrchestrator:
         logger.info("LLM analysis complete")
         return fields
 
-    async def _update_document(self, document: DocumentDto, fields: AppealFields, extracted_text: str) -> None:
+    async def _update_document(
+        self, document: DocumentDto, fields: AppealFields, extracted_text: str
+    ) -> None:
         async with DocumentClient() as doc_client, ReferenceClient() as ref_client:
-            await self._execute_main_fields_update(doc_client, ref_client, document, fields)
-            await self._execute_appeal_fields_update(doc_client, ref_client, document, fields, extracted_text)
+            await self._execute_main_fields_update(
+                doc_client, ref_client, document, fields
+            )
+            await self._execute_appeal_fields_update(
+                doc_client, ref_client, document, fields, extracted_text
+            )
 
     async def _execute_main_fields_update(
-        self, doc_client: DocumentClient, ref_client: ReferenceClient, document: DocumentDto, fields: AppealFields
+        self,
+        doc_client: DocumentClient,
+        ref_client: ReferenceClient,
+        document: DocumentDto,
+        fields: AppealFields,
     ) -> None:
         delivery_id = document.deliveryMethodId
         if not delivery_id:
-            delivery_method_name = fields.deliveryMethod if not ValueSanitizer.is_empty(fields.deliveryMethod) else "Курьер"
-            delivery_id = await ref_client.find_delivery_method(self.token, delivery_method_name)
+            delivery_method_name = (
+                fields.deliveryMethod
+                if not ValueSanitizer.is_empty(fields.deliveryMethod)
+                else "Курьер"
+            )
+            delivery_id = await ref_client.find_delivery_method(
+                self.token, delivery_method_name
+            )
 
-        raw_summary = ValueSanitizer.sanitize_string(fields.shortSummary) if not ValueSanitizer.is_empty(fields.shortSummary) else document.shortSummary
+        raw_summary = (
+            ValueSanitizer.sanitize_string(fields.shortSummary)
+            if not ValueSanitizer.is_empty(fields.shortSummary)
+            else document.shortSummary
+        )
         if raw_summary and len(raw_summary) > 80:
             raw_summary = raw_summary[:80]
             logger.warning("shortSummary обрезан до 80 символов: '%s'", raw_summary)
@@ -625,7 +787,9 @@ class AppealAutofillOrchestrator:
         main_payload = {
             "shortSummary": raw_summary,
             "deliveryMethodId": delivery_id,
-            "documentTypeId": str(document.documentTypeId) if document.documentTypeId else None,
+            "documentTypeId": (
+                str(document.documentTypeId) if document.documentTypeId else None
+            ),
             "pages": document.pages,
             "note": document.note,
             "additionalPages": document.additionalPages,
@@ -635,27 +799,45 @@ class AppealAutofillOrchestrator:
         main_payload = {k: v for k, v in main_payload.items() if v is not None}
 
         await DocumentOperationExecutor.execute(
-            doc_client, self.token, self.document_id, "DOCUMENT_MAIN_FIELDS_UPDATE", main_payload
+            doc_client,
+            self.token,
+            self.document_id,
+            "DOCUMENT_MAIN_FIELDS_UPDATE",
+            main_payload,
         )
 
     async def _execute_appeal_fields_update(
-        self, doc_client: DocumentClient, ref_client: ReferenceClient, document: DocumentDto, fields: AppealFields, extracted_text: str
+        self,
+        doc_client: DocumentClient,
+        ref_client: ReferenceClient,
+        document: DocumentDto,
+        fields: AppealFields,
+        extracted_text: str,
     ) -> None:
         geo_resolver = GeographyResolver(ref_client, self.token)
         geo_data = await geo_resolver.resolve_geography(document, fields)
 
         fields_builder = AppealFieldsBuilder(ref_client, self.token)
-        appeal_payload = await fields_builder.build(document, fields, extracted_text, geo_data)
+        appeal_payload = await fields_builder.build(
+            document, fields, extracted_text, geo_data
+        )
         self.warnings.extend(fields_builder.warnings)
 
         await DocumentOperationExecutor.execute(
-            doc_client, self.token, self.document_id, "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE", appeal_payload
+            doc_client,
+            self.token,
+            self.document_id,
+            "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE",
+            appeal_payload,
         )
 
 
-async def _generate_summary_variants(text: str, current_summary: str | None, token: str | None = None) -> list[str]:
+async def _generate_summary_variants(
+    text: str, current_summary: str | None, token: str | None = None
+) -> list[str]:
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
+
     from edms_ai_assistant.llm import get_chat_model
 
     prompt = ChatPromptTemplate.from_messages(
@@ -684,7 +866,13 @@ async def _generate_summary_variants(text: str, current_summary: str | None, tok
         variants = [v.strip() for v in result.strip().split("\n") if v.strip()]
         variants = [v[:77] + "..." if len(v) > 80 else v for v in variants[:3]]
         if current_summary and current_summary not in variants:
-            variants = [(current_summary[:77] + "..." if len(current_summary) > 80 else current_summary)] + variants[:2]
+            variants = [
+                (
+                    current_summary[:77] + "..."
+                    if len(current_summary) > 80
+                    else current_summary
+                )
+            ] + variants[:2]
         return variants[:3]
     except Exception as exc:
         logger.warning("Failed to generate summary variants: %s", exc)
@@ -714,7 +902,10 @@ async def autofill_appeal_document(
         Dict с результатом операции. Если generate_summary_choices=True —
         дополнительно содержит summary_choices: list[str].
     """
-    logger.info("========== APPEAL AUTOFILL START ==========", extra={"document_id": document_id})
+    logger.info(
+        "========== APPEAL AUTOFILL START ==========",
+        extra={"document_id": document_id},
+    )
 
     try:
         orchestrator = AppealAutofillOrchestrator(document_id, token, attachment_id)
@@ -725,7 +916,9 @@ async def autofill_appeal_document(
 
         if generate_summary_choices and orchestrator._last_extracted_text:
             current_summary = orchestrator._last_short_summary
-            variants = await _generate_summary_variants(orchestrator._last_extracted_text, current_summary)
+            variants = await _generate_summary_variants(
+                orchestrator._last_extracted_text, current_summary
+            )
             if variants:
                 result_dict["summary_choices"] = variants
                 result_dict["summary_choices_hint"] = (
@@ -741,4 +934,6 @@ async def autofill_appeal_document(
         return AutofillResult(status="error", message=str(e)).to_dict()
     except Exception as e:
         logger.error("========== APPEAL AUTOFILL ERROR ==========", exc_info=True)
-        return AutofillResult(status="error", message=f"Ошибка автозаполнения: {e!s}").to_dict()
+        return AutofillResult(
+            status="error", message=f"Ошибка автозаполнения: {e!s}"
+        ).to_dict()

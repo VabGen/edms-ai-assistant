@@ -1,7 +1,7 @@
 from edms_ai_assistant.schemas.summarization import (
-    SummaryFormat,
-    SummarizeRequest,
     SummarizationResult,
+    SummarizeRequest,
+    SummaryFormat,
 )
 
 __all__ = ["SummaryFormat", "SummarizeRequest", "SummarizationResult"]

@@ -1,7 +1,7 @@
 """Async retry decorator with exponential back-off.
 
 Extracted from the legacy ``retry_utils.py`` into the transport layer so it
-carries no external dependencies and is straightforward to test in isolation.
+carries no external dependencies and is straightforward to tests in isolation.
 """
 
 from __future__ import annotations
@@ -17,9 +17,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Status codes that must NOT be retried — they represent deterministic errors.
-_NO_RETRY_STATUSES: frozenset[int] = frozenset(
-    {400, 401, 403, 404, 405, 409, 410, 422}
-)
+_NO_RETRY_STATUSES: frozenset[int] = frozenset({400, 401, 403, 404, 405, 409, 410, 422})
 
 _F = TypeVar("_F", bound=Callable[..., Coroutine[Any, Any, Any]])
 

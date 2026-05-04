@@ -14,7 +14,7 @@ from edms_ai_assistant.agent.context import (
     AgentStatus,
     ContextParams,
 )
-from edms_ai_assistant.agent.orchestrator import handle_human_choice
+from edms_ai_assistant.agent.orchestration import handle_human_choice
 from edms_ai_assistant.agent.repositories import (
     DocumentRepository,
     IDocumentRepository,

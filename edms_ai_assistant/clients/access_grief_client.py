@@ -58,9 +58,7 @@ class AccessGriefClient(EdmsBaseClient):
         )
         return _extract_slice_content(result, endpoint="GET api/access-grief")
 
-    async def get_grief(
-        self, token: str, grief_id: str
-    ) -> dict[str, Any] | None:
+    async def get_grief(self, token: str, grief_id: str) -> dict[str, Any] | None:
         """Gets a single access grief by UUID. GET /api/access-grief/{id}.
 
         Args:
@@ -76,9 +74,7 @@ class AccessGriefClient(EdmsBaseClient):
             )
             return result if isinstance(result, dict) and result else None
         except Exception:
-            logger.warning(
-                "Failed to fetch grief %s", grief_id[:8], exc_info=True
-            )
+            logger.warning("Failed to fetch grief %s", grief_id[:8], exc_info=True)
             return None
 
     async def get_grief_employees(

@@ -208,14 +208,20 @@ async def _get_grief_employees(
             return {
                 "status": "not_found",
                 "message": f"Нет сотрудников с грифом «{grief_label}».",
-                "grief": _format_grief_info(grief_info, grief_id) if grief_info else None,
+                "grief": (
+                    _format_grief_info(grief_info, grief_id) if grief_info else None
+                ),
                 "employees": [],
                 "total": 0,
             }
 
         return {
             "status": "found",
-            "grief": _format_grief_info(grief_info, grief_id) if grief_info else {"id": grief_id},
+            "grief": (
+                _format_grief_info(grief_info, grief_id)
+                if grief_info
+                else {"id": grief_id}
+            ),
             "total": len(employees),
             "employees": employees,
         }

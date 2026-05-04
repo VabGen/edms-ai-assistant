@@ -25,10 +25,10 @@ from fastapi import (
 from langchain_core.messages import AIMessage, HumanMessage
 from starlette.middleware.cors import CORSMiddleware
 
-from edms_ai_assistant.agent import EdmsDocumentAgent
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.routes.cache import router as cache_router
-from edms_ai_assistant.api.routes.summarize import router as summarize_router
 from edms_ai_assistant.api.routes.settings import router as settings_router
+from edms_ai_assistant.api.routes.summarize import router as summarize_router
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.config import settings
@@ -96,7 +96,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS if isinstance(settings.ALLOWED_ORIGINS, list) else ["*"],
+    allow_origins=(
+        settings.ALLOWED_ORIGINS
+        if isinstance(settings.ALLOWED_ORIGINS, list)
+        else ["*"]
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -378,19 +382,20 @@ async def api_direct_summarize(
             tool_input = {
                 "token": user_input.user_token,
                 "document_id": user_input.context_ui_id,
-                "attachment_id": current_path
+                "attachment_id": current_path,
             }
             raw_text = await doc_get_file_content.ainvoke(tool_input)
             raw_text = str(raw_text)
         elif current_path and Path(current_path).exists():
-            # Если файл локальный, читаем его напрямую процессором
-            from edms_ai_assistant.services.file_processor import extract_text_from_file
-            raw_text = await extract_text_from_file(current_path)
+            from edms_ai_assistant.services.file_processor import FileProcessorService
+
+            raw_text = await FileProcessorService.extract_text_async(current_path)
 
     except Exception as exc:
-        logger.warning(f"Direct text extraction failed ({exc}), falling back to Agent...")
+        logger.warning(
+            f"Direct text extraction failed ({exc}), falling back to Agent..."
+        )
 
-    # Фолбэк на агента, если прямое чтение не сработало (например, сложный формат)
     if not raw_text or len(raw_text.strip()) < 30:
         logger.info("Using Agent fallback for text extraction...")
         user_context = await _resolve_user_context(user_input, user_id)

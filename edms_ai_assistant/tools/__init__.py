@@ -3,6 +3,8 @@
 EDMS AI Assistant — Tool Registry.
 """
 
+from edms_ai_assistant.tools.access_grief_tool import access_grief_tool
+
 from .appeal_autofill import autofill_appeal_document
 from .attachment import doc_get_file_content
 from .create_document_from_file import create_document_from_file
@@ -15,7 +17,6 @@ from .document import doc_get_details
 from .document_comparison import doc_compare_documents
 from .document_versions import doc_get_versions
 from .employee_search import employee_search_tool
-from edms_ai_assistant.tools.access_grief_tool import access_grief_tool
 from .file_compare_tool import doc_compare_attachment_with_local
 from .introduction import introduction_create_tool
 from .local_file_tool import read_local_file_content

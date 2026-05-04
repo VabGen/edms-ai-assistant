@@ -2,6 +2,7 @@ import asyncio
 
 _background_tasks: set[asyncio.Task] = set()
 
+
 def spawn_background_task(coro) -> asyncio.Task:
     """Создает фоновую задачу и сохраняет ссылку до её завершения."""
     task = asyncio.create_task(coro)

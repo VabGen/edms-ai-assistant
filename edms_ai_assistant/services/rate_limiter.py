@@ -1,5 +1,6 @@
 from edms_ai_assistant.clients.redis_client import redis_client
 
+
 class RateLimiter:
     def __init__(self, redis_client, limit: int = 20, window: int = 60):
         self.redis = redis_client

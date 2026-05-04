@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.utils.regex_utils import UUID_RE
 from edms_ai_assistant.utils.datetime_utils import (
     LOCAL_TZ,
-    to_local_timezone,
-    now_local,
-    today_local,
     DateTimeEncoder,
+    now_local,
+    to_local_timezone,
+    today_local,
 )
+from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class UserIntent(Enum):
     # NOTIFICATION = "notification"
     COMPLIANCE_CHECK = "compliance_check"
     CONTROL = "control"
-    ACCESS_GRIEF = 'access_grief'
+    ACCESS_GRIEF = "access_grief"
 
 
 class QueryComplexity(Enum):
@@ -297,19 +297,65 @@ class EntityExtractor:
 
     _PERSON_STOP_WORDS = {
         # Предлоги и наречия
-        "через", "после", "перед", "около", "между", "вокруг",
+        "через",
+        "после",
+        "перед",
+        "около",
+        "между",
+        "вокруг",
         # Глаголы-команды (часто с большой буквы в чатах)
-        "создай", "создать", "добавь", "добавить", "найди", "найти",
-        "покажи", "показать", "сделай", "сделать", "поручи", "поручить",
-        "отправь", "отправить", "напиши", "написать", "проверь", "проверить",
-        "оформи", "оформить", "зарегистрируй", "зарегистрировать",
-        "сравни", "сравнить", "проанализируй", "проанализировать",
-        "удали", "удалить", "измени", "изменить", "поставь", "поставить",
-        "сними", "снять", "завизируй", "завизировать",
+        "создай",
+        "создать",
+        "добавь",
+        "добавить",
+        "найди",
+        "найти",
+        "покажи",
+        "показать",
+        "сделай",
+        "сделать",
+        "поручи",
+        "поручить",
+        "отправь",
+        "отправить",
+        "напиши",
+        "написать",
+        "проверь",
+        "проверить",
+        "оформи",
+        "оформить",
+        "зарегистрируй",
+        "зарегистрировать",
+        "сравни",
+        "сравнить",
+        "проанализируй",
+        "проанализировать",
+        "удали",
+        "удалить",
+        "измени",
+        "изменить",
+        "поставь",
+        "поставить",
+        "сними",
+        "снять",
+        "завизируй",
+        "завизировать",
         # EDMS-существительные
-        "документ", "поручение", "ознакомление", "задача", "задачу",
-        "контроль", "уведомление", "резолюция", "обращение", "договор",
-        "совещание", "исполнитель", "контролёр", "автор", "инициатор",
+        "документ",
+        "поручение",
+        "ознакомление",
+        "задача",
+        "задачу",
+        "контроль",
+        "уведомление",
+        "резолюция",
+        "обращение",
+        "договор",
+        "совещание",
+        "исполнитель",
+        "контролёр",
+        "автор",
+        "инициатор",
     }
 
     def extract_persons(self, text: str) -> list[Entity]:
@@ -966,7 +1012,7 @@ class SemanticDispatcher:
                 "грифом",
             ],
             "negative": [],
-        }
+        },
     }
 
     COMPOSITE_CONNECTORS: tuple[str, ...] = (
@@ -999,9 +1045,9 @@ class SemanticDispatcher:
         )
 
     async def classify(
-            self,
-            message: str,
-            context: Any | None = None,
+        self,
+        message: str,
+        context: Any | None = None,
     ) -> "UserIntent":
         """Classify user intent for the agent layer.
 

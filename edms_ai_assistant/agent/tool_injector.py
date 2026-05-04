@@ -208,25 +208,51 @@ class ToolCallInjector:
             t_name, t_args = _inject_token(t_name, t_args, context)
             t_name, t_args = _inject_document_id(t_name, t_args, context)
             t_name, t_args = _route_by_file_path(
-                t_name, t_args, context, clean_path, path_is_uuid, path_is_local,
+                t_name,
+                t_args,
+                context,
+                clean_path,
+                path_is_uuid,
+                path_is_local,
             )
             t_name, t_args = _inject_compare_local(
-                t_name, t_args, context, clean_path, path_is_local,
-                after_compare_disambig, is_choice_active,
+                t_name,
+                t_args,
+                context,
+                clean_path,
+                path_is_local,
+                after_compare_disambig,
+                is_choice_active,
             )
             t_name, t_args = _guard_compare_documents(
-                t_name, t_args, context, messages, clean_path, path_is_local,
-                after_compare_disambig, is_choice_active,
+                t_name,
+                t_args,
+                context,
+                messages,
+                clean_path,
+                path_is_local,
+                after_compare_disambig,
+                is_choice_active,
             )
             t_name, t_args = _inject_summarize(
-                t_name, t_args, context, last_tool_text, is_choice_active,
+                t_name,
+                t_args,
+                context,
+                last_tool_text,
+                is_choice_active,
             )
             t_name, t_args = _inject_create_document(
-                t_name, t_args, context, messages,
+                t_name,
+                t_args,
+                context,
+                messages,
             )
             t_name, t_args = _inject_control_employee(t_name, t_args, messages)
             t_name, t_args = _inject_local_file_placeholder(
-                t_name, t_args, clean_path, path_is_local,
+                t_name,
+                t_args,
+                clean_path,
+                path_is_local,
             )
 
             patched.append({"name": t_name, "args": t_args, "id": t_id})
@@ -235,12 +261,14 @@ class ToolCallInjector:
 
 
 # ---------------------------------------------------------------------------
-# Private injection rules (pure functions — easier to test individually)
+# Private injection rules
 # ---------------------------------------------------------------------------
 
 
 def _inject_token(
-    t_name: str, t_args: dict[str, Any], context: ContextParams,
+    t_name: str,
+    t_args: dict[str, Any],
+    context: ContextParams,
 ) -> tuple[str, dict[str, Any]]:
     """Inject the user JWT token into every tool_call."""
     t_args["token"] = context.user_token
@@ -248,7 +276,9 @@ def _inject_token(
 
 
 def _inject_document_id(
-    t_name: str, t_args: dict[str, Any], context: ContextParams,
+    t_name: str,
+    t_args: dict[str, Any],
+    context: ContextParams,
 ) -> tuple[str, dict[str, Any]]:
     """Inject document_id when the tool requires it and the LLM omitted it."""
     if not context.document_id or t_name not in TOOLS_REQUIRING_DOCUMENT_ID:
@@ -335,7 +365,6 @@ def _inject_compare_local(
     if t_name != "doc_compare_attachment_with_local":
         return t_name, t_args
 
-    # Fallback: no file in context, not after disambiguation → version compare.
     if (
         not clean_path
         and not after_compare_disambig
@@ -358,7 +387,9 @@ def _inject_compare_local(
             or not Path(cur_local).exists()
         ):
             t_args["local_file_path"] = clean_path
-            logger.info("Force-injected local_file_path for doc_compare_attachment_with_local")
+            logger.info(
+                "Force-injected local_file_path for doc_compare_attachment_with_local"
+            )
 
     # Inject original_filename for user-facing display in the tool.
     if context.uploaded_file_name and not t_args.get("original_filename"):
@@ -390,12 +421,18 @@ def _guard_compare_documents(
         logger.warning(
             "GUARD: doc_compare_documents blocked → doc_compare_attachment_with_local "
             "(reason: %s)",
-            "disambiguation_flow" if after_compare_disambig else "choice_active_with_local_file",
+            (
+                "disambiguation_flow"
+                if after_compare_disambig
+                else "choice_active_with_local_file"
+            ),
         )
         new_args: dict[str, Any] = {
             "token": t_args.get("token", ""),
             "document_id": context.document_id,
-            "local_file_path": clean_path if path_is_local else t_args.get("local_file_path"),
+            "local_file_path": (
+                clean_path if path_is_local else t_args.get("local_file_path")
+            ),
             "attachment_id": t_args.get("document_id_2") or t_args.get("attachment_id"),
             "original_filename": context.uploaded_file_name,
         }
@@ -427,15 +464,12 @@ def _inject_summarize(
     if t_name != "doc_summarize_text":
         return t_name, t_args
 
-    # Feed the extracted file text so the LLM does not need to repeat it.
     if last_tool_text:
         t_args["text"] = last_tool_text
 
     if not t_args.get("summary_type"):
         preferred: str | None = context.user_context.get("preferred_summary_format")
         if is_choice_active:
-            # Safety-net: if we are resuming from a HITL choice but the type was
-            # somehow not injected by handle_human_choice(), default to extractive.
             t_args["summary_type"] = "extractive"
             logger.warning(
                 "safety-net: summary_type=extractive "
@@ -443,7 +477,9 @@ def _inject_summarize(
             )
         elif preferred and preferred != "ask":
             t_args["summary_type"] = preferred
-            logger.info("Using preferred_summary_format from user settings: %s", preferred)
+            logger.info(
+                "Using preferred_summary_format from user settings: %s", preferred
+            )
 
     return t_name, t_args
 
@@ -462,10 +498,13 @@ def _inject_create_document(
         from edms_ai_assistant.tools.create_document_from_file import (  # noqa: PLC0415
             _extract_category_from_message,
         )
+
         detected = _extract_category_from_message(last_human_text(messages))
         if detected:
             t_args["doc_category"] = detected
-            logger.info("Injected doc_category=%s for create_document_from_file", detected)
+            logger.info(
+                "Injected doc_category=%s for create_document_from_file", detected
+            )
 
     if t_args.get("file_path") is None and context.file_path:
         cp = context.file_path.strip()
