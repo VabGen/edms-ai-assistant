@@ -1,5 +1,5 @@
 """
-EDMS AI Assistant — Document Summarisation Tool.
+EDMS AI Assistant — Document Summarisation Tool (v2 Integration).
 """
 
 from __future__ import annotations
@@ -7,15 +7,12 @@ from __future__ import annotations
 import json
 import logging
 import re as _re
+import uuid
 from enum import StrEnum
 from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
-
-from edms_ai_assistant.services.summarization_orchestrator import (
-    get_orchestrator,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +160,7 @@ async def doc_summarize_text(
     Do NOT use this tool for simple questions about the document (like 'who is the author?', 'what is the date?', 'find a specific word').
     For simple queries, answer directly from the text.
 
-    Perform intelligent summarisation of document text via LLM.
+    Perform intelligent summarisation of document text via LLM v2 pipeline.
 
     Human-in-the-Loop contract:
         When ``summary_type`` is None this tool returns ``requires_choice``
@@ -176,28 +173,15 @@ async def doc_summarize_text(
     - ``abstractive``: Concise 1–2 paragraph plain-language retelling.
     - ``thesis``     : Numbered section-by-section thesis plan.
 
-    Internal pipeline:
-    1. Unwrap JSON envelope if text arrived from doc_get_file_content.
-    2. Normalise summary_type aliases (e.g. «тезисы» → thesis).
-    3. If summary_type is None → return requires_choice (user must choose).
-    4. Truncate text with head+tail strategy if > 12 000 chars.
-    5. Invoke LLM chain and return the result.
-
     Args:
         text: Document text (plain or JSON-wrapped).
         summary_type: Desired format or None to trigger user selection.
 
     Returns:
         Dict with one of three statuses:
-        - ``requires_choice``: summary_type was None. Contains:
-            - options: list of {key, label, description} for UI rendering.
-            - hint: heuristically recommended format key.
-            - hint_reason: explanation of the recommendation.
-        - ``success``: Analysis completed. Contains:
-            - content: The summary string.
-            - meta: {format_used, text_length, was_truncated}.
-        - ``error``: Validation or LLM call failed. Contains:
-            - message: Human-readable error description.
+        - ``requires_choice``: summary_type was None.
+        - ``success``: Analysis completed. Contains `content` and `meta`.
+        - ``error``: Validation or LLM call failed.
     """
     logger.info(
         "doc_summarize_text called",
@@ -209,35 +193,77 @@ async def doc_summarize_text(
 
     clean_text = _unwrap_json_envelope(text)
 
+    # ── Human-in-the-Loop selection ────────────────────────────────────
     if summary_type is None:
         return _build_requires_choice_response(clean_text)
 
     normalised = _normalise_summary_type(summary_type)
 
+    # ── Lazy imports to prevent circular dependency ────────────────────
     try:
-        orchestrator = get_orchestrator()
-        result = await orchestrator.summarize(
-            text=clean_text,
-            summary_type=str(normalised),
-            file_identifier=None,
+        from edms_ai_assistant.main import app
+        from edms_ai_assistant.summarizer.service import (
+            SummarizationRequest,
+            SummarizationService,
+        )
+        from edms_ai_assistant.summarizer.structured.models import SummaryMode
+    except ImportError as imp_err:
+        logger.error("Failed to import SummarizationService: %s", imp_err)
+        return {
+            "status": "error",
+            "message": "Внутренняя ошибка: модуль суммаризации недоступен.",
+        }
+
+    # ── Retrieve service from app state ────────────────────────────────
+    service: SummarizationService | None = getattr(
+        app.state, "summarization_service", None
+    )
+    if service is None:
+        return {
+            "status": "error",
+            "message": "Сервис суммаризации не инициализирован. Попробуйте позже.",
+        }
+
+    # ── Map tool enums to service enums ────────────────────────────────
+    _mode_map = {
+        SummarizeType.EXTRACTIVE: SummaryMode.EXTRACTIVE,
+        SummarizeType.ABSTRACTIVE: SummaryMode.ABSTRACTIVE,
+        SummarizeType.THESIS: SummaryMode.THESIS,
+    }
+    mode = _mode_map.get(normalised, SummaryMode.ABSTRACTIVE)
+
+    # ── Execute v2 pipeline ────────────────────────────────────────────
+    try:
+        # Service expects bytes, so we encode the extracted text
+        file_bytes = clean_text.encode("utf-8")
+
+        req = SummarizationRequest(
+            file_content=file_bytes,
+            file_name="agent_tool_input.txt",
+            mode=mode,
+            language="ru",
+            request_id=str(uuid.uuid4()),
+            force_refresh=False,
         )
 
-        if result.status == "error":
-            return {"status": "error", "message": result.content}
+        resp = await service.summarize(req)
+
+        # The output is a dict (serialized Pydantic model).
+        # Convert it to JSON string so the LLM agent can read it natively.
+        content_str = json.dumps(resp.output, ensure_ascii=False, indent=2)
 
         return {
-            "status": result.status,
-            "content": result.content,
+            "status": "success",
+            "content": content_str,
             "meta": {
-                "format_used": result.format_used,
-                "text_length": result.text_length,
-                # "was_truncated": result.was_truncated,
-                "pipeline": result.pipeline,
-                "chunks_processed": result.chunks_processed,
-                "processing_time_ms": result.processing_time_ms,
-                "quality_score": result.quality_score,
-                "confidence": result.confidence,
-                "degraded": result.degraded,
+                "format_used": resp.mode.value,
+                "text_length": len(clean_text),
+                "pipeline": resp.chunking_strategy,
+                "chunks_processed": resp.chunk_count,
+                "processing_time_ms": resp.latency_ms,
+                "cost_usd": resp.cost_usd,
+                "from_cache": resp.cache_hit,
+                "model": resp.model,
             },
         }
 

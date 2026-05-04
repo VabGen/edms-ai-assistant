@@ -241,8 +241,9 @@ export default defineBackground({
         ): Promise<void> {
             try {
                 const url = payload.summary_type
-                    ? `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}/${encodeURIComponent(payload.summary_type)}`
-                    : `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}`
+                    ? `${API}/summarize/cache/${encodeURIComponent(payload.file_identifier)}/${encodeURIComponent(payload.summary_type)}`
+                    : `${API}/summarize/cache/${encodeURIComponent(payload.file_identifier)}`
+
                 const res = await fetch(url, {method: 'DELETE'})
                 const data = await res.json()
                 if (!res.ok) throw new Error(data.detail ?? `Cache delete error: ${res.status}`)

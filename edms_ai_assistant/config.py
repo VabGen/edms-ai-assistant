@@ -172,6 +172,30 @@ class Settings(BaseSettings):
     TELEMETRY_ENDPOINT: str | None = Field(default=None)
     HEALTH_CHECK_ENABLED: bool = True
 
+    # ── Summarization Configuration ──────────────────────────────────
+    SUMMARIZER_CONTEXT_WINDOW: int = Field(
+        default=4096,
+        description="Token threshold for switching from Direct to Map-Reduce pipeline.",
+    )
+    SUMMARIZER_QUALITY_MODEL: str | None = Field(
+        default=None,
+        description="Model used for quality scoring. Defaults to main model.",
+    )
+    SUMMARIZER_MAX_CONCURRENT_MAP: int = Field(
+        default=6,
+        description="Max parallel LLM calls in Map-Reduce map stage.",
+        ge=1,
+        le=50,
+    )
+    SUMMARIZER_L1_TTL_SECONDS: int = Field(
+        default=3600,
+        description="Redis L1 cache TTL in seconds (default: 1 hour).",
+    )
+    SUMMARIZER_L2_TTL_SECONDS: int = Field(
+        default=2_592_000,
+        description="Postgres L2 cache TTL in seconds (default: 30 days).",
+    )
+
     # ── Environment-specific defaults ────────────────────────────────────────
     @field_validator("DEBUG", mode="before")
     @classmethod
