@@ -19,11 +19,12 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from edms_ai_assistant.clients.redis_client import get_redis
 from edms_ai_assistant.services.document_service import (
     DocumentNotFoundError,
     DocumentService,
-    get_redis,
 )
+from edms_ai_assistant.utils.format_utils import clean_dict
 
 logger = logging.getLogger(__name__)
 
@@ -33,22 +34,6 @@ class DocDetailsInput(BaseModel):
 
     document_id: str = Field(..., description="UUID документа (context_ui_id)")
     token: str = Field(..., description="Токен авторизации пользователя")
-
-
-def _clean(d: Any) -> Any:
-    """Recursively remove None, empty lists and dicts from result.
-
-    Args:
-        d: Input data structure.
-
-    Returns:
-        Cleaned structure without empty values.
-    """
-    if isinstance(d, dict):
-        return {k: _clean(v) for k, v in d.items() if v not in (None, [], {}, "")}
-    if isinstance(d, list):
-        return [_clean(i) for i in d if i not in (None, [], {}, "")]
-    return d
 
 
 @tool("doc_get_details", args_schema=DocDetailsInput)
@@ -76,7 +61,7 @@ async def doc_get_details(document_id: str, token: str) -> dict[str, Any]:
             token=token,
             document_id=document_id,
         )
-        return {"status": "success", "document_analytics": _clean(analysis)}
+        return {"status": "success", "document_analytics": clean_dict(analysis)}
 
     except DocumentNotFoundError as exc:
         logger.warning(

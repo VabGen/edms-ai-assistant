@@ -1,7 +1,7 @@
 export default defineBackground({
     type: 'module',
     main() {
-        const API = 'http://localhost:8000'
+        const API = import.meta.env.VITE_API_URL
         const controllers = new Map<string, AbortController>()
 
         function normalizeUuid(raw: string): string {
@@ -61,6 +61,10 @@ export default defineBackground({
 
                 case 'updateSettings':
                     doPatchSettings(msg.payload?.user_token, msg.payload?.settings, sendResponse)
+                    return true
+
+                case 'resetSettings':
+                    doResetSettings(msg.payload?.user_token, sendResponse)
                     return true
 
                 case 'navigateTo':
@@ -280,6 +284,24 @@ export default defineBackground({
                 const data = await res.json()
                 if (!res.ok) throw new Error(data.detail ?? `Settings fetch error: ${res.status}`)
                 respond({success: true, data})
+            } catch (e: any) {
+                respond({success: false, error: e.message})
+            }
+        }
+
+        async function doResetSettings(
+            userToken: string | undefined,
+            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
+        ): Promise<void> {
+            try {
+                const headers: Record<string, string> = {'Content-Type': 'application/json'}
+                if (userToken) headers['Authorization'] = `Bearer ${userToken}`
+                const res = await fetch(`${API}/api/settings`, {method: 'DELETE', headers})
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}))
+                    throw new Error(data.detail ?? `Settings reset error: ${res.status}`)
+                }
+                respond({success: true})
             } catch (e: any) {
                 respond({success: false, error: e.message})
             }

@@ -1,3 +1,4 @@
+// edms-plugin/src/shared/hooks/useSettingsStore.ts
 import {useState, useEffect, useCallback, useRef} from 'react'
 import {sendMsg} from '../lib/messaging'
 import {getAuthToken} from '../lib/auth'
@@ -49,7 +50,7 @@ export interface AgentSettings {
     timeout: number
     maxRetries: number
     enableTracing: boolean
-    logLevel: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
+    logLevel: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
 }
 
 export interface RAGSettings {
@@ -87,25 +88,34 @@ export const DEFAULT_USER_PREFS: UserPreferences = {
 }
 export const DEFAULT_TECH: TechSettings = {
     llm: {
-        generativeUrl: 'http://model-generative.shared.du.iba/v1',
-        generativeModel: 'generative-model',
-        embeddingUrl: 'http://model-embedding.shared.du.iba/v1',
-        embeddingModel: 'embedding-model',
-        temperature: 0.0,
-        maxTokens: 2048,
-        timeout: 120,
-        maxRetries: 3
+        generativeUrl: import.meta.env.VITE_LLM_GENERATIVE_URL,
+        generativeModel: import.meta.env.VITE_LLM_GENERATIVE_MODEL,
+        embeddingUrl: import.meta.env.VITE_LLM_EMBEDDING_URL,
+        embeddingModel: import.meta.env.VITE_LLM_EMBEDDING_MODEL,
+        temperature: Number(import.meta.env.VITE_LLM_TEMPERATURE),
+        maxTokens: Number(import.meta.env.VITE_LLM_MAX_TOKENS),
+        timeout: Number(import.meta.env.VITE_LLM_TIMEOUT),
+        maxRetries: Number(import.meta.env.VITE_LLM_MAX_RETRIES),
     },
     agent: {
-        maxIterations: 10,
-        maxContextMessages: 20,
-        timeout: 120,
-        maxRetries: 3,
-        enableTracing: false,
-        logLevel: 'INFO'
+        maxIterations: Number(import.meta.env.VITE_AGENT_MAX_ITERATIONS),
+        maxContextMessages: Number(import.meta.env.VITE_AGENT_MAX_CONTEXT_MESSAGES),
+        timeout: Number(import.meta.env.VITE_AGENT_TIMEOUT),
+        maxRetries: Number(import.meta.env.VITE_AGENT_MAX_RETRIES),
+        enableTracing: import.meta.env.VITE_AGENT_ENABLE_TRACING === 'true',
+        logLevel: import.meta.env.VITE_AGENT_LOG_LEVEL as AgentSettings['logLevel'],
     },
-    rag: {chunkSize: 1200, chunkOverlap: 300, batchSize: 20, embeddingBatchSize: 10},
-    edms: {baseUrl: 'http://127.0.0.1:8098', timeout: 120, apiVersion: 'v1'},
+    rag: {
+        chunkSize: Number(import.meta.env.VITE_RAG_CHUNK_SIZE),
+        chunkOverlap: Number(import.meta.env.VITE_RAG_CHUNK_OVERLAP),
+        batchSize: Number(import.meta.env.VITE_RAG_BATCH_SIZE),
+        embeddingBatchSize: Number(import.meta.env.VITE_RAG_EMBEDDING_BATCH_SIZE),
+    },
+    edms: {
+        baseUrl: import.meta.env.VITE_EDMS_BASE_URL,
+        timeout: Number(import.meta.env.VITE_EDMS_TIMEOUT),
+        apiVersion: import.meta.env.VITE_EDMS_API_VERSION,
+    },
 }
 
 const USER_KEY = 'edmsUserPreferences'
@@ -231,6 +241,7 @@ export interface UseSettingsStoreReturn {
     updateTech: <K extends keyof TechSettings>(group: K, patch: Partial<TechSettings[K]>) => void
     saveAll: () => Promise<void>
     resetAll: () => void
+    resetToDefaults: () => Promise<void>
     discardDraft: () => void
 }
 
@@ -324,6 +335,29 @@ export function useSettingsStore(): UseSettingsStoreReturn {
     }, [draft, showTechnical, scheduleReset])
 
     const resetAll = useCallback(() => setDraft({user: DEFAULT_USER_PREFS, tech: DEFAULT_TECH}), [])
+
+    const resetToDefaults = useCallback(async () => {
+        setSaveStatus('saving')
+        try {
+            await sendMsg<void>('resetSettings', {user_token: getAuthToken() ?? ''})
+            const updated = await sendMsg<Record<string, any>>('fetchSettings', {user_token: getAuthToken() ?? ''})
+            if (updated) {
+                const mapped = techFromBackend(updated)
+                setSavedTech(mapped)
+                setDraft(prev => ({...prev, user: DEFAULT_USER_PREFS, tech: mapped}))
+                chromeSet(USER_KEY, DEFAULT_USER_PREFS)
+                chromeSet(TECH_KEY, mapped)
+            } else {
+                setDraft({user: DEFAULT_USER_PREFS, tech: DEFAULT_TECH})
+            }
+            setSaveStatus('saved')
+            scheduleReset(2500)
+        } catch {
+            setSaveStatus('error')
+            scheduleReset(3000)
+        }
+    }, [scheduleReset])
+
     const discardDraft = useCallback(() => setDraft({user: savedUser, tech: savedTech}), [savedUser, savedTech])
 
     const isDirty =
@@ -343,6 +377,7 @@ export function useSettingsStore(): UseSettingsStoreReturn {
         updateTech,
         saveAll,
         resetAll,
+        resetToDefaults,
         discardDraft
     }
 }

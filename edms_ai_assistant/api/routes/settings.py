@@ -18,6 +18,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.config import settings
+from edms_ai_assistant.llm import reset_chat_model, reset_embedding_model
+
+_PACKAGE_LOGGER = "edms_ai_assistant"
+
+
+def _apply_log_level(level_str: str) -> None:
+    """Apply a new log level to both the package logger and the root logger."""
+    level = getattr(logging, level_str.upper(), logging.INFO)
+    logging.getLogger(_PACKAGE_LOGGER).setLevel(level)
+    logging.getLogger().setLevel(level)
+    logger.info("Log level changed to %s", level_str.upper())
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +119,7 @@ class EDMSSettingsSchema(BaseModel):
 
     base_url: str | None = None
     timeout: int | None = Field(None, ge=10, le=600)
+    api_version: str | None = None
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -164,6 +176,7 @@ class _RuntimeSettingsStore:
         "edms": {
             "base_url": "EDMS_BASE_URL",
             "timeout": "EDMS_TIMEOUT",
+            "api_version": "EDMS_API_VERSION",
         },
     }
 
@@ -245,6 +258,7 @@ class _RuntimeSettingsStore:
             edms={
                 "base_url": str(settings.EDMS_BASE_URL),
                 "timeout": settings.EDMS_TIMEOUT,
+                "api_version": settings.EDMS_API_VERSION,
             },
         )
 
@@ -341,6 +355,23 @@ async def patch_settings(
             detail=f"Не удалось применить настройки: {exc}",
         ) from exc
 
+    if body.llm is not None:
+        reset_chat_model()
+        reset_embedding_model()
+
+    if body.agent is not None and body.agent.log_level is not None:
+        _apply_log_level(body.agent.log_level)
+
+    if body.agent is not None and body.agent.enable_tracing is not None:
+        agent_logger = logging.getLogger("edms_ai_assistant.agent")
+        if body.agent.enable_tracing:
+            agent_logger.setLevel(logging.DEBUG)
+            logger.info("Agent tracing enabled — edms_ai_assistant.agent set to DEBUG")
+        else:
+            current = getattr(logging, settings.AGENT_LOG_LEVEL.upper(), logging.INFO)
+            agent_logger.setLevel(current)
+            logger.info("Agent tracing disabled")
+
     logger.info(
         "Settings PATCH applied, groups=%s",
         [g for g in ("llm", "agent", "rag", "edms") if getattr(body, g) is not None],
@@ -362,3 +393,6 @@ async def reset_settings(
         store: Runtime settings store (injected by FastAPI).
     """
     store.reset()
+    reset_chat_model()
+    reset_embedding_model()
+    _apply_log_level(settings.AGENT_LOG_LEVEL)

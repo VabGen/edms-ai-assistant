@@ -90,7 +90,6 @@ async def build_summarization_service(settings: object) -> "SummarizationService
     logger.info("LLM client configured: model=%s base_url=%s", model, base_url)
 
     # ── Cache ─────────────────────────────────────────────────────────────
-    redis_url = str(getattr(settings, "REDIS_URL", "redis://localhost:6379/0"))
     db_url = str(getattr(settings, "DATABASE_URL", ""))
 
     # Ensure asyncpg driver
@@ -108,7 +107,7 @@ async def build_summarization_service(settings: object) -> "SummarizationService
     )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    l1 = RedisL1Cache(redis_url=redis_url)
+    l1 = RedisL1Cache()
     l2 = PostgresL2Cache(session_factory=session_factory)
     cache = TwoLevelCache(l1=l1, l2=l2)
 
@@ -125,9 +124,6 @@ async def build_summarization_service(settings: object) -> "SummarizationService
         direct_context_window=context_window,
         max_concurrent_map=max_concurrent,
     )
-
-    # Warm up L1 cache connection
-    await l1._ensure_client()
 
     logger.info(
         "SummarizationService v2 ready: model=%s context_window=%d max_concurrent=%d",

@@ -10,7 +10,7 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from edms_ai_assistant.models.task_models import TaskType
+from edms_ai_assistant.domain.task_models import TaskType
 from edms_ai_assistant.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)

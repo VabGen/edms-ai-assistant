@@ -18,6 +18,7 @@ from edms_ai_assistant.utils.datetime_utils import (
     to_local_timezone,
     today_local,
 )
+from edms_ai_assistant.utils.format_utils import clean_dict
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
@@ -203,9 +204,9 @@ class EntityExtractor:
     }
 
     def extract_dates(
-        self,
-        text: str,
-        base_date: datetime | None = None,
+            self,
+            text: str,
+            base_date: datetime | None = None,
     ) -> list[Entity]:
         """
         Extract and normalise date expressions from text.
@@ -451,8 +452,7 @@ class EntityExtractor:
             List of document ID entities.
         """
         doc_ids: list[Entity] = []
-        uuid_re = r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
-        for match in re.finditer(uuid_re, text, re.IGNORECASE):
+        for match in UUID_RE.finditer(text):
             raw = match.group(0)
             doc_ids.append(
                 Entity(
@@ -465,9 +465,9 @@ class EntityExtractor:
         return doc_ids
 
     def extract_all(
-        self,
-        text: str,
-        base_date: datetime | None = None,
+            self,
+            text: str,
+            base_date: datetime | None = None,
     ) -> dict[str, list[Entity]]:
         """Run all extractors and return a grouped entity dict.
 
@@ -691,10 +691,10 @@ class QueryRefiner:
         return text_lower
 
     def add_context(
-        self,
-        text: str,
-        intent: UserIntent,
-        entities: dict[str, list[Entity]],
+            self,
+            text: str,
+            intent: UserIntent,
+            entities: dict[str, list[Entity]],
     ) -> str:
         """Augment the query with intent-specific structured context hints.
 
@@ -758,10 +758,10 @@ class QueryRefiner:
         return text
 
     def refine(
-        self,
-        text: str,
-        intent: UserIntent,
-        entities: dict[str, list[Entity]],
+            self,
+            text: str,
+            intent: UserIntent,
+            entities: dict[str, list[Entity]],
     ) -> str:
         """Run the full refinement pipeline on a query.
 
@@ -785,603 +785,6 @@ class QueryRefiner:
         refined = self.normalize_actions(refined)
         refined = self.add_context(refined, intent, entities)
         return re.sub(r"\s+", " ", refined).strip()
-
-
-class SemanticDispatcher:
-    """Central NLP dispatcher: classifies intent, extracts entities, and builds SemanticContext.
-
-    Args: None (stateless helpers are instantiated internally).
-    """
-
-    INTENT_KEYWORDS: dict[UserIntent, dict[str, list[str]]] = {
-        UserIntent.CREATE_INTRODUCTION: {
-            "primary": [
-                "ознакомление",
-                "ознакомь",
-                "список ознакомления",
-                "добавь в ознакомление",
-                "добавить в ознакомление",
-                "отправь на ознакомление",
-            ],
-            "secondary": ["виза", "визирование", "согласование", "подпись"],
-            "negative": [],
-        },
-        UserIntent.CREATE_TASK: {
-            "primary": [
-                "поручение",
-                "создай задачу",
-                "создай поручение",
-                "задание",
-                "поручи",
-                "поставь задачу",
-                "назначь исполнителя",
-            ],
-            "secondary": ["исполнитель", "срок исполнения", "выполнить"],
-            "negative": [
-                "контролёра",
-                "контролёр",
-                "на контроль",
-                "с контроля",
-                "контрольная дата",
-                "тип контроля",
-            ],
-        },
-        UserIntent.SUMMARIZE: {
-            "primary": [
-                "суммаризуй",
-                "кратко",
-                "резюме",
-                "опиши",
-                "сводка",
-                "кратко опиши",
-                "в двух словах",
-                "суть документа",
-                "о чём документ",
-            ],
-            "secondary": ["анализ", "выжимка", "основное", "тезисы", "пересказ"],
-            "negative": [],
-        },
-        UserIntent.COMPARE: {
-            "primary": [
-                "сравни",
-                "сравни версии",
-                "отличия",
-                "разница",
-                "версии документа",
-                "история документа",
-                "что изменилось",
-                "что менялось",
-                "изменения в документе",
-            ],
-            "secondary": ["изменения", "версия", "обновление", "правки"],
-            "negative": [],
-        },
-        UserIntent.SEARCH: {
-            "primary": [
-                "найди",
-                "поиск",
-                "найти документ",
-                "поиск документов",
-                "реестр документов",
-            ],
-            "secondary": ["выведи", "список", "реестр", "покажи", "где"],
-            "negative": [],
-        },
-        UserIntent.ANALYZE: {
-            "primary": [
-                "проанализируй",
-                "подробно",
-                "детали",
-                "детальный анализ",
-            ],
-            "secondary": ["разбор", "структура", "состав", "содержание"],
-            "negative": [],
-        },
-        UserIntent.QUESTION: {
-            "primary": [
-                "какая",
-                "какой",
-                "сколько",
-                "когда",
-                "почему",
-                "зачем",
-                "кто",
-                "чей",
-            ],
-            "secondary": ["расскажи", "объясни", "что", "как"],
-            "negative": [],
-        },
-        UserIntent.FILE_ANALYSIS: {
-            "primary": [
-                "загруженный файл",
-                "локальный файл",
-                "файл на компьютере",
-                "проанализируй файл",
-                "что в файле",
-                "о чем файл",
-                "содержимое файла",
-                "прочитай файл",
-                "открой файл",
-            ],
-            "secondary": [
-                "вложение",
-                "содержимое",
-                "текст файла",
-                "данные из файла",
-                "кратко",
-                "пересказ",
-                "тезисы",
-            ],
-            "negative": [],
-        },
-        UserIntent.CREATE_DOCUMENT: {
-            "primary": [
-                "создай документ из файла",
-                "создай обращение",
-                "создай входящий",
-                "создай исходящий",
-                "создай договор",
-                "оформи обращение",
-                "зарегистрируй обращение",
-                "на основе файла",
-                "на основе этого файла",
-                "создать новый документ",
-            ],
-            "secondary": [
-                "создай",
-                "оформи",
-                "зарегистрируй",
-                "сделай входящий",
-                "новый документ",
-            ],
-            "negative": [],
-        },
-        # UserIntent.NOTIFICATION: {
-        #     "primary": [
-        #         "уведоми",
-        #         "напомни",
-        #         "отправь напоминание",
-        #         "уведомление",
-        #         "напоминание",
-        #         "предупреди",
-        #         "сообщи",
-        #         "отправь уведомление",
-        #     ],
-        #     "secondary": ["дедлайн", "срок", "исполнитель", "отправь"],
-        #     "negative": [],
-        # },
-        UserIntent.COMPLIANCE_CHECK: {
-            "primary": [
-                "проверить документ",
-                "проверь документ",
-                "проверка документа",
-                "соответствие документа",
-                "корректность заполнения",
-                "всё ли правильно заполнено",
-                "соответствует ли карточка",
-                "перед отправкой проверь",
-            ],
-            "secondary": [
-                "проверить поля",
-                "проверить данные",
-                "расхождения",
-                "несоответствие",
-                "ошибки в карточке",
-            ],
-            "negative": [],
-        },
-        UserIntent.CONTROL: {
-            "primary": [
-                "управление контролем",
-                "контроль документа",
-                "поставить на контроль",
-                "снять с контроля",
-                "назначить контролёра",
-                "изменить контроль",
-                "удалить контроль",
-                "контролёр",
-            ],
-            "secondary": [
-                "контроль",
-                "срок контроля",
-                "дата контроля",
-                "тип контроля",
-                "контрольная дата",
-                "снять контроль",
-            ],
-            "negative": [
-                "задачу",
-                "поручение",
-                "исполнителя поручения",
-            ],
-        },
-        UserIntent.ACCESS_GRIEF: {
-            "primary": [
-                "покажи сотрудников с грифом",
-                "у кого гриф",
-                "какие грифы у сотрудника",
-                "список всех грифов доступа",
-                "сотрудники с грифом",
-                "гриф",
-                "грифы",
-                "грифом",
-            ],
-            "secondary": [
-                "гриф",
-                "грифы",
-                "грифом",
-            ],
-            "negative": [],
-        },
-    }
-
-    COMPOSITE_CONNECTORS: tuple[str, ...] = (
-        " и ",
-        " а также ",
-        " плюс ",
-        " потом ",
-        " после этого ",
-        ", а ",
-        " затем ",
-    )
-
-    def __init__(self) -> None:
-        self.entity_extractor = EntityExtractor()
-        self.query_refiner = QueryRefiner()
-        logger.info(
-            "SemanticDispatcher initialised",
-            extra=safe_extra(
-                component="nlp_service",
-                version="3.0.0",
-                features=[
-                    "domain_synonym_normalization",
-                    "composite_intent_detection",
-                    "structured_query_refinement",
-                    "confidence_scoring",
-                    "entity_extraction",
-                    "file_analysis",
-                ],
-            ),
-        )
-
-    async def classify(
-        self,
-        message: str,
-        context: Any | None = None,
-    ) -> "UserIntent":
-        """Classify user intent for the agent layer.
-
-        Compatibility wrapper around :meth:`detect_intent` that extracts
-        ``file_path`` from the execution context and returns only the
-        primary *UserIntent*.
-
-        Args:
-            message: Raw user message text.
-            context: :class:`ContextParams` from the agent (optional).
-
-        Returns:
-            Primary detected :class:`UserIntent`.
-        """
-        file_path = getattr(context, "file_path", None) if context else None
-        primary, _secondary, _confidence = self.detect_intent(message, file_path)
-        return primary
-
-    def detect_intent(
-        self,
-        message: str,
-        file_path: str | None = None,
-    ) -> tuple[UserIntent, list[UserIntent], float]:
-        """Classify primary and secondary intents with confidence scoring.
-
-        Scoring rules:
-        - Local file present (non-UUID path): FILE_ANALYSIS +3, SUMMARIZE +2
-        - primary keyword hit: +2 per keyword
-        - secondary keyword hit: +1 per keyword
-        - negative keyword hit: -1 per keyword
-        - Question mark at end: QUESTION +1
-        - COMPOSITE detected via connector heuristic: returns COMPOSITE primary
-
-        Composite detection: если сообщение содержит разделитель между двумя
-        разными интент-маркерами — запрос помечается COMPOSITE, оба интента
-        передаются в secondary_intents для последовательной обработки агентом.
-
-        Args:
-            message: User message text.
-            file_path: Optional file path or attachment UUID to boost FILE_ANALYSIS.
-
-        Returns:
-            Tuple of (primary_intent, secondary_intents, confidence).
-        """
-        if not message or not message.strip():
-            return UserIntent.UNKNOWN, [], 0.0
-
-        message_lower = self.query_refiner.normalize_domain_synonyms(message)
-
-        scores: Counter[UserIntent] = Counter()
-
-        if file_path and not UUID_RE.match(file_path):
-            scores[UserIntent.FILE_ANALYSIS] += 3
-            scores[UserIntent.SUMMARIZE] += 2
-            scores[UserIntent.CREATE_DOCUMENT] += 2
-
-        for intent, keywords in self.INTENT_KEYWORDS.items():
-            primary_hits = sum(
-                1 for kw in keywords.get("primary", []) if kw in message_lower
-            )
-            secondary_hits = sum(
-                1 for kw in keywords.get("secondary", []) if kw in message_lower
-            )
-            negative_hits = sum(
-                1 for kw in keywords.get("negative", []) if kw in message_lower
-            )
-            raw_score = primary_hits * 2 + secondary_hits - negative_hits
-            if raw_score > 0:
-                scores[intent] = scores.get(intent, 0) + raw_score
-
-        if message.strip().endswith("?"):
-            scores[UserIntent.QUESTION] += 1
-
-        if not scores:
-            return UserIntent.UNKNOWN, [], 0.0
-
-        sorted_intents = scores.most_common()
-        primary_intent = sorted_intents[0][0]
-        primary_score = sorted_intents[0][1]
-
-        intent_kw = self.INTENT_KEYWORDS.get(primary_intent, {})
-        max_possible = len(intent_kw.get("primary", [])) * 2 + len(
-            intent_kw.get("secondary", [])
-        )
-        confidence = min(primary_score / max(max_possible, 1), 1.0)
-
-        threshold = primary_score * 0.5
-        secondary_intents = [
-            intent
-            for intent, score in sorted_intents[1:]
-            if score >= threshold and score > 0
-        ]
-
-        if secondary_intents:
-            has_connector = any(
-                connector in message_lower for connector in self.COMPOSITE_CONNECTORS
-            )
-            if has_connector and len(secondary_intents) >= 1:
-                # Убеждаемся что у нас реально два разных намерения с ненулевыми scores
-                composite_intents = [primary_intent] + secondary_intents[:2]
-                logger.debug(
-                    "Composite intent detected",
-                    extra=safe_extra(
-                        intents=[i.value for i in composite_intents],
-                        connector_found=True,
-                    ),
-                )
-                return UserIntent.COMPOSITE, composite_intents, confidence
-
-        return primary_intent, secondary_intents, confidence
-
-    def estimate_complexity(
-        self,
-        message: str,
-        document: Any | None = None,
-    ) -> QueryComplexity:
-        """Estimate the processing complexity of a query.
-
-        Args:
-            message: User message text.
-            document: Active EDMS document (if available).
-
-        Returns:
-            QueryComplexity level.
-        """
-        word_count = len(message.split())
-        has_conditions = any(
-            w in message.lower() for w in ("если", "когда", "где", "как", "при")
-        )
-        has_multiple_entities = (
-            len(re.findall(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\b", message)) > 2
-        )
-
-        score = 0
-        if word_count > 20:
-            score += 3
-        elif word_count > 10:
-            score += 2
-        elif word_count > 5:
-            score += 1
-
-        if has_conditions:
-            score += 2
-        if has_multiple_entities:
-            score += 1
-
-        if document:
-            attachments = getattr(document, "attachmentDocument", None) or []
-            tasks = getattr(document, "taskList", None) or []
-            if len(attachments) > 3:
-                score += 1
-            if len(tasks) > 5:
-                score += 1
-            if not getattr(getattr(document, "process", None), "completed", True):
-                score += 1
-            if getattr(document, "docCategoryConstant", None) == "CONTRACT":
-                score += 1
-
-        if score >= 8:
-            return QueryComplexity.VERY_COMPLEX
-        if score >= 5:
-            return QueryComplexity.COMPLEX
-        if score >= 2:
-            return QueryComplexity.MEDIUM
-        return QueryComplexity.SIMPLE
-
-    def extract_keywords(self, message: str) -> set[str]:
-        """Extract content keywords by removing Russian stop words.
-
-        Args:
-            message: User message text.
-
-        Returns:
-            Set of significant word stems.
-        """
-        stop_words = {
-            "а",
-            "в",
-            "и",
-            "на",
-            "с",
-            "о",
-            "к",
-            "по",
-            "для",
-            "из",
-            "у",
-            "от",
-            "до",
-            "это",
-            "как",
-            "что",
-            "где",
-            "когда",
-            "мне",
-            "меня",
-            "мой",
-            "моя",
-            "мое",
-            "можно",
-            "нужно",
-            "надо",
-            "пожалуйста",
-        }
-        words = re.findall(r"\b[а-яёА-ЯЁ]{3,}\b", message.lower())
-        return {w for w in words if w not in stop_words}
-
-    def _validate_file_path(self, file_path: str) -> tuple[bool, str | None]:
-        """Check that *file_path* exists and is within the configured upload directory.
-
-        Args:
-            file_path: Path string to validate.
-
-        Returns:
-            Tuple of (is_valid, error_message_or_none).
-        """
-        if not file_path:
-            return False, "Путь не указан"
-        try:
-            path = Path(file_path).resolve()
-            upload_dir = getattr(settings, "UPLOAD_DIR", None)
-            if upload_dir:
-                upload_path = Path(upload_dir).resolve()
-                if upload_path not in path.parents and path.parent != upload_path:
-                    return False, "Путь вне разрешённой директории"
-            if not path.exists():
-                return False, "Файл не найден"
-            if not path.is_file():
-                return False, "Указанный путь не является файлом"
-            return True, None
-        except Exception as exc:
-            return False, f"Ошибка валидации: {exc}"
-
-    def build_context(
-        self,
-        message: str,
-        document: Any | None = None,
-        file_path: str | None = None,
-    ) -> SemanticContext:
-        """Build a complete SemanticContext for one user turn.
-
-        Args:
-            message: Raw user message.
-            document: Active EDMS document (if available).
-            file_path: Local file path or EDMS attachment UUID.
-
-        Returns:
-            Fully populated SemanticContext.
-        """
-        primary_intent, secondary_intents, confidence = self.detect_intent(
-            message, file_path
-        )
-        entities = self.entity_extractor.extract_all(message)
-        complexity = self.estimate_complexity(message, document)
-        keywords = self.extract_keywords(message)
-        refined = self.query_refiner.refine(message, primary_intent, entities)
-
-        query = UserQuery(
-            original=message,
-            refined=refined,
-            intent=primary_intent,
-            secondary_intents=secondary_intents,
-            complexity=complexity,
-            entities=entities,
-            keywords=keywords,
-            confidence=confidence,
-        )
-
-        metadata: dict[str, Any] = {
-            "word_count": len(message.split()),
-            "char_count": len(message),
-            "has_question_mark": message.strip().endswith("?"),
-        }
-
-        if document:
-            attachments = getattr(document, "attachmentDocument", None) or []
-            tasks = getattr(document, "taskList", None) or []
-            metadata.update(
-                {
-                    "has_document": True,
-                    "document_id": str(getattr(document, "id", "")),
-                    "document_category": str(
-                        getattr(document, "docCategoryConstant", "")
-                    ),
-                    "document_status": str(getattr(document, "status", "")),
-                    "attachments_count": len(attachments),
-                    "tasks_count": len(tasks),
-                }
-            )
-
-        if file_path:
-            metadata["is_local_file"] = True
-            metadata["ctx_file_path"] = file_path
-            if not UUID_RE.match(file_path):
-                metadata["file_type"] = "local"
-                is_valid, error = self._validate_file_path(file_path)
-                if not is_valid:
-                    logger.warning(
-                        "File validation failed",
-                        extra=safe_extra(file_path=file_path, error=error),
-                    )
-
-        suggestions: list[str] = []
-        warnings: list[str] = []
-
-        if primary_intent == UserIntent.CREATE_TASK:
-            if "dates" not in entities:
-                suggestions.append("Рекомендуется указать срок выполнения поручения")
-            if "persons" not in entities:
-                warnings.append(
-                    "Не указан исполнитель. Будет использован ответственный по умолчанию"
-                )
-
-        if primary_intent == UserIntent.COMPARE:
-            if (
-                "document_ids" not in entities
-                or len(entities.get("document_ids", [])) < 2
-            ):
-                warnings.append(
-                    "Для сравнения требуется указать два документа или версии"
-                )
-
-        if complexity == QueryComplexity.VERY_COMPLEX and confidence < 0.7:
-            suggestions.append(
-                "Запрос очень сложный. Рекомендуется разбить на несколько более простых"
-            )
-
-        return SemanticContext(
-            query=query,
-            document=document,
-            metadata=metadata,
-            suggestions=suggestions,
-            warnings=warnings,
-        )
 
 
 class EDMSNaturalLanguageService:
@@ -1545,7 +948,7 @@ class EDMSNaturalLanguageService:
 
             registration = {
                 "рег_номер": getattr(doc, "regNumber", None)
-                or getattr(doc, "reservedRegNumber", None),
+                             or getattr(doc, "reservedRegNumber", None),
                 # Красивые форматы (для UI/человека)
                 "дата_регистрации": self.format_date(reg_date_raw),
                 "дата_создания": self.format_datetime(create_date_raw),
@@ -1644,8 +1047,7 @@ class EDMSNaturalLanguageService:
                                 ),
                             }
                             for ex in (getattr(item, "executors", None) or [])
-                        ]
-                        or None,
+                        ] or None,
                     }
                     for item in items_raw
                 ]
@@ -1716,12 +1118,10 @@ class EDMSNaturalLanguageService:
                                 "текст_отметки": getattr(ex, "stampText", None),
                             }
                             for ex in (getattr(t, "taskExecutors", None) or [])
-                        ]
-                        or None,
+                        ] or None,
                     }
                     for t in task_list
-                ]
-                or None,
+                ] or None,
             }
 
             # ── 7. Вложения ───────────────────────────────────────────────────
@@ -1740,8 +1140,7 @@ class EDMSNaturalLanguageService:
                         ),
                     }
                     for a in attachments_list
-                ]
-                or None,
+                ] or None,
             }
 
             # ── 8. Адресаты и корреспондент ───────────────────────────────────
@@ -1787,11 +1186,8 @@ class EDMSNaturalLanguageService:
                             ),
                             "комментарий": getattr(i, "comment", None),
                         }
-                        for i in intro_list[
-                            :10
-                        ]  # не более 10, чтобы не раздувать промпт
-                    ]
-                    or None,
+                        for i in intro_list[:10]  # не более 10, чтобы не раздувать промпт
+                    ] or None,
                 }
 
             # ── 10. Предварительные номенклатурные дела ───────────────────────
@@ -1856,7 +1252,7 @@ class EDMSNaturalLanguageService:
                 if appeal_obj:
                     receipt_date_raw = getattr(appeal_obj, "receiptDate", None)
                     repeat_list = (
-                        getattr(appeal_obj, "repeatIdenticalAppeals", None) or []
+                            getattr(appeal_obj, "repeatIdenticalAppeals", None) or []
                     )
 
                     specialized["обращение"] = {
@@ -1914,23 +1310,19 @@ class EDMSNaturalLanguageService:
                             "формулировка": getattr(q, "question", None),
                             "докладчики": [
                                 {
-                                    "имя": self.format_user(
-                                        getattr(s, "employee", None)
-                                    ),
+                                    "имя": self.format_user(getattr(s, "employee", None)),
                                     "тип": self.get_safe(s, "type"),
                                 }
                                 for s in (getattr(q, "speakers", None) or [])
-                            ]
-                            or None,
+                            ] or None,
                         }
                         for q in questions
-                    ]
-                    or None,
+                    ] or None,
                 }
 
             # --- MEETING_QUESTION (Повестка заседания) ----------------------
             if category_value == "MEETING_QUESTION" or getattr(
-                doc, "dateMeetingQuestion", None
+                    doc, "dateMeetingQuestion", None
             ):
                 specialized["повестка_заседания"] = {
                     "дата_заседания": self.format_date(
@@ -1947,42 +1339,23 @@ class EDMSNaturalLanguageService:
 
             # ── 12. Сборка итогового словаря ──────────────────────────────────
             result: dict[str, Any] = {
-                "базовая_информация": self._clean_dict(base_info),
-                "регистрация": self._clean_dict(registration),
-                "участники": self._clean_dict(participants),
-                "жизненный_цикл": self._clean_dict(lifecycle),
-                "контроль": self._clean_dict(control_info),
-                "задачи": self._clean_dict(tasks_info),
-                "связи_и_вложения": self._clean_dict(relations),
+                "базовая_информация": clean_dict(base_info),
+                "регистрация": clean_dict(registration),
+                "участники": clean_dict(participants),
+                "жизненный_цикл": clean_dict(lifecycle),
+                "контроль": clean_dict(control_info),
+                "задачи": clean_dict(tasks_info),
+                "связи_и_вложения": clean_dict(relations),
             }
 
             if specialized:
-                result["специализированная_информация"] = self._clean_dict(specialized)
+                result["специализированная_информация"] = clean_dict(specialized)
 
             return result
 
         except Exception as exc:
             logger.error("Error processing document: %s", exc, exc_info=True)
             return {"error": "Ошибка обработки документа", "details": str(exc)}
-
-    def _clean_dict(self, d: Any) -> Any:
-        """Recursively remove None, empty lists, and empty dicts from *d*.
-
-        Args:
-            d: Input data structure (dict, list, or scalar).
-
-        Returns:
-            Cleaned data structure, or None if empty after cleaning.
-        """
-        if isinstance(d, dict):
-            cleaned = {k: self._clean_dict(v) for k, v in d.items()}
-            cleaned = {k: v for k, v in cleaned.items() if v not in (None, [], {}, "")}
-            return cleaned or None
-        if isinstance(d, list):
-            cleaned_list = [self._clean_dict(i) for i in d]
-            cleaned_list = [i for i in cleaned_list if i not in (None, [], {}, "")]
-            return cleaned_list or None
-        return d
 
     def analyze_local_file(self, file_path: str) -> dict[str, Any]:
         """Return basic metadata for a local file before reading its content.

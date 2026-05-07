@@ -13,10 +13,6 @@ import re
 
 from edms_ai_assistant.agent.context import ContextParams, is_valid_uuid
 
-_UUID_RE = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-    re.IGNORECASE,
-)
 _FS_PATH_RE = re.compile(
     r"[A-Za-z]:\\[^\s,;)'\"]{3,}|/(?:tmp|var|home|uploads)/[^\s,;)'\"]{3,}"
 )

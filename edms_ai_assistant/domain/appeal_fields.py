@@ -1,4 +1,10 @@
-# edms_ai_assistant/models/appeal_fields.py
+# edms_ai_assistant/domain/appeal_fields.py
+"""
+Appeal document domain models.
+
+Moved from `models/appeal_fields.py` to resolve the naming conflict between
+`model.py` (HTTP/LangGraph contracts) and `models/` (domain models) at root level.
+"""
 
 import logging
 import re

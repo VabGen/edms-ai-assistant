@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     LLM_REQUEST_TIMEOUT: int = Field(default=120, ge=10, le=600)
     LLM_STREAM_USAGE: bool = False
 
+    # Ollama local-backend specific
+    LLM_OLLAMA_NUM_CTX: int = Field(default=4096, ge=512, le=131072)
+    LLM_OLLAMA_NUM_PREDICT: int = Field(default=512, ge=64, le=8192)
+
     # ── Embedding Configuration ──────────────────────────────────────────────
     EMBEDDING_TIMEOUT: int = Field(default=120, ge=10, le=600)
     EMBEDDING_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
@@ -139,6 +143,10 @@ class Settings(BaseSettings):
     AGENT_ENABLE_TRACING: bool = False
     AGENT_LOG_LEVEL: str = "INFO"
     AGENT_MAX_RETRIES: int = 3
+    AGENT_LEAN_PROMPT: bool = Field(
+        default=False,
+        description="Use minimal system prompt to reduce token usage.",
+    )
 
     SETTINGS_PANEL_SHOW_TECHNICAL: bool = Field(
         default=True,

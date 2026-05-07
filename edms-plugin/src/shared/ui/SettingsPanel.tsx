@@ -1,3 +1,4 @@
+// edms-plugin/src/shared/ui/SettingsPanel.tsx
 import {memo, useState} from 'react'
 import {
     ArrowLeft, Palette, Mic, FileText,
@@ -296,7 +297,7 @@ function AgentTab({s, on}: { s: TechSettings['agent']; on: (p: Partial<TechSetti
                             el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
                         }}
                 >
-                    {(['DEBUG', 'INFO', 'WARNING', 'ERROR'] as const).map(v => <option key={v} value={v}>{v}</option>)}
+                    {(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const).map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
             </Field>
             <ToggleRow label="Трассировка агента" hint="Детальное логирование шагов ReAct" value={s.enableTracing}
@@ -419,6 +420,7 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
         updateTech,
         saveAll,
         resetAll,
+        resetToDefaults,
         discardDraft
     } = useSettingsStore()
     const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
@@ -453,7 +455,9 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                 {isDirty && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{background: '#f59e0b'}}
                                   title="Есть несохранённые изменения"/>}
                 {isDirty && (
-                    <button type="button" onClick={resetAll} title="Сбросить к дефолтам"
+                    <button type="button"
+                            onClick={showTechnical ? resetToDefaults : resetAll}
+                            title={showTechnical ? 'Сбросить к серверным дефолтам' : 'Сбросить к дефолтам'}
                             className="p-1.5 rounded-lg transition-all duration-200 shrink-0"
                             style={{color: '#94a3b8'}}>
                         <RotateCcw size={11}/>

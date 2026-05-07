@@ -7,7 +7,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from edms_ai_assistant.llm import get_chat_model
-from edms_ai_assistant.models.appeal_fields import AppealFields, SubmissionFormAppeal
+from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ _CITY_STOPWORDS: frozenset[str] = frozenset(
         "республика",
         "беларуси",
         "беларусь",
-        "беларуские",
+        "беларусские",
         "области",
         "область",
         "района",
@@ -190,14 +190,10 @@ class AppealExtractionService:
         if fields.index and fields.fullAddress:
             if fields.index not in fields.fullAddress:
                 logger.info(
-                    "index '%s' not in fullAddress '%s' — clearing",
+                    "index '%s' not in fullAddress '%s' — keeping index (postal code is independent of address)",
                     fields.index,
                     fields.fullAddress[:60],
                 )
-                fields.index = None
-        elif fields.index and not fields.fullAddress:
-            logger.info("index '%s' cleared: fullAddress is empty", fields.index)
-            fields.index = None
 
         if fields.declarantType == "ENTITY" and not fields.organizationName:
             proximity = self._recover_org_from_address_proximity(text)

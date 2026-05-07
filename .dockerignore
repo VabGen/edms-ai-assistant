@@ -1,0 +1,66 @@
+# ── Version control ─────────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ── Python artifacts ─────────────────────────────────────────────────────────
+**/__pycache__
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+*.egg-info
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv
+venv/
+env/
+ENV/
+
+# ── Test & QA ────────────────────────────────────────────────────────────────
+tests/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Secrets & local config ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Persistent data (should use named volumes) ───────────────────────────────
+uploads/
+app_uploads/
+pgdata/
+redis_data/
+qdrant_data/
+ollama_data/
+prometheus_data/
+chroma_db/
+
+# ── Node / Frontend ──────────────────────────────────────────────────────────
+edms-plugin/node_modules/
+edms-plugin/.output/
+node_modules/
+
+# ── Docs & misc ──────────────────────────────────────────────────────────────
+*.md
+!README.md
+docs/
+*.log

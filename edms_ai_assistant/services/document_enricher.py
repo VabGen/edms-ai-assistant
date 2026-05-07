@@ -8,7 +8,7 @@ EDMS AI Assistant — Document Enricher Service.
     documentTypeId                → GET /api/document-type/{id}
     currencyId                    → GET /api/currency/{id}
     control.controlTypeId         → GET /api/control-type/{id}
-    doc.id (introduction)         → GET /api/introduction/document/{id}
+    doc.id (introduction)         → GET /api/document/{id}/introduction
     doc.id (appeal)               → GET /api/document-appeal/document/{id}
     doc.id (recipientList)        → GET /api/document/{id}/recipient
     doc.id (taskList+executors)   → GET /api/document/{id}/task?fetchExecutors=true
@@ -143,7 +143,7 @@ class _RefClient(EdmsHttpClient):
             List of IntroductionDto dicts, empty list on failure.
         """
         result = await self._make_request(
-            "GET", f"api/introduction/document/{document_id}", token=token
+            "GET", f"api/document/{document_id}/introduction", token=token
         )
         if isinstance(result, list):
             return result

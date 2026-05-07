@@ -10,7 +10,7 @@ from uuid import UUID
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.clients.task_client import TaskClient
-from edms_ai_assistant.models.task_models import (
+from edms_ai_assistant.domain.task_models import (
     CreateTaskRequest,
     CreateTaskRequestExecutor,
     TaskCreationResult,

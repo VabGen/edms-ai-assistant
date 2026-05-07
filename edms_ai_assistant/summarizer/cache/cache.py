@@ -1,3 +1,4 @@
+# edms_ai_assistant/summarizer/cache/cache.py
 """
 Two-level cache for summarization results.
 
@@ -98,41 +99,17 @@ class SummarizationCache(ABC):
 class RedisL1Cache(SummarizationCache):
     """L1 cache backed by Redis. Sub-millisecond hot path.
 
-    Requires: redis[asyncio] or aioredis installed.
+    Uses the central RedisClient singleton from clients/redis_client.
     Falls back gracefully if Redis unavailable.
     """
 
-    def __init__(self, redis_url: str = "redis://localhost:6379/0") -> None:
-        self._url = redis_url
-        self._client: Any = None
-        self._available = False
-
-    async def _ensure_client(self) -> bool:
-        """Lazy-initialize Redis client. Returns False if unavailable."""
-        if self._client is not None:
-            return self._available
-        try:
-            import redis.asyncio as aioredis  # type: ignore[import]
-            self._client = aioredis.from_url(
-                self._url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=1.0,
-                socket_timeout=1.0,
-            )
-            await self._client.ping()
-            self._available = True
-            logger.info("Redis L1 cache connected: %s", self._url)
-        except Exception as exc:
-            logger.warning("Redis unavailable — L1 cache disabled: %s", exc)
-            self._available = False
-        return self._available
+    def __init__(self) -> None:
+        pass
 
     async def get(self, cache_key: str) -> CacheEntry | None:
-        if not await self._ensure_client():
-            return None
         try:
-            data = await self._client.get(cache_key)
+            from edms_ai_assistant.clients.redis_client import redis_client
+            data = await redis_client.get_client().get(cache_key)
             if data is None:
                 return None
             return CacheEntry.model_validate_json(data)
@@ -141,10 +118,9 @@ class RedisL1Cache(SummarizationCache):
             return None
 
     async def set(self, entry: CacheEntry, ttl_seconds: int = 3600) -> None:
-        if not await self._ensure_client():
-            return
         try:
-            await self._client.setex(
+            from edms_ai_assistant.clients.redis_client import redis_client
+            await redis_client.get_client().setex(
                 entry.cache_key,
                 ttl_seconds,
                 entry.model_dump_json(),
@@ -153,15 +129,19 @@ class RedisL1Cache(SummarizationCache):
             logger.debug("Redis SET failed: %s", exc)
 
     async def delete(self, cache_key: str) -> None:
-        if not await self._ensure_client():
-            return
         try:
-            await self._client.delete(cache_key)
+            from edms_ai_assistant.clients.redis_client import redis_client
+            await redis_client.get_client().delete(cache_key)
         except Exception as exc:
             logger.debug("Redis DELETE failed: %s", exc)
 
     async def health_check(self) -> bool:
-        return await self._ensure_client()
+        try:
+            from edms_ai_assistant.clients.redis_client import redis_client
+            await redis_client.get_client().ping()
+            return True
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------------

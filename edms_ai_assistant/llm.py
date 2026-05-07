@@ -14,7 +14,27 @@ from edms_ai_assistant.config import settings
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_API_KEY = "placeholder-key"
+
 _chat_model_instance: BaseLanguageModel | None = None
+_embedding_model_instance: Embeddings | None = None
+
+
+def reset_chat_model() -> None:
+    """Clear the cached chat model, forcing re-initialisation on next call.
+
+    Call this after patching LLM settings at runtime via the settings API.
+    """
+    global _chat_model_instance
+    _chat_model_instance = None
+    logger.info("Chat model cache cleared")
+
+
+def reset_embedding_model() -> None:
+    """Clear the cached embedding model, forcing re-initialisation on next call."""
+    global _embedding_model_instance
+    _embedding_model_instance = None
+    logger.info("Embedding model cache cleared")
 
 
 def _normalize_url(url: object) -> str:
@@ -61,7 +81,7 @@ def get_chat_model() -> BaseLanguageModel:
     """Create or return cached chat model instance from current runtime settings.
 
     Бэкенды:
-    - ``ollama_local``:  ChatOllama, num_ctx=4096, num_predict=512 (CPU).
+    - ``ollama_local``:  ChatOllama, num_ctx/num_predict from settings (CPU).
     - ``openai_ollama``: ChatOpenAI → http://host:11434/v1 (Ollama OpenAI API).
       Используется для кастомных/облачных моделей вида gpt-oos:120b-cloud.
     - ``openai``:        ChatOpenAI, любой OpenAI-совместимый прокси.
@@ -106,16 +126,16 @@ def get_chat_model() -> BaseLanguageModel:
                 model=model_name,
                 base_url=base_url,
                 temperature=temperature,
-                num_predict=512,
-                num_ctx=4096,
+                num_predict=settings.LLM_OLLAMA_NUM_PREDICT,
+                num_ctx=settings.LLM_OLLAMA_NUM_CTX,
                 timeout=timeout,
                 streaming=True,
-                seed=42,
-                top_p=0.9,
             )
             logger.info(
-                "ChatOllama (local) initialized: model=%s num_ctx=4096 num_predict=512",
+                "ChatOllama (local) initialized: model=%s num_ctx=%d num_predict=%d",
                 model_name,
+                settings.LLM_OLLAMA_NUM_CTX,
+                settings.LLM_OLLAMA_NUM_PREDICT,
             )
             return _chat_model_instance
         except Exception as exc:
@@ -129,7 +149,7 @@ def get_chat_model() -> BaseLanguageModel:
 
             openai_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
 
-            llm_params: dict = {
+            llm_params: dict[str, object] = {
                 "base_url": openai_base,
                 "api_key": "ollama",
                 "model": model_name,
@@ -137,9 +157,6 @@ def get_chat_model() -> BaseLanguageModel:
                 "timeout": timeout,
                 "max_retries": max_retries,
                 "streaming": True,
-                "stop": ["\n\n\n", "END_SUMMARY"],  # Защита от галлюцинаций
-                # "model_kwargs": {"seed": 42}     # Детерминизм
-                "seed": 42,
             }
             if max_tokens:
                 llm_params["max_tokens"] = max_tokens
@@ -161,13 +178,13 @@ def get_chat_model() -> BaseLanguageModel:
     try:
         from langchain_openai import ChatOpenAI
 
-        api_key: str = "placeholder-key"
+        api_key: str = _DEFAULT_API_KEY
         if settings.OPENAI_API_KEY:
             api_key = settings.OPENAI_API_KEY.get_secret_value()
         elif settings.LLM_API_KEY:
             api_key = settings.LLM_API_KEY.get_secret_value()
 
-        llm_params = {
+        llm_params: dict[str, object] = {
             "base_url": base_url,
             "api_key": api_key,
             "model": model_name,
@@ -189,7 +206,7 @@ def get_chat_model() -> BaseLanguageModel:
 
 
 def get_embedding_model() -> Embeddings:
-    """Create an embedding model instance from current runtime settings.
+    """Create or return cached embedding model instance from current runtime settings.
 
     Returns:
         Configured LangChain embeddings instance.
@@ -197,12 +214,16 @@ def get_embedding_model() -> Embeddings:
     Raises:
         RuntimeError: If the model cannot be initialized.
     """
+    global _embedding_model_instance
+    if _embedding_model_instance is not None:
+        return _embedding_model_instance
+
     from langchain_openai import OpenAIEmbeddings
 
     base_url = _normalize_url(settings.LLM_EMBEDDING_URL)
     model_name = settings.LLM_EMBEDDING_MODEL
 
-    api_key: str = "placeholder-key"
+    api_key: str = _DEFAULT_API_KEY
     if settings.LLM_API_KEY:
         api_key = settings.LLM_API_KEY.get_secret_value()
     elif settings.OPENAI_API_KEY:
@@ -214,16 +235,16 @@ def get_embedding_model() -> Embeddings:
     )
 
     try:
-        embedding_model = OpenAIEmbeddings(
-            openai_api_base=base_url,
-            openai_api_key=api_key,
+        _embedding_model_instance = OpenAIEmbeddings(
+            base_url=base_url,
+            api_key=api_key,
             model=model_name,
-            request_timeout=getattr(settings, "EMBEDDING_REQUEST_TIMEOUT", 120),
-            max_retries=getattr(settings, "EMBEDDING_MAX_RETRIES", 3),
-            chunk_size=getattr(settings, "EMBEDDING_CHUNK_SIZE", 1000),
+            request_timeout=settings.EMBEDDING_REQUEST_TIMEOUT,
+            max_retries=settings.EMBEDDING_MAX_RETRIES,
+            chunk_size=settings.EMBEDDING_CHUNK_SIZE,
         )
         logger.info("OpenAIEmbeddings initialized: model=%s", model_name)
-        return embedding_model
+        return _embedding_model_instance
     except Exception as exc:
         logger.error("Embedding model init failed: %s", exc, exc_info=True)
         raise RuntimeError(f"Failed to initialize embedding model: {exc}") from exc

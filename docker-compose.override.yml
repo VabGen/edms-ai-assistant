@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.override.yml — Development overrides
+#
+# Auto-loaded by `docker compose up`. Overrides production values for local dev.
+# Do NOT commit secrets here — use a local .env file.
+#
+# Hot reload: source code is mounted read-only; uvicorn --reload watches it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    build:
+      target: runtime
+    environment:
+      ENVIRONMENT:   development
+      DEBUG:         "true"
+      LOGGING_LEVEL: DEBUG
+    volumes:
+      - ./edms_ai_assistant:/app/edms_ai_assistant:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+    command: >
+      uvicorn edms_ai_assistant.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/edms_ai_assistant
+      --log-level debug
+
+  # Expose infrastructure ports locally for direct access / DB tools
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+

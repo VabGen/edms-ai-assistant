@@ -80,13 +80,13 @@ celerybeat-schedule
 *.sage.py
 
 # Environments
-.env
+#.env
 .env.test
 .venv
-env/
+#env/
 venv/
-ENV/
-env.bak/
+#ENV/
+#env.bak/
 venv.bak/
 
 # Spyder project settings
@@ -115,7 +115,7 @@ Thumbs.db
 
 # Project specific
 edms_ai_assistant.egg-info/
-uv.lock
+# uv.lock intentionally committed — required for reproducible Docker builds
 prometheus_data/
 pgdata/
 redis_data/

@@ -19,7 +19,7 @@ from edms_ai_assistant.generated.resources_openapi import (
     DocumentAppealDto,
     DocumentDto,
 )
-from edms_ai_assistant.models.appeal_fields import AppealFields, SubmissionFormAppeal
+from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
 from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
 from edms_ai_assistant.utils.file_utils import extract_text_from_bytes
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
@@ -578,20 +578,14 @@ class AppealFieldsBuilder:
 
         raw_receipt = d.receiptDate if d.receiptDate else fields.receiptDate
         if raw_receipt:
-            _receipt_date = raw_receipt if isinstance(raw_receipt, datetime) else None
-            if (
-                _receipt_date
-                and abs((_receipt_date.date() - datetime.now(UTC).date()).days) <= 1
-            ):
-                logger.info(
-                    "receiptDate=%s выглядит как today → пропускаем",
-                    _receipt_date.date(),
-                )
-                payload["receiptDate"] = None
-            else:
-                payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt)
+            payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt)
         else:
-            payload["receiptDate"] = None
+            today = datetime.now(UTC)
+            payload["receiptDate"] = today.strftime("%Y-%m-%dT00:00:00Z")
+            logger.info(
+                "receiptDate не указан в документе → устанавливаем today: %s",
+                today.date(),
+            )
 
         payload["fullAddress"] = ValueSanitizer.sanitize_string(
             d.fullAddress
@@ -769,7 +763,7 @@ class AppealAutofillOrchestrator:
             delivery_method_name = (
                 fields.deliveryMethod
                 if not ValueSanitizer.is_empty(fields.deliveryMethod)
-                else "Курьер"
+                else "Электронно"
             )
             delivery_id = await ref_client.find_delivery_method(
                 self.token, delivery_method_name

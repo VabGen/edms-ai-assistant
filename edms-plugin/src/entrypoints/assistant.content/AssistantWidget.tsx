@@ -518,6 +518,7 @@ export function AssistantWidget() {
     const [userContext, setUserContext] = useState<Record<string, string>>({})
     const [pendingDelete, setPendingDelete] = useState<{ id: string; thread: Thread } | null>(null)
     const [handsFree, setHandsFree] = useState(false)
+    const [widgetSize, setWidgetSize] = useState({width: 500, height: 740})
 
     const {rootClassName, rootStyle, prefs: userPrefs} = useApplyPreferences()
 
@@ -588,6 +589,8 @@ export function AssistantWidget() {
     const bottomRef = useRef<HTMLDivElement>(null)
     const fileRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const isResizingRef = useRef(false)
+    const resizeStartRef = useRef({x: 0, y: 0, width: 0, height: 0})
     const requestIdRef = useRef<string | null>(null)
     const serverPathRef = useRef<string | null>(null)
     const filePersistRef = useRef<string | null>(null)
@@ -605,6 +608,26 @@ export function AssistantWidget() {
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`
         }
     }, [displayInput])
+
+    useEffect(() => {
+        function onMouseMove(e: MouseEvent) {
+            if (!isResizingRef.current) return
+            const dx = e.clientX - resizeStartRef.current.x
+            const dy = e.clientY - resizeStartRef.current.y
+            const newWidth = Math.min(Math.max(resizeStartRef.current.width - dx, 320), Math.min(800, window.innerWidth - 32))
+            const newHeight = Math.min(Math.max(resizeStartRef.current.height - dy, 400), window.innerHeight - 64)
+            setWidgetSize({width: newWidth, height: newHeight})
+        }
+        function onMouseUp() {
+            isResizingRef.current = false
+        }
+        window.addEventListener('mousemove', onMouseMove)
+        window.addEventListener('mouseup', onMouseUp)
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove)
+            window.removeEventListener('mouseup', onMouseUp)
+        }
+    }, [])
 
     useEffect(() => {
         if (!isOpen || messages.length === 0) return
@@ -923,9 +946,6 @@ export function AssistantWidget() {
                 : serverPathRef.current
 
             const preferredFormat = userPrefs.documents.defaultSummaryFormat
-            const resolvedHumanChoice = isChoiceFlow
-                ? humanChoice!
-                : (preferredFormat && preferredFormat !== 'ask' ? preferredFormat : undefined)
 
             const res = await sendMsg<any>('sendChatMessage', {
                 message: isChoiceFlow ? humanChoice! : textToSend,
@@ -934,17 +954,17 @@ export function AssistantWidget() {
                 thread_id: tid,
                 context_ui_id: docId,
                 file_path: finalFilePath,
-                human_choice: resolvedHumanChoice,
+                human_choice: isChoiceFlow ? humanChoice! : undefined,
                 preferred_summary_format: preferredFormat !== 'ask' ? preferredFormat : undefined,
                 user_context: Object.keys(userContext).length > 0 ? userContext : undefined,
             })
 
-            if (!isChoiceFlow) {
+            const payload = (res && typeof res === 'object' && 'data' in res && res.success) ? (res as any).data : res
+
+            if (payload?.action_type !== 'summarize_selection') {
                 serverPathRef.current = null
                 filePersistRef.current = null
             }
-
-            const payload = (res && typeof res === 'object' && 'data' in res && res.success) ? (res as any).data : res
             const content = payload?.response ?? payload?.content ?? payload?.message
                 ?? (Array.isArray(payload?.messages) ? payload.messages.at(-1)?.content : undefined)
                 ?? 'Анализ завершён.'
@@ -1025,7 +1045,7 @@ export function AssistantWidget() {
         setIsSettingsOpen(false)
     }
 
-    const canSend = displayInput.trim().length > 0 || Boolean(attachedFile)
+    const canSend = (displayInput.trim().length > 0 || Boolean(attachedFile)) && !loading
 
     const glassOpacity = userPrefs.appearance.glassOpacity ?? 0
     const glassAlpha = 1 - glassOpacity
@@ -1077,9 +1097,11 @@ export function AssistantWidget() {
 
             {isOpen && (
                 <div
-                    className="pointer-events-auto flex flex-col w-[500px] max-w-[calc(100vw-32px)] overflow-hidden"
+                    className="pointer-events-auto flex flex-col overflow-hidden"
                     style={{
-                        height: 'min(740px, calc(100vh - 64px))',
+                        width: Math.min(widgetSize.width, window.innerWidth - 32),
+                        height: Math.min(widgetSize.height, window.innerHeight - 64),
+                        position: 'relative',
                         borderRadius: 24,
                         background: `rgba(255,255,255,${glassAlpha})`,
                         border: `1px solid rgba(255,255,255,${Math.min(glassAlpha + 0.12, 0.65)})`,
@@ -1302,9 +1324,32 @@ export function AssistantWidget() {
                                             </p>
                                             <p className="mt-1"
                                                style={{color: '#94a3b8', fontSize: 12}}>
-                                                Задайте вопрос о документе или загрузите файл
+                                                Задайте вопрос ...
                                             </p>
                                         </div>
+                                        {userPrefs.documents.showQuickActionHints && (
+                                            <div className="flex flex-wrap justify-center gap-2 px-4"
+                                                 style={{animation: 'edms-fade-in-up .6s ease-out'}}>
+                                                {[
+                                                    {label: 'Суммаризация', text: 'Суммаризируй документ'},
+                                                    {label: 'Поиск', text: 'Найди ключевые факты в документе'},
+                                                    {label: 'Тезисы', text: 'Составь тезисный план документа'},
+                                                ].map(chip => (
+                                                    <button
+                                                        key={chip.label}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setInput(chip.text)
+                                                            textareaRef.current?.focus()
+                                                        }}
+                                                        className="edms-action-btn px-3 py-1.5 text-xs font-medium rounded-xl border bg-white text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 transition-all duration-150"
+                                                        style={{borderColor: 'rgba(99,102,241,0.2)', boxShadow: 'var(--edms-shadow-xs)'}}
+                                                    >
+                                                        {chip.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 {messages.map(msg => {
@@ -1574,7 +1619,7 @@ export function AssistantWidget() {
                                                                 ? 'Слушаю…'
                                                                 : attachedFile
                                                                     ? 'Добавьте комментарий…'
-                                                                    : 'Спросите AI...'
+                                                                    : 'Задайте вопрос...'
                                                 }
                                                 className="edms-textarea w-full bg-transparent border-none outline-none resize-none scrollbar-thin"
                                                 style={{
@@ -1618,10 +1663,42 @@ export function AssistantWidget() {
 
                                 <p className="text-center mt-2 px-4 leading-tight"
                                    style={{color: '#cbd5e1', fontSize: 9.5}}>
-                                    EDMS Assistant — ИИ. Может ошибаться и давать неверную информацию.
+                                    EDMS Assistant — AI. Может ошибаться и давать неверную информацию.
                                 </p>
                             </footer>
                         </main>
+                    </div>
+                    <div
+                        onMouseDown={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            isResizingRef.current = true
+                            resizeStartRef.current = {
+                                x: e.clientX,
+                                y: e.clientY,
+                                width: widgetSize.width,
+                                height: widgetSize.height,
+                            }
+                        }}
+                        title="Изменить размер"
+                        style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            right: 0,
+                            width: 22,
+                            height: 22,
+                            cursor: 'nwse-resize',
+                            display: 'flex',
+                            alignItems: 'flex-end',
+                            justifyContent: 'flex-end',
+                            padding: '0 5px 5px 0',
+                            zIndex: 20,
+                        }}
+                    >
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M9 1L1 9" stroke="rgba(99,102,241,0.40)" strokeWidth="1.5" strokeLinecap="round"/>
+                            <path d="M9 5L5 9" stroke="rgba(99,102,241,0.40)" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
                     </div>
                 </div>
             )}

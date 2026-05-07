@@ -4,6 +4,7 @@ HumanChoiceHandler — стратегии обработки HITL-выборов
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -11,6 +12,7 @@ from typing import Any, Protocol
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from edms_ai_assistant.agent.context import is_valid_uuid
+from edms_ai_assistant.agent.extraction.content_extractor import ContentExtractor
 from edms_ai_assistant.agent.tool_injector import TOOL_DISAMBIG_ID_FIELD
 
 logger = logging.getLogger(__name__)
@@ -147,11 +149,7 @@ class SummaryTypeHandler:
     """Обрабатывает выбор формата суммаризации: extractive | abstractive | thesis."""
 
     def can_handle(self, choice: str, pending_call: dict[str, Any] | None) -> bool:
-        return (
-            pending_call is not None
-            and pending_call["name"] == _SUMMARIZE_TOOL
-            and choice.lower() in _VALID_SUMMARY_TYPES
-        )
+        return choice.lower() in _VALID_SUMMARY_TYPES
 
     def handle(
         self,
@@ -159,20 +157,48 @@ class SummaryTypeHandler:
         pending_call: dict[str, Any] | None,
         messages: list[BaseMessage],
     ) -> HandlerResult:
-        assert pending_call is not None
         summary_type = choice.lower()
-        patched_calls = _reconstruct_call(pending_call, {"summary_type": summary_type})
-        logger.info("Injected summary_type=%s for doc_summarize_text", summary_type)
 
-        pending_ai = _find_ai_message_for_call(messages, pending_call["id"])
-        if pending_ai is None:
-            return HandlerResult(
-                new_inputs={"messages": [HumanMessage(content=choice)]}
-            )
+        # Patch-and-resume path: works only while graph is paused at interrupt_before=["tools"].
+        # After graph completes (requires_choice processed, validator + agent ran to END)
+        # the subsequent messages make this ineffective — use explicit message instead.
+        if pending_call is not None and pending_call["name"] == _SUMMARIZE_TOOL:
+            pending_ai = _find_ai_message_for_call(messages, pending_call["id"])
+            if pending_ai is not None:
+                new_args: dict[str, Any] = {"summary_type": summary_type}
+                last_tool_text = ContentExtractor.extract_last_tool_text(messages)
+                if last_tool_text:
+                    new_args["text"] = last_tool_text
+                patched_calls = _reconstruct_call(pending_call, new_args)
+                logger.info(
+                    "SummaryTypeHandler: patch+resume summary_type=%s text_len=%d",
+                    summary_type,
+                    len(new_args.get("text", pending_call["args"].get("text", ""))),
+                )
+                return HandlerResult(
+                    patched_messages=[_make_patched_ai_message(pending_ai, patched_calls)],
+                    resume_from_interrupt=True,
+                )
 
+        # Fallback: graph already completed — send explicit instruction so the LLM
+        # calls doc_summarize_text with the correct summary_type on the next turn.
+        logger.info(
+            "SummaryTypeHandler: explicit message fallback, summary_type=%s", summary_type
+        )
         return HandlerResult(
-            patched_messages=[_make_patched_ai_message(pending_ai, patched_calls)],
-            resume_from_interrupt=True,
+            new_inputs={
+                "messages": [
+                    HumanMessage(
+                        content=(
+                            f"Пользователь выбрал формат анализа документа: «{summary_type}». "
+                            f"Немедленно вызови инструмент doc_summarize_text "
+                            f"с параметром summary_type='{summary_type}'. "
+                            f"Используй текст документа из предыдущего шага. "
+                            f"Не задавай вопросов — сразу выполни суммаризацию."
+                        )
+                    )
+                ]
+            }
         )
 
 
@@ -192,7 +218,8 @@ class UuidChoiceHandler:
         pending_call: dict[str, Any] | None,
         messages: list[BaseMessage],
     ) -> HandlerResult:
-        assert pending_call is not None
+        if pending_call is None:
+            return HandlerResult(new_inputs={"messages": [HumanMessage(content=choice)]})
         tool_name = pending_call["name"]
         id_field = TOOL_DISAMBIG_ID_FIELD.get(tool_name, "selected_employee_ids")
         valid_ids = _parse_uuids(choice)
@@ -338,10 +365,18 @@ def _find_ai_message_for_call(
 
 
 def _is_real_tool_result(msg: ToolMessage) -> bool:
-    """True если ToolMessage содержит реальный результат (не пустую заглушку)."""
+    """True если ToolMessage содержит реальный результат (не пустую заглушку).
+
+    requires_choice не считается финальным результатом — инструмент ожидает
+    выбора пользователя, поэтому AIMessage с pending tool_call остаётся «открытым».
+    """
     content = str(msg.content).strip()
-    return (
-        bool(content)
-        and content not in ("", "{}", "null", "None")
-        and len(content) >= 10
-    )
+    if not (bool(content) and content not in ("", "{}", "null", "None") and len(content) >= 10):
+        return False
+    if content.startswith("{"):
+        try:
+            if json.loads(content).get("status") == "requires_choice":
+                return False
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return True

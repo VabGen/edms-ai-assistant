@@ -1,6 +1,6 @@
 """Create summarization_cache table.
 
-This migration creates the new v2 cache table for summarization results.
+This migration creates the cache table for summarization results.
 It replaces the old `summarization_cache` table with a richer schema that:
   - Uses content-addressed cache keys (SHA-256 based)
   - Stores structured metadata (file_hash, mode, language, prompt_version)

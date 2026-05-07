@@ -1,5 +1,23 @@
 # edms_ai_assistant\utils\format_utils.py
+from typing import Any
 import re
+
+
+def clean_dict(d: Any) -> Any:
+    """Recursively remove None, empty lists, empty dicts and empty strings.
+
+    Returns None (not an empty collection) when the top-level container
+    becomes empty after cleaning, so callers can use ``or`` chaining.
+    """
+    if isinstance(d, dict):
+        cleaned = {k: clean_dict(v) for k, v in d.items()}
+        cleaned = {k: v for k, v in cleaned.items() if v not in (None, [], {}, "")}
+        return cleaned or None
+    if isinstance(d, list):
+        cleaned_list = [clean_dict(i) for i in d]
+        cleaned_list = [i for i in cleaned_list if i not in (None, [], {}, "")]
+        return cleaned_list or None
+    return d
 
 
 def format_document_response(text_content: str) -> str:

@@ -1,6 +1,9 @@
-# edms_ai_assistant/models/task_models.py
+# edms_ai_assistant/domain/task_models.py
 """
-Task models with Disambiguation support.
+Task domain models with Disambiguation support.
+
+Moved from `models/task_models.py` to resolve the naming conflict between
+`model.py` (HTTP/LangGraph contracts) and `models/` (domain models) at root level.
 """
 
 from datetime import datetime

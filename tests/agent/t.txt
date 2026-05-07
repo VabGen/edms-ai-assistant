@@ -1,8 +1,0 @@
-# 3. Запуск тестов
-pytest tests/agent/ -v --tb=short
-
-# 4. Типизация
-mypy edms_ai_assistant/agent/ --strict --ignore-missing-imports
-
-# 5. Проверка что публичный API не изменился
-python -c "from edms_ai_assistant.agent import EdmsDocumentAgent, AgentResponse, AgentStatus"

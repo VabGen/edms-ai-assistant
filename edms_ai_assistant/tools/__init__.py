@@ -10,7 +10,6 @@ from .attachment import doc_get_file_content
 from .create_document_from_file import create_document_from_file
 from .doc_compliance_check import doc_compliance_check
 from .doc_control import doc_control
-from .doc_notification import doc_send_notification
 from .doc_search import doc_search_tool
 from .doc_update_field import doc_update_field
 from .document import doc_get_details
@@ -45,8 +44,6 @@ all_tools = [
     doc_control,
     # People
     employee_search_tool,
-    # Notifications
-    doc_send_notification,
     # Compliance
     doc_compliance_check,
     # Access griefs
@@ -62,7 +59,6 @@ __all__ = [
     "doc_get_file_content",
     "doc_get_versions",
     "doc_search_tool",
-    "doc_send_notification",
     "doc_summarize_text",
     "doc_update_field",
     "doc_control",

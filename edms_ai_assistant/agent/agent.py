@@ -1,14 +1,12 @@
+# edms_ai_assistant/agent/agent.py
 """
-EdmsDocumentAgent — основная точка входа агента.
+EdmsDocumentAgent v2 — Planning-first архитектура.
 
-- Убран _try_forced_tool_call (прямой вызов tool в обход графа)
-- Исправлена мутация context.intent (теперь context иммутабелен, with_intent())
-- Исправлен "протёк" контекста между диалогами через ToolCallInjector
-- Добавлен guard: если предыдущий turn содержал employee_search → не накапливать
-  task_create контекст в следующем turn
-- handle_human_choice теперь использует рефакторинговый loop.py
+Главное изменение: SemanticDispatcher убран из chat() метода.
+IntentPlanner (внутри OrchestrationLoop) заменяет NLP routing.
+
+Публичный API не изменился — обратная совместимость сохранена.
 """
-
 from __future__ import annotations
 
 import html
@@ -23,24 +21,21 @@ from edms_ai_assistant.agent.context import (
     AgentResponse,
     AgentStatus,
     ContextParams,
+    is_valid_uuid,
 )
 from edms_ai_assistant.agent.graph import GraphBuilder
-from edms_ai_assistant.agent.orchestration.loop import (
-    OrchestrationLoop,
-    handle_human_choice,
-)
+from edms_ai_assistant.agent.orchestration import handle_human_choice
+from edms_ai_assistant.agent.orchestration.loop import OrchestrationLoop
 from edms_ai_assistant.agent.prompts import PromptBuilder
 from edms_ai_assistant.agent.repositories import IDocumentRepository
 from edms_ai_assistant.agent.state_manager import AgentStateManager
 from edms_ai_assistant.agent.tool_injector import ToolCallInjector
+from edms_ai_assistant.config import settings
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
-from edms_ai_assistant.services.nlp_service import SemanticDispatcher, UserIntent
+from edms_ai_assistant.services.nlp_service import UserIntent
 from edms_ai_assistant.tools import all_tools
 
 logger = logging.getLogger(__name__)
-
-# Set to True for small LLMs (≤13 B)
-USE_LEAN_PROMPT: bool = False
 
 
 def _xml_escape(value: str | None) -> str:
@@ -51,34 +46,29 @@ def _xml_escape(value: str | None) -> str:
 
 class EdmsDocumentAgent:
     """
-    Основная точка входа для EDMS AI Agent.
+    Основная точка входа EDMS AI Agent v2.
 
-    Изменения по сравнению с предыдущей версией:
-    - ContextParams теперь иммутабелен (frozen=True), intent задаётся через with_intent()
-    - Убран _try_forced_tool_call — создание документа идёт через нормальный граф
-    - handle_human_choice делегирует в рефакторинговый orchestration/loop.py
+    Изменения от v1:
+    - Убран SemanticDispatcher из chat()
+    - OrchestrationLoop содержит IntentPlanner
+    - LLM всегда видит ВСЕ tools (нет routing по subset)
+    - Параллельное выполнение tools через PlanExecutor
+    - Прямые ответы без tools для общих вопросов
     """
 
     def __init__(
         self,
         document_repo: IDocumentRepository | None = None,
-        semantic_dispatcher: SemanticDispatcher | None = None,
         checkpointer: Any = None,
         llm: Any = None,
     ) -> None:
-        self._document_repo: IDocumentRepository = (
-            document_repo or _NullDocumentRepository()
-        )
-        self._semantic_dispatcher: SemanticDispatcher = (
-            semantic_dispatcher or SemanticDispatcher()
-        )
+        self._document_repo = document_repo or _NullDocumentRepository()
         checkpointer = checkpointer or MemorySaver()
 
         if llm is not None:
             self._model = llm
         else:
             from edms_ai_assistant.llm import get_chat_model
-
             self._model = get_chat_model()
 
         self._graph_builder = GraphBuilder(
@@ -100,17 +90,9 @@ class EdmsDocumentAgent:
             model=self._model,
         )
         logger.info(
-            "EdmsDocumentAgent initialised",
-            extra={
-                "checkpointer": type(checkpointer).__name__,
-                "tools": len(all_tools),
-                "lean_prompt": USE_LEAN_PROMPT,
-            },
+            "EdmsDocumentAgent v2 initialized: tools=%d",
+            len(all_tools),
         )
-
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
 
     async def health_check(self) -> dict[str, bool]:
         checks: dict[str, bool] = {}
@@ -126,18 +108,6 @@ class EdmsDocumentAgent:
             checks["tools"] = bool(all_tools)
         except Exception:
             checks["tools"] = False
-        try:
-            checks["state_manager"] = isinstance(self._state_manager, AgentStateManager)
-        except Exception:
-            checks["state_manager"] = False
-        try:
-            checks["injector"] = isinstance(self._injector, ToolCallInjector)
-        except Exception:
-            checks["injector"] = False
-        try:
-            checks["document_repo"] = self._document_repo is not None
-        except Exception:
-            checks["document_repo"] = False
         return checks
 
     async def chat(
@@ -151,7 +121,6 @@ class EdmsDocumentAgent:
         file_name: str | None = None,
         human_choice: str | None = None,
     ) -> dict[str, Any]:
-        # Валидация входных данных
         try:
             request = AgentRequest(
                 message=message,
@@ -172,27 +141,15 @@ class EdmsDocumentAgent:
 
         context = self._build_context(request)
 
-        try:
-            intent = await self._semantic_dispatcher.classify(
-                message=request.message,
-                context=context,
-            )
-        except Exception as exc:
-            logger.warning("Intent classification failed: %s — using UNKNOWN", exc)
-            intent = UserIntent.UNKNOWN
-
-        context = context.with_intent(intent)
-
         logger.info(
-            "chat: thread=%s intent=%s has_file=%s has_doc=%s has_choice=%s",
+            "chat: thread=%s has_file=%s has_doc=%s has_choice=%s",
             context.thread_id,
-            intent.value if intent else "—",
             bool(context.file_path),
             bool(context.document_id),
             bool(human_choice),
         )
 
-        # Получаем метаданные документа
+        # Метаданные документа для semantic_xml в промпте
         doc_info: DocumentDto | None = None
         if context.document_id:
             doc_info = await self._document_repo.get_document(
@@ -200,13 +157,9 @@ class EdmsDocumentAgent:
                 doc_id=context.document_id,
             )
 
-        # Проверяем состояние треда
+        # Проверка состояния треда
         try:
             if await self._state_manager.is_thread_broken(context.thread_id):
-                logger.warning(
-                    "Broken thread detected — repairing",
-                    extra={"thread_id": context.thread_id},
-                )
                 await self._state_manager.repair_thread(context.thread_id)
         except Exception as exc:
             logger.error("Thread health check failed: %s", exc, exc_info=True)
@@ -220,16 +173,14 @@ class EdmsDocumentAgent:
                 loop=self._loop,
             )
 
-        # Обычный путь оркестрации
+        # Строим inputs для graph
+        inputs = self._build_inputs(context, request.message, doc_info)
+
         return await self._loop.run(
             context=context,
-            inputs=self._build_inputs(context, request.message, doc_info),
+            inputs=inputs,
             is_choice_active=False,
         )
-
-    # -----------------------------------------------------------------------
-    # Private helpers
-    # -----------------------------------------------------------------------
 
     def _build_inputs(
         self,
@@ -238,11 +189,17 @@ class EdmsDocumentAgent:
         doc_info: DocumentDto | None,
     ) -> dict[str, Any]:
         semantic_xml = self._build_semantic_xml(doc_info=doc_info)
+        # Если есть локальный файл (путь, не UUID) — явно добавляем workflow-сниппет
+        fp = context.file_path
+        if fp and not is_valid_uuid(fp):
+            intent = UserIntent.FILE_ANALYSIS
+        else:
+            intent = UserIntent.UNKNOWN
         system_prompt = PromptBuilder.build(
             context=context,
-            intent=context.intent or UserIntent.UNKNOWN,
+            intent=intent,
             semantic_xml=semantic_xml,
-            lean=USE_LEAN_PROMPT,
+            lean=settings.AGENT_LEAN_PROMPT,
         )
         return {
             "messages": [
@@ -254,24 +211,12 @@ class EdmsDocumentAgent:
     @staticmethod
     def _build_context(request: AgentRequest) -> ContextParams:
         uc: dict[str, Any] = request.user_context or {}
-
-        first_name: str = (
-            uc.get("first_name") or uc.get("firstName") or uc.get("name") or ""
-        ).strip()
-        last_name: str = (
-            uc.get("last_name") or uc.get("lastName") or uc.get("surname") or ""
-        ).strip()
-        middle_name: str = (
-            uc.get("middle_name") or uc.get("middleName") or uc.get("patronymic") or ""
-        ).strip()
-        user_id: str | None = (
-            uc.get("id")
-            or uc.get("user_id")
-            or uc.get("userId")
-            or uc.get("employeeId")
-            or uc.get("employee_id")
+        first_name = (uc.get("first_name") or uc.get("firstName") or "").strip()
+        last_name = (uc.get("last_name") or uc.get("lastName") or "").strip()
+        middle_name = (uc.get("middle_name") or uc.get("middleName") or "").strip()
+        user_id = (
+            uc.get("id") or uc.get("user_id") or uc.get("userId")
         )
-
         parts = [p for p in (last_name, first_name, middle_name) if p]
         full_name = " ".join(parts) if parts else None
 
@@ -307,63 +252,22 @@ class EdmsDocumentAgent:
             return " ".join(parts) if parts else None
 
         lines: list[str] = ["\n\n<semantic_context>"]
-
         short_summary = getattr(doc_info, "shortSummary", None)
         if short_summary:
             lines.append(f"  <title>{esc(short_summary)}</title>")
-
-        reg_number = getattr(doc_info, "regNumber", None) or getattr(
-            doc_info, "reservedRegNumber", None
-        )
+        reg_number = getattr(doc_info, "regNumber", None)
         if reg_number:
             lines.append(f"  <reg_number>{esc(reg_number)}</reg_number>")
-
-        reg_date = getattr(doc_info, "regDate", None)
-        if reg_date:
-            lines.append(f"  <reg_date>{esc(reg_date)}</reg_date>")
-
         status = getattr(doc_info, "status", None)
         if status:
-            status_val = status.value if hasattr(status, "value") else str(status)
-            lines.append(f"  <status>{esc(status_val)}</status>")
-
-        doc_type = getattr(doc_info, "documentType", None)
-        if doc_type:
-            type_name = getattr(doc_type, "typeName", None)
-            if type_name:
-                lines.append(f"  <doc_type>{esc(type_name)}</doc_type>")
-
+            lines.append(f"  <status>{esc(status)}</status>")
         category = getattr(doc_info, "docCategoryConstant", None)
         if category:
-            cat_val = category.value if hasattr(category, "value") else str(category)
-            lines.append(f"  <category>{esc(cat_val)}</category>")
-
-        author = getattr(doc_info, "author", None)
-        if author:
-            author_name = _user_name(author)
-            if author_name:
-                lines.append(f"  <author>{esc(author_name)}</author>")
-
-        executor = getattr(doc_info, "responsibleExecutor", None)
-        if executor:
-            executor_name = _user_name(executor)
-            if executor_name:
-                lines.append(f"  <executor>{esc(executor_name)}</executor>")
-
-        corr_name = getattr(doc_info, "correspondentName", None)
-        if corr_name:
-            lines.append(f"  <correspondent>{esc(corr_name)}</correspondent>")
-
-        control_flag = getattr(doc_info, "controlFlag", None)
-        if control_flag is not None:
-            lines.append(f"  <on_control>{esc(str(control_flag))}</on_control>")
-
+            lines.append(f"  <category>{esc(category)}</category>")
         lines.append("</semantic_context>")
         return "\n".join(lines)
 
 
 class _NullDocumentRepository:
-    """No-op репозиторий — используется когда document_repo не передан."""
-
     async def get_document(self, token: str, doc_id: str) -> None:
         return None

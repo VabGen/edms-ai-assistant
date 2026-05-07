@@ -8,9 +8,11 @@ The JSON Schema is passed directly to the LLM's `response_format` parameter
 
 from __future__ import annotations
 
+import time
+
 from datetime import date
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, TypeAlias, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -69,18 +71,16 @@ class ExecutiveSummaryOutput(LLMBaseModel):
     Used with: SummaryMode.EXECUTIVE
     """
     headline: Annotated[str, Field(
-        description="One sentence capturing the single most important point",
-        max_length=200,
+        description="One sentence capturing the single most important point (желательно до 200 символов)",
     )]
     bullets: Annotated[list[str], Field(
         description="3-5 key takeaways, each max 20 words",
         min_length=0,
-        max_length=5,
+        max_length=5, # Keep list length limit to prevent runaway generation
     )]
     recommendation: Annotated[str | None, Field(
-        description="Optional: single recommended action if document requires decision",
+        description="Optional: single recommended action if document requires decision (желательно до 300 символов)",
         default=None,
-        max_length=300,
     )]
 
     @field_validator("bullets")
@@ -95,8 +95,8 @@ class ExecutiveSummaryOutput(LLMBaseModel):
 
 
 class NoteSection(LLMBaseModel):
-    title: Annotated[str, Field(max_length=100)]
-    content: Annotated[str, Field(max_length=2000)]
+    title: Annotated[str, Field(description="Section title (желательно до 100 символов)")]
+    content: Annotated[str, Field(description="Section content (желательно до 2000 символов)")]
     subsections: Annotated[list[str], Field(
         default=[],
         description="Optional bullet sub-points",
@@ -112,7 +112,6 @@ class DetailedNotesOutput(LLMBaseModel):
     document_type: Annotated[str, Field(
         description="Detected document type (e.g. CONTRACT, MEMO, REGULATION)",
         default="UNKNOWN",
-        max_length=50,
     )]
     sections: Annotated[list[NoteSection], Field(
         min_length=1,
@@ -138,13 +137,11 @@ class ActionItem(LLMBaseModel):
     """A single extracted action item with structured metadata."""
 
     task: Annotated[str, Field(
-        description="Clear description of what needs to be done",
-        max_length=300,
+        description="Clear description of what needs to be done (желательно до 300 символов)",
     )]
     owner: Annotated[str | None, Field(
-        description="Person or role responsible. null if not explicitly stated.",
+        description="Person or role responsible. null if not explicitly stated. (желательно до 100 символов)",
         default=None,
-        max_length=100,
     )]
     deadline: Annotated[date | None, Field(
         description="Deadline in ISO 8601 date format. null if not explicitly stated.",
@@ -155,9 +152,8 @@ class ActionItem(LLMBaseModel):
         description="Priority inferred from document language and context",
     )]
     source_fragment: Annotated[str, Field(
-        description="Exact quoted sentence from source that contains this action item",
+        description="Exact quoted sentence from source that contains this action item (желательно до 500 символов)",
         default="",
-        max_length=500,
     )]
     confidence: Annotated[float, Field(
         description="Extraction confidence 0.0-1.0",
@@ -165,6 +161,27 @@ class ActionItem(LLMBaseModel):
         ge=0.0,
         le=1.0,
     )]
+
+    @field_validator("deadline", mode="before")
+    @classmethod
+    def _parse_deadline(cls, v: object) -> object:
+        if isinstance(v, str):
+            return date.fromisoformat(v)
+        return v
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _parse_priority(cls, v: object) -> object:
+        if isinstance(v, str):
+            return Priority(v)
+        return v
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _parse_confidence(cls, v: object) -> object:
+        if isinstance(v, int):
+            return float(v)
+        return v
 
 
 class ActionItemsOutput(LLMBaseModel):
@@ -184,9 +201,8 @@ class ActionItemsOutput(LLMBaseModel):
         ge=0,
     )]
     document_context: Annotated[str, Field(
-        description="Brief document context for action items interpretation",
+        description="Brief document context for action items interpretation (желательно до 200 символов)",
         default="",
-        max_length=200,
     )]
 
     @model_validator(mode="after")
@@ -202,17 +218,17 @@ class ActionItemsOutput(LLMBaseModel):
 
 
 class ThesisPoint(LLMBaseModel):
-    claim: Annotated[str, Field(max_length=200)]
-    evidence: Annotated[str | None, Field(default=None, max_length=300)]
+    claim: Annotated[str, Field(description="Claim statement (желательно до 200 символов)")]
+    evidence: Annotated[str | None, Field(default=None, description="Supporting evidence (желательно до 300 символов)")]
     sub_points: Annotated[list[str], Field(default=[], max_length=5)]
 
 
 class ThesisSection(LLMBaseModel):
     title: Annotated[str, Field(
         default="",
-        max_length=100
+        description="Section title (желательно до 100 символов)"
     )]
-    thesis: Annotated[str, Field(max_length=300)]
+    thesis: Annotated[str, Field(description="Section thesis statement (желательно до 300 символов)")]
     points: Annotated[list[ThesisPoint], Field(default=[], max_length=5)]
 
 
@@ -222,8 +238,7 @@ class ThesisPlanOutput(LLMBaseModel):
     Used with: SummaryMode.THESIS
     """
     main_argument: Annotated[str, Field(
-        description="Central thesis of the document in one sentence",
-        max_length=250,
+        description="Central thesis of the document in one-two sentences (желательно до 1000 символов)",
     )]
     sections: Annotated[list[ThesisSection], Field(
         min_length=0,
@@ -231,7 +246,7 @@ class ThesisPlanOutput(LLMBaseModel):
     )]
     conclusion: Annotated[str, Field(
         default="",
-        max_length=300,
+        description="Conclusion based on the thesis (желательно до 300 символов)",
     )]
 
 
@@ -244,10 +259,9 @@ class ExtractedFact(LLMBaseModel):
     category: Annotated[str, Field(
         description="Category: DATE, PERSON, ORG, AMOUNT, REQUIREMENT, DEADLINE, OTHER",
         default="OTHER",
-        max_length=20,
     )]
-    label: Annotated[str, Field(max_length=80)]
-    value: Annotated[str, Field(max_length=300)]
+    label: Annotated[str, Field(description="Fact label/title (желательно до 80 символов)")]
+    value: Annotated[str, Field(description="Fact value/content (желательно до 300 символов)")]
 
 
 class ExtractiveOutput(LLMBaseModel):
@@ -260,9 +274,8 @@ class ExtractiveOutput(LLMBaseModel):
         max_length=20,
     )]
     document_summary: Annotated[str, Field(
-        description="One-sentence document summary",
+        description="One-sentence document summary (желательно до 200 символов)",
         default="",
-        max_length=200,
     )]
 
 
@@ -277,13 +290,12 @@ class AbstractiveOutput(LLMBaseModel):
     Used with: SummaryMode.ABSTRACTIVE
     """
     summary: Annotated[str, Field(
-        description="Cohesive paraphrased summary in 2-4 paragraphs",
-        max_length=2000,
+        description="Cohesive paraphrased summary in 2-4 paragraphs (желательно до 2000 символов)",
     )]
     key_themes: Annotated[list[str], Field(
         description="2-5 main themes covered",
         default=[],
-        min_length=1,
+        min_length=0,
         max_length=5,
     )]
 
@@ -301,18 +313,17 @@ class MultilingualOutput(LLMBaseModel):
     detected_language: Annotated[str, Field(
         description="BCP-47 language tag of source document (e.g. 'ru', 'en', 'be')",
         default="ru",
-        max_length=10,
+        max_length=10, # Keep strict for language codes
     )]
     summary_language: Annotated[str, Field(
         description="BCP-47 language tag of output summary",
         default="ru",
-        max_length=10,
+        max_length=10, # Keep strict for language codes
     )]
-    summary: Annotated[str, Field(max_length=2000)]
+    summary: Annotated[str, Field(description="Translated/preserved summary (желательно до 2000 символов)")]
     translation_notes: Annotated[str | None, Field(
-        description="Notes on significant translation choices if applicable",
+        description="Notes on significant translation choices if applicable (желательно до 300 символов)",
         default=None,
-        max_length=300,
     )]
 
 
@@ -333,7 +344,6 @@ class QualityScore(BaseModel):
 
     @classmethod
     def from_score(cls, score: float, critique: str | None = None) -> "QualityScore":
-        import time
         if score > 0.85:
             confidence = ConfidenceLevel.HIGH
         elif score > 0.60:
@@ -349,18 +359,18 @@ class QualityScore(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Union type for mode dispatch
+# Union type for mode dispatch (Python 3.11 compatible)
 # ---------------------------------------------------------------------------
 
-type SummarizationOutput = (
-    ExecutiveSummaryOutput
-    | DetailedNotesOutput
-    | ActionItemsOutput
-    | ThesisPlanOutput
-    | ExtractiveOutput
-    | AbstractiveOutput
-    | MultilingualOutput
-)
+SummarizationOutput: TypeAlias = Union[
+    ExecutiveSummaryOutput,
+    DetailedNotesOutput,
+    ActionItemsOutput,
+    ThesisPlanOutput,
+    ExtractiveOutput,
+    AbstractiveOutput,
+    MultilingualOutput,
+]
 
 MODE_OUTPUT_MODEL: dict[SummaryMode, type[LLMBaseModel]] = {
     SummaryMode.EXECUTIVE: ExecutiveSummaryOutput,

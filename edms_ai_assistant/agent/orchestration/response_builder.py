@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 
 from edms_ai_assistant.agent.context import AgentResponse, AgentStatus, ContextParams
+from edms_ai_assistant.agent.extraction.content_extractor import ContentExtractor
 from edms_ai_assistant.agent.orchestration.sanitizer import sanitize_technical_content
 
 logger = logging.getLogger(__name__)
@@ -133,8 +135,6 @@ class InteractiveStatusDetector:
 
         base_msg: str = data.get("message", "Уточните выбор:")
         # Убираем лишние UUID из сообщения
-        import re
-
         base_msg = (
             re.sub(
                 r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -258,19 +258,5 @@ class ResponseBuilder:
 
     @staticmethod
     def _extract_compliance(messages: list[BaseMessage]) -> dict[str, Any] | None:
-        """Ищет compliance-результат в последних ToolMessages (staticmethod)."""
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                break
-            if isinstance(msg, ToolMessage):
-                try:
-                    data: dict[str, Any] = json.loads(str(msg.content))
-                    if (
-                        data.get("status") == "success"
-                        and isinstance(data.get("fields"), list)
-                        and "overall" in data
-                    ):
-                        return data
-                except (json.JSONDecodeError, AttributeError, TypeError):
-                    pass
-        return None
+        """Ищет compliance-результат в последних ToolMessages."""
+        return ContentExtractor.extract_compliance_data(messages)

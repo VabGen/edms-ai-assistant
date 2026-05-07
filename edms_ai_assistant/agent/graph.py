@@ -25,11 +25,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
+from edms_ai_assistant.config import settings
 from edms_ai_assistant.model import AgentState
 
 logger = logging.getLogger(__name__)
-
-_MAX_HISTORY_MSGS: int = 40
 
 
 class GraphBuilder:
@@ -76,7 +75,7 @@ class GraphBuilder:
 
         async def call_model(state: AgentState) -> dict[str, Any]:
             """Вызывает LLM с обрезанной и санитизированной историей."""
-            sys_msgs: list[BaseMessage] = [
+            all_sys: list[BaseMessage] = [
                 m for m in state["messages"] if isinstance(m, SystemMessage)
             ]
             non_sys: list[BaseMessage] = [
@@ -84,8 +83,13 @@ class GraphBuilder:
             ]
 
             # Обрезаем историю до лимита
-            if len(non_sys) > _MAX_HISTORY_MSGS:
-                non_sys = non_sys[-_MAX_HISTORY_MSGS:]
+            if len(non_sys) > settings.AGENT_MAX_CONTEXT_MESSAGES:
+                non_sys = non_sys[-settings.AGENT_MAX_CONTEXT_MESSAGES:]
+
+            # Оставляем только последний SystemMessage — каждый запрос добавляет
+            # новый, старые содержат устаревший контекст (file_path, документ и т.д.)
+            # и вводят LLM в заблуждение.
+            sys_msgs: list[BaseMessage] = all_sys[-1:] if all_sys else []
 
             # Инъекция compliance-fix hint
             for msg in reversed(state["messages"]):
@@ -178,8 +182,19 @@ class GraphBuilder:
                         return {
                             "messages": [
                                 AIMessage(
+                                    content=f"ИНФОРМАЦИЯ: {detail}. Сообщи пользователю."
+                                )
+                            ]
+                        }
+
+                    if status == "error":
+                        err_msg: str = data.get("message", raw[:200])
+                        return {
+                            "messages": [
+                                AIMessage(
                                     content=(
-                                        f"ИНФОРМАЦИЯ: {detail}. Сообщи пользователю."
+                                        f"⚠️ Ошибка инструмента: {err_msg}. "
+                                        "Проинформируй пользователя понятным языком."
                                     )
                                 )
                             ]
@@ -187,25 +202,6 @@ class GraphBuilder:
 
                 except json.JSONDecodeError:
                     pass
-
-            raw_lower = raw.lower()
-            if '"status": "error"' in raw_lower or (
-                raw_lower.startswith("{") and '"error"' in raw_lower
-            ):
-                try:
-                    err_msg: str = json.loads(raw).get("message", raw[:200])
-                except (json.JSONDecodeError, KeyError):
-                    err_msg = raw[:200]
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=(
-                                f"⚠️ Ошибка инструмента: {err_msg}. "
-                                "Проинформируй пользователя понятным языком."
-                            )
-                        )
-                    ]
-                }
 
             return {"messages": []}
 

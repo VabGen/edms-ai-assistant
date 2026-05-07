@@ -1,9 +1,111 @@
-version: '3.8'
+# ─────────────────────────────────────────────────────────────────────────────
+# EDMS AI Assistant — Production docker-compose
+#
+# Usage:
+#   docker compose up -d --build          # first start / rebuild
+#   docker compose pull && docker compose up -d --build   # update
+#   docker compose logs -f app             # follow app logs
+#   docker compose down                    # stop (data volumes preserved)
+#   docker compose down -v                 # stop + wipe all volumes
+#
+# Dev overrides are in docker-compose.override.yml (auto-loaded by Docker).
+# ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  redis:
-    image: redis:alpine
-    container_name: edms-redis
-    ports:
-      - "6379:6379"
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18-alpine
+    container_name: edms-postgres
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB:       ${POSTGRES_DB:-ai_assistant}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ai_assistant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
+    networks:
+      - edms-network
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: edms-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - edms-network
+
+  # ── Application ─────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        PYTHON_VERSION: "3.13-slim"
+        TORCH_VARIANT:  "cpu"
+    image: edms-ai-assistant:latest
+    container_name: edms-app
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST:    redis
+      REDIS_PORT:    "6379"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - app_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${API_PORT:-8000}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - edms-network
+
+# ── Named volumes ───────────────────────────────────────────────────────────
+volumes:
+  pgdata:
+    name: edms_pgdata
+  redis_data:
+    name: edms_redis_data
+  app_uploads:
+    name: edms_app_uploads
+
+# ── Networks ────────────────────────────────────────────────────────────────
+networks:
+  edms-network:
+    name: edms-network
+    driver: bridge

@@ -4,10 +4,9 @@
 > Automates document workflows, analysis, and task routing via LangGraph agents.
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![uv](https://img.shields.io/badge/uv-0.5+-blueviolet)](https://docs.astral.sh/uv/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.4+-orange.svg)](https://langchain-ai.github.io/langgraph/)
-[![Ruff](https://img.shields.io/badge/linter-ruff-orange)](https://docs.astral.sh/ruff/)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue.svg)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -15,15 +14,14 @@
 ## Contents
 
 - [Overview](#overview)
-- [Requirements](#requirements)
-- [Installation](#installation)
+- [Quick Start (Docker)](#quick-start-docker)
+- [Deploying on a New Machine](#deploying-on-a-new-machine)
 - [Configuration](#configuration)
-- [Running](#running)
+- [Docker Commands](#docker-commands)
 - [API](#api)
+- [Ollama Setup](#ollama-setup)
+- [Database Migrations](#database-migrations)
 - [Development](#development)
-- [Code Quality](#code-quality)
-- [Database](#database)
-- [Redis](#redis)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -44,115 +42,170 @@ creates tasks and familiarity lists, and fills appeal cards — all through a ch
 - Human-in-the-loop for disambiguation and format selection
 - Local file upload and comparison with EDMS attachments
 
----
-
-## Requirements
-
-| Tool      | Version | Install                                                                       |
-|-----------|---------|-------------------------------------------------------------------------------|
-| Python    | 3.13+   | [python.org](https://www.python.org/downloads/)                               |
-| uv        | 0.5.0+  | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/)  |
-| Redis     | 7.0+    | [redis.io](https://redis.io/docs/install/)                                    |
-| PostgreSQL| 18+     | [postgresql.org](https://www.postgresql.org/download/)                        |
+**Stack:** FastAPI · LangGraph · PostgreSQL 18 · Redis 7 · Qdrant · Ollama · Docker
 
 ---
 
-## Installation
+## Quick Start (Docker)
 
-### 1. Clone the repository
+```bash
+# 1. Clone
+git clone https://github.com/your-org/edms-ai-assistant.git
+cd edms-ai-assistant
+
+# 2. Configure
+cp .env.example .env
+# edit .env with your values
+
+# 3. Start
+docker compose up -d --build
+
+# 4. Check
+curl http://localhost:8000/health
+```
+
+API docs: http://localhost:8000/docs
+
+---
+
+## Deploying on a New Machine
+
+### Prerequisites
+
+| Tool           | Version | Install                                                       |
+|----------------|---------|---------------------------------------------------------------|
+| Docker Desktop | latest  | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| Ollama         | latest  | [ollama.com](https://ollama.com/download)                     |
+| Git            | any     | [git-scm.com](https://git-scm.com/)                          |
+
+### Step-by-step
+
+**1. Install Ollama and pull the model**
+
+```powershell
+ollama pull gpt-oss:120b-cloud
+```
+
+**2. Configure Ollama to listen on all interfaces**
+
+> Required so Docker containers can reach Ollama running on the host.
+
+```powershell
+# Run once, then restart Ollama
+setx OLLAMA_HOST "0.0.0.0:11434"
+```
+
+Open a **new** terminal and start Ollama:
+```powershell
+ollama serve
+```
+
+Verify (must show `0.0.0.0:11434`):
+```powershell
+netstat -ano | findstr 11434
+```
+
+**3. Clone the repository**
 
 ```bash
 git clone https://github.com/your-org/edms-ai-assistant.git
 cd edms-ai-assistant
 ```
 
-### 2. Create virtual environment
+**4. Create `.env`**
+
+Copy `.env.example` to `.env` and fill in the values (or copy a pre-filled `.env` from a teammate):
 
 ```bash
-uv venv --python 3.13
+cp .env.example .env
 ```
 
-### 3. Install dependencies
+**5. Start**
 
 ```bash
-# Development — runtime + dev + lint
-uv sync --all-groups
-
-# Production — runtime only
-uv sync --no-dev
-
-ollama serve
-
-https://www.libreoffice.org/download/download/
-
-Get-ChildItem -Path . -Directory -Recurse -Filter "__pycache__" | Remove-Item -Recurse -Force
+docker compose up -d --build
 ```
 
-### Dependency groups
+```bash
+docker compose up -d --force-recreate app
+```
 
-| Command                  | Installs              |
-|--------------------------|-----------------------|
-| `uv sync --all-groups`   | Runtime + dev + lint  |
-| `uv sync --group dev`    | Runtime + tests       |
-| `uv sync --group lint`   | Runtime + linters     |
-| `uv sync --no-dev`       | Runtime only          |
-
-### Activate virtual environment
+**6. Verify**
 
 ```bash
-# Windows
-.venv\Scripts\activate
-
-# Linux / macOS
-source .venv/bin/activate
+docker compose ps
+curl http://localhost:8000/health
+docker exec edms-app curl -sf http://host.docker.internal:11434
 ```
 
 ---
 
 ## Configuration
 
-### 1. Create `.env` from template
+All settings are loaded from `.env`. See `.env.example` for the full reference with comments.
 
+Key variables:
+
+| Variable               | Description                         | Default      |
+|------------------------|-------------------------------------|--------------|
+| `POSTGRES_PASSWORD`    | PostgreSQL password                 | *(required)* |
+| `JWT_SECRET_KEY`       | JWT signing key (64-char hex)       | *(required)* |
+| `LLM_GENERATIVE_URL`   | Ollama / OpenAI-compatible endpoint | *(required)* |
+| `LLM_GENERATIVE_MODEL` | Model name                          | *(required)* |
+| `EDMS_BASE_URL`        | EDMS backend URL                    | *(required)* |
+| `API_PORT`             | Port to expose                      | `8000`       |
+| `UVICORN_WORKERS`      | Number of uvicorn workers           | `1`          |
+| `LOGGING_LEVEL`        | `DEBUG` / `INFO` / `WARNING`        | `INFO`       |
+
+Generate a secure JWT key:
 ```bash
-cp .env.example .env
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
+
 ---
 
-## Running
-
-### Development
+## Docker Commands
 
 ```bash
-uv run uvicorn edms_ai_assistant.main:app --reload --reload-exclude ".venv"
+# First start / rebuild after code changes
+docker compose up -d --build
+
+# Update: pull latest code, then rebuild
+git pull
+docker compose up -d --build
+
+# Follow application logs
+docker compose logs -f app
+
+# Check status of all services
+docker compose ps
+
+# Stop (data volumes preserved)
+docker compose down
+
+# Stop and wipe all data volumes
+docker compose down -v
+
+# Restart a single service
+docker compose restart app
+
+# Open a shell inside the app container
+docker exec -it edms-app bash
 ```
 
-### Production
+### Dev mode (hot reload)
+
+`docker-compose.override.yml` is auto-loaded — it mounts source code and enables `--reload`:
 
 ```bash
-uv run uvicorn edms_ai_assistant.main:app --host 0.0.0.0 --port 8000 --workers 4
+docker compose up -d --build
+docker compose logs -f app
 ```
 
-### Docker (если есть)
-
-```bash
-docker compose up --build
-docker compose up -d          # фоновый режим
-docker compose logs -f        # логи в реальном времени
-docker compose down           # остановить
-```
-
-### PyCharm Run Configuration
-
-`Run → Edit Configurations → + → Python`
-
-| Field                  | Value                                                         |
-|------------------------|---------------------------------------------------------------|
-| **Module name**        | `uvicorn`                                                     |
-| **Parameters**         | `edms_ai_assistant.main:app --reload --reload-exclude .venv`  |
-| **Working directory**  | `D:\project\edms-ai-assistant`                                |
-| **Interpreter**        | `.venv\Scripts\python.exe`                                    |
-
-> ⚠️ Use **Module name**, not Script path — otherwise the package won't resolve correctly.
+Infrastructure ports exposed locally in dev mode:
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- Qdrant: `localhost:6333`
 
 ---
 
@@ -179,245 +232,118 @@ docker compose down           # остановить
 
 ---
 
-## Development
+## Ollama Setup
 
-### Update lock file
-
-```bash
-# После редактирования pyproject.toml
-uv lock
-
-# Обновить конкретный пакет
-uv lock --upgrade-package langchain
-
-# Обновить все пакеты
-uv lock --upgrade
-```
-
-> `uv.lock` должен быть закоммичен — он обеспечивает воспроизводимые сборки
-> во всех окружениях и CI/CD (аналог `package-lock.json`).
-
-### Добавить зависимость
-
-```bash
-# Runtime
-uv add httpx
-
-# Dev-only
-uv add --group dev pytest-mock
-
-# Lint-only
-uv add --group lint pylint
-```
-
-### Удалить зависимость
-
-```bash
-uv remove httpx
-```
-
-### Показать дерево зависимостей
-
-```bash
-uv tree
-uv tree --package langchain   # только для конкретного пакета
-```
-
-### Run tests
-
-```bash
-# Все тесты
-uv run pytest
-
-# С отчётом покрытия
-uv run pytest --cov=edms_ai_assistant --cov-report=term-missing
-
-# Конкретный файл или тест
-uv run pytest tests/test_agent.py
-uv run pytest tests/test_agent.py::test_chat_basic -v
-
-# Только быстрые тесты (без интеграционных)
-uv run pytest -m "not integration"
-
-# Параллельно (если установлен pytest-xdist)
-uv run pytest -n auto
-```
-
----
-
-## Code Quality
-
-### Format
-
-```bash
-uv run black edms_ai_assistant/
-
-# Только проверка без изменений
-uv run black --check edms_ai_assistant/
-```
-
-### Lint
-
-```bash
-# Только проверка
-uv run ruff check .
-
-# Проверка + автофикс
-uv run ruff check --fix .
-
-# Показать все правила
-uv run ruff rule --all
-```
-
-### Sort imports
-
-```bash
-uv run isort edms_ai_assistant/
-
-# Только проверка
-uv run isort --check-only edms_ai_assistant/
-```
-
-### Type check
-
-```bash
-uv run mypy .
-
-# Строгий режим
-uv run mypy . --strict
-
-# Конкретный файл
-uv run mypy edms_ai_assistant/agent.py
-```
-
-### Run all checks
-
-```bash
-uv run black edms_ai_assistant/ && uv run ruff check --fix . && uv run mypy .
-```
-
-### Pre-commit (рекомендуется)
-
-```bash
-# Установить хуки
-uv run pre-commit install
-
-# Запустить вручную на всех файлах
-uv run pre-commit run --all-files
-```
-
----
-
-## Database
-
-### PostgreSQL — основные команды
-
-```bash
-# Подключиться к БД
-psql -h localhost -U postgres -d postgres
-
-# Проверить подключение
-psql -h localhost -U postgres -c "SELECT version();"
-```
-
-### Alembic миграции
-
-```bash
-# Инициализировать (только первый раз)
-uv run alembic init alembic
-
-# Создать новую миграцию
-uv run alembic revision --autogenerate -m "add_table_name"
-
-# Применить все миграции
-uv run alembic upgrade head
-
-# Откатить последнюю миграцию
-uv run alembic downgrade -1
-
-# Откатить все
-uv run alembic downgrade base
-
-# Показать текущую версию
-uv run alembic current
-
-# История миграций
-uv run alembic history --verbose
-```
-
----
-
-## Redis
-
-### Windows
+Ollama runs on the **host machine** (not in Docker). The app container reaches it via `host.docker.internal:11434`.
 
 ```powershell
-# Установить
-winget install Redis.Redis
+# Set OLLAMA_HOST permanently (user-level, no admin required)
+setx OLLAMA_HOST "0.0.0.0:11434"
 
-# http://localhost:5540
-winget install RedisInsight.RedisInsight
+# Kill current process if running
+Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force
 
-# Запустить сервер
-redis-server
-# или
-& "C:\Program Files\Redis\redis-server.exe"
+# Open a new terminal and start
+ollama serve
 
-net start Redis   # один раз после установки
+# Verify — must show 0.0.0.0:11434
+netstat -ano | findstr 11434
 
-# Проверить
-redis-cli ping   # → PONG
-
-# Управление службой
-Start-Service Redis
-Stop-Service Redis
-Restart-Service Redis
-Get-Service Redis
+# Pull / list models
+ollama pull gpt-oss:120b-cloud
+ollama list
 ```
 
-### Linux / macOS
-
+Test from inside container:
 ```bash
-# Установить (Ubuntu/Debian)
-sudo apt install redis-server
-
-# Установить (macOS)
-brew install redis
-
-# Запустить
-sudo systemctl start redis
-sudo systemctl enable redis   # автозапуск
-
-# Проверить
-redis-cli ping   # → PONG
-redis-cli info server
+docker exec edms-app curl -sf http://host.docker.internal:11434
+# Expected: Ollama is running
 ```
 
-### Отладка кэша
+---
+
+## Database Migrations
+
+Migrations run **automatically** on container startup via `docker/entrypoint.sh`.
+
+To run manually or create new migrations:
 
 ```bash
-# Все ключи агента
-redis-cli keys "edms:doc:*"
+# Apply all pending migrations
+docker exec edms-app alembic upgrade head
 
-redis-cli get "edms:doc_analysis:<UUID>" | python -m json.tool
+# Create a new migration (local dev)
+uv run alembic revision --autogenerate -m "add_table_name"
 
-# TTL конкретного документа
-redis-cli ttl "edms:doc:<UUID>"
+# Other commands
+docker exec edms-app alembic current     # current revision
+docker exec edms-app alembic history     # migration history
+docker exec edms-app alembic downgrade -1  # rollback one step
+```
 
-# Получить значение ключа
-redis-cli get "edms:doc:<UUID>"
+---
 
-# Удалить конкретный ключ
-redis-cli del "edms:doc:<UUID>"
+## Development
 
-# Очистить все ключи (осторожно!)
-redis-cli flushdb
+### Local setup
 
-# Мониторинг команд в реальном времени
-redis-cli monitor
+```bash
+uv venv --python 3.13
+uv sync --all-groups
 
-# Статистика памяти
-redis-cli info memory
+# Windows
+.venv\Scripts\activate
+# Linux / macOS
+source .venv/bin/activate
+```
+
+### Run locally (without Docker)
+
+> Requires PostgreSQL 18, Redis, and Ollama running locally.
+
+```bash
+uv run uvicorn edms_ai_assistant.main:app --reload --reload-exclude ".venv"
+```
+
+### PyCharm Run Configuration
+
+`Run → Edit Configurations → + → Python`
+
+| Field                 | Value                                                        |
+|-----------------------|--------------------------------------------------------------|
+| **Module name**       | `uvicorn`                                                    |
+| **Parameters**        | `edms_ai_assistant.main:app --reload --reload-exclude .venv` |
+| **Working directory** | `<project root>`                                             |
+| **Interpreter**       | `.venv\Scripts\python.exe`                                   |
+
+> ⚠️ Use **Module name**, not Script path.
+
+### Manage dependencies
+
+```bash
+uv add httpx                          # add runtime dependency
+uv add --group dev pytest-mock        # add dev dependency
+uv remove httpx                       # remove dependency
+uv lock                               # update lock file
+uv lock --upgrade-package langchain   # upgrade single package
+```
+
+> `uv.lock` must be committed — it ensures reproducible Docker builds.
+
+### Tests
+
+```bash
+uv run pytest
+uv run pytest --cov=edms_ai_assistant --cov-report=term-missing
+uv run pytest -m "not integration"
+```
+
+### Code quality
+
+```bash
+uv run ruff check --fix .           # lint + autofix
+uv run black edms_ai_assistant/     # format
+uv run mypy .                       # type check
 ```
 
 ---
@@ -428,106 +354,81 @@ redis-cli info memory
 edms-ai-assistant/
 ├── edms_ai_assistant/
 │   ├── main.py               # FastAPI entry point
-│   ├── agent.py              # LangGraph orchestration
 │   ├── config.py             # Settings (pydantic-settings)
-│   ├── model.py              # Pydantic models (public contracts)
 │   ├── llm.py                # LLM factory
-│   ├── security.py           # JWT token extraction
-│   ├── tools/                # LangChain tools
-│   │   ├── attachment.py     # EDMS attachment analysis
-│   │   ├── local_file_tool.py# Local file reading
-│   │   ├── file_compare_tool.py # File vs attachment comparison
-│   │   └── ...
+│   ├── agent/                # LangGraph orchestration
+│   ├── api/routes/           # FastAPI routers
 │   ├── clients/              # EDMS API HTTP clients
-│   │   ├── base_client.py    # EdmsHttpClient base
-│   │   ├── document_client.py
-│   │   ├── employee_client.py
-│   │   └── ...
-│   ├── services/             # Business logic (Service Layer)
-│   │   ├── nlp_service.py    # Semantic dispatcher, intent detection
-│   │   ├── task_service.py   # Task creation with disambiguation
-│   │   └── file_processor.py # Text extraction from files
-│   ├── models/               # Internal domain models
-│   ├── generated/            # Auto-generated OpenAPI models
-│   └── utils/                # Shared utilities
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── .env.example              # Шаблон переменных окружения
-├── pyproject.toml            # Project config + dependency groups
+│   └── core/                 # Shared utilities, exceptions
+├── migrations/               # Alembic migration scripts
+├── docker/
+│   └── entrypoint.sh         # Container startup script
+├── Dockerfile                # Multi-stage production build
+├── docker-compose.yml        # Production stack
+├── docker-compose.override.yml  # Dev overrides (hot reload)
+├── .env.example              # Environment variable template
+├── pyproject.toml            # Project config + dependencies
 ├── uv.lock                   # Locked dependency versions (commit this!)
-├── .gitignore
-└── README.md
+└── .dockerignore
 ```
 
 ---
 
 ## Troubleshooting
 
+### Container `edms-postgres` is unhealthy
+
+```bash
+docker compose logs postgres
+```
+
+PostgreSQL 18 stores data in a version-specific subdirectory. If upgrading from an older image, wipe the old volume:
+```bash
+docker compose down
+docker volume rm edms_pgdata
+docker compose up -d
+```
+
+### App container exits immediately
+
+```bash
+docker compose logs app
+```
+
+Common causes: missing or incomplete `.env`, PostgreSQL not yet healthy, failed Alembic migration.
+
+### Ollama not reachable from container
+
+```bash
+# Check Ollama is listening on 0.0.0.0 (not 127.0.0.1)
+netstat -ano | findstr 11434
+
+# If still 127.0.0.1 — set env var, then restart Ollama in a new terminal
+setx OLLAMA_HOST "0.0.0.0:11434"
+```
+
+### Agent returns 503
+
+```bash
+docker compose logs app --tail=50
+```
+
+Common causes: `EDMS_BASE_URL` unreachable, wrong LLM endpoint, Ollama not running.
+
+### Wipe everything and start fresh
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d --build
+```
+
 ### `Access is denied` при `uv sync` (Windows)
 
-Директория `.venv` заблокирована запущенным процессом (IDE, терминал, Python).
-
 ```powershell
-# 1. Завершить все Python / uvicorn процессы
-Get-Process python* | Stop-Process -Force
-Get-Process uvicorn* | Stop-Process -Force
-
-# 2. Удалить заблокированное окружение и артефакты сборки
-Remove-Item -Recurse -Force .venv
-Remove-Item -Recurse -Force edms_ai_assistant.egg-info
-
-# 3. Пересоздать и синхронизировать
+Get-Process python*, uvicorn* | Stop-Process -Force
+Remove-Item -Recurse -Force .venv, edms_ai_assistant.egg-info
 uv venv --python 3.13
 uv sync --all-groups
-```
-
-> Если ошибка сохраняется — перезагрузите ПК и запустите `uv sync --all-groups` до открытия IDE.
-
-### `Could not import module "edms_ai_assistant.main"`
-
-Uvicorn запущен из неправильной директории или как скрипт вместо модуля.
-Всегда запускайте из корня проекта:
-
-```bash
-uv run uvicorn edms_ai_assistant.main:app --reload
-```
-
-### Неверная версия Python
-
-```bash
-uv venv --python 3.13
-uv sync --all-groups
-```
-
-### Ошибки setuptools после пересборки окружения
-
-```bash
-uv pip install --upgrade setuptools
-uv sync
-```
-
-### Агент возвращает 503
-
-Агент не инициализировался при старте. Проверьте логи:
-
-```bash
-# Смотреть логи uvicorn в реальном времени
-uv run uvicorn edms_ai_assistant.main:app --reload --log-level debug
-```
-
-Частые причины: недоступен EDMS backend (`EDMS_BASE_URL`), неверный `OPENAI_API_KEY`, не запущен Redis или PostgreSQL.
-
-### Файл не найден после загрузки
-
-Проверьте что директория загрузок создана и доступна:
-
-```bash
-# Linux / macOS
-ls -la /tmp/edms_ai_assistant_uploads/
-
-# Windows PowerShell
-Get-ChildItem $env:TEMP\edms_ai_assistant_uploads\
 ```
 
 ---

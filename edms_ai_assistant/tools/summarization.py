@@ -163,10 +163,10 @@ async def doc_summarize_text(
     Perform intelligent summarisation of document text via LLM v2 pipeline.
 
     Human-in-the-Loop contract:
-        When ``summary_type`` is None this tool returns ``requires_choice``
-        with three labelled options and a heuristic recommendation.
-        The agent MUST show this selection to the user and wait for their
-        explicit choice before calling the tool again.
+        When ``summary_type`` is None, ALWAYS call this tool immediately —
+        do NOT ask the user for the format in your text response.
+        The tool returns ``requires_choice`` and the system automatically
+        presents interactive selection buttons to the user.
 
     Supported formats when ``summary_type`` is provided:
     - ``extractive`` : Key facts, dates, amounts as a numbered list.
