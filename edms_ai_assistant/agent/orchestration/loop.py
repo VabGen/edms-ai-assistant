@@ -13,6 +13,7 @@ OrchestrationLoop v2 — Planning-first архитектура.
      + если план содержит ParallelGroup → PlanExecutor.execute() параллельно
   4. ResponseBuilder → финальный ответ
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +21,13 @@ import json
 import logging
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from edms_ai_assistant.agent.context import (
     AgentResponse,
@@ -34,7 +41,10 @@ from edms_ai_assistant.agent.orchestration.hitl import (
     HumanChoiceHandler,
     find_pending_tool_call,
 )
-from edms_ai_assistant.agent.orchestration.response_builder import InteractiveStatusDetector, ResponseBuilder
+from edms_ai_assistant.agent.orchestration.response_builder import (
+    InteractiveStatusDetector,
+    ResponseBuilder,
+)
 from edms_ai_assistant.agent.orchestration.states import ExecutionState
 from edms_ai_assistant.agent.planning import IntentPlanner, PlanExecutor
 from edms_ai_assistant.agent.planning.models import ExecutionPlan, ParallelGroup
@@ -74,13 +84,16 @@ def _check_requires_summary_choice(
         if is_choice_active:
             continue  # user just clicked — honour the patched choice
         args = call.get("args") or {}
-        preferred: str | None = (context.user_context or {}).get("preferred_summary_format")
+        preferred: str | None = (context.user_context or {}).get(
+            "preferred_summary_format"
+        )
         if preferred and preferred != "ask":
             continue  # user has a fixed preference — injector will apply it
         # Always ask the user — ignore whatever summary_type the LLM may have set
         from edms_ai_assistant.tools.summarization import (  # noqa: PLC0415
             _build_requires_choice_response,
         )
+
         text = last_tool_text or args.get("text", "")
         data = _build_requires_choice_response(text)
         logger.info(
@@ -128,6 +141,7 @@ class OrchestrationLoop:
         """Detect if get_chat_model() returned a new instance (after reset_chat_model())
         and refresh self._model, bound model cache, and planner accordingly."""
         from edms_ai_assistant.llm import get_chat_model  # noqa: PLC0415
+
         current = get_chat_model()
         if current is not self._model:
             self._model = current
@@ -249,18 +263,15 @@ class OrchestrationLoop:
 
             # Системный промпт из inputs
             system_msgs = [
-                m for m in inputs.get("messages", [])
-                if isinstance(m, SystemMessage)
+                m for m in inputs.get("messages", []) if isinstance(m, SystemMessage)
             ]
             human_msgs = [
-                m for m in inputs.get("messages", [])
-                if isinstance(m, HumanMessage)
+                m for m in inputs.get("messages", []) if isinstance(m, HumanMessage)
             ]
 
             # Строим messages: system + история (без старых SystemMessage) + текущий запрос
             non_sys_history = [
-                m for m in history_messages[-20:]
-                if not isinstance(m, SystemMessage)
+                m for m in history_messages[-20:] if not isinstance(m, SystemMessage)
             ]
             all_messages = system_msgs + non_sys_history + human_msgs
 
@@ -373,10 +384,16 @@ class OrchestrationLoop:
             # Pre-empt: if doc_summarize_text needs user selection, return
             # selection buttons WITHOUT resuming — graph stays at interrupt
             _raw_for_check = [
-                {"name": tc.get("name", ""), "args": dict(tc.get("args") or {}), "id": tc.get("id", "")}
+                {
+                    "name": tc.get("name", ""),
+                    "args": dict(tc.get("args") or {}),
+                    "id": tc.get("id", ""),
+                }
                 for tc in raw_calls
             ]
-            choice_resp = _check_requires_summary_choice(_raw_for_check, context, last_tool_text, current_is_choice)
+            choice_resp = _check_requires_summary_choice(
+                _raw_for_check, context, last_tool_text, current_is_choice
+            )
             if choice_resp:
                 return choice_resp
 
@@ -422,7 +439,9 @@ class OrchestrationLoop:
         try:
             state = await self._state_manager.get_state(thread_id)
             messages = state.values.get("messages", [])
-            return len([m for m in messages if isinstance(m, (HumanMessage, AIMessage))])
+            return len(
+                [m for m in messages if isinstance(m, (HumanMessage, AIMessage))]
+            )
         except Exception:
             return 0
 
@@ -450,7 +469,9 @@ class OrchestrationLoop:
             if r.error:
                 parts.append(f"[{r.tool_name}] Error: {r.error}")
             else:
-                result_str = json.dumps(r.result, ensure_ascii=False, default=str)[:3000]
+                result_str = json.dumps(r.result, ensure_ascii=False, default=str)[
+                    :3000
+                ]
                 parts.append(f"[{r.tool_name}] Result: {result_str}")
         return "\n\n".join(parts)
 

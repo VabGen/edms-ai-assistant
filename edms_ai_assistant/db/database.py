@@ -71,7 +71,7 @@ def _run_sync_migrations() -> None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=60
+            timeout=60,
         )
 
         if result.returncode == 0:
@@ -79,7 +79,9 @@ def _run_sync_migrations() -> None:
             if result.stdout:
                 logger.debug(f"Alembic output:\n{result.stdout.strip()}")
         else:
-            logger.error(f"Alembic migration failed with return code {result.returncode}")
+            logger.error(
+                f"Alembic migration failed with return code {result.returncode}"
+            )
             logger.error(f"Alembic stderr:\n{result.stderr.strip()}")
             logger.error(f"Alembic stdout:\n{result.stdout.strip()}")
             raise RuntimeError("Alembic migration failed")

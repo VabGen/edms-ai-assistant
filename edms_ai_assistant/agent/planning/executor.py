@@ -7,6 +7,7 @@ PlanExecutor — параллельное и последовательное в
 - Инжекция token/document_id через ToolCallInjector
 - Накопление результатов для передачи в Synthesizer
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -54,9 +55,7 @@ class PlanExecutor:
     """
 
     def __init__(self, tools: list[BaseTool]) -> None:
-        self._tools: dict[str, BaseTool] = {
-            t.name: t for t in tools
-        }
+        self._tools: dict[str, BaseTool] = {t.name: t for t in tools}
 
     async def execute(
         self,
@@ -75,18 +74,17 @@ class PlanExecutor:
             if isinstance(step, ParallelGroup):
                 # Параллельное выполнение группы
                 parallel_results = await asyncio.gather(
-                    *[
-                        self._execute_tool_step(s, context)
-                        for s in step.steps
-                    ],
+                    *[self._execute_tool_step(s, context) for s in step.steps],
                     return_exceptions=True,
                 )
                 for s, r in zip(step.steps, parallel_results):
                     if isinstance(r, Exception):
-                        results.append(StepResult(
-                            tool_name=s.tool_name,
-                            error=str(r),
-                        ))
+                        results.append(
+                            StepResult(
+                                tool_name=s.tool_name,
+                                error=str(r),
+                            )
+                        )
                     else:
                         results.append(r)
 
@@ -121,6 +119,7 @@ class PlanExecutor:
             args["document_id"] = context.document_id
         if context.file_path and "file_path" not in args:
             from edms_ai_assistant.agent.context import is_valid_uuid
+
             if not is_valid_uuid(context.file_path):
                 args["file_path"] = context.file_path
 

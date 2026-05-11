@@ -34,9 +34,9 @@ from edms_ai_assistant.api import (
     system_router,
 )
 from edms_ai_assistant.api.deps import UPLOAD_DIR
+from edms_ai_assistant.clients.redis_client import close_redis, init_redis
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.db.database import init_db
-from edms_ai_assistant.clients.redis_client import close_redis, init_redis
 from edms_ai_assistant.summarizer.api.router import router as summarizer_router
 from edms_ai_assistant.summarizer.container import build_summarization_service
 
@@ -77,9 +77,9 @@ async def lifespan(_app: FastAPI):
     service = getattr(_app.state, "summarization_service", None)
     if service is not None:
         try:
-            await service._llm.aclose()
+            await service.aclose()
         except Exception as exc:
-            logger.warning("Error closing LLM client: %s", exc)
+            logger.warning("Error closing SummarizationService: %s", exc)
 
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)

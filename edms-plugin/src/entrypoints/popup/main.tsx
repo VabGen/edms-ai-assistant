@@ -1,5 +1,5 @@
-import { createRoot } from 'react-dom/client'
+import {createRoot} from 'react-dom/client'
 import './style.css'
-import { Popup } from './Popup'
+import {Popup} from './Popup'
 
-createRoot(document.getElementById('root')!).render(<Popup />)
+createRoot(document.getElementById('root')!).render(<Popup/>)

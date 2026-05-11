@@ -1,6 +1,6 @@
 # edms_ai_assistant\utils\format_utils.py
-from typing import Any
 import re
+from typing import Any
 
 
 def clean_dict(d: Any) -> Any:

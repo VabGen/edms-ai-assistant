@@ -10,6 +10,7 @@ IntentPlanner — LLM-based планировщик вместо NLP keyword rout
 
 Используется в OrchestrationLoop ПЕРЕД bind_tools.
 """
+
 from __future__ import annotations
 
 import json
@@ -211,14 +212,14 @@ class IntentPlanner:
                 steps.append(ToolCallStep(**step_data))
             elif "steps" in step_data:
                 sub_steps = [ToolCallStep(**s) for s in step_data["steps"]]
-                steps.append(ParallelGroup(
-                    steps=sub_steps,
-                    reason=step_data.get("reason", ""),
-                ))
+                steps.append(
+                    ParallelGroup(
+                        steps=sub_steps,
+                        reason=step_data.get("reason", ""),
+                    )
+                )
             else:
-                steps.append(DirectAnswerStep(
-                    reason=step_data.get("reason", "")
-                ))
+                steps.append(DirectAnswerStep(reason=step_data.get("reason", "")))
 
         return ExecutionPlan(
             can_answer_directly=data.get("can_answer_directly", False),

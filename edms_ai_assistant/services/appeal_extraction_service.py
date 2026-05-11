@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from edms_ai_assistant.llm import get_chat_model
 from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
+from edms_ai_assistant.llm import get_chat_model
 
 logger = logging.getLogger(__name__)
 

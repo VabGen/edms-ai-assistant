@@ -1,4 +1,3 @@
-// edms-plugin/src/shared/ui/SettingsPanel.tsx
 import {memo, useState} from 'react'
 import {
     ArrowLeft, Palette, Mic, FileText,
@@ -297,7 +296,8 @@ function AgentTab({s, on}: { s: TechSettings['agent']; on: (p: Partial<TechSetti
                             el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
                         }}
                 >
-                    {(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const).map(v => <option key={v} value={v}>{v}</option>)}
+                    {(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const).map(v => <option key={v}
+                                                                                                   value={v}>{v}</option>)}
                 </select>
             </Field>
             <ToggleRow label="Трассировка агента" hint="Детальное логирование шагов ReAct" value={s.enableTracing}

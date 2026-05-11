@@ -1,47 +1,28 @@
 """
-Dependency wiring — builds SummarizationService from application config.
+Dependency wiring — сборка SummarizationService из конфига приложения.
 
-Provides:
-  - build_summarization_service(): constructs full service with all dependencies
-  - FastAPI lifespan integration helpers
-
-Usage in main.py lifespan:
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        service = await build_summarization_service(settings)
-        app.state.summarization_service = service
-        yield
-        await service._llm.aclose()
+Поведение:
+  - LLM-клиент конструируется из типизированного `SummarizerConfig`.
+  - Cache (Redis L1 + Postgres L2) переиспользует глобальный engine из db.database.
+  - Идемпотентный setup трейсинга.
+  - Регистрация сервиса в tool-обёртке (без app.state).
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+from edms_ai_assistant.summarizer.config import SummarizerConfig
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.summarizer.service import SummarizationService
 
 logger = logging.getLogger(__name__)
 
 
-async def build_summarization_service(settings: object) -> "SummarizationService":  # type: ignore[name-defined]
-    """
-    Construct a fully-wired SummarizationService from application settings.
-
-    Args:
-        settings: Application settings object (pydantic-settings).
-                  Expected attributes:
-                    - REDIS_URL: str
-                    - DATABASE_URL: str  (asyncpg)
-                    - LLM_GENERATIVE_URL: str
-                    - LLM_GENERATIVE_MODEL: str
-                    - LLM_API_KEY: SecretStr | None
-                    - AGENT_MAX_ITERATIONS: int  (used as max_concurrent_map)
-                    - SUMMARIZER_CONTEXT_WINDOW: int  (default: 4096)
-                    - SUMMARIZER_QUALITY_MODEL: str | None
-
-    Returns:
-        Configured SummarizationService instance.
-    """
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
+async def build_summarization_service(settings: object) -> "SummarizationService":
+    from edms_ai_assistant.db.database import AsyncSessionLocal
     from edms_ai_assistant.summarizer.cache.cache import (
         PostgresL2Cache,
         RedisL1Cache,
@@ -50,83 +31,47 @@ async def build_summarization_service(settings: object) -> "SummarizationService
     from edms_ai_assistant.summarizer.observability.tracing import setup_tracing
     from edms_ai_assistant.summarizer.pipeline.direct import OpenAICompatibleClient
     from edms_ai_assistant.summarizer.service import SummarizationService
+    from edms_ai_assistant.tools.summarization import set_summarization_service
 
-    # ── OTel Tracing ──────────────────────────────────────────────────────
-    telemetry_endpoint = getattr(settings, "TELEMETRY_ENDPOINT", None)
+    config = SummarizerConfig.from_app_settings(settings)
+
+    # ── OpenTelemetry (idempotent) ──────────────────────────────────────────
     setup_tracing(
         service_name="edms-summarizer",
-        otlp_endpoint=telemetry_endpoint,
+        otlp_endpoint=config.otlp_endpoint,
         enable_in_memory=False,
     )
 
-    # ── LLM Client ────────────────────────────────────────────────────────
-    base_url = str(getattr(settings, "LLM_GENERATIVE_URL", "http://localhost:11434/v1"))
-
-    base_url = base_url.rstrip("/")
-    if not base_url.endswith("/v1"):
-        base_url += "/v1"
-
-    model = str(getattr(settings, "LLM_GENERATIVE_MODEL"))
-    api_key_secret = getattr(settings, "LLM_API_KEY", None) or getattr(settings, "OPENAI_API_KEY", None)
-
-    if api_key_secret:
-        if hasattr(api_key_secret, "get_secret_value"):
-            api_key = api_key_secret.get_secret_value()
-        else:
-            api_key = str(api_key_secret)
-    else:
-        api_key = None
-
-    if not api_key or not api_key.strip():
-        api_key = "placeholder"
-
-    timeout = float(getattr(settings, "LLM_TIMEOUT", 120))
-
+    # ── LLM client ─────────────────────────────────────────────────────────
+    base_url = config.normalized_base_url()
     llm_client = OpenAICompatibleClient(
-        api_key=api_key,
+        api_key=config.resolved_api_key(),
         base_url=base_url,
-        timeout=timeout,
+        timeout=config.llm_timeout_s,
     )
-    logger.info("LLM client configured: model=%s base_url=%s", model, base_url)
+    logger.info("LLM client: model=%s base_url=%s", config.llm_model, base_url)
 
-    # ── Cache ─────────────────────────────────────────────────────────────
-    db_url = str(getattr(settings, "DATABASE_URL", ""))
-
-    # Ensure asyncpg driver
-    if db_url.startswith("postgresql://"):
-        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-
-    engine = create_async_engine(
-        db_url,
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,
-        echo=False,
+    # ── Cache: переиспользуем глобальный async engine из db/database.py ────
+    cache = TwoLevelCache(
+        l1=RedisL1Cache(),
+        l2=PostgresL2Cache(session_factory=AsyncSessionLocal),
     )
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    l1 = RedisL1Cache()
-    l2 = PostgresL2Cache(session_factory=session_factory)
-    cache = TwoLevelCache(l1=l1, l2=l2)
-
-    # ── Service ───────────────────────────────────────────────────────────
-    context_window = int(getattr(settings, "SUMMARIZER_CONTEXT_WINDOW", 4096))
-    quality_model = getattr(settings, "SUMMARIZER_QUALITY_MODEL", None)
-    max_concurrent = int(getattr(settings, "AGENT_MAX_ITERATIONS", 6))
 
     service = SummarizationService(
         llm_client=llm_client,
         cache=cache,
-        model=model,
-        quality_model=quality_model,
-        direct_context_window=context_window,
-        max_concurrent_map=max_concurrent,
+        model=config.llm_model,
+        direct_context_window=config.context_window_tokens,
+        max_concurrent_map=config.max_concurrent_map,
+        max_output_tokens=config.max_output_tokens,
     )
 
+    set_summarization_service(service)
+
     logger.info(
-        "SummarizationService v2 ready: model=%s context_window=%d max_concurrent=%d",
-        model, context_window, max_concurrent,
+        "SummarizationService готов: model=%s context_window=%d max_output_tokens=%d",
+        config.llm_model,
+        config.context_window_tokens,
+        config.max_output_tokens,
     )
     return service

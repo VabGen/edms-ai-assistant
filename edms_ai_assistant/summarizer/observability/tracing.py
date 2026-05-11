@@ -1,12 +1,6 @@
 """
 Observability — OpenTelemetry spans + cost/latency tracking.
 
-2025 Best Practices:
-- Every pipeline stage wrapped in an OTel span
-- Token cost computed and attached as span attributes
-- Async-safe context propagation via contextvars
-- Zero overhead when tracing disabled (no-op tracer)
-
 Usage:
     async with trace_stage("map_reduce.map", attributes={"chunk_count": 5}) as span:
         result = await do_work()
@@ -58,7 +52,8 @@ def get_cost_usd(
     model_lower = model.lower()
     sorted_keys = sorted(
         (k for k in _COST_TABLE if k != "default"),
-        key=len, reverse=True,
+        key=len,
+        reverse=True,
     )
     key = next((k for k in sorted_keys if k in model_lower), "default")
     inp_price, out_price = _COST_TABLE[key]
@@ -93,17 +88,21 @@ class RequestCostAccumulator:
         self.total_output_tokens += output_tokens
         self.total_latency_ms += latency_ms
         self.call_count += 1
-        self.stage_costs.append({
-            "stage": stage,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost_usd": get_cost_usd(self.model, input_tokens, output_tokens),
-            "latency_ms": round(latency_ms, 1),
-        })
+        self.stage_costs.append(
+            {
+                "stage": stage,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": get_cost_usd(self.model, input_tokens, output_tokens),
+                "latency_ms": round(latency_ms, 1),
+            }
+        )
 
     @property
     def total_cost_usd(self) -> float:
-        return get_cost_usd(self.model, self.total_input_tokens, self.total_output_tokens)
+        return get_cost_usd(
+            self.model, self.total_input_tokens, self.total_output_tokens
+        )
 
     def to_dict(self) -> dict:
         return {
@@ -138,6 +137,7 @@ def set_current_accumulator(acc: RequestCostAccumulator) -> None:
 
 _tracer: trace.Tracer | None = None
 _in_memory_exporter: InMemorySpanExporter | None = None
+_tracing_initialized: bool = False
 
 
 def setup_tracing(
@@ -145,18 +145,22 @@ def setup_tracing(
     *,
     enable_in_memory: bool = False,
     otlp_endpoint: str | None = None,
+    force: bool = False,
 ) -> None:
-    """Initialize OpenTelemetry tracing.
+    """Initialize OpenTelemetry tracing (идемпотентно).
 
-    Call once at application startup.
+    При повторных вызовах без force=True выходит без побочных эффектов.
 
     Args:
         service_name: Service name embedded in all spans.
         enable_in_memory: Export spans to in-memory buffer (for testing).
         otlp_endpoint: OTLP gRPC endpoint (e.g. 'http://localhost:4317').
-                       If None, uses in-memory or no-op exporter.
+        force: Если True, переинициализирует TracerProvider даже если уже создан.
     """
-    global _tracer, _in_memory_exporter
+    global _tracer, _in_memory_exporter, _tracing_initialized
+
+    if _tracing_initialized and not force:
+        return
 
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
@@ -167,10 +171,12 @@ def setup_tracing(
                 OTLPSpanExporter,
             )
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
-            exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
-            provider.add_span_processor(BatchSpanProcessor(exporter))
+
+            provider.add_span_processor(
+                BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+            )
         except ImportError:
-            pass  # OTLP exporter not installed — fall through
+            pass
 
     if enable_in_memory:
         _in_memory_exporter = InMemorySpanExporter()
@@ -178,6 +184,7 @@ def setup_tracing(
 
     trace.set_tracer_provider(provider)
     _tracer = trace.get_tracer(service_name)
+    _tracing_initialized = True
 
 
 def get_tracer() -> trace.Tracer:
@@ -240,10 +247,24 @@ def record_llm_call(
     output_tokens: int,
     latency_ms: float,
 ) -> None:
-    """Record LLM call metrics on span and accumulator."""
+    """Record LLM call metrics on span and accumulator.
+
+    Атрибуты следуют OpenTelemetry GenAI semantic conventions
+    (`gen_ai.*`) и параллельно сохраняют наши legacy-имена `llm.*`
+    для обратной совместимости с дашбордами.
+    """
     cost = get_cost_usd(model, input_tokens, output_tokens)
 
     if not isinstance(span, NonRecordingSpan):
+        # OTel GenAI semantic conventions (https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+        span.set_attribute("gen_ai.system", "openai")
+        span.set_attribute("gen_ai.request.model", model)
+        span.set_attribute("gen_ai.response.model", model)
+        span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+        span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+        span.set_attribute("gen_ai.operation.name", stage)
+
+        # Legacy / domain-specific
         span.set_attribute("llm.model", model)
         span.set_attribute("llm.input_tokens", input_tokens)
         span.set_attribute("llm.output_tokens", output_tokens)

@@ -1,20 +1,9 @@
 """
-Typed Prompt Registry — version-controlled, A/B-testable prompts.
-
-All prompts are defined as frozen Pydantic models. No f-string injection
-of user content — all variable substitution goes through safe XML-escaped
-templates that prevent prompt injection.
-
-2025 Best Practices:
-- Prompts stored as typed objects, not strings
-- XML-delimited content blocks prevent injection
-- Version tracked separately from code
-- Structured Output schema embedded in prompt
+Typed Prompt Registry — version-controlled prompts.
 """
 
 from __future__ import annotations
 
-import html
 import json
 from typing import Final
 
@@ -25,52 +14,30 @@ from edms_ai_assistant.summarizer.structured.models import (
     SummaryMode,
 )
 
-
-# ---------------------------------------------------------------------------
-# Prompt Version Control
-# ---------------------------------------------------------------------------
-
-PROMPT_REGISTRY_VERSION: Final[str] = "2025.06.001"
-"""
-Bump this to invalidate ALL cached summaries.
-Format: YYYY.MM.sequence
-"""
-
-
-def _esc(value: str) -> str:
-    """XML-escape user-supplied content to prevent prompt injection."""
-    return html.escape(value, quote=True)
+PROMPT_REGISTRY_VERSION: Final[str] = "2025.06.002"
 
 
 def _schema_hint(mode: SummaryMode) -> str:
-    """Return compact JSON Schema hint for the mode's output model."""
+    """Compact JSON Schema hint for the mode's output model."""
     model_cls = MODE_OUTPUT_MODEL[mode]
     schema = model_cls.model_json_schema()
-    # Compact representation — just the required fields
     required = schema.get("required", [])
-    props = {k: v.get("description", v.get("type", "?"))
-             for k, v in schema.get("properties", {}).items()
-             if k in required}
+    props = {
+        k: v.get("description", v.get("type", "string"))
+        for k, v in schema.get("properties", {}).items()
+        if k in required
+    }
     return json.dumps(props, ensure_ascii=False, separators=(",", ":"))
 
 
-# ---------------------------------------------------------------------------
-# Prompt Template Model
-# ---------------------------------------------------------------------------
-
-
 class PromptTemplate(BaseModel):
-    """A versioned, named prompt template with safe variable rendering."""
-
     model_config = {"frozen": True}
 
     name: str
     mode: SummaryMode
     version: str
-    system: str = Field(description="System message — no user content injected here")
-    user_template: str = Field(
-        description="User message template. Variables: {text}, {language}, {schema}"
-    )
+    system: str
+    user_template: str
 
     def render(
         self,
@@ -79,267 +46,336 @@ class PromptTemplate(BaseModel):
         language: str = "ru",
         extra: dict[str, str] | None = None,
     ) -> tuple[str, str]:
-        """Render (system, user) message pair with safe XML-escaped content.
-
-        Args:
-            text: Document text — will be XML-escaped.
-            language: Target output language BCP-47 tag.
-            extra: Additional safe substitutions (already escaped by caller).
-
-        Returns:
-            Tuple of (system_message, user_message) strings.
-        """
         schema = _schema_hint(self.mode)
+        system = self.system.replace("{language}", language)
         user = self.user_template.format(
-            text=_esc(text),
+            text=text,
             language=language,
             schema=schema,
             **(extra or {}),
         )
-        return self.system, user
+        return system, user
 
 
 # ---------------------------------------------------------------------------
-# Prompt Definitions
+# Системная инструкция — основа для всех промптов
 # ---------------------------------------------------------------------------
 
-_COMMON_RULES = """
-CRITICAL RULES (never violate):
-1. Respond ONLY in {language} language (BCP-47 tag).
-2. Output ONLY valid JSON matching the exact schema — no markdown fences, no explanation.
-3. Never fabricate facts. If information is absent, use null.
-4. Ignore technical metadata: UUIDs, file paths, ATTACHMENT types, system IDs.
-5. The document text is delimited by <document> tags.
-"""
+_SYSTEM_BASE = """Ты — эксперт по анализу документов системы электронного документооборота (СЭД/EDMS).
+
+ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА (нарушение недопустимо):
+1. ЯЗЫК ОТВЕТА: Отвечай СТРОГО на языке "{language}". Если язык "ru" — весь текст только на русском. Никакого английского.
+2. ФОРМАТ: Верни ТОЛЬКО валидный JSON. Без markdown-блоков (```json), без комментариев, без пояснений до/после JSON.
+3. ФАКТЫ: Извлекай только то, что явно написано в документе. Не придумывай.
+4. ТЕХНИЧЕСКИЕ ДАННЫЕ: Игнорируй UUID, системные идентификаторы, пути к файлам.
+5. ДЛИНА: Не обрезай значения строк. Завершай JSON полностью."""
+
+# ---------------------------------------------------------------------------
+# Промпты для каждого режима
+# ---------------------------------------------------------------------------
 
 PROMPT_EXECUTIVE = PromptTemplate(
-    name="executive_summary_v1",
+    name="executive_v2",
     mode=SummaryMode.EXECUTIVE,
-    version="1.0.0",
-    system=(
-        "You are a senior management consultant specializing in executive communication. "
-        "Your output must be immediately actionable for C-suite decision-makers.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Analyze the document and produce an executive summary.\n\n"
-        "Output schema: {schema}\n\n"
-        "Requirements:\n"
-        "- `headline`: Single sentence capturing the most critical point (max 200 chars)\n"
-        "- `bullets`: 3-5 key takeaways, each ≤ 20 words, starting with action verb when possible\n"
-        "- `recommendation`: Only if document requires a decision; otherwise null\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="2.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Создай краткую выжимку документа для руководителя.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "headline": "одно предложение — главная мысль (не более 200 символов)",
+  "bullets": ["тезис 1", "тезис 2", "тезис 3"],
+  "recommendation": "рекомендуемое действие или null"
+}}
+
+Требования:
+- headline: одно законченное предложение, суть документа
+- bullets: 3-5 ключевых пункта, каждый не более 20 слов
+- recommendation: только если документ требует решения, иначе null
+
+Текст документа:
+{text}""",
 )
 
 PROMPT_DETAILED_NOTES = PromptTemplate(
-    name="detailed_notes_v1",
+    name="detailed_notes_v2",
     mode=SummaryMode.DETAILED_NOTES,
-    version="1.0.0",
-    system=(
-        "You are a meticulous document analyst. Preserve all meaningful structure "
-        "and hierarchy from the source document.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Create comprehensive structured notes from this document.\n\n"
-        "Output schema: {schema}\n\n"
-        "Requirements:\n"
-        "- `document_type`: Classify as one of: CONTRACT, MEMO, REGULATION, REPORT, LETTER, "
-        "APPEAL, PROTOCOL, ORDER, INSTRUCTION, OTHER\n"
-        "- `sections`: Follow the document's own section structure. Max 15 sections.\n"
-        "- `key_entities`: Extract named organizations, people, document references\n"
-        "- `date_range`: If multiple dates present, capture range as 'YYYY-MM-DD / YYYY-MM-DD'\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="2.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Создай структурированный конспект документа.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "document_type": "тип документа (ДОГОВОР/ПИСЬМО/ПРИКАЗ/ПРОТОКОЛ/РЕГЛАМЕНТ/ИНОЕ)",
+  "sections": [
+    {{
+      "title": "название раздела",
+      "content": "содержание раздела",
+      "subsections": ["подпункт 1", "подпункт 2"]
+    }}
+  ],
+  "key_entities": ["организация 1", "персона 1", "документ №..."],
+  "date_range": "период дат или null"
+}}
+
+Требования:
+- sections: следуй структуре самого документа, не более 15 разделов
+- key_entities: все упомянутые организации, люди, ссылки на документы
+- date_range: если есть даты — укажи диапазон в формате "ДД.ММ.ГГГГ — ДД.ММ.ГГГГ"
+
+Текст документа:
+{text}""",
 )
 
 PROMPT_ACTION_ITEMS = PromptTemplate(
-    name="action_items_v1",
+    name="action_items_v2",
     mode=SummaryMode.ACTION_ITEMS,
-    version="1.0.0",
-    system=(
-        "You are a project management expert specializing in extracting actionable commitments "
-        "from organizational documents. Accuracy is paramount — only extract explicitly stated "
-        "actions, never infer.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Extract ALL action items, tasks, and commitments from this document.\n\n"
-        "Output schema: {schema}\n\n"
-        "EXTRACTION RULES:\n"
-        "1. `task`: Quote or closely paraphrase the action. Use imperative form.\n"
-        "2. `owner`: Only if explicitly named (person name OR role). Set null if ambiguous.\n"
-        "3. `deadline`: Only if an explicit date is given. ISO 8601 date only. Set null if relative "
-        "('within 30 days') — put that in task description instead.\n"
-        "4. `priority`: Infer from document language:\n"
-        "   - high: 'срочно', 'немедленно', 'critical', 'обязательно', 'не позднее [imminent date]'\n"
-        "   - medium: regular assignments, standard deadlines\n"
-        "   - low: recommendations, suggestions, optional items\n"
-        "5. `source_fragment`: Quote the EXACT sentence that implies this action (≤ 500 chars)\n"
-        "6. `confidence`: Your confidence this is truly an action item (0.0–1.0)\n\n"
-        "If no action items exist, return empty list: {{\"action_items\": [], \"total_found\": 0, "
-        "\"document_context\": \"<brief context>\"}}\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="2.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Извлеки все задачи, поручения и обязательства из документа.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "action_items": [
+    {{
+      "task": "описание задачи",
+      "owner": "ответственный или null",
+      "deadline": "ГГГГ-ММ-ДД или null",
+      "priority": "high/medium/low",
+      "source_fragment": "цитата из документа",
+      "confidence": 0.9
+    }}
+  ],
+  "document_context": "краткий контекст"
+}}
+
+Правила приоритетов:
+- high: "срочно", "немедленно", "обязательно", ближайший дедлайн
+- medium: обычные поручения со сроками
+- low: рекомендации, пожелания
+
+Если задач нет: верни {{"action_items": [], "document_context": "краткий контекст документа"}}
+
+Текст документа:
+{text}""",
 )
 
 PROMPT_THESIS = PromptTemplate(
-    name="thesis_plan_v1",
+    name="thesis_v2",
     mode=SummaryMode.THESIS,
-    version="1.0.0",
-    system=(
-        "You are an academic research methodologist. Your task is to construct a rigorous "
-        "hierarchical argument map from the document.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Construct a thesis plan for this document.\n\n"
-        "Output schema: {schema}\n\n"
-        "Requirements:\n"
-        "- `main_argument`: The central claim or purpose in one declarative sentence\n"
-        "- `sections`: Max 6 sections following document logic (not arbitrary chunks)\n"
-        "  - Each `thesis` is the key claim of that section (max 300 chars)\n"
-        "  - Each `point` has a `claim` (max 200 chars) and optional `evidence`\n"
-        "- `conclusion`: The document's outcome or expected result\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="2.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Составь тезисный план документа.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "main_argument": "главный тезис/цель документа (одно предложение)",
+  "sections": [
+    {{
+      "title": "название раздела",
+      "thesis": "ключевой тезис раздела",
+      "points": [
+        {{
+          "claim": "утверждение",
+          "evidence": "обоснование или null",
+          "sub_points": []
+        }}
+      ]
+    }}
+  ],
+  "conclusion": "вывод или ожидаемый результат"
+}}
+
+Требования:
+- main_argument: центральная идея всего документа
+- sections: не более 6, следуй логике документа
+- conclusion: итог или ожидаемый результат
+
+Текст документа:
+{text}""",
 )
 
 PROMPT_EXTRACTIVE = PromptTemplate(
-    name="extractive_v2",
+    name="extractive_v3",
     mode=SummaryMode.EXTRACTIVE,
-    version="2.0.0",
-    system=(
-        "You are a data extraction specialist for document management systems. "
-        "Extract concrete, verifiable facts only — no interpretation.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Extract all key facts from this document as structured data.\n\n"
-        "Output schema: {schema}\n\n"
-        "Fact categories to extract:\n"
-        "- DATE: specific dates and deadlines\n"
-        "- PERSON: named individuals and their roles\n"
-        "- ORG: organization names\n"
-        "- AMOUNT: monetary values, quantities, measurements\n"
-        "- REQUIREMENT: mandatory rules, constraints, obligations\n"
-        "- DEADLINE: time limits, execution periods\n"
-        "- OTHER: any other significant concrete information\n\n"
-        "Each fact: `label` = short name (max 80 chars), `value` = the fact (max 300 chars).\n"
-        "Max 20 facts total. Prioritize by importance.\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="3.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Извлеки ключевые факты из документа как структурированные данные.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "facts": [
+    {{
+      "category": "категория факта",
+      "label": "краткое название (до 80 символов)",
+      "value": "значение факта (до 300 символов)"
+    }}
+  ],
+  "document_summary": "одно предложение — суть документа"
+}}
+
+Категории фактов:
+- ДАТА — конкретные даты и дедлайны
+- ПЕРСОНА — имена людей и их роли
+- ОРГАНИЗАЦИЯ — названия организаций
+- СУММА — денежные суммы, количества, объёмы
+- ТРЕБОВАНИЕ — обязательные условия и ограничения
+- СРОК — временные рамки и периоды
+- ПРОЧЕЕ — другие важные факты
+
+Правила:
+- Максимум 20 фактов, приоритет по важности
+- Извлекай только явно указанное в тексте
+
+Текст документа:
+{text}""",
 )
 
 PROMPT_ABSTRACTIVE = PromptTemplate(
-    name="abstractive_v2",
+    name="abstractive_v3",
     mode=SummaryMode.ABSTRACTIVE,
-    version="2.0.0",
-    system=(
-        "You are a professional document summarizer for a government electronic "
-        "document management system. Write clear, professional summaries.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Write a coherent narrative summary of this document.\n\n"
-        "Output schema: {schema}\n\n"
-        "Requirements:\n"
-        "- `summary`: 2-4 paragraphs, paraphrased in your own words. "
-        "Professional tone. Max 2000 chars.\n"
-        "- `key_themes`: 2-5 main topics covered (single words or short phrases)\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="3.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Напиши краткое изложение документа своими словами.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "summary": "краткое изложение в 2-4 абзацах",
+  "key_themes": ["тема 1", "тема 2", "тема 3"]
+}}
+
+Требования:
+- summary: профессиональный стиль, 2-4 абзаца, не более 2000 символов
+- summary: перескажи своими словами, сохраняя все важные детали
+- key_themes: 2-5 главных тем, кратко (1-4 слова каждая)
+
+Текст документа:
+{text}""",
 )
 
 PROMPT_MULTILINGUAL = PromptTemplate(
-    name="multilingual_v1",
+    name="multilingual_v2",
     mode=SummaryMode.MULTILINGUAL,
-    version="1.0.0",
-    system=(
-        "You are a multilingual document analyst with expertise in Russian, "
-        "Belarusian, Kazakh, and English document processing.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Analyze and summarize this document.\n\n"
-        "Output schema: {schema}\n\n"
-        "Requirements:\n"
-        "- `detected_language`: Auto-detect the source language (BCP-47 tag)\n"
-        "- `summary_language`: Use '{language}' as requested output language\n"
-        "- `summary`: Full narrative summary in `summary_language`. Max 2000 chars.\n"
-        "- `translation_notes`: Note significant terms that lose meaning in translation; null otherwise\n\n"
-        "<document>\n{text}\n</document>"
-    ),
+    version="2.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Проанализируй и изложи документ.
+
+Язык вывода: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "detected_language": "BCP-47 код языка источника (ru/be/en/kk)",
+  "summary_language": "{language}",
+  "summary": "краткое изложение на языке {language}",
+  "translation_notes": "примечания по переводу или null"
+}}
+
+Требования:
+- detected_language: определи язык исходного документа
+- summary: полное изложение на языке {language}, 2-4 абзаца
+- translation_notes: только если есть термины, которые сложно перевести
+
+Текст документа:
+{text}""",
 )
 
-# --- Map/Reduce variants (used for large document chunked processing) ---
-
-PROMPT_MAP_EXTRACTIVE = PromptTemplate(
-    name="map_extractive_v1",
-    mode=SummaryMode.EXTRACTIVE,
-    version="1.0.0",
-    system=(
-        "You are a fact extractor processing a CHUNK of a larger document. "
-        "Extract only the most important facts from this chunk.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Extract key facts from this document chunk.\n\n"
-        "Output schema: {schema}\n\n"
-        "CHUNK CONTEXT: This is one part of a larger document. "
-        "Extract self-contained facts only. Max 10 facts.\n\n"
-        "<chunk>\n{text}\n</chunk>"
-    ),
-)
-
-PROMPT_MAP_ABSTRACTIVE = PromptTemplate(
-    name="map_abstractive_v1",
-    mode=SummaryMode.ABSTRACTIVE,
-    version="1.0.0",
-    system=(
-        "You are summarizing a CHUNK of a larger document. "
-        "Be concise — this partial summary will be combined with others.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Summarize this document chunk in 1-2 paragraphs.\n\n"
-        "Output schema: {schema}\n\n"
-        "<chunk>\n{text}\n</chunk>"
-    ),
-)
+# --- Map-stage промпты для Map-Reduce ---
 
 PROMPT_MAP_GENERIC = PromptTemplate(
-    name="map_generic_v1",
+    name="map_generic_v2",
     mode=SummaryMode.ABSTRACTIVE,
-    version="1.0.0",
-    system=(
-        "You are processing a CHUNK of a larger document. Extract the essential "
-        "information as a concise partial summary.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Summarize the key content of this chunk in 2-4 sentences max. "
-        "Output only plain text, no JSON.\n\n"
-        "<chunk>\n{text}\n</chunk>"
-    ),
+    version="2.0.0",
+    system=f"""Ты обрабатываешь ФРАГМЕНТ большого документа.
+Твоя задача — извлечь ключевую информацию из этого фрагмента.
+ОБЯЗАТЕЛЬНО: отвечай на русском языке. Только текст, без JSON.""",
+    user_template="""Изложи ключевое содержание этого фрагмента в 2-4 предложениях на русском языке.
+Не используй JSON. Только текст.
+
+Фрагмент:
+{text}""",
 )
 
-PROMPT_REDUCE_EXECUTIVE = PromptTemplate(
-    name="reduce_executive_v1",
-    mode=SummaryMode.EXECUTIVE,
+PROMPT_MAP_EXTRACTIVE = PromptTemplate(
+    name="map_extractive_v2",
+    mode=SummaryMode.EXTRACTIVE,
+    version="2.0.0",
+    system=f"""Ты обрабатываешь ФРАГМЕНТ большого документа.
+Извлеки ключевые факты из этого фрагмента.
+ОБЯЗАТЕЛЬНО: отвечай на русском языке. Только текст, без JSON.""",
+    user_template="""Перечисли 3-5 ключевых фактов из этого фрагмента на русском языке.
+Формат: "- Факт: значение"
+Только текст, без JSON.
+
+Фрагмент:
+{text}""",
+)
+
+PROMPT_QUALITY_JUDGE = PromptTemplate(
+    name="quality_judge_v1",
+    mode=SummaryMode.ABSTRACTIVE,
     version="1.0.0",
-    system=(
-        "You are combining partial summaries into a final executive summary. "
-        "Eliminate duplicates and synthesize into the most important insights.\n\n"
-        + _COMMON_RULES
-    ),
-    user_template=(
-        "Combine these partial summaries into a final executive summary.\n\n"
-        "Output schema: {schema}\n\n"
-        "Partial summaries from document chunks:\n"
-        "<partial_summaries>\n{text}\n</partial_summaries>"
-    ),
+    system="""Ты — строгий редактор-эксперт. Твоя задача — оценить качество
+суммаризации документа по шкале от 0.0 до 1.0.
+
+Критерии оценки:
+- Точность фактов (нет ли искажений / выдумок)
+- Полнота (покрыты ли ключевые моменты документа)
+- Связность изложения
+- Соответствие запрошенному формату
+
+Отвечай ТОЛЬКО валидным JSON, без markdown-блоков и пояснений.""",
+    user_template="""Оцени качество следующей суммаризации.
+
+Исходный документ (фрагмент):
+{text}
+
+Сгенерированная суммаризация:
+{summary}
+
+Верни JSON:
+{{
+  "score": 0.85,
+  "critique": "краткое объяснение оценки на русском (2-3 предложения)"
+}}
+
+Шкала:
+- 0.9-1.0: образцово точно и полно
+- 0.7-0.9: хорошо, минорные недочёты
+- 0.5-0.7: средне, есть пропуски или неточности
+- 0.0-0.5: плохо, серьёзные проблемы""",
+)
+
+
+PROMPT_REDUCE_EXECUTIVE = PromptTemplate(
+    name="reduce_executive_v2",
+    mode=SummaryMode.EXECUTIVE,
+    version="2.0.0",
+    system=_SYSTEM_BASE,
+    user_template="""Объедини эти частичные изложения в итоговую выжимку для руководителя.
+
+Язык ответа: {language}
+
+Верни JSON строго в этом формате:
+{{
+  "headline": "главная мысль (одно предложение)",
+  "bullets": ["тезис 1", "тезис 2", "тезис 3"],
+  "recommendation": "рекомендуемое действие или null"
+}}
+
+Частичные изложения:
+{text}""",
 )
 
 
@@ -349,14 +385,6 @@ PROMPT_REDUCE_EXECUTIVE = PromptTemplate(
 
 
 class PromptRegistry:
-    """Central registry for all prompt templates.
-
-    Usage:
-        registry = PromptRegistry()
-        template = registry.get(SummaryMode.EXECUTIVE)
-        system, user = template.render(text=doc_text)
-    """
-
     _DIRECT: dict[SummaryMode, PromptTemplate] = {
         SummaryMode.EXECUTIVE: PROMPT_EXECUTIVE,
         SummaryMode.DETAILED_NOTES: PROMPT_DETAILED_NOTES,
@@ -369,40 +397,38 @@ class PromptRegistry:
 
     _MAP: dict[SummaryMode, PromptTemplate] = {
         SummaryMode.EXTRACTIVE: PROMPT_MAP_EXTRACTIVE,
-        SummaryMode.ABSTRACTIVE: PROMPT_MAP_ABSTRACTIVE,
-        SummaryMode.EXECUTIVE: PROMPT_MAP_ABSTRACTIVE,
-        SummaryMode.DETAILED_NOTES: PROMPT_MAP_ABSTRACTIVE,
-        SummaryMode.ACTION_ITEMS: PROMPT_MAP_ABSTRACTIVE,
-        SummaryMode.THESIS: PROMPT_MAP_ABSTRACTIVE,
-        SummaryMode.MULTILINGUAL: PROMPT_MAP_ABSTRACTIVE,
+        SummaryMode.ABSTRACTIVE: PROMPT_MAP_GENERIC,
+        SummaryMode.EXECUTIVE: PROMPT_MAP_GENERIC,
+        SummaryMode.DETAILED_NOTES: PROMPT_MAP_GENERIC,
+        SummaryMode.ACTION_ITEMS: PROMPT_MAP_GENERIC,
+        SummaryMode.THESIS: PROMPT_MAP_GENERIC,
+        SummaryMode.MULTILINGUAL: PROMPT_MAP_GENERIC,
     }
 
     _REDUCE: dict[SummaryMode, PromptTemplate] = {
         SummaryMode.EXECUTIVE: PROMPT_REDUCE_EXECUTIVE,
-        # All others fall back to their direct prompt with combined summaries as input
     }
 
     def get(self, mode: SummaryMode) -> PromptTemplate:
-        """Get direct summarization prompt for given mode."""
         return self._DIRECT[mode]
 
     def get_map(self, mode: SummaryMode) -> PromptTemplate:
-        """Get Map-stage prompt (for chunked processing)."""
         return self._MAP.get(mode, PROMPT_MAP_GENERIC)
 
     def get_reduce(self, mode: SummaryMode) -> PromptTemplate:
-        """Get Reduce-stage prompt (for combining chunk summaries)."""
         return self._REDUCE.get(mode, self._DIRECT[mode])
+
+    def get_judge(self) -> PromptTemplate:
+        """Промпт для LLM-as-judge — оценки качества вывода."""
+        return PROMPT_QUALITY_JUDGE
 
     def version(self) -> str:
         return PROMPT_REGISTRY_VERSION
 
     def cache_version_tag(self) -> str:
-        """Version tag embedded in cache keys — bump PROMPT_REGISTRY_VERSION to invalidate."""
         return f"prompts:{PROMPT_REGISTRY_VERSION}"
 
 
-# Singleton
 _registry: PromptRegistry | None = None
 
 

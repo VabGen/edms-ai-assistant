@@ -2,6 +2,7 @@
 """
 RedisClient — клиент для работы с Redis.
 """
+
 import logging
 
 import redis.asyncio as aioredis

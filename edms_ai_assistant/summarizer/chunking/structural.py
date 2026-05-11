@@ -1,12 +1,6 @@
 """
 StructuralChunker — header-aware document splitting.
 
-2025 Best Practices:
-- Parse document structure (headers, sections) before splitting
-- Preserve section context across chunk boundaries
-- Never split mid-sentence within a section
-- Token-accurate boundaries via tiktoken
-
 Why better than RecursiveCharacterTextSplitter:
   Old: splits by char count → breaks sections mid-thought → LLM loses context
   New: splits at section boundaries → each chunk is semantically complete
@@ -32,7 +26,15 @@ from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
 
 @dataclass(frozen=True)
 class TextChunk:
-    """A single document chunk with metadata."""
+    """A single document chunk with metadata.
+
+    Note on `char_start` / `char_end`:
+        Эти поля являются **приблизительными** оффсетами в исходном документе
+        и не подходят для точной подсветки/цитирования. Они отражают позицию
+        чанка в потоке после слияния/разбиения секций, но не гарантируют
+        соответствия исходному тексту посимвольно. Если нужна точная
+        локализация — см. `text` (содержимое) + `section_title` (раздел).
+    """
 
     text: str
     token_count: int
@@ -111,17 +113,95 @@ class ChunkingStrategy(ABC):
 # Patterns for detecting document headers in Russian/English EDMS documents
 _HEADER_PATTERNS: list[tuple[int, re.Pattern[str]]] = [
     # Numbered sections: "1. Название", "1.1 Название", "Статья 1."
-    (1, re.compile(r"^(?:Статья|Article|Раздел|Section|Глава|Chapter)\s+\d+", re.MULTILINE)),
+    (
+        1,
+        re.compile(
+            r"^(?:Статья|Article|Раздел|Section|Глава|Chapter)\s+\d+", re.MULTILINE
+        ),
+    ),
     (1, re.compile(r"^\d+\.\s+[А-ЯЁA-Z][^\n]{3,60}$", re.MULTILINE)),
     (2, re.compile(r"^\d+\.\d+\.\s+[А-ЯЁA-Z][^\n]{3,60}$", re.MULTILINE)),
     (3, re.compile(r"^\d+\.\d+\.\d+\.\s+[^\n]{3,60}$", re.MULTILINE)),
-    # All-caps headers (common in CIS official documents)
-    (1, re.compile(r"^[А-ЯЁ\s]{10,80}$", re.MULTILINE)),
+    # All-caps headers требуют пустой строки перед или начала текста
+    # (иначе ломается на абзацах в верхнем регистре).
+    (1, re.compile(r"(?:\A|\n\n)([А-ЯЁ][А-ЯЁ\s\-]{8,78})\s*(?=\n)")),
     # Markdown-style headers
     (1, re.compile(r"^#{1}\s+.+$", re.MULTILINE)),
     (2, re.compile(r"^#{2}\s+.+$", re.MULTILINE)),
     (3, re.compile(r"^#{3}\s+.+$", re.MULTILINE)),
 ]
+
+
+# Русские/латинские аббревиатуры, которые часто соседствуют с точкой и обманывают
+# наивный sentence-splitter (".\s" → разрыв предложения).
+_SENTENCE_ABBREV = (
+    "т",
+    "т.е",
+    "т.д",
+    "т.п",
+    "т.к",
+    "и.т.д",
+    "и.т.п",
+    "г",
+    "гг",
+    "р",
+    "руб",
+    "коп",
+    "ул",
+    "пр",
+    "д",
+    "стр",
+    "с",
+    "проф",
+    "акад",
+    "ст",
+    "сов",
+    "обл",
+    "Mr",
+    "Mrs",
+    "Dr",
+    "Prof",
+    "Inc",
+    "Ltd",
+    "Co",
+    "vs",
+    "etc",
+    "e.g",
+    "i.e",
+)
+_ABBREV_LOWER = frozenset(a.lower() for a in _SENTENCE_ABBREV)
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Sentence split с защитой от русских/английских аббревиатур и инициалов.
+
+    Алгоритм: бьём по `[.!?]\\s+(?=[А-ЯЁA-Z])`, затем сшиваем обратно те куски,
+    у которых перед точкой стояло известное сокращение или одиночная заглавная
+    буква (инициал, например "И. И. Иванов").
+    """
+    if not text:
+        return []
+    raw = re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z])", text)
+    if len(raw) == 1:
+        return raw
+
+    merged: list[str] = []
+    for piece in raw:
+        if merged:
+            prev = merged[-1].rstrip()
+            tail = prev[:-1] if prev.endswith((".", "!", "?")) else prev
+            last_token = re.split(r"[\s\(\[\"']", tail)[-1] if tail else ""
+            last_lower = last_token.lower()
+            # Инициал: одна заглавная буква перед точкой ("И.")
+            is_initial = (
+                len(last_token) == 1 and last_token.isalpha() and last_token.isupper()
+            )
+            if is_initial or last_lower in _ABBREV_LOWER:
+                merged[-1] = prev + " " + piece
+                continue
+        merged.append(piece)
+    return merged
+
 
 # Minimum chars for structural detection to be worth using
 _STRUCTURAL_MIN_CHARS = 100
@@ -159,12 +239,16 @@ class StructuralChunker(ChunkingStrategy):
         overlap_tokens: int = 100,
     ) -> list[TextChunk]:
         sections = self._parse_sections(text)
-        return self._sections_to_chunks(sections, max_tokens=max_tokens, overlap_tokens=overlap_tokens)
+        return self._sections_to_chunks(
+            sections, max_tokens=max_tokens, overlap_tokens=overlap_tokens
+        )
 
     def _parse_sections(self, text: str) -> list[Section]:
         """Parse document into sections using detected header positions."""
         # Build a unified header position map
-        header_positions: list[tuple[int, int, int, str]] = []  # (start, end, depth, title)
+        header_positions: list[tuple[int, int, int, str]] = (
+            []
+        )  # (start, end, depth, title)
 
         for depth, pattern in _HEADER_PATTERNS:
             for match in pattern.finditer(text):
@@ -216,16 +300,20 @@ class StructuralChunker(ChunkingStrategy):
         def flush(title: str | None, text: str, tokens: int, start: int) -> None:
             nonlocal chunk_index
             if text.strip():
-                chunks.append(TextChunk.from_text(
-                    text=text,
-                    index=chunk_index,
-                    section_title=title,
-                    char_start=start,
-                ))
+                chunks.append(
+                    TextChunk.from_text(
+                        text=text,
+                        index=chunk_index,
+                        section_title=title,
+                        char_start=start,
+                    )
+                )
                 chunk_index += 1
 
         for section in sections:
-            section_text = f"{section.title}\n{section.body}" if section.title else section.body
+            section_text = (
+                f"{section.title}\n{section.body}" if section.title else section.body
+            )
             section_tokens = count_tokens(section_text)
 
             if section_tokens > max_tokens:
@@ -278,8 +366,7 @@ class StructuralChunker(ChunkingStrategy):
         start_index: int,
     ) -> list[TextChunk]:
         """Split oversized text at sentence boundaries."""
-        sentence_pattern = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z])")
-        sentences = sentence_pattern.split(text)
+        sentences = _split_sentences(text)
 
         chunks: list[TextChunk] = []
         current: list[str] = []
@@ -292,11 +379,13 @@ class StructuralChunker(ChunkingStrategy):
 
             if current_tokens + s_tokens > max_tokens and current:
                 chunk_text = " ".join(current)
-                chunks.append(TextChunk.from_text(
-                    text=chunk_text,
-                    index=idx,
-                    section_title=section_title,
-                ))
+                chunks.append(
+                    TextChunk.from_text(
+                        text=chunk_text,
+                        index=idx,
+                        section_title=section_title,
+                    )
+                )
                 idx += 1
 
                 # Build overlap from end of current chunk
@@ -316,11 +405,13 @@ class StructuralChunker(ChunkingStrategy):
             current_tokens += s_tokens
 
         if current:
-            chunks.append(TextChunk.from_text(
-                text=" ".join(current),
-                index=idx,
-                section_title=section_title,
-            ))
+            chunks.append(
+                TextChunk.from_text(
+                    text=" ".join(current),
+                    index=idx,
+                    section_title=section_title,
+                )
+            )
 
         return chunks
 
@@ -363,20 +454,22 @@ class TokenAwareFallbackChunker(ChunkingStrategy):
             if para_tokens > max_tokens:
                 # Split paragraph by sentences
                 if current_parts:
-                    chunks.append(TextChunk.from_text(
-                        text="\n\n".join(current_parts), index=idx
-                    ))
+                    chunks.append(
+                        TextChunk.from_text(text="\n\n".join(current_parts), index=idx)
+                    )
                     idx += 1
                     current_parts = []
                     current_tokens = 0
-                # Sentence-level split
-                sentences = re.split(r"(?<=[.!?])\s+", para)
+                # Sentence-level split (с защитой от аббревиатур)
+                sentences = _split_sentences(para)
                 acc: list[str] = []
                 acc_tokens = 0
                 for sent in sentences:
                     st = count_tokens(sent)
                     if acc_tokens + st > max_tokens and acc:
-                        chunks.append(TextChunk.from_text(text=" ".join(acc), index=idx))
+                        chunks.append(
+                            TextChunk.from_text(text=" ".join(acc), index=idx)
+                        )
                         idx += 1
                         # overlap
                         acc = acc[-2:] if len(acc) >= 2 else acc
@@ -388,9 +481,9 @@ class TokenAwareFallbackChunker(ChunkingStrategy):
                     idx += 1
 
             elif current_tokens + para_tokens > max_tokens:
-                chunks.append(TextChunk.from_text(
-                    text="\n\n".join(current_parts), index=idx
-                ))
+                chunks.append(
+                    TextChunk.from_text(text="\n\n".join(current_parts), index=idx)
+                )
                 idx += 1
                 # Overlap: keep last paragraph
                 if current_parts and count_tokens(current_parts[-1]) <= overlap_tokens:
@@ -404,9 +497,9 @@ class TokenAwareFallbackChunker(ChunkingStrategy):
                 current_tokens += para_tokens
 
         if current_parts:
-            chunks.append(TextChunk.from_text(
-                text="\n\n".join(current_parts), index=idx
-            ))
+            chunks.append(
+                TextChunk.from_text(text="\n\n".join(current_parts), index=idx)
+            )
 
         return chunks if chunks else [TextChunk.from_text(text=text, index=0)]
 
@@ -437,11 +530,15 @@ class SmartChunker:
         """
         if self._structural.can_handle(text):
             return (
-                self._structural.chunk(text, max_tokens=max_tokens, overlap_tokens=overlap_tokens),
+                self._structural.chunk(
+                    text, max_tokens=max_tokens, overlap_tokens=overlap_tokens
+                ),
                 "structural",
             )
         return (
-            self._fallback.chunk(text, max_tokens=max_tokens, overlap_tokens=overlap_tokens),
+            self._fallback.chunk(
+                text, max_tokens=max_tokens, overlap_tokens=overlap_tokens
+            ),
             "token_aware_fallback",
         )
 

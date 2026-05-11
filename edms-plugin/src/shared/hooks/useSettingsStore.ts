@@ -1,4 +1,3 @@
-// edms-plugin/src/shared/hooks/useSettingsStore.ts
 import {useState, useEffect, useCallback, useRef} from 'react'
 import {sendMsg} from '../lib/messaging'
 import {getAuthToken} from '../lib/auth'

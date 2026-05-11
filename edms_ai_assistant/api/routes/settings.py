@@ -30,6 +30,7 @@ def _apply_log_level(level_str: str) -> None:
     logging.getLogger().setLevel(level)
     logger.info("Log level changed to %s", level_str.upper())
 
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["Settings"])

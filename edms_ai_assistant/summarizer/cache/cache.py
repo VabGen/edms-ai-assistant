@@ -13,24 +13,18 @@ This means:
   - Prompt version bump invalidates ALL cache entries ✓
   - Same file re-uploaded gets cache hit ✓
   - Mutated file (different content) produces new cache entry ✓
-
-2025 Best Practices:
-  - All I/O is async (no sync blocking)
-  - Cache writes do NOT block the response (fire-and-forget with timeout guard)
-  - Graceful degradation: cache miss on any error, never raise to caller
-  - Pydantic v2 (de)serialization for stored payloads
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import json
 import logging
-import time
 from abc import ABC, abstractmethod
 from typing import Any
 
 from pydantic import BaseModel
+from sqlalchemy import text as sa_text
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +42,7 @@ class CacheEntry(BaseModel):
     mode: str
     language: str
     prompt_version: str
-    result_json: str           # JSON-serialized SummarizationResult
+    result_json: str  # JSON-serialized SummarizationResult
     input_tokens: int
     output_tokens: int
     cost_usd: float
@@ -109,6 +103,7 @@ class RedisL1Cache(SummarizationCache):
     async def get(self, cache_key: str) -> CacheEntry | None:
         try:
             from edms_ai_assistant.clients.redis_client import redis_client
+
             data = await redis_client.get_client().get(cache_key)
             if data is None:
                 return None
@@ -120,6 +115,7 @@ class RedisL1Cache(SummarizationCache):
     async def set(self, entry: CacheEntry, ttl_seconds: int = 3600) -> None:
         try:
             from edms_ai_assistant.clients.redis_client import redis_client
+
             await redis_client.get_client().setex(
                 entry.cache_key,
                 ttl_seconds,
@@ -131,6 +127,7 @@ class RedisL1Cache(SummarizationCache):
     async def delete(self, cache_key: str) -> None:
         try:
             from edms_ai_assistant.clients.redis_client import redis_client
+
             await redis_client.get_client().delete(cache_key)
         except Exception as exc:
             logger.debug("Redis DELETE failed: %s", exc)
@@ -138,6 +135,7 @@ class RedisL1Cache(SummarizationCache):
     async def health_check(self) -> bool:
         try:
             from edms_ai_assistant.clients.redis_client import redis_client
+
             await redis_client.get_client().ping()
             return True
         except Exception:
@@ -164,11 +162,10 @@ class PostgresL2Cache(SummarizationCache):
         self._session_factory = session_factory
 
     async def get(self, cache_key: str) -> CacheEntry | None:
-        from sqlalchemy import text
         try:
             async with self._session_factory() as session:
                 result = await session.execute(
-                    text(
+                    sa_text(
                         "SELECT cache_entry_json FROM edms.summarization_cache "
                         "WHERE cache_key = :key AND expires_at > NOW()"
                     ),
@@ -184,12 +181,11 @@ class PostgresL2Cache(SummarizationCache):
 
     async def set(self, entry: CacheEntry, ttl_seconds: int = 2_592_000) -> None:
         """Store entry with TTL (default: 30 days)."""
-        from sqlalchemy import text
         try:
             async with self._session_factory() as session:
                 async with session.begin():
                     await session.execute(
-                        text("""
+                        sa_text("""
                             INSERT INTO edms.summarization_cache
                                 (cache_key, file_hash, mode, language, prompt_version,
                                  cache_entry_json, input_tokens, output_tokens,
@@ -223,22 +219,22 @@ class PostgresL2Cache(SummarizationCache):
             logger.error("Postgres L2 SET failed — cache write dropped: %s", exc)
 
     async def delete(self, cache_key: str) -> None:
-        from sqlalchemy import text
         try:
             async with self._session_factory() as session:
                 async with session.begin():
                     await session.execute(
-                        text("DELETE FROM edms.summarization_cache WHERE cache_key = :key"),
+                        sa_text(
+                            "DELETE FROM edms.summarization_cache WHERE cache_key = :key"
+                        ),
                         {"key": cache_key},
                     )
         except Exception as exc:
             logger.warning("Postgres L2 DELETE failed: %s", exc)
 
     async def health_check(self) -> bool:
-        from sqlalchemy import text
         try:
             async with self._session_factory() as session:
-                await session.execute(text("SELECT 1"))
+                await session.execute(sa_text("SELECT 1"))
             return True
         except Exception:
             return False
@@ -279,26 +275,29 @@ class TwoLevelCache:
         Returns:
             (entry, source) where source is "l1", "l2", or "miss".
         """
-        # Try L1
         entry = await self._l1.get(cache_key)
         if entry is not None:
             self._hits_l1 += 1
             return entry, "l1"
 
-        # Try L2
         entry = await self._l2.get(cache_key)
         if entry is not None:
             self._hits_l2 += 1
-            # Backfill L1
-            await self._l1.set(entry, self._l1_ttl)
+            # Backfill L1 в фоне — не задерживаем ответ на RTT Redis
+            asyncio.create_task(self._safe_backfill(entry))
             return entry, "l2"
 
         self._misses += 1
         return None, "miss"
 
+    async def _safe_backfill(self, entry: CacheEntry) -> None:
+        try:
+            await self._l1.set(entry, self._l1_ttl)
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.debug("L1 backfill failed: %s", exc)
+
     async def set(self, entry: CacheEntry) -> None:
         """Write to both caches concurrently (best-effort — never raises)."""
-        import asyncio
         try:
             async with asyncio.timeout(5.0):
                 await asyncio.gather(
@@ -309,40 +308,14 @@ class TwoLevelCache:
         except TimeoutError:
             logger.warning("Cache write timed out after 5s")
 
-    # async def invalidate_by_file(self, file_hash: str) -> None:
-    #     """Invalidate all cache entries for a given file hash (across modes/languages)."""
-    #     from sqlalchemy import text
-    #     # Delete from Postgres by file_hash
-    #     try:
-    #         async with self._l2._session_factory() as session:
-    #             async with session.begin():
-    #                 result = await session.execute(
-    #                     text(
-    #                         "DELETE FROM edms.summarization_cache "
-    #                         "WHERE file_hash = :fh RETURNING cache_key"
-    #                     ),
-    #                     {"fh": file_hash},
-    #                 )
-    #                 keys = [row[0] for row in result.fetchall()]
-    #         # Delete matching keys from Redis
-    #         import asyncio
-    #         await asyncio.gather(
-    #             *[self._l1.delete(k) for k in keys],
-    #             return_exceptions=True,
-    #         )
-    #         logger.info("Invalidated %d cache entries for file_hash=%s", len(keys), file_hash[:8])
-    #     except Exception as exc:
-    #         logger.error("Cache invalidation failed: %s", exc)
-
     async def invalidate_by_file(self, file_hash: str, mode: str | None = None) -> None:
         """Invalidate cache entries for a given file hash, optionally filtered by mode."""
-        from sqlalchemy import text
         try:
             async with self._l2._session_factory() as session:
                 async with session.begin():
                     if mode:
                         result = await session.execute(
-                            text(
+                            sa_text(
                                 "DELETE FROM edms.summarization_cache "
                                 "WHERE file_hash = :fh AND mode = :mode RETURNING cache_key"
                             ),
@@ -350,25 +323,38 @@ class TwoLevelCache:
                         )
                     else:
                         result = await session.execute(
-                            text(
+                            sa_text(
                                 "DELETE FROM edms.summarization_cache "
                                 "WHERE file_hash = :fh RETURNING cache_key"
                             ),
                             {"fh": file_hash},
                         )
                     keys = [row[0] for row in result.fetchall()]
-            # Delete matching keys from Redis
-            import asyncio
             await asyncio.gather(
                 *[self._l1.delete(k) for k in keys],
                 return_exceptions=True,
             )
             logger.info(
                 "Invalidated %d cache entries for file_hash=%s mode=%s",
-                len(keys), file_hash[:8], mode or "ALL"
+                len(keys),
+                file_hash[:8],
+                mode or "ALL",
             )
         except Exception as exc:
             logger.error("Cache invalidation failed: %s", exc)
+
+    async def health(self) -> dict[str, str]:
+        """Public health probe across both layers."""
+        l1_ok, l2_ok = await asyncio.gather(
+            self._l1.health_check(),
+            self._l2.health_check(),
+            return_exceptions=False,
+        )
+        return {
+            "redis_l1": "ok" if l1_ok else "unavailable",
+            "postgres_l2": "ok" if l2_ok else "unavailable",
+            "overall": "ok" if l2_ok else "degraded",
+        }
 
     def stats(self) -> dict:
         total = self._hits_l1 + self._hits_l2 + self._misses

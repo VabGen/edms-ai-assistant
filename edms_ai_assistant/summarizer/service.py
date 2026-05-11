@@ -1,44 +1,26 @@
 """
-SummarizationService — main entry point for the summarization subsystem.
-
-This is the ONLY public API for the summarizer module. All internal pipeline
-complexity is hidden behind this facade.
-
-Responsibilities:
-  1. Cache lookup (L1 Redis → L2 Postgres)
-  2. Pipeline selection (Direct vs Map-Reduce based on token count)
-  3. Tracing + cost accumulation
-  4. Cache write (async, non-blocking)
-  5. Quality scoring (async background task)
-
-Thread/Concurrency model:
-  - Fully async, no blocking calls
-  - Singleton via dependency injection (not class-level state)
-  - Safe to use from multiple concurrent FastAPI requests
-
-2025 Design:
-  - Single responsibility per method
-  - All inputs/outputs typed via Pydantic v2
-  - File content hashed for content-addressed caching
+SummarizationService — главная точка входа модуля суммаризации.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 
 from pydantic import BaseModel, Field
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.summarizer.cache.cache import CacheEntry, TwoLevelCache
 from edms_ai_assistant.summarizer.chunking.structural import SmartChunker
-from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens, estimate_cost
+from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
 from edms_ai_assistant.summarizer.observability.tracing import (
     RequestCostAccumulator,
     Stopwatch,
+    get_cost_usd,
     set_current_accumulator,
     trace_stage,
 )
@@ -46,9 +28,13 @@ from edms_ai_assistant.summarizer.pipeline.direct import (
     DirectSummarizationPipeline,
     LLMClient,
     PipelineResult,
+    StreamEvent,
 )
 from edms_ai_assistant.summarizer.pipeline.map_reduce import MapReducePipeline
-from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry, get_prompt_registry
+from edms_ai_assistant.summarizer.prompts.registry import (
+    PromptRegistry,
+    get_prompt_registry,
+)
 from edms_ai_assistant.summarizer.structured.models import (
     LLMBaseModel,
     QualityScore,
@@ -57,49 +43,47 @@ from edms_ai_assistant.summarizer.structured.models import (
 
 logger = logging.getLogger(__name__)
 
-# Context window threshold: above this → Map-Reduce
 _DIRECT_CONTEXT_WINDOW_TOKENS = 4096
 
 
 # ---------------------------------------------------------------------------
-# Request / Response Models (Public API)
+# Request / Response Models
 # ---------------------------------------------------------------------------
 
 
 class SummarizationRequest(BaseModel):
-    """Validated input for a summarization request."""
-
     model_config = {"frozen": True}
 
-    file_content: bytes = Field(description="Raw file bytes (PDF, DOCX, TXT, etc.)")
-    file_name: str = Field(description="Original filename for extension detection", max_length=255)
+    file_content: bytes = Field(description="Raw file bytes")
+    file_name: str = Field(
+        description="Имя файла для определения расширения", max_length=255
+    )
     mode: SummaryMode = Field(default=SummaryMode.ABSTRACTIVE)
     language: str = Field(
         default="ru",
-        description="BCP-47 output language tag. Use 'auto' to match document language.",
+        description="BCP-47 код языка вывода. 'ru' по умолчанию.",
         max_length=10,
     )
-    request_id: str = Field(description="Unique request ID for tracing/idempotency")
-    force_refresh: bool = Field(
+    request_id: str = Field(description="Уникальный ID запроса для трейсинга")
+    force_refresh: bool = Field(default=False)
+    enable_quality_score: bool = Field(
         default=False,
-        description="If True, bypass cache and re-generate",
+        description="Если True — после генерации запускается LLM-as-judge "
+        "и заполняет поле SummarizationResponse.quality.",
     )
 
 
 class SummarizationResponse(BaseModel):
-    """Typed summarization result returned to API consumers."""
-
     model_config = {"frozen": True}
 
     request_id: str
     mode: SummaryMode
     language: str
-    output: dict                  # Serialized structured output (mode-dependent)
+    output: dict
     quality: QualityScore | None = None
     cache_hit: bool = False
-    cache_source: str = "miss"    # "l1", "l2", or "miss"
+    cache_source: str = "miss"
 
-    # Observability
     model: str
     input_tokens: int
     output_tokens: int
@@ -108,124 +92,75 @@ class SummarizationResponse(BaseModel):
     chunking_strategy: str
     chunk_count: int
 
-    # File metadata
     file_hash: str
     prompt_version: str
 
 
 # ---------------------------------------------------------------------------
-# Quality Scorer (runs in background, enriches cached entry)
+# Text Extractor
 # ---------------------------------------------------------------------------
 
 
-async def _background_quality_score(
-    result: PipelineResult,
-    llm_client: LLMClient,
-    model: str,
-) -> QualityScore | None:
-    """Score summarization quality via lightweight LLM self-critique.
-
-    Runs as a background task — does NOT block the response.
-    Score is stored back into cache if available.
-    Uses a simple 0.0-1.0 scoring prompt (cheaper model recommended).
-    """
-    try:
-        system = (
-            "You are a quality evaluator. Rate the given summary on a scale from 0.0 to 1.0 "
-            "based on: accuracy, completeness, and clarity. "
-            "Respond ONLY with a JSON object: {\"score\": float, \"critique\": string}"
-        )
-        user = (
-            f"Summary to evaluate:\n\n{result.raw_json[:1500]}\n\n"
-            "Provide score (0.0-1.0) and 1-sentence critique."
-        )
-        async with asyncio.timeout(15.0):
-            import json
-            raw, _, _ = await llm_client.complete(
-                system, user,
-                model=model,
-                temperature=0.0,
-                max_tokens=150,
-            )
-            data = json.loads(raw)
-            score = float(data.get("score", 0.5))
-            critique = str(data.get("critique", ""))
-            return QualityScore.from_score(min(1.0, max(0.0, score)), critique)
-    except Exception as exc:
-        logger.debug("Background quality scoring failed (non-critical): %s", exc)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Text Extractor (async wrapper around sync extraction)
-# ---------------------------------------------------------------------------
-
-
-async def extract_text_from_bytes(
-    file_content: bytes,
-    file_name: str,
-) -> str:
-    """Async text extraction from file bytes.
-
-    Dispatches to appropriate sync extractor based on extension,
-    runs in a thread executor to avoid blocking the event loop.
-    """
-    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+async def extract_text_from_bytes(file_content: bytes, file_name: str) -> str:
+    """Async text extraction from file bytes (offloads heavy parsers to a worker thread)."""
+    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else "txt"
 
     def _sync_extract() -> str:
         if ext == "pdf":
             return _extract_pdf(file_content)
-        elif ext in ("docx", "doc"):
+        if ext in ("docx", "doc"):
             return _extract_docx(file_content)
-        elif ext in ("txt", "md", "rst", "csv"):
+        if ext in ("txt", "md", "rst", "csv"):
             return _decode_text(file_content)
-        else:
-            # Best-effort: try text decode
+        # Уже извлечённый UTF-8 текст или произвольная кодировка
+        try:
+            return file_content.decode("utf-8")
+        except UnicodeDecodeError:
             return _decode_text(file_content)
 
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _sync_extract)
+    return await asyncio.to_thread(_sync_extract)
 
 
 def _extract_pdf(data: bytes) -> str:
-    """Extract text from PDF bytes using PyMuPDF (fitz)."""
     try:
         import fitz  # type: ignore[import]
+
         doc = fitz.open(stream=data, filetype="pdf")
         pages = [page.get_text() for page in doc]
         doc.close()
         return "\n".join(pages)
     except ImportError:
-        logger.warning("PyMuPDF not installed — trying pdfplumber")
+        pass
     try:
         import io
+
         import pdfplumber  # type: ignore[import]
+
         with pdfplumber.open(io.BytesIO(data)) as pdf:
-            return "\n".join(
-                page.extract_text() or "" for page in pdf.pages
-            )
+            return "\n".join(page.extract_text() or "" for page in pdf.pages)
     except Exception as exc:
         raise RuntimeError(f"PDF extraction failed: {exc}") from exc
 
 
 def _extract_docx(data: bytes) -> str:
-    """Extract text from DOCX bytes."""
     import io
+
     try:
         import docx  # type: ignore[import]
+
         doc = docx.Document(io.BytesIO(data))
         return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
     except ImportError:
         pass
     try:
         import docx2txt  # type: ignore[import]
+
         return docx2txt.process(io.BytesIO(data))
     except Exception as exc:
         raise RuntimeError(f"DOCX extraction failed: {exc}") from exc
 
 
 def _decode_text(data: bytes) -> str:
-    """Decode raw bytes as UTF-8 with fallback encodings."""
     for encoding in ("utf-8", "utf-8-sig", "cp1251", "cp1252", "latin-1"):
         try:
             return data.decode(encoding)
@@ -235,22 +170,166 @@ def _decode_text(data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Output → Text formatter
+# ---------------------------------------------------------------------------
+
+
+def format_output_as_markdown(resp: SummarizationResponse) -> str:
+    """
+    Конвертирует структурированный вывод LLM в читаемый Markdown.
+    Все тексты на русском (если LLM ответил правильно).
+    """
+    output = resp.output
+
+    if resp.mode == SummaryMode.EXECUTIVE:
+        headline = output.get("headline", "")
+        bullets = output.get("bullets", [])
+        recommendation = output.get("recommendation")
+
+        lines = [f"**{headline}**", ""] if headline else []
+        for bullet in bullets:
+            if bullet.strip():
+                lines.append(f"• {bullet}")
+        if recommendation:
+            lines.extend(["", f"💡 **Рекомендация:** {recommendation}"])
+        return "\n".join(lines) if lines else "Анализ завершён."
+
+    elif resp.mode == SummaryMode.DETAILED_NOTES:
+        doc_type = output.get("document_type", "Документ")
+        sections = output.get("sections", [])
+        entities = output.get("key_entities", [])
+        date_range = output.get("date_range")
+
+        lines = [f"**Тип документа:** {doc_type}", ""]
+        for sec in sections:
+            title = sec.get("title", "")
+            content = sec.get("content", "")
+            subsections = sec.get("subsections", [])
+            if title:
+                lines.append(f"## {title}")
+            if content:
+                lines.append(content)
+            for sub in subsections:
+                lines.append(f"  - {sub}")
+            lines.append("")
+        if entities:
+            lines.append(f"**Ключевые участники:** {', '.join(entities)}")
+        if date_range:
+            lines.append(f"**Период:** {date_range}")
+        return "\n".join(lines) if lines else "Анализ завершён."
+
+    elif resp.mode == SummaryMode.ACTION_ITEMS:
+        items = output.get("action_items", [])
+        context = output.get("document_context", "")
+
+        if not items:
+            ctx = f"\n\n*Контекст: {context}*" if context else ""
+            return f"Задачи и поручения не найдены.{ctx}"
+
+        lines = [f"**Найдено задач: {len(items)}**", ""]
+        for i, item in enumerate(items, 1):
+            priority = item.get("priority", "medium")
+            emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(priority, "⚪")
+            task = item.get("task", "")
+            owner = item.get("owner")
+            deadline = item.get("deadline")
+
+            lines.append(f"{i}. {emoji} {task}")
+            if owner:
+                lines.append(f"   👤 Ответственный: {owner}")
+            if deadline:
+                lines.append(f"   📅 Срок: {deadline}")
+            lines.append("")
+        return "\n".join(lines)
+
+    elif resp.mode == SummaryMode.THESIS:
+        main_arg = output.get("main_argument", "")
+        sections = output.get("sections", [])
+        conclusion = output.get("conclusion", "")
+
+        lines = []
+        if main_arg:
+            lines.extend([f"**Главный тезис:** {main_arg}", ""])
+        for sec in sections:
+            title = sec.get("title", "")
+            thesis = sec.get("thesis", "")
+            points = sec.get("points", [])
+            if title:
+                lines.append(f"## {title}")
+            if thesis:
+                lines.append(f"*{thesis}*")
+            for pt in points:
+                claim = pt.get("claim", "")
+                evidence = pt.get("evidence")
+                if claim:
+                    lines.append(f"- {claim}")
+                if evidence:
+                    lines.append(f"  _{evidence}_")
+            lines.append("")
+        if conclusion:
+            lines.append(f"**Вывод:** {conclusion}")
+        return "\n".join(lines) if lines else "Анализ завершён."
+
+    elif resp.mode == SummaryMode.EXTRACTIVE:
+        facts = output.get("facts", [])
+        doc_summary = output.get("document_summary", "")
+
+        lines = []
+        if doc_summary:
+            lines.extend([f"*{doc_summary}*", ""])
+        for fact in facts:
+            label = fact.get("label", "")
+            value = fact.get("value", "")
+            category = fact.get("category", "")
+            cat_emoji = {
+                "ДАТА": "📅",
+                "DATE": "📅",
+                "ПЕРСОНА": "👤",
+                "PERSON": "👤",
+                "ОРГАНИЗАЦИЯ": "🏢",
+                "ORG": "🏢",
+                "СУММА": "💰",
+                "AMOUNT": "💰",
+                "ТРЕБОВАНИЕ": "⚠️",
+                "REQUIREMENT": "⚠️",
+                "СРОК": "⏰",
+                "DEADLINE": "⏰",
+            }.get(category.upper(), "•")
+            if label and value:
+                lines.append(f"{cat_emoji} **{label}**: {value}")
+        return "\n".join(lines) if lines else "Факты не извлечены."
+
+    elif resp.mode in (SummaryMode.ABSTRACTIVE, SummaryMode.MULTILINGUAL):
+        summary = output.get("summary", "")
+        themes = output.get("key_themes", [])
+
+        lines = [summary] if summary else []
+        if themes:
+            lines.extend(["", f"**Ключевые темы:** {', '.join(themes)}"])
+        return "\n".join(lines) if lines else "Анализ завершён."
+
+    else:
+        # Fallback для неизвестных режимов
+        return (
+            output.get("summary", "")
+            or output.get("content", "")
+            or json.dumps(output, ensure_ascii=False, indent=2)
+        )
+
+
+# ---------------------------------------------------------------------------
 # SummarizationService
 # ---------------------------------------------------------------------------
 
 
 class SummarizationService:
-    """Facade over the entire summarization pipeline.
+    """
+    Facade над всем пайплайном суммаризации.
 
-    Instantiate once (e.g., via FastAPI lifespan) and inject via Depends().
-
-    Args:
-        llm_client: Async LLM client.
-        cache: Two-level cache (Redis L1 + Postgres L2).
-        model: Primary LLM model identifier.
-        quality_model: Model for quality scoring (can be smaller/cheaper).
-        direct_context_window: Token threshold for switching to Map-Reduce.
-        max_concurrent_map: Global semaphore limit for Map-stage parallel calls.
+    Использование:
+        service = await build_summarization_service(settings)
+        response = await service.summarize(request)
+        text = format_output_as_markdown(response)
     """
 
     def __init__(
@@ -259,51 +338,41 @@ class SummarizationService:
         cache: TwoLevelCache,
         *,
         model: str = settings.LLM_GENERATIVE_MODEL,
-        quality_model: str | None = None,
         direct_context_window: int = _DIRECT_CONTEXT_WINDOW_TOKENS,
         max_concurrent_map: int = 6,
+        max_output_tokens: int = 4096,
     ) -> None:
         self._llm = llm_client
         self._cache = cache
         self._model = model
-        self._quality_model = quality_model or model
         self._context_window = direct_context_window
+        self._max_output_tokens = max_output_tokens
         self._prompts: PromptRegistry = get_prompt_registry()
         self._chunker = SmartChunker()
         self._direct_pipeline = DirectSummarizationPipeline(
-            llm_client, self._prompts, model
+            llm_client,
+            self._prompts,
+            model,
+            max_output_tokens=max_output_tokens,
         )
         self._map_reduce_pipeline = MapReducePipeline(
             llm_client,
             self._prompts,
             model,
             max_concurrent_map=max_concurrent_map,
+            max_output_tokens=max_output_tokens,
+            direct_pipeline=self._direct_pipeline,
         )
+        self._bg_tasks: set[asyncio.Task[None]] = set()
+        self._inflight: dict[str, asyncio.Future[SummarizationResponse]] = {}
+        self._inflight_lock = asyncio.Lock()
 
     async def summarize(self, request: SummarizationRequest) -> SummarizationResponse:
-        """Execute full summarization pipeline with caching.
-
-        This is the primary public method. Everything else is internal.
-        """
-        sw_total = Stopwatch()
-
-        # Set up request-scoped cost accumulator (for OTel)
-        acc = RequestCostAccumulator(
-            request_id=request.request_id,
-            model=self._model,
+        """Выполняет суммаризацию с кэшированием и in-flight дедупликацией."""
+        file_hash = await asyncio.to_thread(
+            lambda: hashlib.sha256(request.file_content).hexdigest()
         )
-        set_current_accumulator(acc)
-
-        # Content-address the file
-        file_hash = hashlib.sha256(request.file_content).hexdigest()
-
-        # Resolve effective language
-        language = request.language
-        if language == "auto":
-            # Will be resolved by multilingual mode, use 'auto' as-is
-            language = "auto"
-
-        # Build cache key
+        language = request.language or "ru"
         cache_key = CacheEntry.build_key(
             file_hash=file_hash,
             mode=request.mode.value,
@@ -311,13 +380,69 @@ class SummarizationService:
             prompt_version=self._prompts.cache_version_tag(),
         )
 
-        # --- Cache lookup (skip if force_refresh) ---
+        if not request.force_refresh:
+            async with self._inflight_lock:
+                pending = self._inflight.get(cache_key)
+                if pending is not None:
+                    logger.info(
+                        "In-flight dedup: request_id=%s waits for key=%s",
+                        request.request_id,
+                        cache_key[:12],
+                    )
+                    pending_request_id = request.request_id
+                    result = await asyncio.shield(pending)
+                    return result.model_copy(update={"request_id": pending_request_id})
+
+                future: asyncio.Future[SummarizationResponse] = (
+                    asyncio.get_running_loop().create_future()
+                )
+                self._inflight[cache_key] = future
+        else:
+            future = None  # type: ignore[assignment]
+
+        try:
+            response = await self._summarize_internal(
+                request, file_hash, language, cache_key
+            )
+            if future is not None and not future.done():
+                future.set_result(response)
+            return response
+        except BaseException as exc:
+            if future is not None and not future.done():
+                future.set_exception(
+                    exc if isinstance(exc, Exception) else RuntimeError(str(exc))
+                )
+            raise
+        finally:
+            if future is not None:
+                async with self._inflight_lock:
+                    self._inflight.pop(cache_key, None)
+
+    async def _summarize_internal(
+        self,
+        request: SummarizationRequest,
+        file_hash: str,
+        language: str,
+        cache_key: str,
+    ) -> SummarizationResponse:
+        """Основной поток суммаризации (без дедупликации)."""
+        sw_total = Stopwatch()
+
+        acc = RequestCostAccumulator(
+            request_id=request.request_id,
+            model=self._model,
+        )
+        set_current_accumulator(acc)
+
+        # --- Cache lookup ---
         if not request.force_refresh:
             cached_entry, cache_source = await self._cache.get(cache_key)
             if cached_entry is not None:
                 logger.info(
-                    "Cache %s hit for request_id=%s key=%s",
-                    cache_source.upper(), request.request_id, cache_key[:12],
+                    "Cache %s hit: request_id=%s key=%s",
+                    cache_source.upper(),
+                    request.request_id,
+                    cache_key[:12],
                 )
                 return self._response_from_cache(
                     cached_entry, cache_source, request.request_id
@@ -330,28 +455,35 @@ class SummarizationService:
             )
 
         if not text.strip():
-            raise ValueError(f"No text could be extracted from '{request.file_name}'")
+            raise ValueError(f"Не удалось извлечь текст из '{request.file_name}'")
 
         doc_tokens = count_tokens(text)
         logger.info(
-            "Summarizing: mode=%s lang=%s tokens=%d request_id=%s",
-            request.mode.value, language, doc_tokens, request.request_id,
+            "Суммаризация: mode=%s lang=%s tokens=%d request_id=%s",
+            request.mode.value,
+            language,
+            doc_tokens,
+            request.request_id,
         )
 
         # --- Pipeline selection ---
-        async with trace_stage("pipeline", {
-            "mode": request.mode.value,
-            "doc_tokens": doc_tokens,
-            "model": self._model,
-        }) as pipeline_span:
+        async with trace_stage(
+            "pipeline",
+            {
+                "mode": request.mode.value,
+                "doc_tokens": doc_tokens,
+                "model": self._model,
+            },
+        ) as pipeline_span:
             needs_map_reduce = self._chunker.needs_map_reduce(
                 text, context_window=self._context_window
             )
 
             if needs_map_reduce:
                 logger.info(
-                    "Routing to MapReducePipeline: %d tokens > %d threshold",
-                    doc_tokens, int(self._context_window * 0.70),
+                    "MapReducePipeline: %d токенов > порог %d",
+                    doc_tokens,
+                    int(self._context_window * 0.70),
                 )
                 pipeline_result = await self._map_reduce_pipeline.run(
                     text,
@@ -361,7 +493,7 @@ class SummarizationService:
                 )
             else:
                 logger.info(
-                    "Routing to DirectPipeline: %d tokens fits context window",
+                    "DirectPipeline: %d токенов укладываются в контекст",
                     doc_tokens,
                 )
                 pipeline_result = await self._direct_pipeline.run(
@@ -371,21 +503,32 @@ class SummarizationService:
                     span=pipeline_span,
                 )
 
+        # Optional: LLM-as-judge quality scoring
+        quality: QualityScore | None = None
+        if request.enable_quality_score:
+            async with trace_stage("quality.judge", {"mode": request.mode.value}):
+                summary_text = pipeline_result.raw_json
+                quality = await self.score_quality(text, summary_text)
+
         total_latency = sw_total.elapsed_ms()
 
-        # --- Build response ---
         response = SummarizationResponse(
             request_id=request.request_id,
             mode=request.mode,
             language=language,
             output=pipeline_result.output.model_dump(),
+            quality=quality,
             cache_hit=False,
             cache_source="miss",
             model=self._model,
             input_tokens=pipeline_result.input_tokens,
             output_tokens=pipeline_result.output_tokens,
             cost_usd=round(
-                estimate_cost(pipeline_result.input_tokens, pipeline_result.output_tokens),
+                get_cost_usd(
+                    self._model,
+                    pipeline_result.input_tokens,
+                    pipeline_result.output_tokens,
+                ),
                 6,
             ),
             latency_ms=round(total_latency, 1),
@@ -395,22 +538,21 @@ class SummarizationService:
             prompt_version=self._prompts.cache_version_tag(),
         )
 
-        # --- Cache write (fire-and-forget, non-blocking) ---
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._write_cache(response, pipeline_result, cache_key, file_hash)
         )
-
-        # --- Background quality scoring ---
-        asyncio.create_task(
-            self._enrich_with_quality_score(response, pipeline_result)
-        )
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
         logger.info(
-            "Summarization complete: request_id=%s mode=%s tokens=%d/%d "
+            "Суммаризация завершена: request_id=%s mode=%s tokens=%d/%d "
             "cost=$%.4f latency=%.0fms strategy=%s",
-            request.request_id, request.mode.value,
-            pipeline_result.input_tokens, pipeline_result.output_tokens,
-            response.cost_usd, total_latency,
+            request.request_id,
+            request.mode.value,
+            pipeline_result.input_tokens,
+            pipeline_result.output_tokens,
+            response.cost_usd,
+            total_latency,
             pipeline_result.chunking_strategy,
         )
 
@@ -423,7 +565,6 @@ class SummarizationService:
         cache_key: str,
         file_hash: str,
     ) -> None:
-        """Write result to cache. Called as background task."""
         try:
             entry = CacheEntry(
                 cache_key=cache_key,
@@ -440,22 +581,9 @@ class SummarizationService:
                 file_hash=file_hash,
             )
             await self._cache.set(entry)
-            logger.debug("Cache write complete for key=%s", cache_key[:12])
+            logger.debug("Cache write: key=%s", cache_key[:12])
         except Exception as exc:
-            logger.error("Background cache write failed (non-critical): %s", exc)
-
-    async def _enrich_with_quality_score(
-        self,
-        response: SummarizationResponse,
-        result: PipelineResult,
-    ) -> None:
-        """Run quality scoring in background. Non-critical path."""
-        score = await _background_quality_score(result, self._llm, self._quality_model)
-        if score:
-            logger.debug(
-                "Quality score for request_id=%s: %.2f (%s)",
-                response.request_id, score.score, score.confidence.value,
-            )
+            logger.error("Cache write failed (non-critical): %s", exc)
 
     @staticmethod
     def _response_from_cache(
@@ -463,8 +591,6 @@ class SummarizationService:
         source: str,
         request_id: str,
     ) -> SummarizationResponse:
-        """Reconstruct SummarizationResponse from a cached CacheEntry."""
-        import json
         try:
             output_dict = json.loads(entry.result_json)
         except Exception:
@@ -481,21 +607,193 @@ class SummarizationService:
             input_tokens=entry.input_tokens,
             output_tokens=entry.output_tokens,
             cost_usd=entry.cost_usd,
-            latency_ms=0.0,  # Cache hit — no LLM latency
+            latency_ms=0.0,
             chunking_strategy=entry.chunking_strategy,
             chunk_count=0,
             file_hash=entry.file_hash,
             prompt_version=entry.prompt_version,
         )
 
-    # async def invalidate_cache(self, file_hash: str) -> None:
-    #     """Invalidate all cached summaries for a given file (all modes/languages)."""
-    #     await self._cache.invalidate_by_file(file_hash)
+    async def summarize_stream(
+        self, request: SummarizationRequest
+    ) -> AsyncIterator[StreamEvent | SummarizationResponse]:
+        """
+        Стримит вывод LLM по токенам и завершается финальным SummarizationResponse.
+
+        Поведение:
+          - Cache hit: сразу yield финальный response (без дельт).
+          - Малый документ: DirectPipeline.run_stream → дельты + финальный результат.
+          - Большой документ: фолбэк на не-стримящий map-reduce, в конце один response.
+
+        Финальный SummarizationResponse кладётся в кэш как обычно.
+        """
+        sw_total = Stopwatch()
+
+        acc = RequestCostAccumulator(request_id=request.request_id, model=self._model)
+        set_current_accumulator(acc)
+
+        file_hash = await asyncio.to_thread(
+            lambda: hashlib.sha256(request.file_content).hexdigest()
+        )
+        language = request.language or "ru"
+        cache_key = CacheEntry.build_key(
+            file_hash=file_hash,
+            mode=request.mode.value,
+            language=language,
+            prompt_version=self._prompts.cache_version_tag(),
+        )
+
+        # Cache hit → выдаём готовый response без дельт
+        if not request.force_refresh:
+            cached_entry, cache_source = await self._cache.get(cache_key)
+            if cached_entry is not None:
+                yield self._response_from_cache(
+                    cached_entry, cache_source, request.request_id
+                )
+                return
+
+        async with trace_stage("extract_text", {"file": request.file_name}):
+            text = await extract_text_from_bytes(
+                request.file_content, request.file_name
+            )
+        if not text.strip():
+            raise ValueError(f"Не удалось извлечь текст из '{request.file_name}'")
+
+        needs_map_reduce = self._chunker.needs_map_reduce(
+            text, context_window=self._context_window
+        )
+
+        async with trace_stage(
+            "pipeline.stream",
+            {
+                "mode": request.mode.value,
+                "model": self._model,
+                "map_reduce": needs_map_reduce,
+            },
+        ) as span:
+            pipeline = (
+                self._map_reduce_pipeline if needs_map_reduce else self._direct_pipeline
+            )
+            pipeline_result = None
+            async for event in pipeline.run_stream(
+                text,
+                request.mode,
+                language=language,
+                span=span,
+            ):
+                if isinstance(event, PipelineResult):
+                    pipeline_result = event
+                else:
+                    yield event
+            if pipeline_result is None:
+                raise RuntimeError("Pipeline.run_stream did not yield a PipelineResult")
+
+        total_latency = sw_total.elapsed_ms()
+        response = SummarizationResponse(
+            request_id=request.request_id,
+            mode=request.mode,
+            language=language,
+            output=pipeline_result.output.model_dump(),
+            cache_hit=False,
+            cache_source="miss",
+            model=self._model,
+            input_tokens=pipeline_result.input_tokens,
+            output_tokens=pipeline_result.output_tokens,
+            cost_usd=round(
+                get_cost_usd(
+                    self._model,
+                    pipeline_result.input_tokens,
+                    pipeline_result.output_tokens,
+                ),
+                6,
+            ),
+            latency_ms=round(total_latency, 1),
+            chunking_strategy=pipeline_result.chunking_strategy,
+            chunk_count=pipeline_result.chunk_count,
+            file_hash=file_hash,
+            prompt_version=self._prompts.cache_version_tag(),
+        )
+
+        task = asyncio.create_task(
+            self._write_cache(response, pipeline_result, cache_key, file_hash)
+        )
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+        yield response
+
+    async def score_quality(
+        self,
+        source_text: str,
+        summary_text: str,
+        *,
+        max_source_chars: int = 8000,
+    ) -> QualityScore | None:
+        """LLM-as-judge: оценивает качество суммаризации (0.0–1.0).
+
+        Если LLM возвращает невалидный JSON — возвращаем None (best-effort).
+        Не бросает исключений: ошибка judge не должна ронять основной запрос.
+        """
+        if not summary_text.strip():
+            return None
+
+        template = self._prompts.get_judge()
+        system = template.system
+        user = template.user_template.format(
+            text=source_text[:max_source_chars],
+            summary=summary_text,
+        )
+
+        try:
+            raw, _, _ = await self._llm.complete(
+                system,
+                user,
+                model=self._model,
+                temperature=0.0,
+                max_tokens=300,
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning("Quality judge LLM call failed: %s", exc)
+            return None
+
+        try:
+            parsed = json.loads(raw.strip())
+            score = float(parsed.get("score", 0.0))
+            score = max(0.0, min(1.0, score))
+            critique = parsed.get("critique")
+            return QualityScore.from_score(score, critique=critique)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.debug("Quality judge returned non-JSON or malformed: %s", exc)
+            return None
 
     async def invalidate_cache(self, file_hash: str, mode: str | None = None) -> None:
-        """Invalidate cached summaries for a given file (optionally for a specific mode)."""
         await self._cache.invalidate_by_file(file_hash, mode=mode)
 
     def cache_stats(self) -> dict:
-        """Return cache hit rate statistics."""
         return self._cache.stats()
+
+    async def health(self) -> dict[str, Any]:
+        """Public health probe: cache layers + cache stats."""
+        return {
+            "cache": await self._cache.health(),
+            "cache_stats": self._cache.stats(),
+        }
+
+    async def aclose(self) -> None:
+        """Корректное завершение: дожидаемся background-задач и закрываем LLM-клиент."""
+        if self._bg_tasks:
+            pending = list(self._bg_tasks)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Background cache writes did not finish within 5s (%d pending)",
+                    len(pending),
+                )
+        try:
+            await self._llm.aclose()
+        except Exception as exc:  # noqa: BLE001 — best-effort shutdown
+            logger.warning("LLM client close failed: %s", exc)

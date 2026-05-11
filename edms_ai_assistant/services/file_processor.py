@@ -30,6 +30,7 @@ _CACHE_SUFFIX = ".ocr_cache.txt"
 
 # ── Utility: Tesseract Binary Discovery ─────────────────────────────────
 
+
 def _find_tesseract_binary() -> str | None:
     """Динамически ищет бинарник Tesseract в системе (Windows/Linux/macOS)."""
     # 1. Проверка в PATH системы
@@ -58,6 +59,7 @@ _TESSERACT_CMD = _find_tesseract_binary()
 
 
 # ── Utility: OCR Disk Cache ─────────────────────────────────────────────
+
 
 def _get_cached_ocr(file_path: str) -> str | None:
     """Возвращает кэшированный OCR текст, если исходный файл не изменился."""
@@ -97,12 +99,17 @@ def _save_ocr_cache(file_path: str, text: str) -> None:
 
 # ── Extractors ──────────────────────────────────────────────────────────
 
+
 def _extract_doc_via_fitz(file_path: str) -> str:
     """Extract text from .doc or .docx using PyMuPDF (fitz)."""
     import fitz  # type: ignore[import]
 
     with fitz.open(file_path) as doc:
-        pages_text = [page.get_text("text").strip() for page in doc if page.get_text("text").strip()]
+        pages_text = [
+            page.get_text("text").strip()
+            for page in doc
+            if page.get_text("text").strip()
+        ]
     return "\n\n".join(pages_text)
 
 
@@ -149,13 +156,27 @@ def _convert_doc_to_docx(doc_path: str) -> str:
 
     try:
         subprocess.run(
-            [soffice_cmd, "--headless", "--convert-to", "docx:MS Word 2007 XML",
-             "--outdir", str(out_dir), str(doc_path_obj)],
-            capture_output=True, text=True, timeout=60, check=True,
+            [
+                soffice_cmd,
+                "--headless",
+                "--convert-to",
+                "docx:MS Word 2007 XML",
+                "--outdir",
+                str(out_dir),
+                str(doc_path_obj),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
         )
         converted_path = out_dir / f"{doc_path_obj.stem}.docx"
         if converted_path.exists():
-            logger.info("DOC converted to DOCX via LibreOffice: %s → %s", doc_path, converted_path)
+            logger.info(
+                "DOC converted to DOCX via LibreOffice: %s → %s",
+                doc_path,
+                converted_path,
+            )
             return str(converted_path)
         raise RuntimeError(f"Converted file not found: {converted_path}")
 
@@ -208,19 +229,27 @@ def _extract_pdf_via_ocr(file_path: str) -> str:
                 try:
                     text = pytesseract.image_to_string(img, lang="rus+eng")
                 except pytesseract.TesseractError as te:
-                    logger.warning("Tesseract failed on page %d: %s — trying 'eng' only", page_num + 1, te)
+                    logger.warning(
+                        "Tesseract failed on page %d: %s — trying 'eng' only",
+                        page_num + 1,
+                        te,
+                    )
                     text = pytesseract.image_to_string(img, lang="eng")
 
                 if text and text.strip():
                     # Внедряем маркер страницы для умного поиска
-                    pages_text.append(f"--- Страница {page_num + 1} ---\n{text.strip()}")
+                    pages_text.append(
+                        f"--- Страница {page_num + 1} ---\n{text.strip()}"
+                    )
             finally:
                 # Строгая очистка памяти для тяжелых PDF
                 if img:
                     img.close()
                 pix = None
 
-    logger.info("PDF OCR completed: %d pages, %d with text", total_pages, len(pages_text))
+    logger.info(
+        "PDF OCR completed: %d pages, %d with text", total_pages, len(pages_text)
+    )
     return "\n\n".join(pages_text)
 
 
@@ -268,7 +297,9 @@ class FileProcessorService:
 
         if ext not in cls.SUPPORTED_EXTENSIONS:
             warning_msg = f"Формат файла {ext} пока не поддерживается для анализа."
-            logger.warning("Unsupported file format: %s", ext, extra={"file_path": file_path})
+            logger.warning(
+                "Unsupported file format: %s", ext, extra={"file_path": file_path}
+            )
             return warning_msg
 
         try:
@@ -287,7 +318,12 @@ class FileProcessorService:
 
         except Exception as e:
             error_msg = f"Произошла техническая ошибка при чтении файла {ext}: {e!s}"
-            logger.error("File parsing error: %s", e, exc_info=True, extra={"file_path": file_path})
+            logger.error(
+                "File parsing error: %s",
+                e,
+                exc_info=True,
+                extra={"file_path": file_path},
+            )
             return error_msg
 
     # ── Format-specific extractors ────────────────────────────────────────────
@@ -318,13 +354,20 @@ class FileProcessorService:
         avg_chars = len(full_text) / max(page_count, 1)
 
         if full_text and avg_chars >= _MIN_AVG_CHARS_PER_PAGE:
-            logger.info("PDF extracted via text layer (fitz)", extra={"chars": len(full_text), "pages": page_count})
-            _save_ocr_cache(file_path, full_text) # Кэшируем даже текстовые PDF для скорости
+            logger.info(
+                "PDF extracted via text layer (fitz)",
+                extra={"chars": len(full_text), "pages": page_count},
+            )
+            _save_ocr_cache(
+                file_path, full_text
+            )  # Кэшируем даже текстовые PDF для скорости
             return full_text
 
         logger.info(
             "PDF text layer too thin (%d chars / %d pages ≈ %.0f chars/page), switching to OCR",
-            len(full_text), page_count, avg_chars
+            len(full_text),
+            page_count,
+            avg_chars,
         )
 
         # 2. Fallback на OCR
@@ -352,15 +395,23 @@ class FileProcessorService:
         try:
             text = _extract_doc_via_fitz(file_path)
             if text and len(text.strip()) > 10:
-                logger.info("DOC extracted via fitz", extra={"file_path": file_path, "chars": len(text)})
+                logger.info(
+                    "DOC extracted via fitz",
+                    extra={"file_path": file_path, "chars": len(text)},
+                )
                 return text
         except Exception as fitz_err:
-            logger.warning("fitz failed for .doc '%s': %s — trying mammoth", file_path, fitz_err)
+            logger.warning(
+                "fitz failed for .doc '%s': %s — trying mammoth", file_path, fitz_err
+            )
 
         try:
             text = _extract_doc_via_mammoth(file_path)
             if text and len(text.strip()) > 10:
-                logger.info("DOC extracted via mammoth", extra={"file_path": file_path, "chars": len(text)})
+                logger.info(
+                    "DOC extracted via mammoth",
+                    extra={"file_path": file_path, "chars": len(text)},
+                )
                 return text
         except ImportError:
             logger.warning("mammoth not installed — install with: uv add mammoth")
@@ -374,16 +425,28 @@ class FileProcessorService:
             try:
                 Path(docx_path).unlink()
             except Exception as cleanup_err:
-                logger.warning("Failed to remove temp file %s: %s", docx_path, cleanup_err)
+                logger.warning(
+                    "Failed to remove temp file %s: %s", docx_path, cleanup_err
+                )
 
             if text and len(text.strip()) > 10:
-                logger.info("DOC extracted via LibreOffice conversion", extra={"original": file_path, "chars": len(text)})
+                logger.info(
+                    "DOC extracted via LibreOffice conversion",
+                    extra={"original": file_path, "chars": len(text)},
+                )
                 return text
 
         except RuntimeError as conv_err:
-            logger.warning("LibreOffice conversion failed for '%s': %s", file_path, conv_err)
+            logger.warning(
+                "LibreOffice conversion failed for '%s': %s", file_path, conv_err
+            )
         except Exception as e:
-            logger.error("Unexpected error during DOC extraction for '%s': %s", file_path, e, exc_info=True)
+            logger.error(
+                "Unexpected error during DOC extraction for '%s': %s",
+                file_path,
+                e,
+                exc_info=True,
+            )
 
         return (
             "Не удалось извлечь текст из файла .doc.\n"
@@ -399,7 +462,10 @@ class FileProcessorService:
         try:
             text = _extract_docx_via_docx2txt(file_path)
             if text and len(text.strip()) > 10:
-                logger.info("DOCX extracted via docx2txt", extra={"file_path": file_path, "chars": len(text)})
+                logger.info(
+                    "DOCX extracted via docx2txt",
+                    extra={"file_path": file_path, "chars": len(text)},
+                )
                 return text
         except KeyError as ke:
             logger.warning("docx2txt failed (invalid ZIP) for '%s': %s", file_path, ke)
@@ -409,7 +475,10 @@ class FileProcessorService:
         try:
             text = _extract_doc_via_mammoth(file_path)
             if text and len(text.strip()) > 10:
-                logger.info("DOCX extracted via mammoth", extra={"file_path": file_path, "chars": len(text)})
+                logger.info(
+                    "DOCX extracted via mammoth",
+                    extra={"file_path": file_path, "chars": len(text)},
+                )
                 return text
         except Exception as e:
             logger.warning("mammoth failed for '%s': %s — trying fitz", file_path, e)
@@ -417,7 +486,10 @@ class FileProcessorService:
         try:
             text = _extract_doc_via_fitz(file_path)
             if text and len(text.strip()) > 10:
-                logger.info("DOCX extracted via fitz", extra={"file_path": file_path, "chars": len(text)})
+                logger.info(
+                    "DOCX extracted via fitz",
+                    extra={"file_path": file_path, "chars": len(text)},
+                )
                 return text
         except Exception as e:
             logger.error("fitz also failed for '%s': %s", file_path, e)
@@ -432,7 +504,10 @@ class FileProcessorService:
         if not docs:
             return "Текстовый файл пуст."
         full_text = "\n\n".join(doc.page_content for doc in docs).strip()
-        logger.info("TXT extracted successfully", extra={"file_path": file_path, "chars": len(full_text)})
+        logger.info(
+            "TXT extracted successfully",
+            extra={"file_path": file_path, "chars": len(full_text)},
+        )
         return full_text
 
     @classmethod
@@ -441,9 +516,11 @@ class FileProcessorService:
         try:
             if ext == ".xlsx":
                 import openpyxl
+
                 wb = openpyxl.load_workbook(file_path, data_only=True)
             else:
                 import xlrd
+
                 wb = xlrd.open_workbook(file_path)
 
             extracted_text = []
@@ -451,23 +528,34 @@ class FileProcessorService:
             if ext == ".xlsx":
                 for sheet_name in wb.sheetnames:
                     sheet = wb[sheet_name]
-                    extracted_text.append(f"\n{'=' * 50}\nЛИСТ: {sheet_name}\n{'=' * 50}\n")
+                    extracted_text.append(
+                        f"\n{'=' * 50}\nЛИСТ: {sheet_name}\n{'=' * 50}\n"
+                    )
                     for row in sheet.iter_rows(values_only=True):
                         if any(cell is not None for cell in row):
-                            row_text = " | ".join(str(cell) if cell is not None else "" for cell in row)
+                            row_text = " | ".join(
+                                str(cell) if cell is not None else "" for cell in row
+                            )
                             extracted_text.append(row_text)
             else:
                 for sheet_idx in range(wb.nsheets):
                     sheet = wb.sheet_by_index(sheet_idx)
-                    extracted_text.append(f"\n{'=' * 50}\nЛИСТ: {sheet.name}\n{'=' * 50}\n")
+                    extracted_text.append(
+                        f"\n{'=' * 50}\nЛИСТ: {sheet.name}\n{'=' * 50}\n"
+                    )
                     for row_idx in range(sheet.nrows):
                         row = sheet.row_values(row_idx)
                         if any(cell for cell in row):
-                            row_text = " | ".join(str(cell) if cell else "" for cell in row)
+                            row_text = " | ".join(
+                                str(cell) if cell else "" for cell in row
+                            )
                             extracted_text.append(row_text)
 
             result = "\n".join(extracted_text).strip()
-            logger.info("Excel extracted successfully", extra={"file_path": file_path, "extension": ext, "chars": len(result)})
+            logger.info(
+                "Excel extracted successfully",
+                extra={"file_path": file_path, "extension": ext, "chars": len(result)},
+            )
             return result
 
         except ImportError as e:
@@ -509,32 +597,60 @@ class FileProcessorService:
         return result
 
     @classmethod
-    async def _extract_excel_tables(cls, file_path: str, ext: str) -> list[dict[str, Any]]:
+    async def _extract_excel_tables(
+        cls, file_path: str, ext: str
+    ) -> list[dict[str, Any]]:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_executor, cls._extract_tables_sync, file_path, ext)
+        return await loop.run_in_executor(
+            _executor, cls._extract_tables_sync, file_path, ext
+        )
 
     @classmethod
     def _extract_tables_sync(cls, file_path: str, ext: str) -> list[dict[str, Any]]:
         try:
             if ext == ".xlsx":
                 import openpyxl
+
                 wb = openpyxl.load_workbook(file_path, data_only=True)
             else:
                 import xlrd
+
                 wb = xlrd.open_workbook(file_path)
             tables = []
             if ext == ".xlsx":
                 for sheet_name in wb.sheetnames:
                     sheet = wb[sheet_name]
-                    data = [list(row) for row in sheet.iter_rows(values_only=True) if any(c is not None for c in row)]
+                    data = [
+                        list(row)
+                        for row in sheet.iter_rows(values_only=True)
+                        if any(c is not None for c in row)
+                    ]
                     if data:
-                        tables.append({"sheet_name": sheet_name, "headers": data[0], "data": data[1:], "rows_count": len(data) - 1})
+                        tables.append(
+                            {
+                                "sheet_name": sheet_name,
+                                "headers": data[0],
+                                "data": data[1:],
+                                "rows_count": len(data) - 1,
+                            }
+                        )
             else:
                 for i in range(wb.nsheets):
                     sheet = wb.sheet_by_index(i)
-                    data = [sheet.row_values(r) for r in range(sheet.nrows) if any(sheet.row_values(r))]
+                    data = [
+                        sheet.row_values(r)
+                        for r in range(sheet.nrows)
+                        if any(sheet.row_values(r))
+                    ]
                     if data:
-                        tables.append({"sheet_name": sheet.name, "headers": data[0], "data": data[1:], "rows_count": len(data) - 1})
+                        tables.append(
+                            {
+                                "sheet_name": sheet.name,
+                                "headers": data[0],
+                                "data": data[1:],
+                                "rows_count": len(data) - 1,
+                            }
+                        )
             return tables
         except Exception as e:
             logger.error("Table extraction error: %s", e, exc_info=True)

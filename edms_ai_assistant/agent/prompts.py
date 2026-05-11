@@ -237,7 +237,7 @@ _SNIPPETS: Final[dict[UserIntent, str]] = {
     UserIntent.CREATE_TASK: """
 <task_creation_guide>
 Параметры:
-- task_text: текст поручения (обязательно).
+- task_text: текст поручения (если не указан — подставится из запроса пользователя).
 - executor_last_names: фамилии исполнителей (обязательно).
 - responsible_last_name: ответственный (опционально).
 - planed_date_end: ISO 8601 (опционально; без даты → +7 дней).

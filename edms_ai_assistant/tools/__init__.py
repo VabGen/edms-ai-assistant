@@ -10,6 +10,7 @@ from .attachment import doc_get_file_content
 from .create_document_from_file import create_document_from_file
 from .doc_compliance_check import doc_compliance_check
 from .doc_control import doc_control
+from .doc_next_process import doc_next_process
 from .doc_search import doc_search_tool
 from .doc_update_field import doc_update_field
 from .document import doc_get_details
@@ -48,6 +49,8 @@ all_tools = [
     doc_compliance_check,
     # Access griefs
     access_grief_tool,
+    # Process bpmn
+    doc_next_process,
 ]
 
 __all__ = [
@@ -69,4 +72,5 @@ __all__ = [
     "create_document_from_file",
     "doc_compliance_check",
     "access_grief_tool",
+    "doc_next_process",
 ]

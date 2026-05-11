@@ -7,6 +7,7 @@ IntentPlanner (внутри OrchestrationLoop) заменяет NLP routing.
 
 Публичный API не изменился — обратная совместимость сохранена.
 """
+
 from __future__ import annotations
 
 import html
@@ -69,6 +70,7 @@ class EdmsDocumentAgent:
             self._model = llm
         else:
             from edms_ai_assistant.llm import get_chat_model
+
             self._model = get_chat_model()
 
         self._graph_builder = GraphBuilder(
@@ -214,9 +216,7 @@ class EdmsDocumentAgent:
         first_name = (uc.get("first_name") or uc.get("firstName") or "").strip()
         last_name = (uc.get("last_name") or uc.get("lastName") or "").strip()
         middle_name = (uc.get("middle_name") or uc.get("middleName") or "").strip()
-        user_id = (
-            uc.get("id") or uc.get("user_id") or uc.get("userId")
-        )
+        user_id = uc.get("id") or uc.get("user_id") or uc.get("userId")
         parts = [p for p in (last_name, first_name, middle_name) if p]
         full_name = " ".join(parts) if parts else None
 

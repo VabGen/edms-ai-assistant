@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.reference_client import ReferenceClient
+from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
 from edms_ai_assistant.generated.resources_openapi import (
     DeclarantType as GeneratedDeclarantType,
 )
@@ -19,7 +20,6 @@ from edms_ai_assistant.generated.resources_openapi import (
     DocumentAppealDto,
     DocumentDto,
 )
-from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
 from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
 from edms_ai_assistant.utils.file_utils import extract_text_from_bytes
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder

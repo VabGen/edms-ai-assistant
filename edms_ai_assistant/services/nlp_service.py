@@ -204,9 +204,9 @@ class EntityExtractor:
     }
 
     def extract_dates(
-            self,
-            text: str,
-            base_date: datetime | None = None,
+        self,
+        text: str,
+        base_date: datetime | None = None,
     ) -> list[Entity]:
         """
         Extract and normalise date expressions from text.
@@ -465,9 +465,9 @@ class EntityExtractor:
         return doc_ids
 
     def extract_all(
-            self,
-            text: str,
-            base_date: datetime | None = None,
+        self,
+        text: str,
+        base_date: datetime | None = None,
     ) -> dict[str, list[Entity]]:
         """Run all extractors and return a grouped entity dict.
 
@@ -691,10 +691,10 @@ class QueryRefiner:
         return text_lower
 
     def add_context(
-            self,
-            text: str,
-            intent: UserIntent,
-            entities: dict[str, list[Entity]],
+        self,
+        text: str,
+        intent: UserIntent,
+        entities: dict[str, list[Entity]],
     ) -> str:
         """Augment the query with intent-specific structured context hints.
 
@@ -758,10 +758,10 @@ class QueryRefiner:
         return text
 
     def refine(
-            self,
-            text: str,
-            intent: UserIntent,
-            entities: dict[str, list[Entity]],
+        self,
+        text: str,
+        intent: UserIntent,
+        entities: dict[str, list[Entity]],
     ) -> str:
         """Run the full refinement pipeline on a query.
 
@@ -948,7 +948,7 @@ class EDMSNaturalLanguageService:
 
             registration = {
                 "рег_номер": getattr(doc, "regNumber", None)
-                             or getattr(doc, "reservedRegNumber", None),
+                or getattr(doc, "reservedRegNumber", None),
                 # Красивые форматы (для UI/человека)
                 "дата_регистрации": self.format_date(reg_date_raw),
                 "дата_создания": self.format_datetime(create_date_raw),
@@ -1047,7 +1047,8 @@ class EDMSNaturalLanguageService:
                                 ),
                             }
                             for ex in (getattr(item, "executors", None) or [])
-                        ] or None,
+                        ]
+                        or None,
                     }
                     for item in items_raw
                 ]
@@ -1118,10 +1119,12 @@ class EDMSNaturalLanguageService:
                                 "текст_отметки": getattr(ex, "stampText", None),
                             }
                             for ex in (getattr(t, "taskExecutors", None) or [])
-                        ] or None,
+                        ]
+                        or None,
                     }
                     for t in task_list
-                ] or None,
+                ]
+                or None,
             }
 
             # ── 7. Вложения ───────────────────────────────────────────────────
@@ -1140,7 +1143,8 @@ class EDMSNaturalLanguageService:
                         ),
                     }
                     for a in attachments_list
-                ] or None,
+                ]
+                or None,
             }
 
             # ── 8. Адресаты и корреспондент ───────────────────────────────────
@@ -1186,8 +1190,11 @@ class EDMSNaturalLanguageService:
                             ),
                             "комментарий": getattr(i, "comment", None),
                         }
-                        for i in intro_list[:10]  # не более 10, чтобы не раздувать промпт
-                    ] or None,
+                        for i in intro_list[
+                            :10
+                        ]  # не более 10, чтобы не раздувать промпт
+                    ]
+                    or None,
                 }
 
             # ── 10. Предварительные номенклатурные дела ───────────────────────
@@ -1252,7 +1259,7 @@ class EDMSNaturalLanguageService:
                 if appeal_obj:
                     receipt_date_raw = getattr(appeal_obj, "receiptDate", None)
                     repeat_list = (
-                            getattr(appeal_obj, "repeatIdenticalAppeals", None) or []
+                        getattr(appeal_obj, "repeatIdenticalAppeals", None) or []
                     )
 
                     specialized["обращение"] = {
@@ -1310,19 +1317,23 @@ class EDMSNaturalLanguageService:
                             "формулировка": getattr(q, "question", None),
                             "докладчики": [
                                 {
-                                    "имя": self.format_user(getattr(s, "employee", None)),
+                                    "имя": self.format_user(
+                                        getattr(s, "employee", None)
+                                    ),
                                     "тип": self.get_safe(s, "type"),
                                 }
                                 for s in (getattr(q, "speakers", None) or [])
-                            ] or None,
+                            ]
+                            or None,
                         }
                         for q in questions
-                    ] or None,
+                    ]
+                    or None,
                 }
 
             # --- MEETING_QUESTION (Повестка заседания) ----------------------
             if category_value == "MEETING_QUESTION" or getattr(
-                    doc, "dateMeetingQuestion", None
+                doc, "dateMeetingQuestion", None
             ):
                 specialized["повестка_заседания"] = {
                     "дата_заседания": self.format_date(

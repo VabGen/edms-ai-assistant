@@ -14,7 +14,7 @@ import {toast} from '@/shared/lib/toast'
 import {useSpeechRecognition} from '@/shared/hooks/useSpeechRecognition'
 import {useApplyPreferences} from '@/shared/hooks/useApplyPreferences'
 import {SettingsPanel} from '@/shared/ui/SettingsPanel'
-import {ComplianceData, ComplianceResult} from "@/shared/ui/ComplianceResult";
+import {ComplianceData, ComplianceField, ComplianceResult} from "@/shared/ui/ComplianceResult";
 
 dayjs.locale('ru')
 
@@ -40,10 +40,15 @@ interface Thread {
 
 const MAX_THREADS = 20
 const THREADS_STORAGE_KEY = 'edmsWidgetThreads'
-const CHOICE_LABELS: Record<string, string> = {abstractive: 'Пересказ', extractive: 'Факты', thesis: 'Тезисы'}
+
+const SUMMARY_TYPE_LABELS: Record<string, string> = {
+    abstractive: 'Пересказ',
+    extractive: 'Факты',
+    thesis: 'Тезисы',
+}
 
 function persistThreads(threads: Thread[]): void {
-    chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
+    void chrome.storage.local.set({[THREADS_STORAGE_KEY]: threads})
 }
 
 const newMsgId = (): string =>
@@ -104,7 +109,7 @@ function tryCallRefreshFn(): boolean {
 
 function fallbackReloadPage(): void {
     try {
-        chrome.runtime.sendMessage({type: 'reloadActiveTab'}).catch(() => {
+        void chrome.runtime.sendMessage({type: 'reloadActiveTab'}).catch(() => {
             window.location.reload()
         })
     } catch {
@@ -121,6 +126,22 @@ function normalizeSpeechText(text: string): string {
     }
     result = result.replace(/\s+/g, ' ')
     return result
+}
+
+function rebuildCompliance(
+    compliance: ComplianceData,
+    fieldUpdater: (f: ComplianceField) => ComplianceField | null,
+): ComplianceData {
+    const updatedFields = compliance.fields.map(f => fieldUpdater(f) ?? f)
+    const mismatches = updatedFields.filter(f => f.status === 'mismatch').length
+    const ok = updatedFields.filter(f => f.status === 'ok').length
+    const not_found = updatedFields.filter(f => f.status === 'not_found').length
+    return {
+        ...compliance,
+        fields: updatedFields,
+        overall: mismatches > 0 ? 'has_mismatches' as const : 'ok' as const,
+        stats: { total: updatedFields.length, mismatches, ok, not_found },
+    }
 }
 
 function SoundWave() {
@@ -260,7 +281,7 @@ const ActionButtons = memo(({msg, loading, onSend, defaultSummaryFormat}: Action
             defaultSummaryFormat !== 'ask' &&
             !loading
         ) {
-            const label = CHOICE_LABELS[defaultSummaryFormat] ?? defaultSummaryFormat
+            const label = SUMMARY_TYPE_LABELS[defaultSummaryFormat] ?? defaultSummaryFormat
             const timer = setTimeout(() => onSend(defaultSummaryFormat, label), 150)
             return () => clearTimeout(timer)
         }
@@ -396,12 +417,6 @@ interface RefreshCacheButtonProps {
     onRefreshStart: (msgId: string, prevContent: string) => void
     onRefreshDone: (msgId: string, newContent: string, payload?: any) => void
     onRefreshError: (msgId: string) => void
-}
-
-const SUMMARY_TYPE_LABELS: Record<string, string> = {
-    extractive: 'Факты',
-    abstractive: 'Пересказ',
-    thesis: 'Тезисы',
 }
 
 const RefreshCacheButton = memo(({
@@ -632,18 +647,18 @@ export function AssistantWidget() {
     useEffect(() => {
         if (!isOpen || messages.length === 0) return
         const snapshot = {messages, threadId, isOpen: true, savedAt: Date.now()}
-        chrome.storage.local.set({edmsWidgetSnapshot: snapshot})
+        void chrome.storage.local.set({edmsWidgetSnapshot: snapshot})
     }, [messages, isOpen, threadId])
 
     useEffect(() => {
-        chrome.storage.local.get(['assistantEnabled'], r => {
+        void chrome.storage.local.get(['assistantEnabled'], r => {
             if (r.assistantEnabled !== undefined) setIsEnabled(r.assistantEnabled)
         })
-        chrome.storage.local.get([THREADS_STORAGE_KEY], r => {
+        void chrome.storage.local.get([THREADS_STORAGE_KEY], r => {
             const saved = r[THREADS_STORAGE_KEY]
             if (Array.isArray(saved) && saved.length > 0) setThreads(saved)
         })
-        chrome.storage.local.get(['userContext'], r => {
+        void chrome.storage.local.get(['userContext'], r => {
             if (r.userContext && typeof r.userContext === 'object') setUserContext(r.userContext)
         })
 
@@ -715,9 +730,9 @@ export function AssistantWidget() {
     }, [messages, loading])
 
     useEffect(() => {
-        chrome.storage.local.get(['edmsWidgetSnapshot'], r => {
+        void chrome.storage.local.get(['edmsWidgetSnapshot'], r => {
             const snap = r?.edmsWidgetSnapshot
-            if (snap) chrome.storage.local.remove('edmsWidgetSnapshot')
+            if (snap) void chrome.storage.local.remove('edmsWidgetSnapshot')
             if (!snap) return
             if (Date.now() - (snap.savedAt ?? 0) > 60_000) return
             if (Array.isArray(snap.messages) && snap.messages.length > 0) setMessages(snap.messages)
@@ -755,7 +770,7 @@ export function AssistantWidget() {
             serverPathRef.current = null
             setAttachedFile(null)
             if (fileRef.current) fileRef.current.value = ''
-            chrome.storage.local.remove('edmsWidgetSnapshot')
+            void chrome.storage.local.remove('edmsWidgetSnapshot')
         } catch (err) {
             toast.error(getToastErrorText(err), 'Не удалось создать диалог')
         } finally {
@@ -860,7 +875,7 @@ export function AssistantWidget() {
             isOpen: true,
             savedAt: Date.now()
         }
-        chrome.storage.local.set({edmsWidgetSnapshot: snapshot}).then(() => {
+        void chrome.storage.local.set({edmsWidgetSnapshot: snapshot}).then(() => {
             setTimeout(() => {
                 const refreshed = tryCallRefreshFn()
                 if (!refreshed) {
@@ -883,13 +898,13 @@ export function AssistantWidget() {
         ).trim()
 
         if (currentDocId && normalizedId === currentDocId) {
-            refreshDocumentForm()
+            void refreshDocumentForm()
             return
         }
 
         const url = `/document-form/${normalizedId}`
 
-        chrome.runtime.sendMessage(
+        void chrome.runtime.sendMessage(
             {type: 'navigateTo', payload: {url, newTab: true}},
             (r) => {
                 if (!r?.success) {
@@ -922,7 +937,7 @@ export function AssistantWidget() {
         if (!threadId) setThreadId(tid)
 
         const userLabel = isChoiceFlow
-            ? (humanChoiceLabel ?? CHOICE_LABELS[humanChoice!] ?? humanChoice!)
+            ? (humanChoiceLabel ?? SUMMARY_TYPE_LABELS[humanChoice!] ?? humanChoice!)
             : hasFile ? `${input} (Файл: ${attachedFile!.name})`.trim()
                 : input
         setMessages(prev => [...prev, {role: 'user', content: userLabel, id: newMsgId(), timestamp: Date.now()}])
@@ -988,7 +1003,7 @@ export function AssistantWidget() {
             setMessages(prev => [...prev, assistantMsg])
 
             if (payload?.navigate_url) {
-                chrome.runtime.sendMessage(
+                void chrome.runtime.sendMessage(
                     {type: 'navigateTo', payload: {url: payload.navigate_url}},
                     (r) => {
                         if (!r?.success) {
@@ -1001,7 +1016,7 @@ export function AssistantWidget() {
                     }
                 )
             } else if (payload?.requires_reload) {
-                refreshDocumentPage(docId, [...messagesRef.current, assistantMsg])
+                await refreshDocumentPage(docId, [...messagesRef.current, assistantMsg])
             }
         } catch (err: unknown) {
             if (!String(err).includes('aborted')) {
@@ -1028,7 +1043,7 @@ export function AssistantWidget() {
 
     const abort = () => {
         if (!requestIdRef.current) return
-        chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
+        void chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
         setLoading(false)
         requestIdRef.current = null
         setMessages(prev => [...prev, {
@@ -1324,7 +1339,7 @@ export function AssistantWidget() {
                                             </p>
                                             <p className="mt-1"
                                                style={{color: '#94a3b8', fontSize: 12}}>
-                                                Задайте вопрос ...
+                                                Задайте вопрос...
                                             </p>
                                         </div>
                                         {userPrefs.documents.showQuickActionHints && (
@@ -1381,66 +1396,31 @@ export function AssistantWidget() {
                                                     data={msg.compliance}
                                                     threadId={threadId}
                                                     onFieldFixed={(fieldKey, newValue) => {
-                                                        const currentMsgs = messagesRef.current
-                                                        const updated = currentMsgs.map(m => {
+                                                        const updated = messagesRef.current.map(m => {
                                                             if (m.id !== msg.id || !m.compliance) return m
-                                                            const updatedFields = m.compliance.fields.map(f =>
-                                                                f.field_key === fieldKey
-                                                                    ? {
-                                                                        ...f,
-                                                                        status: 'ok' as const,
-                                                                        card_value: newValue,
-                                                                        correct_value: null,
-                                                                    }
-                                                                    : f
-                                                            )
-                                                            const mismatchesCount = updatedFields.filter(f => f.status === 'mismatch').length
-                                                            const anyMismatch = mismatchesCount > 0
                                                             return {
                                                                 ...m,
-                                                                compliance: {
-                                                                    ...m.compliance,
-                                                                    fields: updatedFields,
-                                                                    overall: anyMismatch ? 'has_mismatches' as const : 'ok' as const,
-                                                                    stats: {
-                                                                        ...m.compliance.stats,
-                                                                        mismatches: mismatchesCount,
-                                                                        ok: updatedFields.filter(f => f.status === 'ok').length,
-                                                                    },
-                                                                },
+                                                                compliance: rebuildCompliance(m.compliance, f =>
+                                                                    f.field_key === fieldKey
+                                                                        ? { ...f, status: 'ok' as const, card_value: newValue }
+                                                                        : null
+                                                                ),
                                                             }
                                                         })
                                                         setMessages(updated)
-                                                        refreshDocumentForm(updated)
+                                                        void refreshDocumentForm(updated)
                                                     }}
                                                     onAllFixed={(fixedFields) => {
                                                         const fixedKeysSet = new Set(fixedFields.map(f => f.fieldKey))
-                                                        const currentMsgs = messagesRef.current
-                                                        const updated = currentMsgs.map(m => {
+                                                        const updated = messagesRef.current.map(m => {
                                                             if (m.id !== msg.id || !m.compliance) return m
-                                                            const updatedFields = m.compliance.fields.map(f =>
-                                                                fixedKeysSet.has(f.field_key)
-                                                                    ? {
-                                                                        ...f,
-                                                                        status: 'ok' as const,
-                                                                        card_value: f.correct_value ?? f.card_value,
-                                                                        correct_value: null,
-                                                                    }
-                                                                    : f
-                                                            )
-                                                            const mismatchesCount = updatedFields.filter(f => f.status === 'mismatch').length
                                                             return {
                                                                 ...m,
-                                                                compliance: {
-                                                                    ...m.compliance,
-                                                                    fields: updatedFields,
-                                                                    overall: mismatchesCount > 0 ? 'has_mismatches' as const : 'ok' as const,
-                                                                    stats: {
-                                                                        ...m.compliance.stats,
-                                                                        mismatches: mismatchesCount,
-                                                                        ok: updatedFields.filter(f => f.status === 'ok').length,
-                                                                    },
-                                                                },
+                                                                compliance: rebuildCompliance(m.compliance, f =>
+                                                                    fixedKeysSet.has(f.field_key)
+                                                                        ? { ...f, status: 'ok' as const, card_value: f.correct_value ?? f.card_value }
+                                                                        : null
+                                                                ),
                                                             }
                                                         })
                                                         let finalMsgs = updated
@@ -1459,7 +1439,7 @@ export function AssistantWidget() {
                                                             ]
                                                         }
                                                         setMessages(finalMsgs)
-                                                        refreshDocumentForm(finalMsgs)
+                                                        void refreshDocumentForm(finalMsgs)
                                                     }}
                                                 />
                                             )}
@@ -1542,7 +1522,6 @@ export function AssistantWidget() {
                                             gap: 0,
                                             flexShrink: 0,
                                         }}>
-                                            {/* Кнопка прикрепления файла */}
                                             <button
                                                 type="button"
                                                 onClick={() => fileRef.current?.click()}
@@ -1636,7 +1615,7 @@ export function AssistantWidget() {
                                             {canSend && (
                                                 <button
                                                     type="button"
-                                                    onClick={(e) => send(e)}
+                                                    onClick={(e) => { void send(e) }}
                                                     className="edms-icon-btn"
                                                     title="Отправить"
                                                     style={{

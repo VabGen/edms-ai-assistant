@@ -17,17 +17,27 @@ _MAX_CONTENT_CHARS = 120_000
 _PAGE_MARKER_PATTERN = re.compile(r"--- Страница (\d+) ---")
 
 _ALLOWED_EXTENSIONS = {
-    ".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt",
-    ".md", ".xlsx", ".xls", ".csv",
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".txt",
+    ".rtf",
+    ".odt",
+    ".md",
+    ".xlsx",
+    ".xls",
+    ".csv",
 }
 
 
 class LocalFileInput(BaseModel):
     """Validated input for read_local_file_content."""
+
     file_path: str = Field(
         ...,
         description="ПОЛНЫЙ абсолютный путь к локальному файлу.",
-        min_length=1, max_length=500,
+        min_length=1,
+        max_length=500,
     )
     target_pages: list[int] | None = Field(
         default=None,
@@ -62,17 +72,23 @@ def _split_text_to_pages(text: str) -> dict[int, str]:
 
 @tool("read_local_file_content", args_schema=LocalFileInput)
 async def read_local_file_content(
-        file_path: str,
-        target_pages: list[int] | None = None,
-        search_keywords: list[str] | None = None
+    file_path: str,
+    target_pages: list[int] | None = None,
+    search_keywords: list[str] | None = None,
 ) -> dict[str, Any]:
     """Extract text and metadata from a local file on disk.
 
     Supports Smart Truncation (Head + Mini-Index + Tail) for large docs,
     Targeted Page Extraction, and Keyword Search.
     """
-    logger.info("read_local_file_content called",
-                extra={"file_path": file_path, "target_pages": target_pages, "search_keywords": search_keywords})
+    logger.info(
+        "read_local_file_content called",
+        extra={
+            "file_path": file_path,
+            "target_pages": target_pages,
+            "search_keywords": search_keywords,
+        },
+    )
 
     path = Path(file_path)
     if not path.exists():
@@ -80,15 +96,32 @@ async def read_local_file_content(
 
     suffix = path.suffix.lower()
     size_mb = round(path.stat().st_size / (1024 * 1024), 2)
-    meta = {"имя_файла": path.name, "расширение": suffix, "размер_мб": size_mb, "путь": str(path)}
+    meta = {
+        "имя_файла": path.name,
+        "расширение": suffix,
+        "размер_мб": size_mb,
+        "путь": str(path),
+    }
 
     if suffix not in _ALLOWED_EXTENSIONS:
-        return {"status": "error", "message": f"Формат '{suffix}' не поддерживается.", "meta": meta}
+        return {
+            "status": "error",
+            "message": f"Формат '{suffix}' не поддерживается.",
+            "meta": meta,
+        }
 
     full_text = await FileProcessorService.extract_text_async(str(path))
 
-    if not full_text or full_text.startswith("Ошибка:") or full_text.startswith("Формат файла"):
-        return {"status": "error", "message": f"Не удалось извлечь текст: {full_text[:300]}", "meta": meta}
+    if (
+        not full_text
+        or full_text.startswith("Ошибка:")
+        or full_text.startswith("Формат файла")
+    ):
+        return {
+            "status": "error",
+            "message": f"Не удалось извлечь текст: {full_text[:300]}",
+            "meta": meta,
+        }
 
     total_chars = len(full_text)
 
@@ -104,23 +137,36 @@ async def read_local_file_content(
 
         if not matched_pages:
             return {
-                "status": "success", "meta": meta, "content": "Ключевые слова не найдены в документе.",
-                "is_truncated": False, "total_chars": total_chars, "matched_pages": []
+                "status": "success",
+                "meta": meta,
+                "content": "Ключевые слова не найдены в документе.",
+                "is_truncated": False,
+                "total_chars": total_chars,
+                "matched_pages": [],
             }
 
         result_text = "\n\n".join(pages_dict[p] for p in sorted(matched_pages))
         return {
-            "status": "success", "meta": meta, "content": result_text,
-            "is_truncated": False, "total_chars": total_chars, "matched_pages": sorted(matched_pages)
+            "status": "success",
+            "meta": meta,
+            "content": result_text,
+            "is_truncated": False,
+            "total_chars": total_chars,
+            "matched_pages": sorted(matched_pages),
         }
 
     # ── Режим 2: Извлечение конкретных страниц ───────────────────────────
     if target_pages:
         pages_dict = _split_text_to_pages(full_text)
-        result_text = "\n\n".join(pages_dict.get(p, f"[Страница {p} не найдена]") for p in target_pages)
+        result_text = "\n\n".join(
+            pages_dict.get(p, f"[Страница {p} не найдена]") for p in target_pages
+        )
         return {
-            "status": "success", "meta": meta, "content": result_text,
-            "is_truncated": False, "total_chars": total_chars
+            "status": "success",
+            "meta": meta,
+            "content": result_text,
+            "is_truncated": False,
+            "total_chars": total_chars,
         }
 
     # ── Режим 3: Умная обрезка (Начало + Мини-Индекс + Конец) ───────────
@@ -157,22 +203,34 @@ async def read_local_file_content(
                 tail_pages.insert(0, p)
 
             # Формируем Мини-Индекс для пропущенных страниц
-            middle_pages = [p for p in all_page_nums if p not in head_pages and p not in tail_pages]
+            middle_pages = [
+                p for p in all_page_nums if p not in head_pages and p not in tail_pages
+            ]
             index_text = "... [ПРОПУЩЕННЫЕ СТРАНИЦЫ. Краткое содержание пропущенных частей для навигации]:\n"
 
             for p in middle_pages:
                 # Берем первые 100 символов текста страницы как аннотацию
-                page_content_clean = pages_dict[p].replace(f"--- Страница {p} ---", "").strip()
+                page_content_clean = (
+                    pages_dict[p].replace(f"--- Страница {p} ---", "").strip()
+                )
                 snippet = page_content_clean[:100].replace("\n", " ")
                 index_text += f"  Стр. {p}: {snippet}...\n"
 
             index_text += "\nДля чтения полных пропущенных страниц используй параметры target_pages или search_keywords.\n\n"
 
             content = head_text + index_text + tail_text
-            logger.info("Smart truncation with Mini-Index applied to %s. Head: %s, Tail: %s, Indexed: %s",
-                        path.name, len(head_pages), len(tail_pages), len(middle_pages))
+            logger.info(
+                "Smart truncation with Mini-Index applied to %s. Head: %s, Tail: %s, Indexed: %s",
+                path.name,
+                len(head_pages),
+                len(tail_pages),
+                len(middle_pages),
+            )
 
     return {
-        "status": "success", "meta": meta, "content": content,
-        "is_truncated": is_truncated, "total_chars": total_chars
+        "status": "success",
+        "meta": meta,
+        "content": content,
+        "is_truncated": is_truncated,
+        "total_chars": total_chars,
     }

@@ -11,7 +11,6 @@ from pathlib import Path
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.model import UserInput
-from edms_ai_assistant.summarizer.structured.models import SummaryMode
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
@@ -68,58 +67,3 @@ def unwrap_text_from_agent_result(content: str) -> str:
     except (json.JSONDecodeError, AttributeError):
         pass
     return content
-
-
-def format_output_as_text(resp: object) -> str:
-    """Format a structured summarization response as human-readable Markdown."""
-    output = getattr(resp, "output", {})
-    mode = getattr(resp, "mode", None)
-
-    if mode == SummaryMode.EXECUTIVE:
-        lines = [f"**{output.get('headline', '')}**", ""]
-        for bullet in output.get("bullets", []):
-            lines.append(f"• {bullet}")
-        rec = output.get("recommendation")
-        if rec:
-            lines.extend(["", f"💡 **Рекомендация:** {rec}"])
-        return "\n".join(lines)
-
-    if mode == SummaryMode.ACTION_ITEMS:
-        items = output.get("action_items", [])
-        if not items:
-            return "Задачи и поручения не найдены."
-        lines = [f"**Найдено задач: {len(items)}**", ""]
-        for i, item in enumerate(items, 1):
-            priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
-                item.get("priority", "medium"), "⚪"
-            )
-            lines.append(f"{i}. {priority_emoji} {item.get('task', '')}")
-            if item.get("owner"):
-                lines.append(f"   Ответственный: {item['owner']}")
-            if item.get("deadline"):
-                lines.append(f"   Срок: {item['deadline']}")
-        return "\n".join(lines)
-
-    if mode == SummaryMode.THESIS:
-        sections = output.get("sections", [])
-        lines = [f"**{output.get('main_argument', 'Анализ документа')}**", ""]
-        for sec in sections:
-            lines.append(f"## {sec.get('title', '')}")
-            lines.append(sec.get("thesis", ""))
-            for pt in sec.get("points", []):
-                lines.append(f"- {pt.get('claim', '')}")
-            lines.append("")
-        return "\n".join(lines)
-
-    if mode == SummaryMode.EXTRACTIVE:
-        facts = output.get("facts", [])
-        lines = [output.get("document_summary", ""), ""]
-        for fact in facts:
-            lines.append(f"- **{fact.get('label', '')}**: {fact.get('value', '')}")
-        return "\n".join(lines)
-
-    return (
-        output.get("summary", "")
-        or output.get("content", "")
-        or json.dumps(output, ensure_ascii=False, indent=2)
-    )

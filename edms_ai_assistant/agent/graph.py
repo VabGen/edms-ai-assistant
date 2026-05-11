@@ -84,7 +84,7 @@ class GraphBuilder:
 
             # Обрезаем историю до лимита
             if len(non_sys) > settings.AGENT_MAX_CONTEXT_MESSAGES:
-                non_sys = non_sys[-settings.AGENT_MAX_CONTEXT_MESSAGES:]
+                non_sys = non_sys[-settings.AGENT_MAX_CONTEXT_MESSAGES :]
 
             # Оставляем только последний SystemMessage — каждый запрос добавляет
             # новый, старые содержат устаревший контекст (file_path, документ и т.д.)

@@ -12,8 +12,8 @@ services:
     build:
       target: runtime
     environment:
-      ENVIRONMENT:   development
-      DEBUG:         "true"
+      ENVIRONMENT: development
+      DEBUG: "true"
       LOGGING_LEVEL: DEBUG
     volumes:
       - ./edms_ai_assistant:/app/edms_ai_assistant:ro

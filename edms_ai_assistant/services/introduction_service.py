@@ -12,6 +12,10 @@ from edms_ai_assistant.clients.base_client import EdmsHttpClient
 from edms_ai_assistant.clients.department_client import DepartmentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.clients.group_client import GroupClient
+from edms_ai_assistant.services.search_utils import (
+    DEFAULT_PAGEABLE,
+    build_employee_filter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,34 +64,20 @@ class AmbiguousMatch:
 
 
 class IntroductionService:
-    """
-    Сервисный слой для управления списками ознакомления.
-
-    Responsibilities:
-    - Резолвинг сотрудников по различным критериям (фамилия, отдел, группа)
-    - Обработка неоднозначных совпадений
-    - Создание списков ознакомления через API
-    - Валидация и нормализация комментариев
-
-    Архитектурные решения:
-    - Использование async context manager для автоматического управления клиентами
-    """
+    """Сервисный слой для управления списками ознакомления."""
 
     def __init__(self):
-        """Инициализация с созданием клиентов для внешних API."""
         self.employee_client = EmployeeClient()
         self.department_client = DepartmentClient()
         self.group_client = GroupClient()
 
     async def __aenter__(self):
-        """Async context manager entry."""
         await self.employee_client.__aenter__()
         await self.department_client.__aenter__()
         await self.group_client.__aenter__()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit с корректным закрытием клиентов."""
         await self.employee_client.__aexit__(exc_type, exc_val, exc_tb)
         await self.department_client.__aexit__(exc_type, exc_val, exc_tb)
         await self.group_client.__aexit__(exc_type, exc_val, exc_tb)
@@ -98,25 +88,10 @@ class IntroductionService:
         last_names: list[str],
         department_names: list[str],
         group_names: list[str],
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool = False,
     ) -> EmployeeResolutionResult:
-        """
-        Резолвит сотрудников по множественным критериям поиска.
-
-        Обрабатывает:
-        - Поиск по фамилиям (с обработкой неоднозначных совпадений)
-        - Массовое добавление по отделам
-        - Массовое добавление по группам
-
-        Args:
-            token: JWT токен авторизации
-            last_names: Список фамилий для поиска
-            department_names: Названия отделов
-            group_names: Названия групп
-
-        Returns:
-            EmployeeResolutionResult с найденными UUID, не найденными критериями
-            и неоднозначными совпадениями
-        """
+        """Резолвит сотрудников по множественным критериям поиска."""
         found_ids: set[UUID] = set()
         not_found: list[str] = []
         ambiguous_results: list[dict] = []
@@ -124,7 +99,6 @@ class IntroductionService:
         if last_names:
             for last_name in last_names:
                 result = await self._resolve_by_last_name(token, last_name)
-
                 if result["status"] == "not_found":
                     not_found.append(f"Сотрудник: {last_name}")
                 elif result["status"] == "found":
@@ -140,18 +114,22 @@ class IntroductionService:
             not_found.extend(dept_not_found)
 
         if group_names:
-            group_ids, group_not_found = await self._resolve_groups(token, group_names)
+            group_ids, group_not_found = await self._resolve_groups(
+                token, group_names, personal=False
+            )
             found_ids.update(group_ids)
             not_found.extend(group_not_found)
 
-        logger.info(
-            "Employee resolution complete",
-            extra={
-                "found_count": len(found_ids),
-                "not_found_count": len(not_found),
-                "ambiguous_count": len(ambiguous_results),
-            },
-        )
+        if personal_group_names:
+            pg_ids, pg_not_found = await self._resolve_groups(
+                token, personal_group_names, personal=True
+            )
+            found_ids.update(pg_ids)
+            not_found.extend(pg_not_found)
+
+        if include_subordinates:
+            sub_ids, sub_count = await self._resolve_subordinates(token)
+            found_ids.update(sub_ids)
 
         return EmployeeResolutionResult(
             employee_ids=found_ids,
@@ -159,38 +137,36 @@ class IntroductionService:
             ambiguous=ambiguous_results,
         )
 
-    async def _resolve_by_last_name(self, token: str, last_name: str) -> dict:
-        """
-        Резолвит сотрудника по фамилии с обработкой неоднозначностей.
+    async def _resolve_by_last_name(self, token: str, name_query: str) -> dict:
+        """Резолвит сотрудника по фамилии или полному ФИО."""
+        search_filter = build_employee_filter(name_query=name_query)
 
-        Returns:
-            Dict с ключами:
-            - status: "found" | "not_found" | "ambiguous"
-            - employee_id: UUID (для "found")
-            - ambiguous_data: dict (для "ambiguous")
-        """
-        employees = await self.employee_client.search_employees(
-            token, {"lastName": last_name, "includes": ["POST", "DEPARTMENT"]}
+        employees = await self.employee_client.search_employees_post(
+            token=token,
+            employee_filter=search_filter,
+            pageable=DEFAULT_PAGEABLE,
         )
 
         if not employees:
-            logger.warning(f"Employee not found: {last_name}")
+            logger.warning("Employee not found: %s", name_query)
             return {"status": "not_found"}
 
         if len(employees) == 1:
             emp = employees[0]
             emp_id = UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
-            logger.debug(f"Found single employee: {last_name} -> {emp_id}")
+            logger.debug("Found single employee: %s -> %s", name_query, emp_id)
             return {"status": "found", "employee_id": emp_id}
 
         logger.info(
-            f"Found {len(employees)} employees with last name '{last_name}' - disambiguation required"
+            "Found %d employees for '%s' - disambiguation required",
+            len(employees),
+            name_query,
         )
 
         return {
             "status": "ambiguous",
             "ambiguous_data": {
-                "search_query": last_name,
+                "search_query": name_query,
                 "matches": [self._format_employee_match(emp) for emp in employees],
             },
         }
@@ -198,76 +174,157 @@ class IntroductionService:
     async def _resolve_departments(
         self, token: str, department_names: list[str]
     ) -> tuple[set[UUID], list[str]]:
-        """
-        Резолвит сотрудников по названиям отделов.
-
-        Returns:
-            Tuple[Set[UUID], List[str]]: Найденные ID и не найденные отделы
-        """
+        """Резолвит сотрудников по названиям отделов."""
         found_ids: set[UUID] = set()
         not_found: list[str] = []
 
         for dept_name in department_names:
-            dept = await self.department_client.find_by_name(token, dept_name)
-
-            if not dept:
-                not_found.append(f"Департамент: {dept_name}")
-                logger.warning(f"Department not found: {dept_name}")
+            ns = dept_name.strip()
+            if not ns:
                 continue
+            try:
+                dept = await self.department_client.find_by_name(token, ns)
+                if not dept or not dept.get("id"):
+                    not_found.append(f"Департамент: {ns}")
+                    continue
 
-            dept_id = UUID(dept["id"]) if isinstance(dept["id"], str) else dept["id"]
-            employees = await self.department_client.get_employees_by_department_id(
-                token, dept_id
-            )
+                dept_id = (
+                    UUID(dept["id"]) if isinstance(dept["id"], str) else dept["id"]
+                )
+                employees = await self.department_client.get_employees_by_department_id(
+                    token, dept_id
+                )
+                for emp in employees:
+                    emp_id = (
+                        UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    )
+                    found_ids.add(emp_id)
 
-            for emp in employees:
-                emp_id = UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
-                found_ids.add(emp_id)
-
-            logger.info(
-                f"Resolved department '{dept_name}': {len(employees)} employees"
-            )
+                logger.info(
+                    "Resolved department '%s': %d employees", ns, len(employees)
+                )
+            except Exception:
+                logger.warning("Failed to resolve department '%s'", ns, exc_info=True)
+                not_found.append(f"Департамент: {ns}")
 
         return found_ids, not_found
 
     async def _resolve_groups(
-        self, token: str, group_names: list[str]
+        self,
+        token: str,
+        group_names: list[str],
+        *,
+        personal: bool = False,
     ) -> tuple[set[UUID], list[str]]:
-        """
-        Резолвит сотрудников по названиям групп.
+        """Резолвит группы (обычные или личные) по названиям.
 
-        Returns:
-            Tuple[Set[UUID], List[str]]: Найденные ID и не найденные группы
+        Args:
+            token: JWT токен
+            group_names: Названия групп
+            personal: True — личные группы, False — обычные группы
         """
         found_ids: set[UUID] = set()
         not_found: list[str] = []
         group_ids: list[UUID] = []
 
+        label = "Личная группа" if personal else "Группа"
+
         for group_name in group_names:
-            group = await self.group_client.find_by_name(token, group_name)
-
-            if not group:
-                not_found.append(f"Группа: {group_name}")
-                logger.warning(f"Group not found: {group_name}")
+            ns = group_name.strip()
+            if not ns:
                 continue
+            try:
+                if personal:
+                    group = await self.group_client.find_personal_by_name(token, ns)
+                else:
+                    group = await self.group_client.find_by_name(token, ns)
 
-            group_id = (
-                UUID(group["id"]) if isinstance(group["id"], str) else group["id"]
-            )
-            group_ids.append(group_id)
+                if not group or not group.get("id"):
+                    not_found.append(f"{label}: {ns}")
+                    continue
+
+                group_id = (
+                    UUID(group["id"]) if isinstance(group["id"], str) else group["id"]
+                )
+                group_ids.append(group_id)
+            except Exception:
+                logger.warning(
+                    "Failed to resolve %s '%s'", label.lower(), ns, exc_info=True
+                )
+                not_found.append(f"{label}: {ns}")
 
         if group_ids:
-            employees = await self.group_client.get_employees_by_group_ids(
-                token, group_ids
-            )
+            try:
+                if personal:
+                    employees = (
+                        await self.group_client.get_employees_by_personal_group_ids(
+                            token, group_ids
+                        )
+                    )
+                else:
+                    employees = await self.group_client.get_employees_by_group_ids(
+                        token, group_ids
+                    )
 
-            for emp in employees:
-                emp_id = UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
-                found_ids.add(emp_id)
+                for emp in employees:
+                    emp_id = (
+                        UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    )
+                    found_ids.add(emp_id)
 
-            logger.info(f"Resolved {len(group_ids)} groups: {len(employees)} employees")
+                logger.info(
+                    "Resolved %d %ss: %d employees",
+                    len(group_ids),
+                    label.lower(),
+                    len(employees),
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to get employees for %ss",
+                    label.lower(),
+                    exc_info=True,
+                )
 
         return found_ids, not_found
+
+    async def _resolve_subordinates(
+        self,
+        token: str,
+    ) -> tuple[set[UUID], int]:
+        """Резолвит подчинённых текущего пользователя."""
+        try:
+            current_user = await self.employee_client.get_current_user(token)
+            if not current_user:
+                return set(), 0
+
+            user_id = current_user.get("id")
+            dept_id = current_user.get("departmentId")
+
+            if not dept_id:
+                logger.warning("Current user has no departmentId")
+                return set(), 0
+
+            search_filter = {
+                "departmentId": [str(dept_id)],
+                "includes": ["POST", "DEPARTMENT"],
+            }
+
+            employees = await self.employee_client.search_employees_post(
+                token=token,
+                employee_filter=search_filter,
+                pageable={"page": 0, "size": 100, "sort": "lastName,ASC"},
+            )
+
+            found_ids: set[UUID] = set()
+            for emp in employees:
+                emp_id_str = str(emp.get("id", ""))
+                if emp_id_str and emp_id_str != str(user_id):
+                    found_ids.add(UUID(emp_id_str))
+
+            return found_ids, len(found_ids)
+        except Exception:
+            logger.warning("Failed to resolve subordinates", exc_info=True)
+            return set(), 0
 
     async def create_introduction(
         self,
@@ -276,18 +333,7 @@ class IntroductionService:
         employee_ids: list[UUID],
         comment: str | None = None,
     ) -> IntroductionResult:
-        """
-        Создает список ознакомления через API EDMS.
-
-        Args:
-            token: JWT токен авторизации
-            document_id: UUID документа
-            employee_ids: Список UUID сотрудников
-            comment: Комментарий к ознакомлению (опционально)
-
-        Returns:
-            IntroductionResult с информацией об успехе операции
-        """
+        """Создает список ознакомления через API EDMS."""
         if not employee_ids:
             logger.warning("Attempted to create introduction with empty employee list")
             return IntroductionResult(
@@ -337,16 +383,13 @@ class IntroductionService:
                 error_message=f"Ошибка API: {e!s}",
             )
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Private: utils
+    # ──────────────────────────────────────────────────────────────────────
+
     @staticmethod
     def _normalize_comment(comment: str | None) -> str:
-        """
-        Нормализует комментарий перед отправкой в API.
-
-        Rules:
-        - None или пустая строка → ""
-        - Убирает шаблонные фразы от LLM
-        - Капитализирует первую букву
-        """
+        """Нормализует комментарий перед отправкой в API."""
         if not comment:
             return ""
 
@@ -368,15 +411,7 @@ class IntroductionService:
 
     @staticmethod
     def _format_employee_match(employee: dict) -> dict:
-        """
-        Форматирует данные сотрудника для disambiguation response.
-
-        Args:
-            employee: Сырые данные от API
-
-        Returns:
-            Структурированный словарь с полным именем, должностью и отделом
-        """
+        """Форматирует данные сотрудника для disambiguation response."""
         first_name = employee.get("firstName", "")
         last_name = employee.get("lastName", "")
         middle_name = employee.get("middleName", "") or ""

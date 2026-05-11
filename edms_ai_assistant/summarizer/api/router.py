@@ -1,123 +1,127 @@
-# summarizer/api/router.py
-
 """
-FastAPI Router — Production-grade summarization API.
+FastAPI router для суммаризации.
 
-Endpoints:
-    POST /summarize          — Full structured summarization (all modes)
-    POST /summarize/stream   — SSE streaming for executive/abstractive modes
-    GET  /summarize/modes    — Available modes + schema descriptions
-    DELETE /cache/{file_hash} — Invalidate cache by file hash
+Эндпоинты:
+  GET  /summarize/modes                 — список режимов суммаризации
+  POST /summarize                       — основная суммаризация (multipart upload)
+  POST /summarize/stream                — SSE-стриминг финального вывода
+  DELETE /summarize/cache/{hash}/{mode} — инвалидация кэша
+  GET  /summarize/health                — проверка работоспособности
 
-Design principles:
-    - All inputs validated by Pydantic v2 before hitting the service
-    - Request ID generated server-side (UUID4) for idempotency + tracing
-    - File upload as multipart (not base64 JSON) — efficient for large files
-    - Response always includes cost + latency metadata
-    - Streaming via Server-Sent Events (text/event-stream)
-    - Rate limiting via slowapi (configurable)
+Схемы вынесены в `summarizer/api/schemas.py`. Доменные модели запроса/ответа
+живут в `summarizer/service.py`.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from typing import Annotated, AsyncIterator
 
-from fastapi import APIRouter, Depends, File, Form, Request, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 
-from edms_ai_assistant.summarizer.service import (
-    SummarizationRequest,
-    SummarizationResponse,
-    SummarizationService,
-)
 from edms_ai_assistant.summarizer.api.schemas import (
     CacheInvalidationResponse,
     SummarizeModeInfo,
     SummarizeModesResponse,
 )
-from edms_ai_assistant.summarizer.structured.models import (
-    MODE_OUTPUT_MODEL,
-    SummaryMode,
+from edms_ai_assistant.summarizer.pipeline.direct import StreamEvent
+from edms_ai_assistant.summarizer.prompts.registry import get_prompt_registry
+from edms_ai_assistant.summarizer.service import (
+    SummarizationRequest,
+    SummarizationResponse,
+    SummarizationService,
+    format_output_as_markdown,
 )
+from edms_ai_assistant.summarizer.structured.models import SummaryMode
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/summarize", tags=["Summarization"])
 
+# Hex-валидация SHA-256 ключа кэша
+_HEX_CHARS = frozenset("0123456789abcdef")
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_STREAM_CHUNK_BYTES = 256
+
+
 # ---------------------------------------------------------------------------
-# Dependency injection
+# Описания режимов
+# ---------------------------------------------------------------------------
+
+_MODE_DESCRIPTIONS: dict[SummaryMode, dict[str, str]] = {
+    SummaryMode.EXECUTIVE: {
+        "description": "Краткая выжимка для руководителя: заголовок + 3-5 тезисов",
+        "use_case": "Быстрые решения, управленческие брифинги",
+    },
+    SummaryMode.DETAILED_NOTES: {
+        "description": "Полный структурированный конспект с сохранением иерархии",
+        "use_case": "Юридический анализ, изучение договоров",
+    },
+    SummaryMode.ACTION_ITEMS: {
+        "description": "Извлечение задач с ответственными, сроками и приоритетами",
+        "use_case": "Протоколы совещаний, контроль исполнения",
+    },
+    SummaryMode.THESIS: {
+        "description": "Иерархический тезисный план для аналитических документов",
+        "use_case": "Научные документы, стратегические планы",
+    },
+    SummaryMode.EXTRACTIVE: {
+        "description": "Ключевые факты, даты, суммы как структурированные данные",
+        "use_case": "Извлечение данных, заполнение карточки СЭД",
+    },
+    SummaryMode.ABSTRACTIVE: {
+        "description": "Связный пересказ своими словами в 2-4 абзацах",
+        "use_case": "Общее понимание документа, брифинги",
+    },
+    SummaryMode.MULTILINGUAL: {
+        "description": "Авто-определение языка источника, изложение на нужном языке",
+        "use_case": "Многоязычная обработка (RU/BE/KZ/EN)",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Dependency
 # ---------------------------------------------------------------------------
 
 
 def get_summarization_service(request: Request) -> SummarizationService:
-    """FastAPI dependency — returns the singleton SummarizationService.
-
-    The service is initialized in app lifespan and stored in app.state.
-    This dependency retrieves it.
-    """
-    service: SummarizationService | None = getattr(request.app.state, "summarization_service", None)
+    service: SummarizationService | None = getattr(
+        request.app.state, "summarization_service", None
+    )
     if service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="SummarizationService not initialized. Check application lifespan.",
+            detail="SummarizationService не инициализирован.",
         )
     return service
 
 
 ServiceDep = Annotated[SummarizationService, Depends(get_summarization_service)]
 
-# # ---------------------------------------------------------------------------
-# # Schemas
-# # ---------------------------------------------------------------------------
-#
-#
-# class SummarizeModeInfo(BaseModel):
-#     mode: str
-#     description: str
-#     output_schema: dict
-#     use_case: str
-#
-#
-# class SummarizeModesResponse(BaseModel):
-#     modes: list[SummarizeModeInfo]
-#     prompt_registry_version: str
-#
-#
-# class CacheInvalidationResponse(BaseModel):
-#     invalidated: bool
-#     file_hash: str
-#     message: str
 
+def _parse_mode(mode: str) -> SummaryMode:
+    try:
+        return SummaryMode(mode)
+    except ValueError:
+        valid = sorted(m.value for m in SummaryMode)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Неверный режим '{mode}'. Допустимые: {valid}",
+        )
 
-_MODE_DESCRIPTIONS: dict[SummaryMode, dict] = {
-    SummaryMode.EXECUTIVE: {
-        "description": "C-suite friendly: headline + 3-5 bullets + optional recommendation",
-        "use_case": "Quick decisions, management briefings",
-    },
-    SummaryMode.DETAILED_NOTES: {
-        "description": "Full structured notes preserving document hierarchy and key entities",
-        "use_case": "Legal review, contract analysis, detailed study",
-    },
-    SummaryMode.ACTION_ITEMS: {
-        "description": "Extracts all tasks/commitments with owners, deadlines, priorities",
-        "use_case": "Meeting minutes, project assignments, compliance tracking",
-    },
-    SummaryMode.THESIS: {
-        "description": "Hierarchical argument/thesis plan for analytical documents",
-        "use_case": "Academic papers, policy documents, strategic plans",
-    },
-    SummaryMode.EXTRACTIVE: {
-        "description": "Key facts, dates, figures, organizations as structured data",
-        "use_case": "Data extraction, fact-checking, EDMS card filling",
-    },
-    SummaryMode.ABSTRACTIVE: {
-        "description": "Cohesive narrative paraphrase in 2-4 paragraphs",
-        "use_case": "General document understanding, briefings",
-    },
-    SummaryMode.MULTILINGUAL: {
-        "description": "Auto-detects source language, summarizes in requested language",
-        "use_case": "Cross-language document processing (RU/BE/KZ/EN)",
-    },
-}
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -127,22 +131,18 @@ _MODE_DESCRIPTIONS: dict[SummaryMode, dict] = {
 @router.get(
     "/modes",
     response_model=SummarizeModesResponse,
-    summary="List available summarization modes with schemas",
+    summary="Список доступных режимов суммаризации",
 )
 async def get_modes(service: ServiceDep) -> SummarizeModesResponse:
-    """Return all available summarization modes with their output schemas."""
-    from edms_ai_assistant.summarizer.prompts.registry import get_prompt_registry
     registry = get_prompt_registry()
-    modes = []
-    for mode in SummaryMode:
-        info = _MODE_DESCRIPTIONS.get(mode, {})
-        model_cls = MODE_OUTPUT_MODEL[mode]
-        modes.append(SummarizeModeInfo(
+    modes = [
+        SummarizeModeInfo(
             mode=mode.value,
-            description=info.get("description", ""),
-            output_schema=model_cls.model_json_schema(),
-            use_case=info.get("use_case", ""),
-        ))
+            description=_MODE_DESCRIPTIONS.get(mode, {}).get("description", ""),
+            use_case=_MODE_DESCRIPTIONS.get(mode, {}).get("use_case", ""),
+        )
+        for mode in SummaryMode
+    ]
     return SummarizeModesResponse(
         modes=modes,
         prompt_registry_version=registry.version(),
@@ -152,84 +152,69 @@ async def get_modes(service: ServiceDep) -> SummarizeModesResponse:
 @router.post(
     "",
     response_model=SummarizationResponse,
-    summary="Summarize a document file",
+    summary="Суммаризация документа",
     status_code=status.HTTP_200_OK,
 )
 async def summarize_document(
     service: ServiceDep,
-    file: Annotated[UploadFile, File(description="Document file (PDF, DOCX, TXT, etc.)")],
-    mode: Annotated[str, Form(description="Summarization mode")] = SummaryMode.ABSTRACTIVE.value,
-    language: Annotated[str, Form(description="Output language BCP-47 (e.g. 'ru', 'en', 'auto')")] = "ru",
-    force_refresh: Annotated[bool, Form(description="Bypass cache")] = False,
+    file: Annotated[
+        UploadFile, File(description="Файл документа (PDF, DOCX, TXT и др.)")
+    ],
+    mode: Annotated[
+        str, Form(description="Режим суммаризации")
+    ] = SummaryMode.ABSTRACTIVE.value,
+    language: Annotated[
+        str, Form(description="Язык вывода BCP-47 (ru, en, auto)")
+    ] = "ru",
+    force_refresh: Annotated[bool, Form(description="Игнорировать кэш")] = False,
+    enable_quality_score: Annotated[
+        bool,
+        Form(description="Запустить LLM-as-judge для оценки качества (≈ +1 LLM-вызов)"),
+    ] = False,
 ) -> SummarizationResponse:
-    """
-    Summarize an uploaded document file.
+    summary_mode = _parse_mode(mode)
 
-    Supported formats: PDF, DOCX, DOC, TXT, MD, CSV.
-
-    Returns a typed structured response depending on the selected mode:
-    - **executive**: headline + bullets + recommendation
-    - **detailed_notes**: full hierarchical notes with sections
-    - **action_items**: tasks with owners, deadlines, priorities
-    - **thesis**: argument/thesis plan
-    - **extractive**: key facts as structured list
-    - **abstractive**: narrative paraphrase
-    - **multilingual**: auto-detects language, summarizes in `language`
-
-    Response includes observability metadata:
-    - `input_tokens`, `output_tokens`, `cost_usd`, `latency_ms`
-    - `cache_hit`, `cache_source` (l1/l2/miss)
-    - `chunking_strategy` (direct / map_reduce:structural / map_reduce:token_aware_fallback)
-    """
-    try:
-        summary_mode = SummaryMode(mode)
-    except ValueError:
-        valid = [m.value for m in SummaryMode]
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid mode '{mode}'. Valid modes: {valid}",
-        )
-
-    if file.size and file.size > 50 * 1024 * 1024:  # 50 MB
+    if file.size and file.size > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File too large. Maximum size: 50 MB.",
+            detail=f"Файл слишком большой. Максимум: {_MAX_UPLOAD_BYTES // (1024 * 1024)} МБ.",
         )
 
     file_content = await file.read()
     if not file_content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Empty file uploaded.",
+            detail="Загружен пустой файл.",
         )
 
-    request = SummarizationRequest(
+    req = SummarizationRequest(
         file_content=file_content,
         file_name=file.filename or "document",
         mode=summary_mode,
-        language=language,
+        language=language or "ru",
         request_id=str(uuid.uuid4()),
         force_refresh=force_refresh,
+        enable_quality_score=enable_quality_score,
     )
 
     try:
-        return await service.summarize(request)
+        return await service.summarize(req)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        logger.error("Summarization failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ошибка суммаризации. См. логи сервиса.",
+        )
 
 
 @router.post(
     "/stream",
-    summary="Stream summarization via Server-Sent Events",
+    summary="Стриминг финального вывода через Server-Sent Events",
     response_class=StreamingResponse,
-    responses={
-        200: {
-            "content": {"text/event-stream": {}},
-            "description": "SSE stream of summary tokens",
-        }
-    },
 )
 async def summarize_stream(
     service: ServiceDep,
@@ -237,60 +222,56 @@ async def summarize_stream(
     mode: Annotated[str, Form()] = SummaryMode.ABSTRACTIVE.value,
     language: Annotated[str, Form()] = "ru",
 ) -> StreamingResponse:
-    """
-    Stream summarization output via Server-Sent Events (SSE).
-
-    Available for modes: executive, abstractive, extractive.
-    Other modes return full JSON in a single event.
-
-    SSE Event format:
-        data: <token_or_chunk>\\n\\n
-        data: [DONE]\\n\\n
-
-    Suitable for real-time UI updates (e.g., progressive text rendering).
-    """
-    try:
-        summary_mode = SummaryMode(mode)
-    except ValueError:
-        raise HTTPException(status_code=422, detail=f"Invalid mode: {mode}")
+    summary_mode = _parse_mode(mode)
 
     file_content = await file.read()
     if not file_content:
-        raise HTTPException(status_code=400, detail="Empty file.")
+        raise HTTPException(status_code=400, detail="Пустой файл.")
+
+    req = SummarizationRequest(
+        file_content=file_content,
+        file_name=file.filename or "document",
+        mode=summary_mode,
+        language=language or "ru",
+        request_id=str(uuid.uuid4()),
+        force_refresh=False,
+    )
+
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     async def event_generator() -> AsyncIterator[str]:
         try:
-            request = SummarizationRequest(
-                file_content=file_content,
-                file_name=file.filename or "document",
-                mode=summary_mode,
-                language=language,
-                request_id=str(uuid.uuid4()),
-                force_refresh=False,
-            )
-            result = await service.summarize(request)
-
-            import json
-            output_json = json.dumps(result.output, ensure_ascii=False)
-
-            chunk_size = 50
-            for i in range(0, len(output_json), chunk_size):
-                chunk = output_json[i:i + chunk_size]
-                yield f"data: {chunk}\n\n"
-
-            meta = {
-                "event": "done",
-                "cache_hit": result.cache_hit,
-                "latency_ms": result.latency_ms,
-                "cost_usd": result.cost_usd,
-                "tokens": result.input_tokens + result.output_tokens,
-            }
-            yield f"data: {json.dumps(meta)}\n\n"
+            async for event in service.summarize_stream(req):
+                if isinstance(event, StreamEvent):
+                    if event.kind == "delta" and event.text:
+                        yield _sse({"event": "delta", "text": event.text})
+                    elif event.kind == "error":
+                        yield _sse({"event": "error", "message": "LLM streaming error"})
+                elif isinstance(event, SummarizationResponse):
+                    formatted = format_output_as_markdown(event)
+                    yield _sse(
+                        {
+                            "event": "result",
+                            "formatted": formatted,
+                            "cache_hit": event.cache_hit,
+                            "cache_source": event.cache_source,
+                            "latency_ms": event.latency_ms,
+                            "cost_usd": event.cost_usd,
+                            "input_tokens": event.input_tokens,
+                            "output_tokens": event.output_tokens,
+                            "chunking_strategy": event.chunking_strategy,
+                            "request_id": event.request_id,
+                        }
+                    )
             yield "data: [DONE]\n\n"
 
-        except Exception as exc:
-            import json
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        except ValueError as exc:
+            yield _sse({"event": "error", "message": str(exc)})
+            yield "data: [DONE]\n\n"
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Stream summarization failed: %s", exc, exc_info=True)
+            yield _sse({"event": "error", "message": "Ошибка суммаризации"})
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -304,86 +285,41 @@ async def summarize_stream(
     )
 
 
-# @router.delete(
-#     "/cache/{file_hash}",
-#     response_model=CacheInvalidationResponse,
-#     summary="Invalidate all cached summaries for a file",
-# )
-# async def invalidate_cache(
-#     file_hash: str,
-#     service: ServiceDep,
-# ) -> CacheInvalidationResponse:
-#     """
-#     Invalidate ALL cached summaries for a given file hash (all modes and languages).
-#
-#     The file hash is the SHA-256 of the file content bytes, available in every
-#     SummarizationResponse under `file_hash`.
-#
-#     Use this when:
-#     - A document has been updated/replaced
-#     - You want to force re-generation after a prompt version bump
-#     """
-#     if len(file_hash) != 64 or not all(c in "0123456789abcdef" for c in file_hash.lower()):
-#         raise HTTPException(
-#             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-#             detail="file_hash must be a 64-character lowercase hex string (SHA-256).",
-#         )
-#
-#     await service.invalidate_cache(file_hash)
-#     return CacheInvalidationResponse(
-#         invalidated=True,
-#         file_hash=file_hash,
-#         message=f"All cached summaries for file_hash={file_hash[:8]}... invalidated.",
-#     )
-
 @router.delete(
     "/cache/{file_hash}/{summary_type}",
     response_model=CacheInvalidationResponse,
-    summary="Invalidate cached summaries for a specific file and mode",
+    summary="Инвалидация кэша для конкретного файла и режима",
 )
 async def invalidate_cache(
-        file_hash: str,
-        summary_type: str,
-        service: ServiceDep,
+    file_hash: str,
+    summary_type: str,
+    service: ServiceDep,
 ) -> CacheInvalidationResponse:
-    """
-    Invalidate cached summaries for a given file hash and specific summary type.
-
-    Use this when:
-    - A document has been updated/replaced
-    - You want to force re-generation for a specific mode
-    """
-    if len(file_hash) != 64 or not all(c in "0123456789abcdef" for c in file_hash.lower()):
+    if len(file_hash) != 64 or any(c not in _HEX_CHARS for c in file_hash.lower()):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="file_hash must be a 64-character lowercase hex string (SHA-256).",
+            detail="file_hash должен быть 64-символьной hex-строкой (SHA-256).",
         )
+    _parse_mode(summary_type)  # validate
 
     await service.invalidate_cache(file_hash, mode=summary_type)
     return CacheInvalidationResponse(
         invalidated=True,
         file_hash=file_hash,
-        message=f"Cache for file_hash={file_hash[:8]}... mode={summary_type} invalidated.",
+        message=f"Кэш для file_hash={file_hash[:8]}... mode={summary_type} инвалидирован.",
     )
 
 
-@router.get(
-    "/health",
-    summary="Health check for summarization service",
-)
+@router.get("/health", summary="Проверка работоспособности сервиса суммаризации")
 async def summarization_health(service: ServiceDep) -> dict:
-    """Check health of summarization service components."""
-    l1_ok = await service._cache._l1.health_check()
-    l2_ok = await service._cache._l2.health_check()
-    cache_stats = service.cache_stats()
+    info = await service.health()
+    cache_status = info["cache"]
     return {
-        "status": "ok" if l2_ok else "degraded",
+        "status": cache_status.get("overall", "ok"),
         "components": {
-            "redis_l1": "ok" if l1_ok else "unavailable",
-            "postgres_l2": "ok" if l2_ok else "unavailable",
+            "redis_l1": cache_status.get("redis_l1"),
+            "postgres_l2": cache_status.get("postgres_l2"),
             "llm": "ok",
         },
-        "cache_stats": cache_stats,
+        "cache_stats": info["cache_stats"],
     }
-
-# 1

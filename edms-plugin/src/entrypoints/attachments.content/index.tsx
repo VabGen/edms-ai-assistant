@@ -1,6 +1,6 @@
-import {getAuthToken} from '../../shared/lib/auth'
-import {extractDocIdFromUrl} from '../../shared/lib/url'
-import {toast} from '../../shared/lib/toast'
+import {getAuthToken} from '@/shared/lib/auth'
+import {extractDocIdFromUrl} from '@/shared/lib/url'
+import {toast} from '@/shared/lib/toast'
 
 let assistantEnabled = true;
 
@@ -15,7 +15,6 @@ export default defineContentScript({
     runAt: 'document_idle',
 
     async main() {
-        console.log('[EDMS] ✅ Attachments content script started')
 
         const res = await chrome.storage.local.get(['assistantEnabled']);
         assistantEnabled = res.assistantEnabled !== false;

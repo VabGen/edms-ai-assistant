@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# EDMS AI Assistant — Production docker-compose
+# EDMS AI Assistant — docker-compose
 #
 # Usage:
-#   docker compose up -d --build          # first start / rebuild
+#   docker compose up -d --build                          # first start / rebuild
 #   docker compose pull && docker compose up -d --build   # update
-#   docker compose logs -f app             # follow app logs
-#   docker compose down                    # stop (data volumes preserved)
-#   docker compose down -v                 # stop + wipe all volumes
+#   docker compose logs -f app                            # follow app logs
+#   docker compose down                                   # stop (data volumes preserved)
+#   docker compose down -v                                # stop + wipe all volumes
 #
 # Dev overrides are in docker-compose.override.yml (auto-loaded by Docker).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -18,13 +18,13 @@ services:
     image: postgres:18-alpine
     container_name: edms-postgres
     environment:
-      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_DB:       ${POSTGRES_DB:-ai_assistant}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_assistant}
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ai_assistant}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ai_assistant}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -47,7 +47,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -64,7 +64,7 @@ services:
       target: runtime
       args:
         PYTHON_VERSION: "3.13-slim"
-        TORCH_VARIANT:  "cpu"
+        TORCH_VARIANT: "cpu"
     image: edms-ai-assistant:latest
     container_name: edms-app
     env_file:
@@ -72,8 +72,8 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
-      REDIS_HOST:    redis
-      REDIS_PORT:    "6379"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -84,7 +84,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:${API_PORT:-8000}/health || exit 1"]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:${API_PORT:-8000}/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -95,7 +95,6 @@ services:
     networks:
       - edms-network
 
-# ── Named volumes ───────────────────────────────────────────────────────────
 volumes:
   pgdata:
     name: edms_pgdata
@@ -104,7 +103,6 @@ volumes:
   app_uploads:
     name: edms_app_uploads
 
-# ── Networks ────────────────────────────────────────────────────────────────
 networks:
   edms-network:
     name: edms-network

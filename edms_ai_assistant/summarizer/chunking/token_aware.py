@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _TIKTOKEN_AVAILABLE = False
 try:
     import tiktoken  # type: ignore[import]
+
     _TIKTOKEN_AVAILABLE = True
 except ImportError:
     logger.warning(
@@ -35,8 +36,7 @@ class TokenCounter(ABC):
     """Abstract token counter interface."""
 
     @abstractmethod
-    def count(self, text: str) -> int:
-        ...
+    def count(self, text: str) -> int: ...
 
     @abstractmethod
     def count_messages(self, messages: list[dict]) -> int:
@@ -66,7 +66,10 @@ class TiktokenCounter(TokenCounter):
                     self.__class__._encoding = tiktoken.get_encoding(self._model)
                     logger.info("tiktoken encoder loaded: %s", self._model)
                 except Exception as exc:
-                    logger.warning("tiktoken encoder unavailable: %s -- using char ratio fallback", exc)
+                    logger.warning(
+                        "tiktoken encoder unavailable: %s -- using char ratio fallback",
+                        exc,
+                    )
                     raise
         return self._encoding
 
@@ -114,7 +117,7 @@ def _char_ratio_count(text: str) -> int:
     """Improved char ratio with Cyrillic detection."""
     if not text:
         return 0
-    cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04FF")
+    cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04ff")
     ratio = 3.0 if cyrillic > len(text) * 0.3 else 3.7
     return max(1, int(len(text) / ratio))
 
@@ -122,6 +125,7 @@ def _char_ratio_count(text: str) -> int:
 # ---------------------------------------------------------------------------
 # Singleton factory
 # ---------------------------------------------------------------------------
+
 
 @functools.lru_cache(maxsize=1)
 def get_token_counter() -> TokenCounter:
@@ -145,11 +149,13 @@ def estimate_cost(
     input_tokens: int,
     output_tokens: int,
     *,
-    input_price_per_1k: float = 0.0015,
-    output_price_per_1k: float = 0.002,
+    model: str = "default",
 ) -> float:
-    """Estimate USD cost for a generation (default: GPT-4o-mini pricing)."""
-    return (
-        input_tokens / 1000 * input_price_per_1k
-        + output_tokens / 1000 * output_price_per_1k
-    )
+    """Estimate USD cost via canonical pricing table (`tracing.get_cost_usd`).
+
+    Сохранён ради обратной совместимости.
+    Для нового кода предпочтительно использовать `tracing.get_cost_usd` напрямую.
+    """
+    from edms_ai_assistant.summarizer.observability.tracing import get_cost_usd
+
+    return get_cost_usd(model, input_tokens, output_tokens)

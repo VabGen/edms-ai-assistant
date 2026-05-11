@@ -1,4 +1,3 @@
-// plugins/remarkLazyList.ts
 import {visit} from 'unist-util-visit'
 import type {Plugin} from 'unified'
 import type {Root, Paragraph, Text} from 'mdast'

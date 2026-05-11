@@ -1,9 +1,6 @@
 # edms_ai_assistant/api/routes/actions.py
 """
 Actions API routes.
-
-Endpoints:
-    POST /actions/summarize — trigger file summarization via v2 pipeline with agent fallback
 """
 
 from __future__ import annotations
@@ -21,7 +18,6 @@ from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.deps import get_agent
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
-    format_output_as_text,
     is_system_attachment,
     resolve_user_context,
     unwrap_text_from_agent_result,
@@ -30,7 +26,10 @@ from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.model import AssistantResponse, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.services.file_processor import FileProcessorService
-from edms_ai_assistant.summarizer.service import SummarizationRequest
+from edms_ai_assistant.summarizer.service import (
+    SummarizationRequest,
+    format_output_as_markdown,
+)
 from edms_ai_assistant.summarizer.structured.models import SummaryMode
 from edms_ai_assistant.tools.attachment import doc_get_file_content
 from edms_ai_assistant.utils.hash_utils import get_file_hash
@@ -96,6 +95,7 @@ async def api_direct_summarize(
                     attachments = doc_dto.get("attachmentDocument") or []
 
                 if attachments:
+
                     def _norm(s: str) -> str:
                         return re.sub(r"[^a-zA-Zа-яА-Я0-9]", "", s.lower()) if s else ""
 
@@ -103,10 +103,20 @@ async def api_direct_summarize(
                     if clean_input:
                         for att in attachments:
                             att_name = (
-                                (att.get("name", "") if isinstance(att, dict) else getattr(att, "name", "")) or ""
+                                (
+                                    att.get("name", "")
+                                    if isinstance(att, dict)
+                                    else getattr(att, "name", "")
+                                )
+                                or ""
                             ).strip()
                             att_id = str(
-                                (att.get("id", "") if isinstance(att, dict) else getattr(att, "id", "")) or ""
+                                (
+                                    att.get("id", "")
+                                    if isinstance(att, dict)
+                                    else getattr(att, "id", "")
+                                )
+                                or ""
                             )
                             if clean_input in _norm(att_name):
                                 file_identifier = att_id
@@ -115,7 +125,14 @@ async def api_direct_summarize(
                     if not file_identifier and attachments:
                         first = attachments[0]
                         file_identifier = (
-                            str((first.get("id", "") if isinstance(first, dict) else getattr(first, "id", "")) or "")
+                            str(
+                                (
+                                    first.get("id", "")
+                                    if isinstance(first, dict)
+                                    else getattr(first, "id", "")
+                                )
+                                or ""
+                            )
                             or None
                         )
 
@@ -156,6 +173,14 @@ async def api_direct_summarize(
                         file_bytes = raw_result
                     elif isinstance(raw_result, str):
                         file_bytes = raw_result.encode("utf-8")
+                    elif isinstance(raw_result, dict):
+                        content_text = raw_result.get("content", "")
+                        if content_text:
+                            file_bytes = content_text.encode("utf-8")
+                        else:
+                            logger.warning(
+                                "doc_get_file_content returned dict without 'content'"
+                            )
                     else:
                         file_bytes = str(raw_result).encode("utf-8")
 
@@ -170,7 +195,7 @@ async def api_direct_summarize(
                 except Exception as exc:
                     logger.warning("Failed to read EDMS attachment for v2: %s", exc)
 
-            if file_bytes:
+            if file_bytes and len(file_bytes) > 10:
                 req = SummarizationRequest(
                     file_content=file_bytes,
                     file_name=file_name,
@@ -181,7 +206,7 @@ async def api_direct_summarize(
                 )
 
                 resp = await service.summarize(req)
-                output_text = format_output_as_text(resp)
+                output_text = format_output_as_markdown(resp)
 
                 if current_path and not is_uuid and Path(current_path).exists():
                     background_tasks.add_task(cleanup_file, current_path)
@@ -193,6 +218,7 @@ async def api_direct_summarize(
                     metadata={
                         "cache_file_identifier": resp.file_hash,
                         "cache_summary_type": mode.value,
+                        "cache_context_ui_id": user_input.context_ui_id,
                         "from_cache": resp.cache_hit,
                         "pipeline": resp.chunking_strategy,
                         "cost_usd": resp.cost_usd,
@@ -200,7 +226,9 @@ async def api_direct_summarize(
                     },
                 )
 
-            logger.warning("file_bytes is empty for v2 pipeline, falling back to agent.")
+            logger.warning(
+                "file_bytes is empty for v2 pipeline, falling back to agent."
+            )
 
         except Exception as exc:
             logger.warning(
@@ -218,7 +246,13 @@ async def api_direct_summarize(
                 "document_id": user_input.context_ui_id,
                 "attachment_id": current_path,
             }
-            raw_text = str(await doc_get_file_content.ainvoke(tool_input))
+            result = await doc_get_file_content.ainvoke(tool_input)
+            if isinstance(result, dict):
+                raw_text = result.get("content", "") or ""
+            elif isinstance(result, bytes):
+                raw_text = result.decode("utf-8", errors="replace")
+            else:
+                raw_text = str(result)
         elif current_path and Path(current_path).exists():
             raw_text = await FileProcessorService.extract_text_async(current_path)
     except Exception as exc:

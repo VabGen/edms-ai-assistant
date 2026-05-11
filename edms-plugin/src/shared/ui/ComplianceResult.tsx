@@ -1,18 +1,14 @@
-/**
- * ComplianceResult.tsx
- * Кликабельные карточки расхождений + кнопка «Исправить все».
- */
-
 import {useState, memo, useCallback} from 'react'
 import {CheckCircle, AlertTriangle, HelpCircle, RefreshCw, Zap} from 'lucide-react'
-import {sendMsg} from '../lib/messaging'
-import {getAuthToken} from '../lib/auth'
-import {extractDocIdFromUrl} from '../lib/url'
+import {sendMsg} from '@/shared/lib/messaging'
+import {getAuthToken} from '@/shared/lib/auth'
+import {extractDocIdFromUrl} from '@/shared/lib/url'
 
 export interface ComplianceField {
     field_key: string
     label: string
     card_value: string
+    file_value: string | null
     correct_value: string | null
     status: 'ok' | 'mismatch' | 'not_found'
     update_field: string
@@ -24,7 +20,12 @@ export interface ComplianceData {
     summary: string
     document_id?: string
     fields: ComplianceField[]
-    stats: { total: number; ok: number; mismatches: number; not_found: number }
+    stats?: {
+        total?: number
+        ok?: number
+        mismatches?: number
+        not_found?: number
+    }
     fix_hint?: string | null
 }
 
@@ -280,7 +281,7 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
                         {data.summary}
                     </div>
                 </div>
-                {data.stats.mismatches > 0 && pendingMismatches.length > 0 && (
+                {((data.stats?.mismatches ?? data.fields.filter(f => f.status === 'mismatch').length) > 0) && pendingMismatches.length > 0 && (
                     <span style={{
                         flexShrink: 0, fontSize: 11, fontWeight: 700,
                         color: '#d97706', background: 'rgba(217,119,6,0.10)',
@@ -382,5 +383,3 @@ export const ComplianceResult = memo(({data, threadId, onFieldFixed, onAllFixed}
     )
 })
 ComplianceResult.displayName = 'ComplianceResult'
-
-// 5
