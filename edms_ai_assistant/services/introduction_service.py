@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from edms_ai_assistant.clients.base_client import EdmsHttpClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.department_client import DepartmentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.clients.group_client import GroupClient
@@ -349,7 +349,7 @@ class IntroductionService:
         )
 
         try:
-            async with EdmsHttpClient() as client:
+            async with EdmsBaseClient() as client:
                 endpoint = f"api/document/{document_id}/introduction"
                 payload = request.model_dump(mode="json")
 

@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from edms_ai_assistant.clients.base_client import EdmsHttpClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.utils.api_utils import prepare_auth_headers
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ _CATEGORY_LABELS: dict[str, str] = {
 }
 
 
-class DocumentCreatorClient(EdmsHttpClient):
+class DocumentCreatorClient(EdmsBaseClient):
     """HTTP client for the document-creation-from-file workflow.
 
     All three steps are stateless and can be used independently.

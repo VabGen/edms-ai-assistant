@@ -18,7 +18,7 @@ from abc import abstractmethod
 from typing import Any
 from uuid import UUID
 
-from .base_client import EdmsBaseClient, EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class BaseGroupClient(EdmsBaseClient):
         raise NotImplementedError
 
 
-class GroupClient(BaseGroupClient, EdmsHttpClient):
+class GroupClient(BaseGroupClient, EdmsBaseClient):
     """Concrete async HTTP client for EDMS Group API."""
 
     # ── Общие группы ───────────────────────────────────────────────────

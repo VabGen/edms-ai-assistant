@@ -27,7 +27,7 @@ import logging
 from abc import abstractmethod
 from typing import Any
 
-from .base_client import EdmsBaseClient, EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class BaseEmployeeClient(EdmsBaseClient):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class EmployeeClient(BaseEmployeeClient, EdmsHttpClient):
+class EmployeeClient(BaseEmployeeClient, EdmsBaseClient):
     """Concrete async HTTP client for EDMS Employee API.
 
     Реализует взаимодействие с EmployeeController.java.

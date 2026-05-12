@@ -27,7 +27,7 @@ import asyncio
 import logging
 from typing import Any
 
-from edms_ai_assistant.clients.base_client import EdmsHttpClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ RawDoc = dict[str, Any]
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class _RefClient(EdmsHttpClient):
+class _RefClient(EdmsBaseClient):
     """Lightweight HTTP client for single-resource reference lookups.
 
     Используется только внутри DocumentEnricher.

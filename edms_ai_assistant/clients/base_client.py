@@ -13,16 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 class EdmsBaseClient:
-    """Абстрактный базовый класс для всех клиентов EDMS API."""
-
-
-class EdmsHttpClient(EdmsBaseClient):
     """Универсальный асинхронный клиент для API EDMS, реализующий HTTP-запросы."""
 
     def __init__(
-        self,
-        base_url: str | None = None,
-        timeout: int | None = None,
+            self,
+            base_url: str | None = None,
+            timeout: int | None = None,
     ):
         resolved_base_url = base_url or settings.CHANCELLOR_NEXT_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
@@ -56,13 +52,13 @@ class EdmsHttpClient(EdmsBaseClient):
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def _make_request(
-        self,
-        method: str,
-        endpoint: str,
-        token: str,
-        is_json_response: bool = True,
-        long_timeout: bool = False,
-        **kwargs,
+            self,
+            method: str,
+            endpoint: str,
+            token: str,
+            is_json_response: bool = True,
+            long_timeout: bool = False,
+            **kwargs,
     ) -> dict[str, Any] | list[dict[str, Any]] | bytes | None:
         """
         Выполняет HTTP-запрос с авторизацией, обработкой ошибок и повторными попытками.
@@ -91,12 +87,12 @@ class EdmsHttpClient(EdmsBaseClient):
         exceptions=(httpx.RequestError, httpx.HTTPStatusError),
     )
     async def _make_request_response_object(
-        self,
-        method: str,
-        endpoint: str,
-        token: str,
-        long_timeout: bool = False,
-        **kwargs,
+            self,
+            method: str,
+            endpoint: str,
+            token: str,
+            long_timeout: bool = False,
+            **kwargs,
     ) -> httpx.Response:
         """
         Выполняет HTTP-запрос и возвращает объект httpx.Response.

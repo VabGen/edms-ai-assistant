@@ -43,7 +43,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from edms_ai_assistant.clients.base_client import EdmsHttpClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def _has_control_data(data: dict[str, Any]) -> bool:
 # ─── HTTP client ──────────────────────────────────────────────────────────────
 
 
-class _ControlClient(EdmsHttpClient):
+class _ControlClient(EdmsBaseClient):
     """Thin HTTP client for document control endpoints."""
 
     # ── Control types ─────────────────────────────────────────────────────────

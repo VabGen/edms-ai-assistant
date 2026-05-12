@@ -4,7 +4,7 @@ from abc import abstractmethod
 from typing import Any
 from uuid import UUID
 
-from .base_client import EdmsBaseClient, EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class BaseDepartmentClient(EdmsBaseClient):
         raise NotImplementedError
 
 
-class DepartmentClient(BaseDepartmentClient, EdmsHttpClient):
+class DepartmentClient(BaseDepartmentClient, EdmsBaseClient):
 
     async def find_by_name(
         self, token: str, department_name: str

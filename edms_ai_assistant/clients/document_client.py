@@ -50,7 +50,7 @@ import logging
 from abc import abstractmethod
 from typing import Any
 
-from .base_client import EdmsBaseClient, EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,7 @@ def _build_includes_params(includes: list[str]) -> dict[str, list[str]]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
+class DocumentClient(EdmsDocumentClient, EdmsBaseClient):
     """Concrete async HTTP client for EDMS Document API.
 
     Реализует взаимодействие с DocumentController.java.

@@ -6,7 +6,7 @@ from abc import abstractmethod
 
 from edms_ai_assistant.domain.task_models import CreateTaskRequest
 
-from .base_client import EdmsBaseClient, EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class BaseTaskClient(EdmsBaseClient):
         raise NotImplementedError
 
 
-class TaskClient(BaseTaskClient, EdmsHttpClient):
+class TaskClient(BaseTaskClient, EdmsBaseClient):
     """Concrete async HTTP client for EDMS task API."""
 
     async def create_tasks_batch(

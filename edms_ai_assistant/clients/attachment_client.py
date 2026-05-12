@@ -1,12 +1,12 @@
 # edms_ai_assistant/clients/attachment_client.py
 import logging
 
-from .base_client import EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
 
-class EdmsAttachmentClient(EdmsHttpClient):
+class EdmsAttachmentClient(EdmsBaseClient):
     """Клиент для работы с контентом и файлами вложений в СЭД."""
 
     async def get_attachment_content(

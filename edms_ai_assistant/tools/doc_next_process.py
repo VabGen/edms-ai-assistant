@@ -35,7 +35,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.clients.base_client import EdmsHttpClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
 logger = logging.getLogger(__name__)
@@ -178,7 +178,7 @@ def _resolve_step_selection(
 # ─── HTTP client ──────────────────────────────────────────────────────────────
 
 
-class _ProcessClient(EdmsHttpClient):
+class _ProcessClient(EdmsBaseClient):
 
     async def get_bpmn_activity(
         self, token: str, document_id: str
