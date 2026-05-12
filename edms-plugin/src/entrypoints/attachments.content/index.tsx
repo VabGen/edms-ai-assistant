@@ -232,7 +232,7 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
             user_token: token,
             context_ui_id: docId,
             file_path: effectiveFileId,
-            human_choice: summaryType,
+            preferred_summary_format: summaryType,
         },
     }, res => {
         btn.innerHTML = sparklesSVG()

@@ -36,6 +36,16 @@ from edms_ai_assistant.summarizer.api.schemas import (
     SummarizeModeInfo,
     SummarizeModesResponse,
 )
+from edms_ai_assistant.summarizer.errors import (
+    LLMClientError,
+    LLMRateLimitedError,
+    LLMServerError,
+    LLMTransportError,
+    PipelineError,
+    SummarizerError,
+    TextExtractionError,
+)
+from edms_ai_assistant.summarizer.errors import ValidationError as SummarizerValidationError
 from edms_ai_assistant.summarizer.pipeline.direct import StreamEvent
 from edms_ai_assistant.summarizer.prompts.registry import get_prompt_registry
 from edms_ai_assistant.summarizer.service import (
@@ -123,6 +133,19 @@ def _parse_mode(mode: str) -> SummaryMode:
         )
 
 
+def _http_status_for(exc: SummarizerError) -> int:
+    """Маппинг типизированных исключений на HTTP-коды."""
+    if isinstance(exc, (TextExtractionError, SummarizerValidationError)):
+        return status.HTTP_422_UNPROCESSABLE_ENTITY
+    if isinstance(exc, LLMRateLimitedError):
+        return status.HTTP_503_SERVICE_UNAVAILABLE
+    if isinstance(exc, LLMClientError):
+        return status.HTTP_502_BAD_GATEWAY
+    if isinstance(exc, (LLMServerError, LLMTransportError)):
+        return status.HTTP_504_GATEWAY_TIMEOUT
+    return status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -199,16 +222,14 @@ async def summarize_document(
 
     try:
         return await service.summarize(req)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        )
-    except RuntimeError as exc:
-        logger.error("Summarization failed: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ошибка суммаризации. См. логи сервиса.",
-        )
+    except SummarizerError as exc:
+        code = _http_status_for(exc)
+        if code < 500:
+            logger.warning("Summarization rejected: %s", exc)
+        else:
+            logger.error("Summarization failed: %s", exc, exc_info=True)
+        detail = str(exc) if code < 500 else "Ошибка суммаризации. См. логи сервиса."
+        raise HTTPException(status_code=code, detail=detail)
 
 
 @router.post(
@@ -266,8 +287,14 @@ async def summarize_stream(
                     )
             yield "data: [DONE]\n\n"
 
-        except ValueError as exc:
-            yield _sse({"event": "error", "message": str(exc)})
+        except SummarizerError as exc:
+            code = _http_status_for(exc)
+            if code < 500:
+                logger.warning("Stream rejected: %s", exc)
+                yield _sse({"event": "error", "message": str(exc)})
+            else:
+                logger.error("Stream summarization failed: %s", exc, exc_info=True)
+                yield _sse({"event": "error", "message": "Ошибка суммаризации"})
             yield "data: [DONE]\n\n"
         except Exception as exc:  # noqa: BLE001
             logger.error("Stream summarization failed: %s", exc, exc_info=True)

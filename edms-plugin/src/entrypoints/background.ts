@@ -8,6 +8,100 @@ export default defineBackground({
             return raw.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g, '-').trim()
         }
 
+        // ── SSE streaming via port ────────────────────────────────────────
+
+        chrome.runtime.onConnect.addListener((port) => {
+            if (port.name !== 'streamChatMessage' && port.name !== 'resumeChat') return
+
+            const ctrl = new AbortController()
+            let receivedPayload = false
+
+            port.onMessage.addListener(async (payload) => {
+                if (receivedPayload) return
+                receivedPayload = true
+
+                const url = port.name === 'resumeChat'
+                    ? `${API}/chat/resume`
+                    : `${API}/chat/stream`
+
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload),
+                        signal: ctrl.signal,
+                    })
+
+                    if (!res.ok) {
+                        const errBody = await res.json().catch(() => ({}))
+                        port.postMessage({type: 'sse_error', error: (errBody as any).detail ?? `HTTP ${res.status}`})
+                        port.disconnect()
+                        return
+                    }
+
+                    const reader = res.body?.getReader()
+                    if (!reader) {
+                        port.postMessage({type: 'sse_error', error: 'No response body'})
+                        port.disconnect()
+                        return
+                    }
+
+                    const decoder = new TextDecoder()
+                    let buffer = ''
+
+                    while (true) {
+                        const {done, value} = await reader.read()
+                        if (done) break
+
+                        buffer += decoder.decode(value, {stream: true})
+
+                        // Parse SSE events from buffer
+                        const parts = buffer.split('\n\n')
+                        buffer = parts.pop() ?? ''
+
+                        for (const part of parts) {
+                            if (!part.trim()) continue
+                            let eventType = 'message'
+                            let dataStr = ''
+
+                            for (const line of part.split('\n')) {
+                                if (line.startsWith('event: ')) {
+                                    eventType = line.slice(7).trim()
+                                } else if (line.startsWith('data: ')) {
+                                    dataStr = line.slice(6)
+                                } else if (line.startsWith(': ')) {
+                                    // comment / keepalive — skip
+                                }
+                            }
+
+                            if (!dataStr) continue
+
+                            try {
+                                const parsed = JSON.parse(dataStr)
+                                port.postMessage({type: 'sse_event', data: {kind: eventType, data: parsed}})
+                            } catch {
+                                // skip malformed JSON
+                            }
+                        }
+                    }
+
+                    port.postMessage({type: 'sse_done'})
+                } catch (e: any) {
+                    if (e.name !== 'AbortError') {
+                        port.postMessage({type: 'sse_error', error: e.message ?? 'Stream failed'})
+                    }
+                } finally {
+                    port.disconnect()
+                }
+            })
+
+            port.onDisconnect.addListener(() => {
+                ctrl.abort()
+            })
+        })
+
+        // ── Simple message handlers ────────────────────────────────────────
+
         chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             const reqId: string = msg.payload?.requestId ?? 'default'
 

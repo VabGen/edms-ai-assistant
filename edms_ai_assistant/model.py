@@ -5,6 +5,7 @@ EDMS AI Assistant — Public data contracts (Pydantic v2).
 
 from __future__ import annotations
 
+from operator import or_
 from typing import Annotated, Any, Literal
 
 from langchain_core.messages import BaseMessage
@@ -18,15 +19,8 @@ from typing_extensions import TypedDict
 
 
 class AgentState(TypedDict):
-    """
-    Состояние LangGraph графа.
-
-    Единственное каноническое определение — используется
-    как в _build_graph, так и везде, где нужен тип состояния.
-    Reducer add_messages обеспечивает корректное слияние.
-    """
-
     messages: Annotated[list[BaseMessage], add_messages]
+    last_ui_directives: Annotated[dict[str, str], or_]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -65,16 +59,15 @@ class UserInput(BaseModel):
         description="UUID вложения EDMS или путь к локальному файлу",
     )
     file_name: str | None = None
-    human_choice: str | None = Field(
+    thread_id: str | None = Field(None, max_length=255)
+    preferred_summary_format: str | None = Field(
         None,
-        max_length=200,
+        max_length=32,
         description=(
-            "Выбор пользователя: тип суммаризации (extractive/abstractive/thesis) "
-            "или UUID сотрудников через запятую для disambiguation"
+            "Предпочитаемый формат суммаризации: extractive/abstractive/thesis. "
+            "Используется /actions/summarize и как user-preference в /chat."
         ),
     )
-    thread_id: str | None = Field(None, max_length=255)
-    preferred_summary_format: str | None = None
 
     @field_validator("message")
     @classmethod

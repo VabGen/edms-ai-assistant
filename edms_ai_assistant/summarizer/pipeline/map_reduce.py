@@ -16,6 +16,7 @@ from edms_ai_assistant.summarizer.observability.tracing import (
     record_llm_call,
     trace_stage,
 )
+from edms_ai_assistant.summarizer.errors import LLMTransportError, MapStageError
 from edms_ai_assistant.summarizer.pipeline.direct import (
     DirectSummarizationPipeline,
     LLMClient,
@@ -142,7 +143,7 @@ class MapReducePipeline:
                     )
 
                 if not successful:
-                    raise RuntimeError(
+                    raise MapStageError(
                         f"Все {len(failed)} чанков Map-стадии завершились с ошибкой. "
                         f"Первая ошибка: {failed[0].error if failed else 'unknown'}"
                     )
@@ -281,7 +282,7 @@ class MapReducePipeline:
                     map_results.append(result)
                 successful = [r for r in map_results if not r.error]
                 if not successful:
-                    raise RuntimeError("Все Map-чанки упали — стриминг невозможен")
+                    raise MapStageError("Все Map-чанки упали — стриминг невозможен")
 
                 total_map_in = sum(r.input_tokens for r in successful)
                 total_map_out = sum(r.output_tokens for r in successful)
@@ -323,7 +324,7 @@ class MapReducePipeline:
                     in_t = event.input_tokens
                     out_t = event.output_tokens
                 elif event.kind == "error":
-                    raise RuntimeError(f"Reduce stream failed: {event.error}")
+                    raise LLMTransportError(f"Reduce stream failed: {event.error}")
 
             latency = sw.elapsed_ms()
             if span:

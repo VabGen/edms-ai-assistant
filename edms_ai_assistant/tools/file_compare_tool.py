@@ -13,9 +13,11 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
 
-from langchain_core.tools import tool
+from typing import Any, Annotated
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
@@ -46,9 +48,6 @@ _PATH_PLACEHOLDERS: frozenset[str] = frozenset(
 
 class FileCompareInput(BaseModel):
     """Validated input for the doc_compare_attachment_with_local tool."""
-
-    token: str = Field(..., description="JWT токен авторизации пользователя")
-    document_id: str = Field(..., description="UUID документа в СЭД")
     local_file_path: str = Field(
         ...,
         description=(
@@ -87,7 +86,7 @@ class FileCompareInput(BaseModel):
 
 def _att_name(attachment: Any) -> str:
     return (
-        getattr(attachment, "name", None) or getattr(attachment, "fileName", None) or ""
+            getattr(attachment, "name", None) or getattr(attachment, "fileName", None) or ""
     )
 
 
@@ -139,9 +138,9 @@ def _resolve_attachment(attachments: list[Any], hint: str) -> Any | None:
 
 
 def _disambiguation_response(
-    attachments: list[Any],
-    local_filename: str,
-    hint: str | None = None,
+        attachments: list[Any],
+        local_filename: str,
+        hint: str | None = None,
 ) -> dict[str, Any]:
     """Build requires_disambiguation response consumed by _detect_interactive_status."""
     available = [
@@ -154,7 +153,7 @@ def _disambiguation_response(
         f"Выберите вложение для сравнения с «{local_filename}»:"
         if hint
         else f"Не удалось автоматически определить вложение для сравнения "
-        f"с «{local_filename}». Выберите из списка:"
+             f"с «{local_filename}». Выберите из списка:"
     )
     return {
         "status": "requires_disambiguation",
@@ -170,10 +169,10 @@ def _normalise(text: str) -> str:
 
 
 def _compute_diff(
-    local_text: str,
-    att_text: str,
-    local_label: str,
-    att_label: str,
+        local_text: str,
+        att_text: str,
+        local_label: str,
+        att_label: str,
 ) -> list[dict[str, str]]:
     raw_diff = difflib.unified_diff(
         local_text.splitlines(keepends=True),
@@ -198,13 +197,13 @@ def _compute_diff(
 
 
 def _build_summary(
-    are_identical: bool,
-    similarity: float,
-    local_name: str,
-    att_name: str,
-    local_stats: dict[str, int],
-    att_stats: dict[str, int],
-    diff_result: list[dict[str, str]],
+        are_identical: bool,
+        similarity: float,
+        local_name: str,
+        att_name: str,
+        local_stats: dict[str, int],
+        att_stats: dict[str, int],
+        diff_result: list[dict[str, str]],
 ) -> str:
     if are_identical:
         return (
@@ -225,11 +224,11 @@ def _build_summary(
 
 @tool("doc_compare_attachment_with_local", args_schema=FileCompareInput)
 async def doc_compare_attachment_with_local(
-    token: str,
-    document_id: str,
-    local_file_path: str,
-    attachment_id: str | None = None,
-    original_filename: str | None = None,
+        local_file_path: str,
+        attachment_id: str | None = None,
+        original_filename: str | None = None,
+        document_id: Annotated[str, InjectedToolArg] = "",
+        token: Annotated[str, InjectedToolArg] = "",
 ) -> dict[str, Any]:
     """СРАВНИТЬ локальный файл с вложением документа в СЭД.
 
@@ -251,12 +250,19 @@ async def doc_compare_attachment_with_local(
     и вызови этот инструмент снова. НЕ вызывай `doc_compare`!
 
     Примеры:
-    • doc_compare_attachment_with_local(attachment_id="363ca517-...", document_id="083a8076-...") # ✅
+    • doc_compare_attachment_with_local(attachment_id="363ca517-...") # ✅ (document_id подставится сам)
     • doc_compare(document_id_2="363ca517-...") # ❌ ОШИБКА: это UUID вложения, не документа!
 
     Возвращает: {"status": "success" | "requires_disambiguation" | "error",
                     "similarity_percent": float, # % схожести
                     "differences": [...] # список изменений}
+
+    Args:
+        local_file_path: Путь к локальному файлу.
+        attachment_id: UUID или имя вложения.
+        original_filename: Оригинальное имя файла.
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен авторизации (инжектируется автоматически).
     """
     local_path = Path(local_file_path)
     display_name: str = (

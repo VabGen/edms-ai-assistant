@@ -18,7 +18,7 @@ version     = "0.1.0"
 description = "AI-Powered EDMS Document Automation Assistant"
 readme      = "README.md"
 license     = { text = "MIT" }
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 authors     = [{ name = "Next", email = "your.email@example.com" }]
 keywords    = ["ai", "edms", "automation", "assistant", "langchain", "langgraph"]
 classifiers = [
@@ -101,7 +101,14 @@ dependencies = [
     "json-repair>=0.59.5,<1.0.0",
 
     # ── Licenses ──
-    "pip-licenses>=5.5.5"
+    "pip-licenses>=5.5.5",
+
+    # ── Telemetry ──
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.40b0",
+    "opentelemetry-instrumentation-httpx>=0.40b0",
+    "opentelemetry-exporter-otlp>=1.20.0",
 ]
 
 [project.urls]

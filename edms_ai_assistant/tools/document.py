@@ -1,14 +1,6 @@
 # edms_ai_assistant/tools/document.py
 """
 EDMS AI Assistant — doc_get_details tool.
-
-Слой: Interface (Tools).
-
-Используем DocumentService.get_document_analysis(), который:
-    1. GET /api/document/{id}?includes=FULL_DOC_INCLUDES
-    2. DocumentEnricher.enrich() — дозапрос correspondentId, introductions и др.
-    3. Redis-кэш (TTL 300s)
-    4. EDMSNaturalLanguageService.process_document()
 """
 
 from __future__ import annotations
@@ -16,9 +8,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.clients.redis_client import get_redis
 from edms_ai_assistant.services.document_service import (
     DocumentNotFoundError,
@@ -31,14 +28,12 @@ logger = logging.getLogger(__name__)
 
 class DocDetailsInput(BaseModel):
     """Input schema for doc_get_details tool."""
-
-    document_id: str = Field(..., description="UUID документа (context_ui_id)")
-    token: str = Field(..., description="Токен авторизации пользователя")
+    pass
 
 
 @tool("doc_get_details", args_schema=DocDetailsInput)
-async def doc_get_details(document_id: str, token: str) -> dict[str, Any]:
-    """Анализирует документ СЭД и все его вложенные сущности.
+async def doc_get_details(config: RunnableConfig) -> dict[str, Any]:
+    """Анализирует текущий открытый документ СЭД и все его вложенные сущности.
 
     Возвращает полный семантически структурированный контекст:
     основные данные, регистрацию, участников, жизненный цикл, контроль,
@@ -48,13 +43,22 @@ async def doc_get_details(document_id: str, token: str) -> dict[str, Any]:
     Использует Redis-кэш — повторный вызов для того же документа
     не делает запрос к Java API.
 
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
+
     Args:
-        document_id: UUID документа в EDMS.
-        token: JWT-токен авторизации пользователя.
+        config: LangGraph RunnableConfig (инжектится фреймворком, содержит token и document_id).
 
     Returns:
         Dict со статусом и полным NLP-анализом документа.
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
     try:
         svc = DocumentService(redis=get_redis())
         analysis = await svc.get_document_analysis(

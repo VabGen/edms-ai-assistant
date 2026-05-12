@@ -1,24 +1,9 @@
 # edms_ai_assistant/main.py
-"""
-Application entry point.
-
-Responsibilities:
-  - lifespan: startup/shutdown (DB, Redis, Agent, SummarizationService)
-  - FastAPI app creation and middleware
-  - Router registration
-
-Route handlers live in api/routes/:
-  chat.py     — /chat, /chat/history, /chat/new
-  files.py    — /upload-file
-  actions.py  — /actions/summarize
-  settings.py — /api/settings
-  system.py   — /health
-"""
 
 from __future__ import annotations
 
 import logging
-import shutil
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -39,12 +24,41 @@ from edms_ai_assistant.config import settings
 from edms_ai_assistant.db.database import init_db
 from edms_ai_assistant.summarizer.api.router import router as summarizer_router
 from edms_ai_assistant.summarizer.container import build_summarization_service
+from edms_ai_assistant.summarizer.observability.logging_ctx import install_request_id_filter
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
     format=settings.LOGGING_FORMAT,
 )
+install_request_id_filter()
 logger = logging.getLogger(__name__)
+
+
+def _setup_telemetry(app: FastAPI) -> None:
+    """Настройка OpenTelemetry инструментации.
+
+    Безопасно импортирует instrumentors. Если пакеты не установлены
+    или OTEL_ENABLED=false, просто логирует предупреждение.
+    """
+    if not settings.OTEL_ENABLED:
+        return
+
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+        FastAPIInstrumentor.instrument_app(app)
+        HTTPXClientInstrumentor().instrument()
+
+        logger.info("OpenTelemetry instrumentation enabled for FastAPI and HTTPX.")
+    except ImportError:
+        logger.warning(
+            "OpenTelemetry packages not installed. "
+            "Install opentelemetry-instrumentation-fastapi and "
+            "opentelemetry-instrumentation-httpx to enable tracing."
+        )
+    except Exception as exc:
+        logger.error(f"Failed to initialize OpenTelemetry: {exc}")
 
 
 @asynccontextmanager
@@ -54,25 +68,27 @@ async def lifespan(_app: FastAPI):
     await init_db()
     await init_redis()
 
+    # Agent init (fail-fast)
     try:
         agent = EdmsDocumentAgent()
-        health_status = await agent.health_check()
-        _app.state.agent = agent  # type: ignore[attr-defined]
-        logger.info("EDMS AI Assistant started", extra={"health": health_status})
-    except Exception:
-        logger.critical("Agent initialization failed", exc_info=True)
+        _app.state.agent = agent
+        logger.info("EDMS AI Assistant started")
+    except Exception as exc:
+        logger.critical("Agent initialization failed. Exiting.", exc_info=True)
+        raise SystemExit(1) from exc
 
+    # Summarization init (optional)
     try:
         summarization_service = await build_summarization_service(settings)
-        _app.state.summarization_service = summarization_service  # type: ignore[attr-defined]
+        _app.state.summarization_service = summarization_service
         logger.info("SummarizationService ready")
     except Exception as exc:
-        logger.critical(
-            "SummarizationService initialization failed: %s", exc, exc_info=True
-        )
+        logger.error("SummarizationService initialization failed: %s", exc, exc_info=True)
+        _app.state.summarization_service = None
 
     yield
 
+    # Shutdown
     await close_redis()
     service = getattr(_app.state, "summarization_service", None)
     if service is not None:
@@ -81,36 +97,47 @@ async def lifespan(_app: FastAPI):
         except Exception as exc:
             logger.warning("Error closing SummarizationService: %s", exc)
 
-    if UPLOAD_DIR.exists():
-        shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
+
+if settings.OTEL_ENABLED:
+    from edms_ai_assistant.observability.tracing import setup_tracing
+    setup_tracing(
+        service_name="edms-ai-assistant",
+        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    )
+
+def create_app() -> FastAPI:
+    """Application factory."""
+
+    application = FastAPI(
+        title="EDMS AI Assistant API",
+        version=settings.APP_VERSION,
+        description="AI-powered assistant for EDMS document management workflows.",
+        lifespan=lifespan,
+    )
+
+    # Middleware
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Routers
+    application.include_router(chat_router)
+    application.include_router(files_router)
+    application.include_router(actions_router)
+    application.include_router(settings_router)
+    application.include_router(system_router)
+    application.include_router(summarizer_router)
+
+    _setup_telemetry(application)
+
+    return application
 
 
-app = FastAPI(
-    title="EDMS AI Assistant API",
-    version="2.2.0",
-    description="AI-powered assistant for EDMS document management workflows.",
-    lifespan=lifespan,
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=(
-        settings.ALLOWED_ORIGINS
-        if isinstance(settings.ALLOWED_ORIGINS, list)
-        else ["*"]
-    ),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(chat_router)
-app.include_router(files_router)
-app.include_router(actions_router)
-app.include_router(settings_router)
-app.include_router(system_router)
-app.include_router(summarizer_router)
-
+app = create_app()
 
 if __name__ == "__main__":
     uvicorn.run(

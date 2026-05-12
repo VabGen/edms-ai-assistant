@@ -1,11 +1,19 @@
 #!/bin/bash
 # docker/entrypoint.sh — EDMS AI Assistant container entrypoint
-# Runs Alembic migrations (idempotent), then starts uvicorn.
 set -euo pipefail
 
 log() {
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [entrypoint] $*"
 }
+
+# ── Verify Tesseract OCR ──────────────────────────────────────────────────────
+if command -v tesseract &>/dev/null; then
+    TESS_VERSION=$(tesseract --version 2>&1 | head -1)
+    log "Tesseract OCR found: ${TESS_VERSION}"
+    log "Available languages: $(tesseract --list-langs 2>&1 | tail -n +2 | tr '\n' ' ')"
+else
+    log "WARNING: Tesseract OCR not found in PATH — OCR features will not work!"
+fi
 
 # ── Wait for PostgreSQL ────────────────────────────────────────────────────────
 POSTGRES_HOST="${POSTGRES_HOST:-postgres}"
@@ -45,3 +53,9 @@ exec uvicorn edms_ai_assistant.main:app \
     --log-level "${LOG_LEVEL}" \
     --proxy-headers \
     --forwarded-allow-ips '*'
+
+
+
+# docker compose down
+# docker compose build --no-cache app
+# docker compose up -d

@@ -3,10 +3,12 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID
 
-from langchain_core.tools import tool
+from typing import Any, Annotated
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field
 
 from edms_ai_assistant.domain.task_models import TaskType
@@ -17,9 +19,6 @@ logger = logging.getLogger(__name__)
 
 class TaskCreateInput(BaseModel):
     """Схема входных данных инструмента создания поручения."""
-
-    token: str = Field(..., description="Токен авторизации пользователя (JWT)")
-    document_id: str = Field(..., description="UUID документа для создания поручения")
     task_text: str = Field(..., description="Текст поручения (обязательно)")
 
     # ── Исполнители: индивидуальные ────────────────────────────────────
@@ -88,18 +87,18 @@ class TaskCreateInput(BaseModel):
 
 @tool("task_create_tool", args_schema=TaskCreateInput)
 async def task_create_tool(
-    token: str,
-    document_id: str,
-    task_text: str,
-    executor_last_names: list[str] | None = None,
-    responsible_last_name: str | None = None,
-    department_names: list[str] | None = None,
-    group_names: list[str] | None = None,
-    personal_group_names: list[str] | None = None,
-    include_subordinates: bool | None = None,
-    planed_date_end: str | None = None,
-    task_type: TaskType | None = TaskType.GENERAL,
-    selected_employee_ids: list[str] | None = None,
+        task_text: str,
+        executor_last_names: list[str] | None = None,
+        responsible_last_name: str | None = None,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool | None = None,
+        planed_date_end: str | None = None,
+        task_type: TaskType | None = TaskType.GENERAL,
+        selected_employee_ids: list[str] | None = None,
+        document_id: Annotated[str, InjectedToolArg] = "",
+        token: Annotated[str, InjectedToolArg] = "",
 ) -> dict[str, Any]:
     """
     Создает поручение с поддержкой различных типов исполнителей.
@@ -113,6 +112,20 @@ async def task_create_tool(
 
     Можно комбинировать:
     "Создай поручение для Петрова, отдела ИТ, группы Бухгалтеры и моей команды"
+
+    Args:
+        task_text: Текст поручения.
+        executor_last_names: Фамилии исполнителей.
+        responsible_last_name: Фамилия ответственного.
+        department_names: Подразделения.
+        group_names: Группы.
+        personal_group_names: Личные группы.
+        include_subordinates: Включить подчинённых.
+        planed_date_end: Плановая дата окончания.
+        task_type: Тип поручения.
+        selected_employee_ids: UUID выбранных сотрудников.
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен авторизации (инжектируется автоматически).
     """
     if not task_text or not task_text.strip():
         return {"status": "error", "message": "Текст поручения не может быть пустым."}

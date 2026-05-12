@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Annotated
 
-from langchain_core.tools import tool
+from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.clients.document_creator_client import DocumentCreatorClient
@@ -58,7 +59,6 @@ _CATEGORY_NAMES_RU: dict[str, str] = {
     "CUSTOM": "произвольный документ",
 }
 
-
 _CATEGORY_KEYWORDS: list[tuple[list[str], str]] = [
     (["обращени", "жалоб", "заявлени", "appeal"], "APPEAL"),
     (["входящ", "incoming"], "INCOMING"),
@@ -92,8 +92,9 @@ def _extract_category_from_message(message: str) -> str | None:
 class CreateDocumentFromFileInput(BaseModel):
     """Validated input schema for create_document_from_file tool.
 
+    Token убран из схемы, так как инжектируется автоматически через RunnableConfig.
+
     Attributes:
-        token: JWT bearer token (injected by orchestrator).
         file_path: Local filesystem path OR EDMS attachment UUID of the source file.
         doc_category: Target document category constant.
         file_name: Optional display name override for the uploaded attachment.
@@ -101,7 +102,6 @@ class CreateDocumentFromFileInput(BaseModel):
             Defaults to True — applies to supported categories (currently APPEAL).
     """
 
-    token: str = Field(..., description="JWT токен авторизации пользователя")
     file_path: str = Field(
         ...,
         description=(
@@ -181,11 +181,12 @@ class CreateDocumentFromFileInput(BaseModel):
 
 @tool("create_document_from_file", args_schema=CreateDocumentFromFileInput)
 async def create_document_from_file(
-    token: str,
-    file_path: str,
-    doc_category: str = "APPEAL",
-    file_name: str | None = None,
-    autofill: bool = True,
+        file_path: str,
+        token: Annotated[str, InjectedToolArg],
+        doc_category: str = "APPEAL",
+        file_name: str | None = None,
+        autofill: bool = True,
+        config: RunnableConfig = None,
 ) -> dict[str, Any]:
     """Create a new EDMS document from a local file and open it in the browser.
 
@@ -208,11 +209,12 @@ async def create_document_from_file(
     Do NOT ask the user for the file path.
 
     Args:
-        token: JWT bearer token (injected by orchestrator).
         file_path: Local file path or EDMS attachment UUID from context.
+        token: JWT bearer token (injected automatically by orchestrator).
         doc_category: Target document category (e.g. APPEAL, INCOMING).
         file_name: Override display name for the attachment.
         autofill: Whether to auto-fill the document card after upload.
+        config: Runtime config (used for injection).
 
     Returns:
         Dict with:

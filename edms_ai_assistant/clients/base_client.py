@@ -102,6 +102,12 @@ class EdmsHttpClient(EdmsBaseClient):
         Выполняет HTTP-запрос и возвращает объект httpx.Response.
         Используется, когда необходимо получить заголовки ответа (например, для имени файла).
         """
+        if not token or not token.strip():
+            raise ValueError(
+                "Authorization token is missing or empty. "
+                "Cannot make authenticated request to EDMS API."
+            )
+
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = prepare_auth_headers(token)
 

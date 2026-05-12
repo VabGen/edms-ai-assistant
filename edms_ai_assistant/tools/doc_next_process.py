@@ -29,7 +29,10 @@ import logging
 import re
 from typing import Any
 
-from langchain_core.tools import tool
+from typing import Any, Annotated
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.clients.base_client import EdmsHttpClient
@@ -241,8 +244,6 @@ class _ProcessClient(EdmsHttpClient):
 
 
 class DocNextProcessInput(BaseModel):
-    token: str = Field(..., description="JWT токен авторизации")
-    document_id: str = Field(..., description="UUID документа")
     next_step: str | None = Field(
         None,
         description=(
@@ -257,16 +258,6 @@ class DocNextProcessInput(BaseModel):
             "требуют указания хотя бы одного исполнителя."
         ),
     )
-
-    @field_validator("document_id")
-    @classmethod
-    def validate_document_id(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Укажите документ для перехода.")
-        if not _is_uuid(v):
-            raise ValueError("Некорректный идентификатор документа.")
-        return v
 
     @field_validator("employees", mode="before")
     @classmethod
@@ -432,10 +423,11 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
 
 @tool("doc_next_process", args_schema=DocNextProcessInput)
 async def doc_next_process(
-    token: str,
-    document_id: str,
     next_step: str | None = None,
     employees: list[str] | None = None,
+    document_id: Annotated[str, InjectedToolArg] = "",
+    token: Annotated[str, InjectedToolArg] = "",
+    config: RunnableConfig = None,
 ) -> dict[str, Any]:
     """Переводит документ на следующий этап бизнес-процесса.
 
@@ -449,17 +441,18 @@ async def doc_next_process(
     Примеры: next_step="1", next_step="Регистрация", next_step="REVIEW"
 
     Args:
-        token: JWT токен авторизации.
-        document_id: UUID документа.
         next_step: Название или номер этапа.
         employees: Список ФИО или UUID исполнителей.
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен авторизации (инжектируется автоматически).
+        config: Конфиг Runnable (инжектируется автоматически).
 
     Returns:
         Dict со статусом и результатом.
     """
     logger.info(
         "doc_next_process: doc=%s next_step=%s employees=%s",
-        document_id[:8],
+        document_id[:8] if document_id else "N/A",
         next_step,
         employees if employees else "none",
     )

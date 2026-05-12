@@ -5,10 +5,12 @@ EDMS AI Assistant - Introduction Tool.
 """
 
 import logging
-from typing import Any
 from uuid import UUID
 
-from langchain_core.tools import tool
+from typing import Any, Annotated
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.services.introduction_service import IntroductionService
@@ -18,13 +20,6 @@ logger = logging.getLogger(__name__)
 
 class IntroductionInput(BaseModel):
     """Валидированная схема входных данных для создания ознакомления."""
-
-    token: str = Field(..., description="JWT токен авторизации пользователя")
-    document_id: str = Field(
-        ...,
-        description="UUID документа для создания ознакомления",
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    )
     last_names: list[str] | None = Field(
         None,
         description="Фамилии сотрудников для поиска (например: ['Иванов', 'Петров'])",
@@ -97,15 +92,15 @@ class IntroductionInput(BaseModel):
 
 @tool("introduction_create_tool", args_schema=IntroductionInput)
 async def introduction_create_tool(
-    token: str,
-    document_id: str,
-    last_names: list[str] | None = None,
-    department_names: list[str] | None = None,
-    group_names: list[str] | None = None,
-    personal_group_names: list[str] | None = None,
-    include_subordinates: bool | None = None,
-    comment: str | None = None,
-    selected_employee_ids: list[str] | None = None,
+        last_names: list[str] | None = None,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool | None = None,
+        comment: str | None = None,
+        selected_employee_ids: list[str] | None = None,
+        document_id: Annotated[str, InjectedToolArg] = "",
+        token: Annotated[str, InjectedToolArg] = "",
 ) -> dict[str, Any]:
     """
     Создает список ознакомления с документом.
@@ -119,6 +114,17 @@ async def introduction_create_tool(
 
     Можно комбинировать:
     "Добавь ознакомление для Петрова, отдела ИТ и моей команды"
+
+    Args:
+        last_names: Фамилии сотрудников.
+        department_names: Подразделения.
+        group_names: Группы.
+        personal_group_names: Личные группы.
+        include_subordinates: Включить подчинённых.
+        comment: Комментарий.
+        selected_employee_ids: UUID выбранных сотрудников (для disambiguation).
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен авторизации (инжектируется автоматически).
     """
     logger.info(
         "Creating introduction",

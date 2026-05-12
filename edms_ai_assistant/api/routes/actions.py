@@ -11,8 +11,12 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
+import json
+from typing import AsyncIterator
+
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.deps import get_agent
@@ -26,8 +30,11 @@ from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.model import AssistantResponse, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.services.file_processor import FileProcessorService
+from edms_ai_assistant.summarizer.errors import SummarizerError
+from edms_ai_assistant.summarizer.pipeline.direct import StreamEvent
 from edms_ai_assistant.summarizer.service import (
     SummarizationRequest,
+    SummarizationResponse,
     format_output_as_markdown,
 )
 from edms_ai_assistant.summarizer.structured.models import SummaryMode
@@ -38,11 +45,114 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Actions"])
 
-_MODE_MAP: dict[str, SummaryMode] = {
+_MODE_MAP: dict[str, SummaryMode] = {  # noqa: E501
     "extractive": SummaryMode.EXTRACTIVE,
     "abstractive": SummaryMode.ABSTRACTIVE,
     "thesis": SummaryMode.THESIS,
 }
+
+
+async def _run_agent_once(
+    *,
+    agent: EdmsDocumentAgent,
+    message: str,
+    user_token: str,
+    context_ui_id: str | None,
+    thread_id: str,
+    user_context: dict,
+    file_path: str | None,
+    file_name: str | None,
+) -> str:
+    """Run the LangGraph agent once and return the final assistant text.
+
+    Used by /actions/summarize fallback paths only. These paths are not
+    expected to require HITL — they ask the agent to perform a single
+    file-extraction or analysis turn and consume its final AIMessage. If a
+    tool ever does suspend with ``interrupt()`` here, ``ainvoke`` raises
+    ``GraphInterrupt``; we surface this as an empty string so the caller
+    can fall back gracefully.
+    """
+    from langchain_core.messages import AIMessage  # noqa: PLC0415
+    from langgraph.errors import GraphInterrupt  # noqa: PLC0415
+
+    inputs, _ctx = agent.build_initial_inputs(
+        message=message,
+        user_token=user_token,
+        context_ui_id=context_ui_id,
+        thread_id=thread_id,
+        user_context=user_context,
+        file_path=file_path,
+        file_name=file_name,
+    )
+    configurable: dict[str, str] = {
+        "thread_id": thread_id,
+        "user_token": user_token,
+    }
+    if context_ui_id:
+        configurable["document_id"] = context_ui_id
+    config = {"configurable": configurable}
+    try:
+        final_state = await agent.graph.ainvoke(inputs, config=config)
+    except GraphInterrupt:
+        logger.warning(
+            "actions._run_agent_once: tool suspended on a non-interactive "
+            "path (thread=%s); returning empty content",
+            thread_id,
+        )
+        return ""
+    messages = (final_state or {}).get("messages", []) or []
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage):
+            content = str(msg.content or "").strip()
+            if content:
+                return content
+    return ""
+
+
+async def _resolve_file_bytes(
+    *,
+    current_path: str,
+    is_uuid: bool,
+    user_input: UserInput,
+) -> tuple[bytes | None, str]:
+    """Достаёт байты документа: локальный файл или EDMS-вложение.
+
+    Возвращает (file_bytes, file_name). bytes=None если резолв не удался.
+    """
+    file_name = "document"
+    file_bytes: bytes | None = None
+
+    if current_path and not is_uuid and Path(current_path).exists():
+        async with aiofiles.open(current_path, "rb") as f:
+            file_bytes = await f.read()
+        file_name = Path(current_path).name
+        return file_bytes, file_name
+
+    if is_uuid and user_input.context_ui_id:
+        try:
+            tool_input = {
+                "token": user_input.user_token,
+                "document_id": user_input.context_ui_id,
+                "attachment_id": current_path,
+            }
+            raw_result = await doc_get_file_content.ainvoke(tool_input)
+            if isinstance(raw_result, bytes):
+                file_bytes = raw_result
+            elif isinstance(raw_result, str):
+                file_bytes = raw_result.encode("utf-8")
+            elif isinstance(raw_result, dict):
+                content_text = raw_result.get("content", "")
+                if content_text:
+                    file_bytes = content_text.encode("utf-8")
+            else:
+                file_bytes = str(raw_result).encode("utf-8")
+
+            if file_bytes:
+                file_name = "extracted_text.txt"
+        except Exception as exc:
+            logger.warning("Failed to read EDMS attachment: %s", exc)
+
+    return file_bytes, file_name
 
 
 @router.post(
@@ -58,7 +168,7 @@ async def api_direct_summarize(
 ) -> AssistantResponse:
     current_path = (user_input.file_path or "").strip()
     is_uuid = is_system_attachment(current_path)
-    summary_type = user_input.human_choice or "extractive"
+    summary_type = user_input.preferred_summary_format or "extractive"
 
     user_id = extract_user_id_from_token(user_input.user_token)
     new_thread_id = f"action_{user_id}_{uuid.uuid4().hex[:8]}"
@@ -142,13 +252,13 @@ async def api_direct_summarize(
         except Exception as exc:
             logger.error("Error resolving EDMS attachments: %s", exc)
 
-    # ── 2. Try v2 pipeline ─────────────────────────────────────────────────────
+    # ── 2. Try pipeline ─────────────────────────────────────────────────────
     service = getattr(request.app.state, "summarization_service", None)
 
     if service is not None:
         try:
             mode = _MODE_MAP.get(
-                (user_input.human_choice or "abstractive").lower(),
+                (user_input.preferred_summary_format or "abstractive").lower(),
                 SummaryMode.ABSTRACTIVE,
             )
 
@@ -268,17 +378,18 @@ async def api_direct_summarize(
             f"{instructions}Прочитай файл и верни его полное текстовое содержимое. "
             "Не суммаризируй — верни исходный текст."
         )
-        extract_result = await agent.chat(
+        extract_result = await _run_agent_once(
+            agent=agent,
             message=extract_msg,
             user_token=user_input.user_token,
             context_ui_id=user_input.context_ui_id,
             thread_id=new_thread_id,
             user_context=user_context,
             file_path=current_path,
-            human_choice=None,
+            file_name=None,
         )
         raw_text = unwrap_text_from_agent_result(
-            extract_result.get("content") or extract_result.get("response") or ""
+            extract_result or ""
         )
 
     if not raw_text or len(raw_text.strip()) < 30:
@@ -304,16 +415,20 @@ async def api_direct_summarize(
     instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
     user_context = await resolve_user_context(user_input, user_id)
 
-    fallback_result = await agent.chat(
+    user_context = dict(user_context)
+    user_context["preferred_summary_format"] = summary_type
+    response_text = await _run_agent_once(
+        agent=agent,
         message=f"{instructions}Проанализируй этот файл и выдели {type_label}.",
         user_token=user_input.user_token,
         context_ui_id=user_input.context_ui_id,
         thread_id=new_thread_id,
         user_context=user_context,
         file_path=current_path,
-        human_choice=summary_type,
+        file_name=None,
     )
-    response_text = (
+    fallback_result: dict = {"content": response_text}
+    _legacy_ignored = (
         fallback_result.get("content") or fallback_result.get("response") or ""
     )
 
@@ -331,5 +446,144 @@ async def api_direct_summarize(
             "cache_context_ui_id": user_input.context_ui_id,
             "from_cache": False,
             "pipeline": "agent_fallback",
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSE streaming endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _sse(payload: dict) -> str:
+    """Формирует одну SSE data-строку."""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post(
+    "/actions/summarize/stream",
+    summary="Streamed file summarization (SSE)",
+    response_class=StreamingResponse,
+)
+async def api_direct_summarize_stream(
+    request: Request,
+    user_input: UserInput,
+) -> StreamingResponse:
+    """
+    SSE-стриминг суммаризации с тем же JSON-контрактом, что /actions/summarize.
+
+    Эмитит:
+      data: {"event":"delta","text":"..."}      — токены LLM по мере генерации
+      data: {"event":"result","response":"...", "metadata":{...},
+             "thread_id":"...","status":"success"}
+                                                  — финальный ответ (как в non-stream)
+      data: {"event":"error","message":"..."}   — ошибка (4xx-friendly или generic 5xx)
+      data: [DONE]                              — терминатор стрима
+    """
+    service = getattr(request.app.state, "summarization_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SummarizationService недоступен; используйте /actions/summarize.",
+        )
+
+    current_path = (user_input.file_path or "").strip()
+    is_uuid_input = is_system_attachment(current_path)
+    summary_type = (user_input.preferred_summary_format or "abstractive").lower()
+    mode = _MODE_MAP.get(summary_type, SummaryMode.ABSTRACTIVE)
+
+    user_id = extract_user_id_from_token(user_input.user_token)
+    new_thread_id = f"action_{user_id}_{uuid.uuid4().hex[:8]}"
+
+    file_identifier: str | None = None
+    if is_uuid_input:
+        file_identifier = current_path
+    elif current_path and Path(current_path).exists():
+        try:
+            file_identifier = get_file_hash(current_path)
+        except Exception as exc:
+            logger.warning("Could not hash local file: %s", exc)
+
+    async def event_gen() -> AsyncIterator[str]:
+        try:
+            file_bytes, file_name = await _resolve_file_bytes(
+                current_path=current_path,
+                is_uuid=is_uuid_input,
+                user_input=user_input,
+            )
+            if not file_bytes or len(file_bytes) <= 10:
+                yield _sse({
+                    "event": "error",
+                    "message": "Не удалось прочитать содержимое документа.",
+                })
+                yield "data: [DONE]\n\n"
+                return
+
+            req = SummarizationRequest(
+                file_content=file_bytes,
+                file_name=file_name,
+                mode=mode,
+                language="ru",
+                request_id=str(uuid.uuid4()),
+                force_refresh=False,
+            )
+
+            final: SummarizationResponse | None = None
+            async for event in service.summarize_stream(req):
+                if isinstance(event, StreamEvent):
+                    if event.kind == "delta" and event.text:
+                        yield _sse({"event": "delta", "text": event.text})
+                    elif event.kind == "error":
+                        yield _sse({
+                            "event": "error",
+                            "message": "LLM streaming error",
+                        })
+                elif isinstance(event, SummarizationResponse):
+                    final = event
+
+            if final is None:
+                yield _sse({
+                    "event": "error",
+                    "message": "Стриминг не вернул финальный результат.",
+                })
+                yield "data: [DONE]\n\n"
+                return
+
+            response_text = format_output_as_markdown(final)
+            yield _sse({
+                "event": "result",
+                "status": "success",
+                "response": response_text or "Анализ завершён.",
+                "thread_id": new_thread_id,
+                "metadata": {
+                    "cache_file_identifier": file_identifier or final.file_hash,
+                    "cache_summary_type": mode.value,
+                    "cache_context_ui_id": user_input.context_ui_id,
+                    "from_cache": final.cache_hit,
+                    "pipeline": final.chunking_strategy,
+                    "cost_usd": final.cost_usd,
+                    "input_tokens": final.input_tokens,
+                    "output_tokens": final.output_tokens,
+                    "latency_ms": final.latency_ms,
+                    "v2": True,
+                },
+            })
+            yield "data: [DONE]\n\n"
+
+        except SummarizerError as exc:
+            logger.warning("Stream summarization rejected: %s", exc)
+            yield _sse({"event": "error", "message": str(exc)})
+            yield "data: [DONE]\n\n"
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Stream summarization failed: %s", exc, exc_info=True)
+            yield _sse({"event": "error", "message": "Внутренняя ошибка сервера."})
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )

@@ -15,8 +15,10 @@ from pydantic import BaseModel, Field
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.summarizer.cache.cache import CacheEntry, TwoLevelCache
+from edms_ai_assistant.summarizer.errors import PipelineError, TextExtractionError
 from edms_ai_assistant.summarizer.chunking.structural import SmartChunker
 from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
+from edms_ai_assistant.summarizer.observability.logging_ctx import request_id_var
 from edms_ai_assistant.summarizer.observability.tracing import (
     RequestCostAccumulator,
     Stopwatch,
@@ -139,7 +141,7 @@ def _extract_pdf(data: bytes) -> str:
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             return "\n".join(page.extract_text() or "" for page in pdf.pages)
     except Exception as exc:
-        raise RuntimeError(f"PDF extraction failed: {exc}") from exc
+        raise TextExtractionError(f"PDF extraction failed: {exc}") from exc
 
 
 def _extract_docx(data: bytes) -> str:
@@ -157,7 +159,7 @@ def _extract_docx(data: bytes) -> str:
 
         return docx2txt.process(io.BytesIO(data))
     except Exception as exc:
-        raise RuntimeError(f"DOCX extraction failed: {exc}") from exc
+        raise TextExtractionError(f"DOCX extraction failed: {exc}") from exc
 
 
 def _decode_text(data: bytes) -> str:
@@ -369,6 +371,7 @@ class SummarizationService:
 
     async def summarize(self, request: SummarizationRequest) -> SummarizationResponse:
         """Выполняет суммаризацию с кэшированием и in-flight дедупликацией."""
+        request_id_var.set(request.request_id)
         file_hash = await asyncio.to_thread(
             lambda: hashlib.sha256(request.file_content).hexdigest()
         )
@@ -455,7 +458,7 @@ class SummarizationService:
             )
 
         if not text.strip():
-            raise ValueError(f"Не удалось извлечь текст из '{request.file_name}'")
+            raise TextExtractionError(f"Не удалось извлечь текст из '{request.file_name}'")
 
         doc_tokens = count_tokens(text)
         logger.info(
@@ -627,6 +630,7 @@ class SummarizationService:
 
         Финальный SummarizationResponse кладётся в кэш как обычно.
         """
+        request_id_var.set(request.request_id)
         sw_total = Stopwatch()
 
         acc = RequestCostAccumulator(request_id=request.request_id, model=self._model)
@@ -657,7 +661,7 @@ class SummarizationService:
                 request.file_content, request.file_name
             )
         if not text.strip():
-            raise ValueError(f"Не удалось извлечь текст из '{request.file_name}'")
+            raise TextExtractionError(f"Не удалось извлечь текст из '{request.file_name}'")
 
         needs_map_reduce = self._chunker.needs_map_reduce(
             text, context_window=self._context_window
@@ -686,7 +690,7 @@ class SummarizationService:
                 else:
                     yield event
             if pipeline_result is None:
-                raise RuntimeError("Pipeline.run_stream did not yield a PipelineResult")
+                raise PipelineError("Pipeline.run_stream did not yield a PipelineResult")
 
         total_latency = sw_total.elapsed_ms()
         response = SummarizationResponse(

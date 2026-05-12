@@ -1,144 +1,445 @@
 # edms_ai_assistant/api/routes/chat.py
 """
-Chat API routes.
+Chat API — native LangGraph HITL contract over SSE.
 
 Endpoints:
-    POST /chat                      — main agent conversation endpoint
-    GET  /chat/history/{thread_id}  — retrieve conversation history
-    POST /chat/new                  — create a new conversation thread
+    POST /chat/stream            — start a new turn, stream tokens + interrupts
+    POST /chat/resume            — resume a paused graph with a typed value
+    GET  /chat/state/{thread_id} — current snapshot + pending interrupts (reconnect)
+    GET  /chat/history/{thread_id} — flat message list (UI history rendering)
+    POST /chat/new               — allocate a fresh thread_id
+
+Design contract:
+    - The frontend never parses LLM text. Interruptions arrive as structured
+      ``event: interrupt`` payloads matching
+      ``edms_ai_assistant.agent.interrupt_contract.InterruptPayload``.
+    - Resume is a pure POST that injects ``Command(resume=value)`` into the
+      same ``thread_id``. No history mutation. No LLM re-invocation.
+    - Both streaming endpoints respond with ``text/event-stream``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from typing import Annotated
+from typing import Annotated, Any, AsyncIterator
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from langchain_core.messages import AIMessage, HumanMessage
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command, Interrupt
+from pydantic import BaseModel, Field, ValidationError
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
-from edms_ai_assistant.api.deps import get_agent
-from edms_ai_assistant.api.helpers import (
-    cleanup_file,
-    is_system_attachment,
-    resolve_user_context,
+from edms_ai_assistant.agent.interrupt_contract import (
+    InterruptPayloadAdapter,
+    ResumeValueAdapter,
 )
-from edms_ai_assistant.model import AssistantResponse, NewChatRequest, UserInput
+from edms_ai_assistant.api.deps import get_agent
+from edms_ai_assistant.api.helpers import resolve_user_context
+from edms_ai_assistant.api.sse import format_sse
+from edms_ai_assistant.model import NewChatRequest, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
 
-_FILE_OPERATION_KEYWORDS: tuple[str, ...] = (
-    "сравни",
-    "сравнение",
-    "сравн",
-    "compare",
-    "отличи",
-    "анализ",
-    "проанализируй",
-    "суммаризир",
-    "прочит",
-    "содержим",
-    "прочти",
-    "что в файл",
-    "читай",
-    "изучи",
-)
+
+# ── Request / response schemas ────────────────────────────────────────────
+
+
+class _UserContext(BaseModel):
+    firstName: str | None = None
+    lastName: str | None = None
+    middleName: str | None = None
+    role: str | None = None
+    post: str | None = None
+
+
+class ChatStreamRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=8000)
+    user_token: str = Field(..., min_length=10)
+    thread_id: str | None = Field(None, max_length=255)
+    context_ui_id: str | None = None
+    context: _UserContext | None = None
+    file_path: str | None = Field(None, max_length=500)
+    file_name: str | None = None
+    preferred_summary_format: str | None = Field(None, max_length=32)
+
+
+class ChatResumeRequest(BaseModel):
+    """Resume a paused graph with a structured value.
+
+    ``resume_value`` must validate against ``ResumeValue`` (discriminated
+    union by ``kind``). The ``interrupt_id`` is optional but recommended
+    for diagnostics — the engine itself routes by checkpoint, not by id.
+    """
+
+    thread_id: str = Field(..., min_length=1, max_length=255)
+    user_token: str = Field(..., min_length=10)
+    resume_value: dict[str, Any]
+    interrupt_id: str | None = None
+    context_ui_id: str | None = Field(
+        None,
+        description="UUID активного документа в UI EDMS (для автоинъекции document_id)",
+    )
+
+
+class ChatStateResponse(BaseModel):
+    thread_id: str
+    messages: list[dict[str, Any]]
+    pending_interrupts: list[dict[str, Any]] = []
+    active_ui_directives: list[dict[str, Any]] = []
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────
+
+
+def _make_config(
+    thread_id: str,
+    user_token: str,
+    user_id: str,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    """Build the RunnableConfig consumed by graph nodes and tools.
+
+    ``configurable`` is the canonical place to pass per-request data into
+    tools (LangGraph injects it as ``config: RunnableConfig``).
+    """
+    cfg: dict[str, Any] = {
+        "configurable": {
+            "thread_id": thread_id,
+            "user_token": user_token,
+            "user_id": user_id,
+        }
+    }
+    if document_id:
+        cfg["configurable"]["document_id"] = document_id
+    return cfg
+
+
+def _serialise_message(msg: BaseMessage) -> dict[str, Any] | None:
+    if isinstance(msg, HumanMessage):
+        return {"role": "user", "content": str(msg.content)}
+    if isinstance(msg, AIMessage):
+        content = str(msg.content or "").strip()
+        if not content:
+            return None
+        return {"role": "assistant", "content": content}
+    return None
+
+
+def _extract_pending_interrupts(snapshot: Any) -> list[dict[str, Any]]:
+    """Pluck all pending Interrupts from a StateSnapshot.
+
+    LangGraph stores pending interrupts on ``snapshot.tasks[*].interrupts``.
+    We surface all of them — supports fan-out (Send) scenarios where
+    multiple branches may be paused simultaneously.
+    """
+    results: list[dict[str, Any]] = []
+    for task in getattr(snapshot, "tasks", []) or []:
+        for itr in getattr(task, "interrupts", []) or []:
+            if not isinstance(itr, Interrupt):
+                continue
+            results.append({
+                "interrupt_id": getattr(itr, "id", None)
+                or getattr(itr, "ns", [""])[-1],
+                "payload": itr.value,
+            })
+    return results
+
+
+async def _validate_resume_kind(
+    graph: Any,
+    config: dict[str, Any],
+    interrupt_id: str | None,
+    resume_kind: str,
+) -> None:
+    """Return silently on match, raise 409 on mismatch."""
+    if not interrupt_id:
+        return  # Can't validate without an id
+    snapshot = await graph.aget_state(config)
+    for task in snapshot.tasks or []:
+        for itr in task.interrupts or []:
+            value = getattr(itr, "value", itr)
+            if isinstance(value, dict):
+                pending_kind = value.get("kind")
+                if pending_kind and pending_kind != resume_kind:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Kind mismatch: expected {pending_kind!r}, got {resume_kind!r}",
+                    )
+                return  # found, matches
+
+
+async def _stream_graph_events(
+    agent: EdmsDocumentAgent,
+    payload: Any,
+    config: dict[str, Any],
+    thread_id: str,
+) -> AsyncIterator[str]:
+    """Drive ``graph.astream(...)`` and translate LangGraph events into SSE.
+
+    Strategy:
+        - ``stream_mode=["updates", "custom"]`` exposes the ``__interrupt__``
+          channel and the ``custom`` channel (for UIDirective / ui_update).
+        - ``GraphInterrupt`` is also caught defensively — older LangGraph
+          builds raise it instead of yielding ``__interrupt__``.
+    """
+    try:
+        async for mode, chunk in agent.graph.astream(
+            payload,
+            config=config,
+            stream_mode=["updates", "custom"],
+        ):
+            # ── Custom channel: UIDirective (ui_update) ──────────────
+            if mode == "custom":
+                if isinstance(chunk, dict) and "ui" in chunk:
+                    directive = chunk["ui"]
+                    yield format_sse(
+                        "ui_update",
+                        {
+                            "directive_id": directive.get("directive_id"),
+                            "thread_id": thread_id,
+                            "directive": directive,
+                        },
+                    )
+                continue
+
+            # ── Updates channel: interrupts + agent messages ──────────
+            if mode == "updates":
+                if not isinstance(chunk, dict):
+                    continue
+
+                interrupts = chunk.get("__interrupt__")
+                if interrupts:
+                    for itr in interrupts:
+                        value = getattr(itr, "value", itr)
+                        interrupt_id = getattr(itr, "id", None)
+                        yield format_sse(
+                            "interrupt",
+                            {
+                                "interrupt_id": interrupt_id,
+                                "thread_id": thread_id,
+                                "payload": value,
+                            },
+                        )
+                    yield format_sse("done", {"thread_id": thread_id, "paused": True})
+                    return
+
+                agent_update = chunk.get("agent")
+                if isinstance(agent_update, dict):
+                    for msg in agent_update.get("messages", []) or []:
+                        rendered = _serialise_message(msg)
+                        if rendered is not None and rendered["role"] == "assistant":
+                            yield format_sse("message", rendered)
+
+    except GraphInterrupt as exc:
+        for itr in getattr(exc, "args", []):
+            if isinstance(itr, Interrupt):
+                yield format_sse(
+                    "interrupt",
+                    {
+                        "interrupt_id": getattr(itr, "id", None),
+                        "thread_id": thread_id,
+                        "payload": itr.value,
+                    },
+                )
+        yield format_sse("done", {"thread_id": thread_id, "paused": True})
+        return
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("chat stream failed for thread=%s", thread_id)
+        yield format_sse(
+            "error",
+            {"code": "INTERNAL", "message": str(exc), "thread_id": thread_id},
+        )
+        return
+
+    yield format_sse("done", {"thread_id": thread_id, "paused": False})
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────
 
 
 @router.post(
-    "/chat",
-    response_model=AssistantResponse,
-    summary="Send a message to the EDMS AI assistant",
+    "/chat/stream",
+    summary="Start a new chat turn (SSE)",
+    response_class=StreamingResponse,
 )
-async def chat_endpoint(
-    user_input: UserInput,
-    background_tasks: BackgroundTasks,
+async def chat_stream(
+    body: ChatStreamRequest,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
-) -> AssistantResponse:
-    user_id = extract_user_id_from_token(user_input.user_token)
+) -> StreamingResponse:
+    try:
+        user_id = extract_user_id_from_token(body.user_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
     thread_id = (
-        user_input.thread_id
-        or f"user_{user_id}_doc_{user_input.context_ui_id or 'general'}"
+        body.thread_id
+        or f"user_{user_id}_doc_{body.context_ui_id or 'general'}"
     )
 
-    user_context = await resolve_user_context(user_input, user_id)
+    if body.context is not None:
+        user_context = body.context.model_dump(exclude_none=True)
+    else:
+        bridged = UserInput(message=body.message, user_token=body.user_token)
+        user_context = await resolve_user_context(bridged, user_id)
 
     if (
-        user_input.preferred_summary_format
-        and user_input.preferred_summary_format != "ask"
+        body.preferred_summary_format
+        and body.preferred_summary_format != "ask"
     ):
-        user_context["preferred_summary_format"] = user_input.preferred_summary_format
+        user_context["preferred_summary_format"] = body.preferred_summary_format
 
-    result = await agent.chat(
-        message=user_input.message,
-        user_token=user_input.user_token,
-        context_ui_id=user_input.context_ui_id,
+    inputs, _ctx = agent.build_initial_inputs(
+        message=body.message,
+        user_token=body.user_token,
+        context_ui_id=body.context_ui_id,
         thread_id=thread_id,
         user_context=user_context,
-        file_path=user_input.file_path,
-        file_name=user_input.file_name,
-        human_choice=user_input.human_choice,
+        file_path=body.file_path,
+        file_name=body.file_name,
     )
 
-    _is_file_operation = any(
-        kw in (user_input.message or "").lower() for kw in _FILE_OPERATION_KEYWORDS
+    config = _make_config(thread_id, body.user_token, str(user_id), body.context_ui_id)
+
+    return StreamingResponse(
+        _stream_graph_events(agent, inputs, config, thread_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
-    _is_continuation = bool(user_input.human_choice)
 
-    if user_input.file_path and not is_system_attachment(user_input.file_path):
-        _is_disambiguation = result.get("action_type") in (
-            "requires_disambiguation",
-            "summarize_selection",
-        )
-        _should_cleanup = (
-            result.get("status", "success") not in ("requires_action",)
-            and not _is_file_operation
-            and not _is_continuation
-            and not _is_disambiguation
-            and result.get("requires_reload", False)
-        )
-        if _should_cleanup:
-            background_tasks.add_task(cleanup_file, user_input.file_path)
 
-    return AssistantResponse(
-        status=result.get("status") or "success",
-        response=result.get("content") or result.get("message"),
-        action_type=result.get("action_type"),
-        message=result.get("message"),
+@router.post(
+    "/chat/resume",
+    summary="Resume a paused graph (SSE)",
+    response_class=StreamingResponse,
+)
+async def chat_resume(
+    body: ChatResumeRequest,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+) -> StreamingResponse:
+    try:
+        validated = ResumeValueAdapter.validate_python(body.resume_value)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    try:
+        user_id = extract_user_id_from_token(body.user_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    config = _make_config(body.thread_id, body.user_token, str(user_id), body.context_ui_id)
+
+    # Validate kind match before resuming (Костыль №4)
+    await _validate_resume_kind(
+        agent.graph, config, body.interrupt_id, validated.kind
+    )
+
+    resume_value = validated.model_dump(mode="json")
+
+    return StreamingResponse(
+        _stream_graph_events(
+            agent,
+            Command(resume=resume_value),
+            config,
+            body.thread_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
+    "/chat/state/{thread_id}",
+    response_model=ChatStateResponse,
+    summary="Get current thread snapshot (for reconnect)",
+)
+async def chat_state(
+    thread_id: str,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+) -> ChatStateResponse:
+    """Return the latest state for ``thread_id``.
+
+    Used by the frontend on tab re-open to:
+      1. Render the message history.
+      2. Detect and re-render a pending HITL card without sending anything.
+    """
+    try:
+        snapshot = await agent.graph.aget_state(
+            {"configurable": {"thread_id": thread_id}}
+        )
+    except Exception as exc:
+        logger.warning("state fetch failed: thread=%s err=%s", thread_id, exc)
+        return ChatStateResponse(thread_id=thread_id, messages=[])
+
+    raw_messages: list[BaseMessage] = (snapshot.values or {}).get("messages", []) or []
+    rendered: list[dict[str, Any]] = []
+    for m in raw_messages:
+        item = _serialise_message(m)
+        if item is not None:
+            rendered.append(item)
+
+    # Extract all pending interrupts (Фаза 6)
+    pending_list = _extract_pending_interrupts(snapshot)
+    valid_pending: list[dict[str, Any]] = []
+    for p in pending_list:
+        try:
+            InterruptPayloadAdapter.validate_python(p["payload"])
+            valid_pending.append(p)
+        except ValidationError:
+            logger.warning(
+                "stale interrupt payload on thread=%s — dropping", thread_id
+            )
+
+    # Extract UI directives for reconnect (Фаза 5)
+    raw_directives = (snapshot.values or {}).get("last_ui_directives") or {}
+    active_ui = [
+        {"directive_id": did, "component": comp}
+        for did, comp in raw_directives.items()
+    ]
+
+    return ChatStateResponse(
         thread_id=thread_id,
-        requires_reload=result.get("requires_reload", False),
-        navigate_url=result.get("navigate_url"),
-        metadata=result.get("metadata", {}),
+        messages=rendered,
+        pending_interrupts=valid_pending,
+        active_ui_directives=active_ui,
     )
 
 
 @router.get(
     "/chat/history/{thread_id}",
-    summary="Get conversation history for a thread",
+    summary="Get conversation history for a thread (flat list)",
 )
 async def get_history(
     thread_id: str,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
     try:
-        state = await agent._state_manager.get_state(thread_id)
-        messages = state.values.get("messages", [])
-        filtered = []
-        for m in messages:
-            if not isinstance(m, (HumanMessage, AIMessage)):
-                continue
-            if isinstance(m, AIMessage) and not m.content:
-                continue
-            filtered.append(
-                {
-                    "type": "human" if isinstance(m, HumanMessage) else "ai",
-                    "content": m.content,
-                }
-            )
+        snapshot = await agent.graph.aget_state(
+            {"configurable": {"thread_id": thread_id}}
+        )
+        raw: list[BaseMessage] = (snapshot.values or {}).get("messages", []) or []
+        filtered: list[dict[str, str]] = []
+        for m in raw:
+            if isinstance(m, HumanMessage):
+                filtered.append({"type": "human", "content": str(m.content)})
+            elif isinstance(m, AIMessage):
+                content = str(m.content or "").strip()
+                if content:
+                    filtered.append({"type": "ai", "content": content})
         return {"messages": filtered}
     except Exception as exc:
         logger.error(

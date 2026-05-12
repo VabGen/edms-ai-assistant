@@ -2,29 +2,35 @@
 """
 GraphBuilder — компилирует LangGraph ReAct workflow.
 
-Решение: model передаётся в call_model через threading.local() или
-через явный параметр в config["configurable"].
+Hot-path node ``call_model`` is now a **pure** function:
+  history (trimmed) → LLM → response
 
-Выбрано: хранение последнего bound model в thread-safe структуре.
-В production при asyncio concurrency (один event loop) достаточно
-простого атрибута — asyncio не переключает корутины в середине
-синхронного кода. Race condition возможен только при multi-thread.
+No heuristic string-parsing, no dynamic SystemMessage injection,
+no sanitizer loop, no synthetic AIMessage validator.  All
+message-history invariants are enforced by ``trim_pairwise`` and
+``validate_no_dangling_tool_calls`` in ``messages_utils``.
+
+Tools are expected to return self-describing, user-friendly content
+strings in their ToolMessages. The LLM interprets these natively.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Any
 
 from langchain_core.language_models import BaseLanguageModel
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
+from edms_ai_assistant.agent.messages_utils import (
+    trim_pairwise,
+    validate_no_dangling_tool_calls,
+)
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.model import AgentState
 
@@ -42,39 +48,47 @@ class GraphBuilder:
         self._tools = tools
         self._checkpointer = checkpointer
         self._model: BaseLanguageModel | None = None
-        self._model_lock = asyncio.Lock()
+        self._model_lock: asyncio.Lock | None = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Lazy-init lock — avoids RuntimeError outside running event loop."""
+        if self._model_lock is None:
+            self._model_lock = asyncio.Lock()
+        return self._model_lock
 
     async def set_model_async(self, model: BaseLanguageModel) -> None:
-        """Thread-safe обновление модели.
-
-        Args:
-            model: LangChain модель с привязанными инструментами.
-        """
-        async with self._model_lock:
+        async with self._get_lock():
             self._model = model
 
     def set_model(self, model: BaseLanguageModel) -> None:
-        """Синхронное обновление модели (для backward compatibility).
-
-        Примечание: в asyncio context безопасно т.к. event loop
-        не переключает корутины внутри синхронного кода.
-        """
         self._model = model
 
     def compile(self) -> CompiledStateGraph:
-        """Компилирует state graph.
+        """Компилирует state graph для native HITL pipeline.
+
+        Тулы сами решают, когда приостановить граф, через
+        ``ask_human()`` → ``langgraph.types.interrupt()``. Никаких
+        ``interrupt_before`` — пауза ставится в той точке кода тула,
+        где она логически уместна.
 
         Returns:
-            Скомпилированный граф с interrupt_before=["tools"].
+            Скомпилированный граф.
 
         Raises:
             RuntimeError: При ошибке компиляции LangGraph.
         """
         workflow: StateGraph = StateGraph(AgentState)
-        builder_ref = self  # Closure — ссылка на builder для доступа к _model
+        builder_ref = self
+
+        # ── Node: call_model (PURE — no string parsing, no injection) ────
 
         async def call_model(state: AgentState) -> dict[str, Any]:
-            """Вызывает LLM с обрезанной и санитизированной историей."""
+            """Вызывает LLM с парно-обрезанной историей.
+
+            Единственная ответственность — подготовить messages и вызвать
+            модель. Никакого парсинга ToolMessage, никаких динамических
+            SystemMessage-инъекций.
+            """
             all_sys: list[BaseMessage] = [
                 m for m in state["messages"] if isinstance(m, SystemMessage)
             ]
@@ -82,128 +96,47 @@ class GraphBuilder:
                 m for m in state["messages"] if not isinstance(m, SystemMessage)
             ]
 
-            # Обрезаем историю до лимита
-            if len(non_sys) > settings.AGENT_MAX_CONTEXT_MESSAGES:
-                non_sys = non_sys[-settings.AGENT_MAX_CONTEXT_MESSAGES :]
+            # Pair-aware trim: AIMessage(tool_calls) + ToolMessage* — атомарны
+            non_sys = trim_pairwise(
+                non_sys, settings.AGENT_MAX_CONTEXT_MESSAGES
+            )
 
-            # Оставляем только последний SystemMessage — каждый запрос добавляет
-            # новый, старые содержат устаревший контекст (file_path, документ и т.д.)
-            # и вводят LLM в заблуждение.
+            # Последний system prompt (без динамических инъекций)
             sys_msgs: list[BaseMessage] = all_sys[-1:] if all_sys else []
 
-            # Инъекция compliance-fix hint
-            for msg in reversed(state["messages"]):
-                if isinstance(msg, ToolMessage):
-                    raw = str(msg.content)
-                    if raw.startswith("{"):
-                        try:
-                            data: dict[str, Any] = json.loads(raw)
-                            if data.get("status") == "success" and "fields" in data:
-                                sys_msgs.append(
-                                    SystemMessage(
-                                        content=(
-                                            "ВНИМАНИЕ: В истории есть результат compliance check. "
-                                            "При просьбе 'исправить': вызывай doc_update_field "
-                                            "для каждого поля с ошибкой, используя 'correct_value'."
-                                        )
-                                    )
-                                )
-                        except json.JSONDecodeError:
-                            pass
-                    break
-
-            # Санитизация висящих tool_calls
             candidate: list[BaseMessage] = sys_msgs + non_sys
-            final: list[BaseMessage] = []
-            for i, msg in enumerate(candidate):
-                if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-                    next_msg = candidate[i + 1] if i + 1 < len(candidate) else None
-                    if not isinstance(next_msg, ToolMessage):
-                        final.append(AIMessage(content=msg.content or "", id=msg.id))
-                        logger.warning(
-                            "Sanitized dangling tool_calls at position %d", i
-                        )
-                        continue
-                final.append(msg)
+
+            # Validate structural invariant — fail loud in dev, log in prod
+            validate_no_dangling_tool_calls(
+                candidate, fail_loud=getattr(settings, "DEBUG", False)
+            )
 
             if builder_ref._model is None:
                 raise RuntimeError(
                     "Model not set. Call GraphBuilder.set_model() before invoking."
                 )
-            return {"messages": [await builder_ref._model.ainvoke(final)]}
 
-        async def validator(state: AgentState) -> dict[str, Any]:
-            """Валидирует результат tool call и формирует guidance для LLM."""
-            last: BaseMessage = state["messages"][-1]
-            if not isinstance(last, ToolMessage):
-                return {"messages": []}
-
-            raw: str = str(last.content).strip()
-
-            if not raw or raw in ("None", "{}", "null"):
+            llm_timeout = getattr(settings, "AGENT_LLM_TIMEOUT", 30.0)
+            try:
+                response = await asyncio.wait_for(
+                    builder_ref._model.ainvoke(candidate),
+                    timeout=llm_timeout,
+                )
+                return {"messages": [response]}
+            except asyncio.TimeoutError:
+                logger.error("LLM call timed out after %.1fs", llm_timeout)
                 return {
                     "messages": [
                         AIMessage(
                             content=(
-                                "⚠️ Инструмент вернул пустой результат. "
-                                "Попробуй другой подход или сообщи пользователю."
+                                "Превышено время ожидания ответа. "
+                                "Попробуйте переформулировать запрос."
                             )
                         )
                     ]
                 }
 
-            if raw.startswith("{"):
-                try:
-                    data: dict[str, Any] = json.loads(raw)
-                    status: str = data.get("status", "")
-
-                    if status == "success" and "fields" in data:
-                        return {
-                            "messages": [
-                                AIMessage(
-                                    content="Анализ документа завершён. Найдены расхождения."
-                                )
-                            ]
-                        }
-
-                    if status in (
-                        "requires_choice",
-                        "requires_disambiguation",
-                        "requires_action",
-                    ):
-                        return {"messages": [AIMessage(content="")]}
-
-                    if status in ("already_exists", "already_added", "duplicate"):
-                        detail = (
-                            data.get("message")
-                            or data.get("detail")
-                            or "Запись уже существует."
-                        )
-                        return {
-                            "messages": [
-                                AIMessage(
-                                    content=f"ИНФОРМАЦИЯ: {detail}. Сообщи пользователю."
-                                )
-                            ]
-                        }
-
-                    if status == "error":
-                        err_msg: str = data.get("message", raw[:200])
-                        return {
-                            "messages": [
-                                AIMessage(
-                                    content=(
-                                        f"⚠️ Ошибка инструмента: {err_msg}. "
-                                        "Проинформируй пользователя понятным языком."
-                                    )
-                                )
-                            ]
-                        }
-
-                except json.JSONDecodeError:
-                    pass
-
-            return {"messages": []}
+        # ── Routing ──────────────────────────────────────────────────────
 
         def should_continue(state: AgentState) -> str:
             last: BaseMessage = state["messages"][-1]
@@ -211,21 +144,26 @@ class GraphBuilder:
                 return "tools"
             return END
 
+        # ── Wire graph ───────────────────────────────────────────────────
+        #
+        # Канонический ReAct цикл:
+        #   agent -> (tools or END) -> tools -> agent
+        #
+        # Узел validator удалён. Тулы обязаны возвращать понятный текст
+        # (или структурированный JSON с понятными полями), который LLM
+        # сможет интерпретировать самостоятельно без инъекций подсказок.
+
         workflow.add_node("agent", call_model)
         workflow.add_node("tools", ToolNode(tools=self._tools))
-        workflow.add_node("validator", validator)
+
         workflow.add_edge(START, "agent")
         workflow.add_conditional_edges(
             "agent", should_continue, {"tools": "tools", END: END}
         )
-        workflow.add_edge("tools", "validator")
-        workflow.add_edge("validator", "agent")
+        workflow.add_edge("tools", "agent")
 
         try:
-            return workflow.compile(
-                checkpointer=self._checkpointer,
-                interrupt_before=["tools"],
-            )
+            return workflow.compile(checkpointer=self._checkpointer)
         except Exception as exc:
             logger.error("Graph compilation failed", exc_info=True)
             raise RuntimeError(f"Failed to compile LangGraph: {exc}") from exc

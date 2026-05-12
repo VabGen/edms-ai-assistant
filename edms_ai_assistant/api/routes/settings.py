@@ -66,7 +66,7 @@ async def get_settings_meta() -> SettingsMetaResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pydantic schemas (snake_case — зеркало useSettingsStore.ts mappers)
+# Pydantic schemas
 # ─────────────────────────────────────────────────────────────────────────────
 
 

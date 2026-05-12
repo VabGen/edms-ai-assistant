@@ -18,11 +18,13 @@ EDMS AI Assistant — Access Grief Search Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field, model_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
@@ -38,9 +40,6 @@ _MAX_EMPLOYEES: int = 50
 
 class AccessGriefSearchInput(BaseModel):
     """Схема ввода для поиска по грифам доступа."""
-
-    token: str = Field(..., description="JWT токен авторизации пользователя")
-
     grief_name: str | None = Field(
         None,
         max_length=300,
@@ -98,11 +97,11 @@ class AccessGriefSearchInput(BaseModel):
 
 @tool("access_grief_tool", args_schema=AccessGriefSearchInput)
 async def access_grief_tool(
-    token: str,
     grief_name: str | None = None,
     grief_id: str | None = None,
     employee_id: str | None = None,
     list_all: bool | None = None,
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """Searches for access griefs and employees with specific griefs.
 
@@ -119,6 +118,14 @@ async def access_grief_tool(
     - status='found' with griefs[] — список всех грифов
     - status='not_found' — ничего не найдено
     """
+
+    # Безопасное извлечение токена
+    try:
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s", e)
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
+
     # ── Грифы конкретного сотрудника ──────────────────────────────────────
     if employee_id:
         return await _get_employee_griefs(token, employee_id)

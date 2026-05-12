@@ -17,6 +17,16 @@ import httpx
 from pydantic import ValidationError
 
 from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
+from edms_ai_assistant.summarizer.errors import (
+    LLMClientError,
+    LLMError,
+    LLMRateLimitedError,
+    LLMResponseError,
+    LLMServerError,
+    LLMTransportError,
+    PipelineError,
+)
+from edms_ai_assistant.summarizer.errors import ValidationError as SummarizerValidationError
 
 # Lazy probe для опционального json_repair
 try:
@@ -286,13 +296,16 @@ class OpenAICompatibleClient(LLMClient):
             if response.status_code == 429:
                 retry_after = float(response.headers.get("Retry-After", 2**attempt))
                 logger.warning("Rate limited (429) — retrying after %.1fs", retry_after)
-                last_exc = RuntimeError("HTTP 429 Too Many Requests")
+                last_exc = LLMRateLimitedError(
+                    "HTTP 429 Too Many Requests", status_code=429
+                )
                 await asyncio.sleep(retry_after)
                 continue
 
             if response.status_code >= 500:
-                last_exc = RuntimeError(
-                    f"HTTP {response.status_code}: {response.text[:300]}"
+                last_exc = LLMServerError(
+                    f"HTTP {response.status_code}: {response.text[:300]}",
+                    status_code=response.status_code,
                 )
                 if attempt < self._MAX_RETRIES - 1:
                     wait = self._BASE_BACKOFF * (2**attempt)
@@ -308,8 +321,9 @@ class OpenAICompatibleClient(LLMClient):
                 break
 
             if 400 <= response.status_code < 500:
-                raise RuntimeError(
-                    f"LLM client error {response.status_code}: {response.text[:300]}"
+                raise LLMClientError(
+                    f"LLM client error {response.status_code}: {response.text[:300]}",
+                    status_code=response.status_code,
                 )
 
             try:
@@ -317,8 +331,9 @@ class OpenAICompatibleClient(LLMClient):
                 choice = data["choices"][0]
                 text = choice["message"]["content"] or ""
             except (ValueError, KeyError, IndexError) as exc:
-                raise RuntimeError(
-                    f"Malformed LLM response: {exc}; body={response.text[:300]}"
+                raise LLMResponseError(
+                    f"Malformed LLM response: {exc}; body={response.text[:300]}",
+                    status_code=response.status_code,
                 ) from exc
 
             finish_reason = choice.get("finish_reason", "stop")
@@ -335,7 +350,13 @@ class OpenAICompatibleClient(LLMClient):
             out_t = usage.get("completion_tokens") or count_tokens(text)
             return text, in_t, out_t
 
-        raise RuntimeError(
+        if isinstance(last_exc, (httpx.TransportError, httpx.TimeoutException)):
+            raise LLMTransportError(
+                f"LLM transport failed after {self._MAX_RETRIES} attempts: {last_exc}"
+            ) from last_exc
+        if isinstance(last_exc, LLMError):
+            raise last_exc
+        raise LLMServerError(
             f"LLM call failed after {self._MAX_RETRIES} attempts: {last_exc}"
         ) from last_exc
 
@@ -649,7 +670,7 @@ class DirectSummarizationPipeline:
                     logger.warning("Stream truncated (finish_reason=length)")
             elif event.kind == "error":
                 logger.error("LLM stream error: %s", event.error)
-                raise RuntimeError(f"LLM streaming failed: {event.error}")
+                raise LLMTransportError(f"LLM streaming failed: {event.error}")
 
         latency_ms = sw.elapsed_ms()
         if span:
@@ -716,7 +737,7 @@ class DirectSummarizationPipeline:
             except Exception as exc:
                 logger.error("Fallback JSON also failed: %s", exc)
 
-        raise ValueError(
+        raise SummarizerValidationError(
             f"Не удалось разобрать ответ LLM для режима {mode.value}. "
             f"Последняя ошибка: {last_error}"
         )

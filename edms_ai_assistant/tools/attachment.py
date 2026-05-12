@@ -11,11 +11,16 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
@@ -55,8 +60,6 @@ class AttachmentFetchInput(BaseModel):
     """Validated input for the doc_get_file_content tool.
 
     Attributes:
-        document_id: EDMS document UUID (injected by orchestrator).
-        token: User JWT bearer token (injected by orchestrator).
         attachment_id: Attachment UUID or filename hint. When a filename is
             provided (e.g. "Шаблон обложки.docx"), the tool performs a
             case-insensitive name/stem lookup. If omitted, the first
@@ -65,8 +68,8 @@ class AttachmentFetchInput(BaseModel):
         summary_type: Summarisation format to forward to doc_summarize_text.
     """
 
-    document_id: str = Field(..., description="UUID документа в СЭД")
-    token: str = Field(..., description="Токен авторизации пользователя (JWT)")
+    # token и document_id УДАЛЕНЫ — пробрасываются автоматически через RunnableConfig
+
     attachment_id: str | None = Field(
         None,
         description=(
@@ -247,17 +250,19 @@ def _build_attachment_meta(attachment: Any) -> dict[str, Any]:
 
 @tool("doc_get_file_content", args_schema=AttachmentFetchInput)
 async def doc_get_file_content(
-    document_id: str,
-    token: str,
     attachment_id: str | None = None,
     analysis_mode: str = "text",
     summary_type: str | None = None,
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """Extract and analyse the content of a document attachment from EDMS.
 
     Accepts ``attachment_id`` as either a UUID or a filename string.
     Performs multi-strategy name resolution before falling back to
     the first attachment with an info-level log entry.
+
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
 
     Analysis modes:
     - ``text``     : Plain text extraction (PDF, DOCX, TXT, RTF, ODT, MD).
@@ -266,8 +271,6 @@ async def doc_get_file_content(
     - ``full``     : Text + tables + metadata in a single response.
 
     Args:
-        document_id: EDMS document UUID (injected by orchestrator).
-        token: User JWT bearer token (injected by orchestrator).
         attachment_id: Attachment UUID or filename to read.
         analysis_mode: One of text | tables | metadata | full.
         summary_type: Summarisation format to forward to doc_summarize_text.
@@ -282,6 +285,15 @@ async def doc_get_file_content(
         - ``is_truncated``  : bool — whether text was trimmed to 15 000 chars.
         - ``total_chars``   : int — full character count before truncation.
     """
+
+    # Безопасное извлечение токена и document_id из конфига
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token/document_id from config: %s", e)
+        return {"status": "error", "message": f"Ошибка авторизации или контекста документа: {e}"}
+
     logger.info(
         "doc_get_file_content called",
         extra={

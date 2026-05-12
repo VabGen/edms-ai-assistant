@@ -9,11 +9,14 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from typing import Any, Annotated
 
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
+from pydantic import BaseModel
+
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
@@ -101,12 +104,13 @@ def _compare_attachments(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str
 class DocumentVersionsInput(BaseModel):
     """Схема входных данных для получения и сравнения всех версий документа."""
 
-    document_id: str = Field(..., description="UUID документа")
-    token: str = Field(..., description="Токен авторизации пользователя (JWT)")
-
 
 @tool("doc_get_versions", args_schema=DocumentVersionsInput)
-async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
+async def doc_get_versions(
+    document_id: Annotated[str, InjectedToolArg] = "",
+    # token: Annotated[str, InjectedToolArg] = "",
+    config: RunnableConfig = None,
+) -> dict[str, Any]:
     """Retrieve all document versions and compare each consecutive pair automatically.
 
     BEHAVIOUR:
@@ -119,12 +123,19 @@ async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
     - If N > 2 versions — compares all N-1 consecutive pairs and presents full history.
 
     Args:
-        document_id: EDMS document UUID.
-        token: JWT bearer token.
+        document_id: EDMS document UUID (injected automatically).
+        token: JWT bearer token (injected automatically).
+        config: Runnable config (injected automatically).
 
     Returns:
         Dict with all versions metadata and full pair-wise comparison results.
     """
+    try:
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}"}
     try:
         async with DocumentClient() as client:
             versions = await client.get_document_versions(token, document_id)

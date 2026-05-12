@@ -118,17 +118,14 @@ class ContextParams:
     intent: Any = field(default=None, compare=False, hash=False)
 
     def __post_init__(self) -> None:
-        # Валидация через object.__setattr__ т.к. frozen=True
         if not self.user_token or not isinstance(self.user_token, str):
             raise ValueError("user_token must be a non-empty string")
 
-        # Auto-derive uploaded_file_name из локального пути
         if self.file_path and not self.uploaded_file_name:
             fp = self.file_path.strip()
             if not is_valid_uuid(fp):
                 object.__setattr__(self, "uploaded_file_name", Path(fp).name)
 
-        # Auto-derive full_name
         if not self.user_full_name:
             parts = [p for p in (self.user_last_name, self.user_first_name) if p]
             if parts:
@@ -177,7 +174,6 @@ class AgentRequest(BaseModel):
     user_context: dict[str, Any] = Field(default_factory=dict)
     file_path: str | None = Field(None, max_length=500)
     file_name: str | None = Field(None, max_length=260)
-    human_choice: str | None = Field(None, max_length=200)
 
     @field_validator("message")
     @classmethod
@@ -185,13 +181,9 @@ class AgentRequest(BaseModel):
         return v.strip()
 
     @model_validator(mode="after")
-    def _validate_message_or_choice(self) -> "AgentRequest":
-        has_message = bool(self.message and self.message.strip())
-        has_choice = bool(self.human_choice and self.human_choice.strip())
-        if not has_message and not has_choice:
-            raise ValueError("Either message or human_choice must be provided")
-        if not has_message and has_choice:
-            object.__setattr__(self, "message", self.human_choice)
+    def _require_message(self) -> "AgentRequest":
+        if not (self.message and self.message.strip()):
+            raise ValueError("message must be provided")
         return self
 
     @field_validator("file_path")

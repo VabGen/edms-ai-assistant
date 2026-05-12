@@ -4,11 +4,16 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
-from typing import Any
+from typing import Annotated, Any
 
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.reference_client import ReferenceClient
@@ -28,12 +33,10 @@ logger = logging.getLogger(__name__)
 
 
 class AppealAutofillInput(BaseModel):
-    document_id: str = Field(
-        ...,
-        description="UUID документа категории APPEAL",
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    )
-    token: str = Field(..., description="JWT токен авторизации пользователя")
+    """Схема ввода для автозаполнения обращения."""
+
+    # token и document_id УДАЛЕНЫ — пробрасываются автоматически через RunnableConfig
+
     attachment_id: str | None = Field(
         None,
         description="UUID конкретного вложения для анализа",
@@ -132,11 +135,11 @@ class ValueSanitizer:
 class DocumentOperationExecutor:
     @staticmethod
     async def execute(
-        client: DocumentClient,
-        token: str,
-        document_id: str,
-        operation_type: str,
-        body: dict[str, Any],
+            client: DocumentClient,
+            token: str,
+            document_id: str,
+            operation_type: str,
+            body: dict[str, Any],
     ) -> None:
         payload = [{"operationType": operation_type, "body": body}]
         json_safe_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
@@ -239,7 +242,7 @@ class GeographyResolver:
         return None
 
     async def _resolve_country(
-        self, document: Any, fields: Any, geo_data: dict
+            self, document: Any, fields: Any, geo_data: dict
     ) -> None:
         d = document.documentAppeal
         country_name: str | None = None
@@ -266,7 +269,7 @@ class GeographyResolver:
             geo_data["countryAppealId"] = str(d.countryAppealId)
 
     async def _lookup(
-        self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict
+            self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict
     ) -> None:
         try:
             method = getattr(self.ref_client, f"find_{endpoint}_with_name")
@@ -283,7 +286,7 @@ class GeographyResolver:
             logger.error("%s lookup error for '%s': %s", endpoint, name, exc)
 
     async def _resolve_city(
-        self, city_name: str | None, document: Any, geo_data: dict
+            self, city_name: str | None, document: Any, geo_data: dict
     ) -> None:
         d = document.documentAppeal
         if city_name:
@@ -363,11 +366,11 @@ class AppealFieldsBuilder:
         self.warnings: list[str] = []
 
     async def build(
-        self,
-        document: DocumentDto,
-        fields: AppealFields,
-        extracted_text: str,
-        geo_data: dict,
+            self,
+            document: DocumentDto,
+            fields: AppealFields,
+            extracted_text: str,
+            geo_data: dict,
     ) -> dict[str, Any]:
         d = document.documentAppeal or self._create_empty_appeal()
         payload: dict[str, Any] = {}
@@ -400,7 +403,7 @@ class AppealFieldsBuilder:
         return DocumentAppealDto()
 
     async def _add_correspondent(
-        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+            self, d: DocumentAppealDto, fields: AppealFields, payload: dict
     ) -> None:
         if d.correspondentAppealId:
             payload["correspondentAppealId"] = str(d.correspondentAppealId)
@@ -446,7 +449,7 @@ class AppealFieldsBuilder:
                 payload["correspondentAppeal"] = None
 
     def _add_personal_data(
-        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+            self, d: DocumentAppealDto, fields: AppealFields, payload: dict
     ) -> None:
         if not ValueSanitizer.is_empty(d.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fioApplicant)
@@ -465,11 +468,11 @@ class AppealFieldsBuilder:
             )
 
     async def _add_classification(
-        self,
-        d: DocumentAppealDto,
-        fields: AppealFields,
-        extracted_text: str,
-        payload: dict,
+            self,
+            d: DocumentAppealDto,
+            fields: AppealFields,
+            extracted_text: str,
+            payload: dict,
     ) -> None:
         if d.citizenTypeId:
             payload["citizenTypeId"] = str(d.citizenTypeId)
@@ -491,7 +494,7 @@ class AppealFieldsBuilder:
                 logger.info("Subject determined by LLM: %s", subject_id)
 
     async def _add_declarant_type(
-        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+            self, d: DocumentAppealDto, fields: AppealFields, payload: dict
     ) -> None:
         if fields.declarantType:
             if isinstance(fields.declarantType, str):
@@ -516,7 +519,7 @@ class AppealFieldsBuilder:
             logger.warning("declarantType set to INDIVIDUAL (fallback)")
 
     async def _add_conditional_fields(
-        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+            self, d: DocumentAppealDto, fields: AppealFields, payload: dict
     ) -> None:
         if payload.get("declarantType") == GeneratedDeclarantType.ENTITY:
             raw_org: str | None = (
@@ -529,7 +532,7 @@ class AppealFieldsBuilder:
                     self.token, "correspondent", raw_org, "Организация"
                 )
                 if corr_data and _is_good_correspondent_match(
-                    raw_org, corr_data.get("name", "")
+                        raw_org, corr_data.get("name", "")
                 ):
                     payload["organizationName"] = corr_data["name"]
                     logger.info(
@@ -564,7 +567,7 @@ class AppealFieldsBuilder:
             payload["correspondentOrgNumber"] = None
 
     def _add_common_fields(
-        self, d: DocumentAppealDto, fields: AppealFields, payload: dict
+            self, d: DocumentAppealDto, fields: AppealFields, payload: dict
     ) -> None:
         payload["collective"] = (
             fields.collective if fields.collective is not None else d.collective
@@ -741,7 +744,7 @@ class AppealAutofillOrchestrator:
         return fields
 
     async def _update_document(
-        self, document: DocumentDto, fields: AppealFields, extracted_text: str
+            self, document: DocumentDto, fields: AppealFields, extracted_text: str
     ) -> None:
         async with DocumentClient() as doc_client, ReferenceClient() as ref_client:
             await self._execute_main_fields_update(
@@ -752,11 +755,11 @@ class AppealAutofillOrchestrator:
             )
 
     async def _execute_main_fields_update(
-        self,
-        doc_client: DocumentClient,
-        ref_client: ReferenceClient,
-        document: DocumentDto,
-        fields: AppealFields,
+            self,
+            doc_client: DocumentClient,
+            ref_client: ReferenceClient,
+            document: DocumentDto,
+            fields: AppealFields,
     ) -> None:
         delivery_id = document.deliveryMethodId
         if not delivery_id:
@@ -801,12 +804,12 @@ class AppealAutofillOrchestrator:
         )
 
     async def _execute_appeal_fields_update(
-        self,
-        doc_client: DocumentClient,
-        ref_client: ReferenceClient,
-        document: DocumentDto,
-        fields: AppealFields,
-        extracted_text: str,
+            self,
+            doc_client: DocumentClient,
+            ref_client: ReferenceClient,
+            document: DocumentDto,
+            fields: AppealFields,
+            extracted_text: str,
     ) -> None:
         geo_resolver = GeographyResolver(ref_client, self.token)
         geo_data = await geo_resolver.resolve_geography(document, fields)
@@ -827,7 +830,7 @@ class AppealAutofillOrchestrator:
 
 
 async def _generate_summary_variants(
-    text: str, current_summary: str | None, token: str | None = None
+        text: str, current_summary: str | None, token: str | None = None
 ) -> list[str]:
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
@@ -861,12 +864,12 @@ async def _generate_summary_variants(
         variants = [v[:77] + "..." if len(v) > 80 else v for v in variants[:3]]
         if current_summary and current_summary not in variants:
             variants = [
-                (
-                    current_summary[:77] + "..."
-                    if len(current_summary) > 80
-                    else current_summary
-                )
-            ] + variants[:2]
+                           (
+                               current_summary[:77] + "..."
+                               if len(current_summary) > 80
+                               else current_summary
+                           )
+                       ] + variants[:2]
         return variants[:3]
     except Exception as exc:
         logger.warning("Failed to generate summary variants: %s", exc)
@@ -875,27 +878,36 @@ async def _generate_summary_variants(
 
 @tool("autofill_appeal_document", args_schema=AppealAutofillInput)
 async def autofill_appeal_document(
-    document_id: str,
-    token: str,
-    attachment_id: str | None = None,
-    generate_summary_choices: bool = False,
+        attachment_id: str | None = None,
+        generate_summary_choices: bool = False,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
     Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ.
+
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
 
     Используй generate_summary_choices=True когда пользователь хочет
     выбрать или изменить заголовок (краткое содержание) документа.
 
     Args:
-        document_id: UUID документа категории APPEAL.
-        token: JWT токен авторизации.
-        attachment_id: UUID конкретного файла (опционально).
+        attachment_id: UUID конкретного вложения для анализа (опционально).
         generate_summary_choices: Вернуть 3 варианта заголовка для выбора.
 
     Returns:
         Dict с результатом операции. Если generate_summary_choices=True —
         дополнительно содержит summary_choices: list[str].
     """
+
+    # Безопасное извлечение токена и document_id из конфига
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token/document_id from config: %s", e)
+        return {"status": "error", "message": f"Ошибка авторизации или контекста документа: {e}"}
+
     logger.info(
         "========== APPEAL AUTOFILL START ==========",
         extra={"document_id": document_id},

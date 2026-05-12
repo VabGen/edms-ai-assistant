@@ -37,7 +37,10 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from langchain_core.tools import tool
+from typing import Annotated
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from edms_ai_assistant.clients.base_client import EdmsHttpClient
@@ -185,9 +188,6 @@ class DocControlInput(BaseModel):
 
     Для action='edit' указываются только изменяемые поля.
     """
-
-    token: str = Field(..., description="JWT токен авторизации")
-    document_id: str = Field(..., description="UUID документа")
     action: str = Field(
         "set",
         description=(
@@ -472,14 +472,15 @@ async def _resolve_employee(
 
 @tool("doc_control", args_schema=DocControlInput)
 async def doc_control(
-    token: str,
-    document_id: str,
     action: str = "set",
     date_control_end: str | None = None,
     control_term_days: int | None = None,
     control_type_name: str | None = None,
     control_employee_id: str | None = None,
     comment: str | None = None,
+    document_id: Annotated[str, InjectedToolArg] = "",
+    token: Annotated[str, InjectedToolArg] = "",
+    config: RunnableConfig = None,
 ) -> dict[str, Any]:
     """Управляет контролем документа.
 
@@ -500,19 +501,20 @@ async def doc_control(
     При ошибке 403 проверьте права DOCUMENT_CONTROL_CREATE.
 
     Args:
-        token: JWT токен авторизации.
-        document_id: UUID документа.
         action: set | edit | remove | delete | get.
         date_control_end: Дата окончания контроля (YYYY-MM-DD).
         control_term_days: Срок в днях (приоритет над датой).
         control_type_name: Название типа контроля.
         control_employee_id: ФИО или UUID контролёра.
         comment: Комментарий.
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен авторизации (инжектируется автоматически).
+        config: Конфиг Runnable (инжектируется автоматически).
 
     Returns:
         Dict со статусом, сообщением и данными контроля.
     """
-    logger.info("doc_control: action=%s doc=%s...", action, document_id[:8])
+    logger.info("doc_control: action=%s doc=%s...", action, document_id[:8] if document_id else "N/A")
 
     try:
         async with _ControlClient() as client:

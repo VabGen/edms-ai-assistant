@@ -19,7 +19,6 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml README.md ./
-# COPY uv.lock ./   # Uncomment after committing uv.lock
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${TORCH_VARIANT}" ]; then \
@@ -29,18 +28,31 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-cache .
 
+# -- Runtime ---------------------------------------------------------------
+
 FROM python:${PYTHON_VERSION} AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-rus \
     tesseract-ocr-eng \
+    libreoffice-writer \
+    libreoffice-common \
     libgl1 \
     libglib2.0-0 \
     libpq5 \
     postgresql-client \
     curl \
     && rm -rf /var/lib/apt/lists/*
+
+# -- Verify Tesseract & set env vars ---------------------------------------
+
+RUN tesseract --version && \
+    tesseract --list-langs && \
+    which soffice
+
+ENV TESSERACT_CMD=/usr/bin/tesseract \
+    TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
 
 RUN groupadd -r appuser && \
     useradd -r -g appuser -d /app -s /sbin/nologin -c "EDMS app user" appuser
@@ -69,6 +81,6 @@ ENV VIRTUAL_ENV=/opt/venv \
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-    CMD curl -sf http://localhost:${API_PORT:-8000}/health || exit 1
+    CMD curl -sf http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]

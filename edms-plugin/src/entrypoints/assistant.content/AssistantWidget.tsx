@@ -1,7 +1,8 @@
 import {useState, useRef, useEffect, useCallback, memo, type FormEvent} from 'react'
 import {
     Paperclip, X, Mic, Send, MessageSquare,
-    StopCircle, FileText, Search, List, History, Settings,
+    StopCircle, History, Settings,
+    AlertTriangle, Check, ChevronRight,
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import 'dayjs/locale/ru'
@@ -9,19 +10,26 @@ import 'dayjs/locale/ru'
 import {ChatMessage} from '@/shared/ui/ChatMessage'
 import {getAuthToken} from '@/shared/lib/auth'
 import {extractDocIdFromUrl} from '@/shared/lib/url'
-import {sendMsg} from '@/shared/lib/messaging'
+import {sendMsg, streamChat, resumeChat, type StreamHandle} from '@/shared/lib/messaging'
 import {toast} from '@/shared/lib/toast'
 import {useSpeechRecognition} from '@/shared/hooks/useSpeechRecognition'
 import {useApplyPreferences} from '@/shared/hooks/useApplyPreferences'
 import {SettingsPanel} from '@/shared/ui/SettingsPanel'
 import {ComplianceData, ComplianceField, ComplianceResult} from "@/shared/ui/ComplianceResult";
+import type {
+    InterruptPayload,
+    ResumeValue,
+    DisambiguationResume,
+    ConfirmationResume,
+    TextInputResume,
+    SelectResume,
+} from '@/types/interrupt'
 
 dayjs.locale('ru')
 
 interface Message {
     role: 'user' | 'assistant'
     content: string
-    action_type?: string
     isError?: boolean
     id: string
     timestamp: number
@@ -30,6 +38,9 @@ interface Message {
     cacheFilePath?: string | null
     cacheContextId?: string | null
     compliance?: ComplianceData | null
+    /** Non-null when the graph is paused waiting for a HITL response */
+    interrupt?: InterruptPayload | null
+    interruptId?: string | null
 }
 
 interface Thread {
@@ -252,164 +263,196 @@ function getCandidateType(name: string): 'employee' | 'docx' | 'xlsx' | 'pdf' | 
     return 'file'
 }
 
-function parseDisambigCandidates(content: string): Array<{ id: string; name: string; dept: string }> {
-    const m = content.match(/<!--CANDIDATES:(.+?)-->/)
-    if (!m) return []
-    try {
-        return JSON.parse(m[1])
-    } catch {
-        return []
-    }
-}
+// ── Interrupt-driven UI card ────────────────────────────────────────────
 
-function cleanDisambigMessage(content: string): string {
-    return content.replace(/\n\n<!--CANDIDATES:.+?-->/, '').trimEnd()
-}
-
-interface ActionButtonsProps {
-    msg: Message
+interface InterruptCardProps {
+    interrupt: InterruptPayload
     loading: boolean
-    onSend: (choice: string, label: string) => void
-    defaultSummaryFormat?: string
+    onReply: (value: ResumeValue) => void
 }
 
-const ActionButtons = memo(({msg, loading, onSend, defaultSummaryFormat}: ActionButtonsProps) => {
-    useEffect(() => {
-        if (
-            msg.action_type === 'summarize_selection' &&
-            defaultSummaryFormat &&
-            defaultSummaryFormat !== 'ask' &&
-            !loading
-        ) {
-            const label = SUMMARY_TYPE_LABELS[defaultSummaryFormat] ?? defaultSummaryFormat
-            const timer = setTimeout(() => onSend(defaultSummaryFormat, label), 150)
-            return () => clearTimeout(timer)
-        }
-    }, [msg.id])
+const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) => {
+    const [textInput, setTextInput] = useState('')
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-    if (msg.action_type !== 'summarize_selection') return null
-    if (defaultSummaryFormat && defaultSummaryFormat !== 'ask') return null
+    const btnBase = 'edms-action-btn flex items-center gap-1.5 px-3.5 py-2 font-semibold rounded-xl border bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200'
 
-    return (
-        <div className="mt-2.5 flex flex-wrap gap-2" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
-            {[
-                {id: 'abstractive', label: 'Пересказ', icon: <FileText size={13}/>},
-                {id: 'extractive', label: 'Факты', icon: <Search size={13}/>},
-                {id: 'thesis', label: 'Тезисы', icon: <List size={13}/>},
-            ].map(btn => (
-                <button
-                    key={btn.id}
-                    type="button"
-                    disabled={loading}
-                    onClick={e => {
-                        e.stopPropagation();
-                        onSend(btn.id, btn.label)
-                    }}
-                    className="edms-action-btn flex items-center gap-1.5 px-3.5 py-2 font-semibold rounded-xl border bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
-                    style={{
-                        borderColor: 'rgba(99,102,241,0.18)',
-                        boxShadow: 'var(--edms-shadow-xs)',
-                    }}
-                    onMouseEnter={e => {
-                        if (loading) return
-                        const el = e.currentTarget as HTMLButtonElement
-                        el.style.boxShadow = '0 4px 14px rgba(99,102,241,0.25)'
-                        el.style.transform = 'translateY(-1px)'
-                    }}
-                    onMouseLeave={e => {
-                        const el = e.currentTarget as HTMLButtonElement
-                        el.style.boxShadow = 'var(--edms-shadow-xs)'
-                        el.style.transform = 'translateY(0)'
-                    }}
-                >
-                    {btn.icon}{btn.label}
-                </button>
-            ))}
-        </div>
-    )
-})
-ActionButtons.displayName = 'ActionButtons'
-
-interface DisambButtonsProps {
-    msg: Message
-    loading: boolean
-    onSend: (choice: string, label: string) => void
-}
-
-const DisambiguationButtons = memo(({msg, loading, onSend}: DisambButtonsProps) => {
-    if (msg.action_type !== 'requires_disambiguation') return null
-    const candidates = parseDisambigCandidates(msg.content)
-    if (candidates.length === 0) return null
-    const isEmployeeList = candidates.every(c => getCandidateType(c.name) === 'employee')
-    const isFileList = candidates.every(c => getCandidateType(c.name) !== 'employee')
-    return (
-        <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
-            <p className="mb-2.5 px-1" style={{
-                fontSize: 10,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                color: '#94a3b8',
-            }}>
-                {isEmployeeList ? '👤 Выберите сотрудника' : isFileList ? '📎 Выберите вложение' : '✦ Выберите вариант'}
-            </p>
-            <div className="flex flex-col gap-1.5">
-                {candidates.map((c, idx) => {
-                    const ctype = getCandidateType(c.name)
-                    const accent = typeAccent[ctype] ?? typeAccent.file
-                    return (
+    switch (interrupt.kind) {
+        case 'disambiguation': {
+            const isEmployeeList = interrupt.entity_type === 'employee'
+            return (
+                <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                    <p className="mb-1 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                        {interrupt.prompt}
+                    </p>
+                    <p className="mb-2.5 px-1" style={{
+                        fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+                        letterSpacing: '0.08em', color: '#94a3b8',
+                    }}>
+                        {isEmployeeList ? '👤 Выберите сотрудника' : '📎 Выберите вариант'}
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                        {interrupt.options.map((opt, idx) => {
+                            const ctype = isEmployeeList ? 'employee' : getCandidateType(opt.label)
+                            const accent = typeAccent[ctype] ?? typeAccent.file
+                            const isSelected = selectedIds.has(opt.id)
+                            return (
+                                <button
+                                    key={opt.id}
+                                    type="button"
+                                    disabled={loading}
+                                    onClick={() => {
+                                        if (interrupt.multiple) {
+                                            setSelectedIds(prev => {
+                                                const next = new Set(prev)
+                                                if (next.has(opt.id)) next.delete(opt.id)
+                                                else next.add(opt.id)
+                                                return next
+                                            })
+                                        } else {
+                                            onReply({kind: 'disambiguation', selected_ids: [opt.id]} as DisambiguationResume)
+                                        }
+                                    }}
+                                    className="group flex items-center gap-3 w-full px-3.5 py-3 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                                    style={{
+                                        borderColor: isSelected ? '#6366f1' : 'rgba(0,0,0,0.05)',
+                                        color: '#1e293b',
+                                        fontSize: 12,
+                                        boxShadow: 'var(--edms-shadow-xs)',
+                                    }}
+                                >
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200 bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
+                                        {idx + 1}
+                                    </span>
+                                    <CandidateIcon type={ctype} className={accent}/>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-semibold truncate leading-tight">{opt.label}</p>
+                                        {opt.description &&
+                                            <p className="truncate mt-0.5 leading-tight opacity-60 group-hover:opacity-80"
+                                               style={{fontSize: 10}}>{opt.description}</p>}
+                                    </div>
+                                    <ChevronRight size={14} className="flex-shrink-0 opacity-25 group-hover:opacity-80"/>
+                                </button>
+                            )
+                        })}
+                    </div>
+                    {interrupt.multiple && selectedIds.size > 0 && (
                         <button
-                            key={c.id}
                             type="button"
                             disabled={loading}
-                            onClick={e => {
-                                e.stopPropagation();
-                                onSend(c.id, c.name)
-                            }}
-                            className="group flex items-center gap-3 w-full px-3.5 py-3 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                            onClick={() => onReply({kind: 'disambiguation', selected_ids: [...selectedIds]} as DisambiguationResume)}
+                            className={btnBase}
+                            style={{marginTop: 8, borderColor: 'rgba(99,102,241,0.18)', boxShadow: 'var(--edms-shadow-xs)'}}
+                        >
+                            <Check size={13}/>Выбрать ({selectedIds.size})
+                        </button>
+                    )}
+                </div>
+            )
+        }
+
+        case 'confirmation': {
+            return (
+                <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                    <p className="mb-2 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                        {interrupt.danger && <AlertTriangle size={14} className="inline mr-1 text-amber-500"/>}
+                        {interrupt.prompt}
+                    </p>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() => onReply({kind: 'confirmation', confirmed: true} as ConfirmationResume)}
+                            className={btnBase}
                             style={{
-                                borderColor: 'rgba(0,0,0,0.05)',
-                                color: '#1e293b',
-                                fontSize: 12,
+                                borderColor: interrupt.danger ? 'rgba(239,68,68,0.25)' : 'rgba(99,102,241,0.18)',
                                 boxShadow: 'var(--edms-shadow-xs)',
-                            }}
-                            onMouseEnter={e => {
-                                if (loading) return
-                                const el = e.currentTarget as HTMLButtonElement
-                                el.style.boxShadow = '0 4px 16px rgba(99,102,241,0.22)'
-                                el.style.transform = 'translateY(-1px)'
-                            }}
-                            onMouseLeave={e => {
-                                const el = e.currentTarget as HTMLButtonElement
-                                el.style.boxShadow = 'var(--edms-shadow-xs)'
-                                el.style.transform = 'translateY(0)'
+                                ...(interrupt.danger ? {color: '#ef4444'} : {}),
                             }}
                         >
-                            <span
-                                className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200 bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white"
-                            >
-                                {idx + 1}
-                            </span>
-                            <CandidateIcon type={ctype} className={accent}/>
-                            <div className="flex-1 min-w-0">
-                                <p className="font-semibold truncate leading-tight">{c.name}</p>
-                                {c.dept &&
-                                    <p className="truncate mt-0.5 leading-tight opacity-60 group-hover:opacity-80"
-                                       style={{fontSize: 10}}>{c.dept}</p>}
-                            </div>
-                            <svg
-                                className="w-3.5 h-3.5 flex-shrink-0 opacity-25 group-hover:opacity-80 transition-opacity"
-                                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                                <path d="M9 18l6-6-6-6"/>
-                            </svg>
+                            <Check size={13}/>{interrupt.confirm_label}
                         </button>
-                    )
-                })}
-            </div>
-        </div>
-    )
+                        <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() => onReply({kind: 'confirmation', confirmed: false} as ConfirmationResume)}
+                            className={btnBase}
+                            style={{borderColor: 'rgba(0,0,0,0.08)', boxShadow: 'var(--edms-shadow-xs)', color: '#64748b'}}
+                        >
+                            {interrupt.cancel_label}
+                        </button>
+                    </div>
+                </div>
+            )
+        }
+
+        case 'text_input': {
+            return (
+                <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                    <p className="mb-2 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                        {interrupt.prompt}
+                    </p>
+                    <div className="flex gap-2">
+                        <input
+                            type={interrupt.secret ? 'password' : 'text'}
+                            value={textInput}
+                            onChange={e => setTextInput(e.target.value)}
+                            placeholder={interrupt.placeholder ?? ''}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter' && textInput.trim()) {
+                                    onReply({kind: 'text_input', value: textInput.trim()} as TextInputResume)
+                                }
+                            }}
+                            className="flex-1 px-3 py-2 rounded-xl border text-sm outline-none focus:border-indigo-400 transition-colors"
+                            style={{borderColor: 'rgba(0,0,0,0.10)', color: '#1e293b'}}
+                        />
+                        <button
+                            type="button"
+                            disabled={loading || !textInput.trim()}
+                            onClick={() => onReply({kind: 'text_input', value: textInput.trim()} as TextInputResume)}
+                            className={btnBase}
+                            style={{borderColor: 'rgba(99,102,241,0.18)', boxShadow: 'var(--edms-shadow-xs)'}}
+                        >
+                            <Send size={13}/>
+                        </button>
+                    </div>
+                </div>
+            )
+        }
+
+        case 'select': {
+            return (
+                <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                    <p className="mb-1 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                        {interrupt.prompt}
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                        {interrupt.options.map(opt => (
+                            <button
+                                key={opt.id}
+                                type="button"
+                                disabled={loading}
+                                onClick={() => onReply({kind: 'select', selected_id: opt.id} as SelectResume)}
+                                className="group flex items-center gap-3 w-full px-3.5 py-2.5 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                                style={{borderColor: 'rgba(0,0,0,0.05)', color: '#1e293b', fontSize: 12, boxShadow: 'var(--edms-shadow-xs)'}}
+                            >
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-semibold truncate leading-tight">{opt.label}</p>
+                                    {opt.description && <p className="truncate mt-0.5 leading-tight opacity-60" style={{fontSize: 10}}>{opt.description}</p>}
+                                </div>
+                                <ChevronRight size={14} className="flex-shrink-0 opacity-25 group-hover:opacity-80"/>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )
+        }
+
+        default:
+            return null
+    }
 })
-DisambiguationButtons.displayName = 'DisambiguationButtons'
+InterruptCard.displayName = 'InterruptCard'
 
 interface RefreshCacheButtonProps {
     msg: Message
@@ -428,7 +471,7 @@ const RefreshCacheButton = memo(({
                                  }: RefreshCacheButtonProps) => {
     const [refreshing, setRefreshing] = useState(false)
 
-    if (msg.role !== 'assistant' || msg.action_type || msg.isError) return null
+    if (msg.role !== 'assistant' || msg.isError) return null
     if (!msg.cacheFileIdentifier) return null
 
     const effectiveFilePath = msg.cacheFilePath ?? msg.cacheFileIdentifier
@@ -606,6 +649,7 @@ export function AssistantWidget() {
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const isResizingRef = useRef(false)
     const resizeStartRef = useRef({x: 0, y: 0, width: 0, height: 0})
+    const streamHandleRef = useRef<StreamHandle | null>(null)
     const requestIdRef = useRef<string | null>(null)
     const serverPathRef = useRef<string | null>(null)
     const filePersistRef = useRef<string | null>(null)
@@ -918,108 +962,76 @@ export function AssistantWidget() {
         )
     }, [refreshDocumentForm])
 
-    const send = async (e?: FormEvent | React.KeyboardEvent, humanChoice?: string, humanChoiceLabel?: string) => {
-        if (e) e.preventDefault()
-        const isChoiceFlow = Boolean(humanChoice)
-        const hasTextInput = input.trim().length > 0
-        const hasFile = Boolean(attachedFile)
-        if (!isChoiceFlow && !hasTextInput && !hasFile) return
-        if (loading) return
-        if (isListening && !handsFreeRef.current) {
-            stopMic()
-        }
-
-        const token = getAuthToken() ?? 'no_token'
-        const docId = extractDocIdFromUrl()
-        const reqId = Math.random().toString(36).slice(7)
-        const tid = threadId ?? `${token.slice(0, 8)}_${docId}`
-        requestIdRef.current = reqId
-        if (!threadId) setThreadId(tid)
-
-        const userLabel = isChoiceFlow
-            ? (humanChoiceLabel ?? SUMMARY_TYPE_LABELS[humanChoice!] ?? humanChoice!)
-            : hasFile ? `${input} (Файл: ${attachedFile!.name})`.trim()
-                : input
-        setMessages(prev => [...prev, {role: 'user', content: userLabel, id: newMsgId(), timestamp: Date.now()}])
-        setLoading(true)
-        const textToSend = isChoiceFlow ? (humanChoice ?? '') : input
-        setInput('')
+    /** Process SSE stream events from the backend */
+    const processStream = async (handle: StreamHandle, tid: string, docId: string | null, finalFilePath: string | null) => {
+        let assistantMsgId = newMsgId()
+        let assistantContent = ''
+        let currentInterrupt: InterruptPayload | null = null
+        let currentInterruptId: string | null = null
 
         try {
-            if (hasFile && !isChoiceFlow) {
-                const up = await sendMsg<{ file_path: string }>('uploadFile', {
-                    fileData: attachedFile!.path,
-                    fileName: attachedFile!.name,
-                    user_token: token,
-                })
-                serverPathRef.current = up.file_path
-                filePersistRef.current = up.file_path
-            }
-
-            const finalFilePath = isChoiceFlow && filePersistRef.current
-                ? filePersistRef.current
-                : serverPathRef.current
-
-            const preferredFormat = userPrefs.documents.defaultSummaryFormat
-
-            const res = await sendMsg<any>('sendChatMessage', {
-                message: isChoiceFlow ? humanChoice! : textToSend,
-                user_token: token,
-                requestId: reqId,
-                thread_id: tid,
-                context_ui_id: docId,
-                file_path: finalFilePath,
-                human_choice: isChoiceFlow ? humanChoice! : undefined,
-                preferred_summary_format: preferredFormat !== 'ask' ? preferredFormat : undefined,
-                user_context: Object.keys(userContext).length > 0 ? userContext : undefined,
-            })
-
-            const payload = (res && typeof res === 'object' && 'data' in res && res.success) ? (res as any).data : res
-
-            if (payload?.action_type !== 'summarize_selection') {
-                serverPathRef.current = null
-                filePersistRef.current = null
-            }
-            const content = payload?.response ?? payload?.content ?? payload?.message
-                ?? (Array.isArray(payload?.messages) ? payload.messages.at(-1)?.content : undefined)
-                ?? 'Анализ завершён.'
-
-            const cacheFileIdentifier: string | null = payload?.metadata?.cache_file_identifier ?? null
-            const complianceData: ComplianceData | null = payload?.metadata?.compliance ?? null
-            const cacheSummaryType: string | null = payload?.metadata?.cache_summary_type ?? null
-
-            const assistantMsg: Message = {
-                role: 'assistant',
-                content,
-                action_type: payload?.action_type,
-                id: newMsgId(),
-                timestamp: Date.now(),
-                cacheFileIdentifier,
-                cacheSummaryType,
-                cacheFilePath: finalFilePath ?? null,
-                cacheContextId: docId ?? null,
-                compliance: complianceData,
-            }
-            setMessages(prev => [...prev, assistantMsg])
-
-            if (payload?.navigate_url) {
-                void chrome.runtime.sendMessage(
-                    {type: 'navigateTo', payload: {url: payload.navigate_url}},
-                    (r) => {
-                        if (!r?.success) {
-                            try {
-                                window.location.href = payload.navigate_url
-                            } catch {
-                                toast.info(`Документ создан. Перейдите по адресу: ${payload.navigate_url}`)
-                            }
+            for await (const ev of handle.events) {
+                if (ev.kind === 'message') {
+                    const msgData = ev.data
+                    assistantContent = msgData.content ?? ''
+                    setMessages(prev => {
+                        const existing = prev.find(m => m.id === assistantMsgId)
+                        if (existing) {
+                            return prev.map(m => m.id === assistantMsgId ? {...m, content: assistantContent} : m)
                         }
+                        return [...prev, {
+                            role: 'assistant' as const,
+                            content: assistantContent,
+                            id: assistantMsgId,
+                            timestamp: Date.now(),
+                            cacheFilePath: finalFilePath,
+                            cacheContextId: docId ?? null,
+                        }]
+                    })
+                } else if (ev.kind === 'interrupt') {
+                    const intData = ev.data
+                    currentInterrupt = intData.payload as InterruptPayload
+                    currentInterruptId = intData.interrupt_id ?? null
+                    // If no assistant content yet, add a placeholder message
+                    if (!assistantContent) {
+                        assistantContent = currentInterrupt.prompt ?? ''
+                        setMessages(prev => [...prev, {
+                            role: 'assistant' as const,
+                            content: assistantContent,
+                            id: assistantMsgId,
+                            timestamp: Date.now(),
+                            interrupt: currentInterrupt,
+                            interruptId: currentInterruptId,
+                        }])
+                    } else {
+                        // Attach interrupt to existing assistant message
+                        setMessages(prev => prev.map(m =>
+                            m.id === assistantMsgId
+                                ? {...m, interrupt: currentInterrupt, interruptId: currentInterruptId}
+                                : m
+                        ))
                     }
-                )
-            } else if (payload?.requires_reload) {
-                await refreshDocumentPage(docId, [...messagesRef.current, assistantMsg])
+                } else if (ev.kind === 'done') {
+                    const doneData = ev.data
+                    if (doneData.paused) {
+                        // Graph is paused — keep the interrupt card visible
+                    }
+                    // Stream finished normally
+                    break
+                } else if (ev.kind === 'error') {
+                    const errData = ev.data
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: `__error__:${errData.message ?? 'Stream error'}`,
+                        isError: true,
+                        id: newMsgId(),
+                        timestamp: Date.now(),
+                    }])
+                    break
+                }
             }
-        } catch (err: unknown) {
-            if (!String(err).includes('aborted')) {
+        } catch (err) {
+            if (!String(err).includes('aborted') && !String(err).includes('disconnect')) {
                 setMessages(prev => [...prev, {
                     role: 'assistant',
                     content: makeErrorMessage(err),
@@ -1030,22 +1042,121 @@ export function AssistantWidget() {
             }
         } finally {
             setLoading(false)
+            streamHandleRef.current = null
             requestIdRef.current = null
-            if (!isChoiceFlow) {
-                setAttachedFile(null)
-                if (fileRef.current) fileRef.current.value = ''
-            }
+            setAttachedFile(null)
+            if (fileRef.current) fileRef.current.value = ''
         }
     }
 
-    const sendWithLabel = (humanChoice: string, label: string) => send(undefined, humanChoice, label)
+    const send = async (e?: FormEvent | React.KeyboardEvent) => {
+        if (e) e.preventDefault()
+        const hasTextInput = input.trim().length > 0
+        const hasFile = Boolean(attachedFile)
+        if (!hasTextInput && !hasFile) return
+        if (loading) return
+        if (isListening && !handsFreeRef.current) {
+            stopMic()
+        }
+
+        const token = getAuthToken() ?? 'no_token'
+        const docId = extractDocIdFromUrl()
+        const tid = threadId ?? `${token.slice(0, 8)}_${docId}`
+        if (!threadId) setThreadId(tid)
+
+        const userLabel = hasFile ? `${input} (Файл: ${attachedFile!.name})`.trim() : input
+        setMessages(prev => [...prev, {role: 'user', content: userLabel, id: newMsgId(), timestamp: Date.now()}])
+        setLoading(true)
+        setInput('')
+
+        try {
+            let finalFilePath: string | null = serverPathRef.current
+
+            if (hasFile) {
+                const up = await sendMsg<{ file_path: string }>('uploadFile', {
+                    fileData: attachedFile!.path,
+                    fileName: attachedFile!.name,
+                    user_token: token,
+                })
+                serverPathRef.current = up.file_path
+                filePersistRef.current = up.file_path
+                finalFilePath = up.file_path
+            }
+
+            const preferredFormat = userPrefs.documents.defaultSummaryFormat
+
+            const handle = streamChat('streamChatMessage', {
+                message: input,
+                user_token: token,
+                thread_id: tid,
+                context_ui_id: docId,
+                file_path: finalFilePath,
+                preferred_summary_format: preferredFormat !== 'ask' ? preferredFormat : undefined,
+                context: Object.keys(userContext).length > 0 ? userContext : undefined,
+            })
+            streamHandleRef.current = handle
+
+            await processStream(handle, tid, docId, finalFilePath)
+        } catch (err: unknown) {
+            if (!String(err).includes('aborted')) {
+                setMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: makeErrorMessage(err),
+                    isError: true,
+                    id: newMsgId(),
+                    timestamp: Date.now(),
+                }])
+            }
+            setLoading(false)
+        }
+    }
+
+    /** Handle user reply to an interrupt card */
+    const handleInterruptReply = async (_msgId: string, resumeValue: ResumeValue) => {
+        const token = getAuthToken() ?? 'no_token'
+        const tid = threadId
+        if (!tid) return
+
+        // Find the message with the interrupt to get interruptId
+        const intMsg = messages.find(m => m.interrupt)
+        const interruptId = intMsg?.interruptId ?? null
+
+        // Clear the interrupt from the message
+        setMessages(prev => prev.map(m =>
+            m.interrupt ? {...m, interrupt: null, interruptId: null} : m
+        ))
+
+        setLoading(true)
+
+        try {
+            const handle = resumeChat(tid, token, resumeValue, interruptId)
+            streamHandleRef.current = handle
+
+            await processStream(handle, tid, extractDocIdFromUrl(), serverPathRef.current)
+        } catch (err: unknown) {
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: makeErrorMessage(err),
+                isError: true,
+                id: newMsgId(),
+                timestamp: Date.now(),
+            }])
+            setLoading(false)
+        }
+    }
+
     sendRef.current = () => send()
 
     const abort = () => {
-        if (!requestIdRef.current) return
-        void chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
+        if (streamHandleRef.current) {
+            streamHandleRef.current.abort()
+            streamHandleRef.current = null
+        }
+        if (requestIdRef.current) {
+            void chrome.runtime.sendMessage({type: 'abortRequest', payload: {requestId: requestIdRef.current}})
+            requestIdRef.current = null
+        }
         setLoading(false)
-        requestIdRef.current = null
         setMessages(prev => [...prev, {
             role: 'assistant',
             content: '_Запрос отменён._',
@@ -1368,13 +1479,10 @@ export function AssistantWidget() {
                                     </div>
                                 )}
                                 {messages.map(msg => {
-                                    const displayContent = msg.action_type === 'requires_disambiguation'
-                                        ? cleanDisambigMessage(msg.content)
-                                        : msg.content
                                     return (
                                         <div key={msg.id} className="flex flex-col">
                                             <ChatMessage
-                                                content={displayContent}
+                                                content={msg.content}
                                                 role={msg.role}
                                                 timestamp={msg.timestamp}
                                                 isError={msg.isError}
@@ -1384,13 +1492,13 @@ export function AssistantWidget() {
                                                 }}
                                                 onDocumentClick={handleDocumentClick}
                                             />
-                                            <ActionButtons
-                                                msg={msg}
-                                                loading={loading}
-                                                onSend={sendWithLabel}
-                                                defaultSummaryFormat={userPrefs.documents.defaultSummaryFormat}
-                                            />
-                                            <DisambiguationButtons msg={msg} loading={loading} onSend={sendWithLabel}/>
+                                            {msg.interrupt && (
+                                                <InterruptCard
+                                                    interrupt={msg.interrupt}
+                                                    loading={loading}
+                                                    onReply={(value) => handleInterruptReply(msg.id, value)}
+                                                />
+                                            )}
                                             {msg.compliance && (
                                                 <ComplianceResult
                                                     data={msg.compliance}

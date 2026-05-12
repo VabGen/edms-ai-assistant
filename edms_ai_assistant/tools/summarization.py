@@ -14,6 +14,14 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.hitl_primitives import ask_human
+from edms_ai_assistant.agent.interrupt_contract import (
+    InterruptOption,
+    SelectInterrupt,
+    SelectResume,
+)
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,29 +31,12 @@ class SummarizeType(StrEnum):
     THESIS = "thesis"
 
 
-_SUMMARY_TYPE_ALIASES: dict[str, str] = {
-    "факты": "extractive",
-    "ключевые факты": "extractive",
-    "extractive": "extractive",
-    "1": "extractive",
-    "пересказ": "abstractive",
-    "краткий пересказ": "abstractive",
-    "abstractive": "abstractive",
-    "2": "abstractive",
-    "тезисы": "thesis",
-    "тезисный план": "thesis",
-    "thesis": "thesis",
-    "3": "thesis",
-}
-
-
 def _normalise_summary_type(value: Any) -> SummarizeType:
     if isinstance(value, SummarizeType):
         return value
     raw = str(value).strip().lower() if value else ""
-    canonical = _SUMMARY_TYPE_ALIASES.get(raw, raw)
     try:
-        return SummarizeType(canonical)
+        return SummarizeType(raw)
     except ValueError:
         logger.warning("Unknown summary_type '%s' — falling back to extractive", value)
         return SummarizeType.EXTRACTIVE
@@ -122,33 +113,6 @@ def _heuristic_recommendation(text: str) -> dict[str, str]:
     }
 
 
-def _build_requires_choice_response(text: str) -> dict[str, Any]:
-    hint = _heuristic_recommendation(text)
-    return {
-        "status": "requires_choice",
-        "message": "Выберите формат анализа документа:",
-        "options": [
-            {
-                "key": "extractive",
-                "label": "Ключевые факты",
-                "description": "Конкретные данные, даты, суммы, имена — нумерованным списком.",
-            },
-            {
-                "key": "abstractive",
-                "label": "Краткий пересказ",
-                "description": "Суть документа своими словами в 1–2 абзацах.",
-            },
-            {
-                "key": "thesis",
-                "label": "Тезисный план",
-                "description": "Структурированный план с разделами и подпунктами.",
-            },
-        ],
-        "hint": hint["recommended"],
-        "hint_reason": hint["reason"],
-    }
-
-
 # ---------------------------------------------------------------------------
 # Глобальный синглтон сервиса (без import cycle)
 # ---------------------------------------------------------------------------
@@ -174,8 +138,8 @@ def get_summarization_service() -> Any | None:
 
 @tool("doc_summarize_text", args_schema=SummarizeInput)
 async def doc_summarize_text(
-    text: str,
-    summary_type: SummarizeType | None = None,
+        text: str,
+        summary_type: SummarizeType | None = None,
 ) -> dict[str, Any]:
     """Анализирует текст документа через LLM-пайплайн суммаризации.
 
@@ -208,16 +172,46 @@ async def doc_summarize_text(
 
     clean_text = _unwrap_json_envelope(text)
 
-    # Human-in-the-Loop — запрашиваем выбор формата
     if summary_type is None:
-        return _build_requires_choice_response(clean_text)
+        hint = _heuristic_recommendation(clean_text)
+        resume = ask_human(
+            SelectInterrupt(
+                prompt="Выберите формат анализа документа:",
+                options=[
+                    InterruptOption(
+                        id="extractive",
+                        label="Ключевые факты",
+                        description=(
+                            "Конкретные данные, даты, суммы, имена — "
+                            "нумерованным списком."
+                        ),
+                    ),
+                    InterruptOption(
+                        id="abstractive",
+                        label="Краткий пересказ",
+                        description="Суть документа своими словами в 1–2 абзацах.",
+                    ),
+                    InterruptOption(
+                        id="thesis",
+                        label="Тезисный план",
+                        description="Структурированный план с разделами и подпунктами.",
+                    ),
+                ],
+                default=hint["recommended"],
+            )
+        )
+
+        if not isinstance(resume, SelectResume):
+            raise ToolAborted(
+                f"Contract mismatch: expected SelectResume, "
+                f"got {type(resume).__name__}"
+            )
+        summary_type = _normalise_summary_type(resume.selected_id)
 
     normalised = _normalise_summary_type(summary_type)
 
-    # Получаем сервис через синглтон (без import cycle)
     service = get_summarization_service()
     if service is None:
-        # Fallback: используем простой LLM без пайплайна
         return await _llm_fallback(clean_text, normalised)
 
     try:
@@ -268,7 +262,6 @@ async def doc_summarize_text(
         return {"status": "error", "message": f"Ошибка валидации: {exc}"}
     except Exception as exc:
         logger.error("doc_summarize_text failed: %s", exc, exc_info=True)
-        # Пробуем fallback
         try:
             return await _llm_fallback(clean_text, normalised)
         except Exception:

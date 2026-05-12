@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Annotated
 
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.clients.document_client import DocumentClient
@@ -40,13 +41,6 @@ _ALLOWED_APPEAL_FIELDS: dict[str, str] = {
 
 class UpdateDocumentFieldInput(BaseModel):
     """Validated input for updating a single document field."""
-
-    document_id: str = Field(
-        ...,
-        description="UUID документа в СЭД",
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    )
-    token: str = Field(..., description="JWT токен авторизации")
     field_name: str = Field(
         ...,
         description=(
@@ -205,8 +199,6 @@ async def _fetch_appeal_required_fields(
 
 @tool("doc_update_field", args_schema=UpdateDocumentFieldInput)
 async def doc_update_field(
-    document_id: str,
-    token: str,
     field_name: str,
     field_value: str,
 ) -> dict[str, Any]:
