@@ -43,6 +43,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
@@ -478,9 +479,7 @@ async def doc_control(
     control_type_name: str | None = None,
     control_employee_id: str | None = None,
     comment: str | None = None,
-    document_id: Annotated[str, InjectedToolArg] = "",
-    token: Annotated[str, InjectedToolArg] = "",
-    config: RunnableConfig = None,
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """Управляет контролем документа.
 
@@ -499,6 +498,8 @@ async def doc_control(
     со списком доступных вариантов — уточните у пользователя и вызовите повторно.
 
     При ошибке 403 проверьте права DOCUMENT_CONTROL_CREATE.
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+        Тебе НЕ НУЖНО запрашивать их у пользователя.
 
     Args:
         action: set | edit | remove | delete | get.
@@ -514,6 +515,14 @@ async def doc_control(
     Returns:
         Dict со статусом, сообщением и данными контроля.
     """
+    try:
+        document_id = get_document_id_from_config(config)
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}"}
+
     logger.info("doc_control: action=%s doc=%s...", action, document_id[:8] if document_id else "N/A")
 
     try:

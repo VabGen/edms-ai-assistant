@@ -23,7 +23,16 @@ import type {
     ConfirmationResume,
     TextInputResume,
     SelectResume,
+    CardSelectResume,
+    InterruptCard as InterruptCardType,
+    CardSelectInterrupt,
+    InterruptOption,
+    TextInputInterrupt,
+    ConfirmationInterrupt,
+    DisambiguationInterrupt,
 } from '@/types/interrupt'
+
+dayjs.locale('ru')
 
 dayjs.locale('ru')
 
@@ -95,6 +104,7 @@ function getToastErrorText(err: unknown): string {
     if (raw.includes('timeout')) return 'Сервер не ответил вовремя'
     if (raw.includes('401') || raw.includes('unauthorized')) return 'Ошибка авторизации — обновите страницу'
     if (raw.includes('403')) return 'Доступ запрещён'
+    if (raw.includes('statecorrupted') || raw.includes('dangling')) return 'Состояние диалога повреждено — начните новый'
     return err instanceof Error ? err.message : String(err)
 }
 
@@ -151,7 +161,7 @@ function rebuildCompliance(
         ...compliance,
         fields: updatedFields,
         overall: mismatches > 0 ? 'has_mismatches' as const : 'ok' as const,
-        stats: { total: updatedFields.length, mismatches, ok, not_found },
+        stats: {total: updatedFields.length, mismatches, ok, not_found},
     }
 }
 
@@ -254,6 +264,8 @@ const typeAccent: Record<string, string> = {
     file: 'text-slate-400 group-hover:text-white',
 }
 
+// ── Interrupt-driven UI card ────────────────────────────────────────────
+
 function getCandidateType(name: string): 'employee' | 'docx' | 'xlsx' | 'pdf' | 'file' {
     const lower = name.toLowerCase()
     if (lower.endsWith('.docx') || lower.endsWith('.doc')) return 'docx'
@@ -279,11 +291,12 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
 
     switch (interrupt.kind) {
         case 'disambiguation': {
-            const isEmployeeList = interrupt.entity_type === 'employee'
+            const dis = interrupt as DisambiguationInterrupt
+            const isEmployeeList = dis.entity_type === 'employee'
             return (
                 <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
                     <p className="mb-1 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
-                        {interrupt.prompt}
+                        {dis.prompt}
                     </p>
                     <p className="mb-2.5 px-1" style={{
                         fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
@@ -292,7 +305,7 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                         {isEmployeeList ? '👤 Выберите сотрудника' : '📎 Выберите вариант'}
                     </p>
                     <div className="flex flex-col gap-1.5">
-                        {interrupt.options.map((opt, idx) => {
+                        {dis.options.map((opt, idx) => {
                             const ctype = isEmployeeList ? 'employee' : getCandidateType(opt.label)
                             const accent = typeAccent[ctype] ?? typeAccent.file
                             const isSelected = selectedIds.has(opt.id)
@@ -302,7 +315,7 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                                     type="button"
                                     disabled={loading}
                                     onClick={() => {
-                                        if (interrupt.multiple) {
+                                        if (dis.multiple) {
                                             setSelectedIds(prev => {
                                                 const next = new Set(prev)
                                                 if (next.has(opt.id)) next.delete(opt.id)
@@ -310,7 +323,10 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                                                 return next
                                             })
                                         } else {
-                                            onReply({kind: 'disambiguation', selected_ids: [opt.id]} as DisambiguationResume)
+                                            onReply({
+                                                kind: 'disambiguation',
+                                                selected_ids: [opt.id]
+                                            } as DisambiguationResume)
                                         }
                                     }}
                                     className="group flex items-center gap-3 w-full px-3.5 py-3 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
@@ -321,7 +337,8 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                                         boxShadow: 'var(--edms-shadow-xs)',
                                     }}
                                 >
-                                    <span className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200 bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
+                                    <span
+                                        className="flex-shrink-0 w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center transition-colors duration-200 bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
                                         {idx + 1}
                                     </span>
                                     <CandidateIcon type={ctype} className={accent}/>
@@ -331,18 +348,26 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                                             <p className="truncate mt-0.5 leading-tight opacity-60 group-hover:opacity-80"
                                                style={{fontSize: 10}}>{opt.description}</p>}
                                     </div>
-                                    <ChevronRight size={14} className="flex-shrink-0 opacity-25 group-hover:opacity-80"/>
+                                    <ChevronRight size={14}
+                                                  className="flex-shrink-0 opacity-25 group-hover:opacity-80"/>
                                 </button>
                             )
                         })}
                     </div>
-                    {interrupt.multiple && selectedIds.size > 0 && (
+                    {dis.multiple && selectedIds.size > 0 && (
                         <button
                             type="button"
                             disabled={loading}
-                            onClick={() => onReply({kind: 'disambiguation', selected_ids: [...selectedIds]} as DisambiguationResume)}
+                            onClick={() => onReply({
+                                kind: 'disambiguation',
+                                selected_ids: [...selectedIds]
+                            } as DisambiguationResume)}
                             className={btnBase}
-                            style={{marginTop: 8, borderColor: 'rgba(99,102,241,0.18)', boxShadow: 'var(--edms-shadow-xs)'}}
+                            style={{
+                                marginTop: 8,
+                                borderColor: 'rgba(99,102,241,0.18)',
+                                boxShadow: 'var(--edms-shadow-xs)'
+                            }}
                         >
                             <Check size={13}/>Выбрать ({selectedIds.size})
                         </button>
@@ -352,11 +377,12 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
         }
 
         case 'confirmation': {
+            const conf = interrupt as ConfirmationInterrupt
             return (
                 <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
                     <p className="mb-2 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
-                        {interrupt.danger && <AlertTriangle size={14} className="inline mr-1 text-amber-500"/>}
-                        {interrupt.prompt}
+                        {conf.danger && <AlertTriangle size={14} className="inline mr-1 text-amber-500"/>}
+                        {conf.prompt}
                     </p>
                     <div className="flex gap-2">
                         <button
@@ -365,21 +391,25 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                             onClick={() => onReply({kind: 'confirmation', confirmed: true} as ConfirmationResume)}
                             className={btnBase}
                             style={{
-                                borderColor: interrupt.danger ? 'rgba(239,68,68,0.25)' : 'rgba(99,102,241,0.18)',
+                                borderColor: conf.danger ? 'rgba(239,68,68,0.25)' : 'rgba(99,102,241,0.18)',
                                 boxShadow: 'var(--edms-shadow-xs)',
-                                ...(interrupt.danger ? {color: '#ef4444'} : {}),
+                                ...(conf.danger ? {color: '#ef4444'} : {}),
                             }}
                         >
-                            <Check size={13}/>{interrupt.confirm_label}
+                            <Check size={13}/>{conf.confirm_label}
                         </button>
                         <button
                             type="button"
                             disabled={loading}
                             onClick={() => onReply({kind: 'confirmation', confirmed: false} as ConfirmationResume)}
                             className={btnBase}
-                            style={{borderColor: 'rgba(0,0,0,0.08)', boxShadow: 'var(--edms-shadow-xs)', color: '#64748b'}}
+                            style={{
+                                borderColor: 'rgba(0,0,0,0.08)',
+                                boxShadow: 'var(--edms-shadow-xs)',
+                                color: '#64748b'
+                            }}
                         >
-                            {interrupt.cancel_label}
+                            {conf.cancel_label}
                         </button>
                     </div>
                 </div>
@@ -387,17 +417,18 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
         }
 
         case 'text_input': {
+            const ti = interrupt as TextInputInterrupt
             return (
                 <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
                     <p className="mb-2 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
-                        {interrupt.prompt}
+                        {ti.prompt}
                     </p>
                     <div className="flex gap-2">
                         <input
-                            type={interrupt.secret ? 'password' : 'text'}
+                            type={ti.secret ? 'password' : 'text'}
                             value={textInput}
                             onChange={e => setTextInput(e.target.value)}
-                            placeholder={interrupt.placeholder ?? ''}
+                            placeholder={ti.placeholder ?? ''}
                             onKeyDown={e => {
                                 if (e.key === 'Enter' && textInput.trim()) {
                                     onReply({kind: 'text_input', value: textInput.trim()} as TextInputResume)
@@ -420,25 +451,199 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
             )
         }
 
-        case 'select': {
+        // ★★★ Beautiful card-select from ask_user_to_select ★★★
+        case 'card_select': {
+            const cs = interrupt as CardSelectInterrupt
+            const cards = cs.cards ?? []
+            const multiple = cs.multiple ?? false
+            const layout = cs.layout ?? 'list'
+
+            if (cards.length === 0) {
+                return (
+                    <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                        <p className="font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                            {cs.prompt ?? 'Ожидание ввода...'}
+                        </p>
+                    </div>
+                )
+            }
+
+            return (
+                <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                    <p className="mb-1 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                        {cs.prompt}
+                    </p>
+                    <p className="mb-2.5 px-1" style={{
+                        fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+                        letterSpacing: '0.08em', color: '#94a3b8',
+                    }}>
+                        📋 Выберите вариант
+                    </p>
+                    <div
+                        className={layout === 'grid' ? 'grid grid-cols-2 gap-2' : 'flex flex-col gap-2'}
+                    >
+                        {cards.map((card, idx) => {
+                            const isSelected = selectedIds.has(card.id)
+                            const hasDesc = Boolean(card.description)
+                            return (
+                                <button
+                                    key={card.id}
+                                    type="button"
+                                    disabled={loading}
+                                    onClick={() => {
+                                        if (multiple) {
+                                            setSelectedIds(prev => {
+                                                const next = new Set(prev)
+                                                if (next.has(card.id)) next.delete(card.id)
+                                                else next.add(card.id)
+                                                return next
+                                            })
+                                        } else {
+                                            onReply({
+                                                kind: 'card_select',
+                                                selected_ids: [card.id]
+                                            } as CardSelectResume)
+                                        }
+                                    }}
+                                    className="group relative w-full text-left rounded-xl border transition-all duration-200"
+                                    style={{
+                                        borderColor: isSelected ? '#6366f1' : 'rgba(0,0,0,0.07)',
+                                        background: isSelected
+                                            ? 'rgba(99,102,241,0.06)'
+                                            : '#ffffff',
+                                        boxShadow: isSelected
+                                            ? '0 0 0 1px rgba(99,102,241,0.25), var(--edms-shadow-xs)'
+                                            : 'var(--edms-shadow-xs)',
+                                        padding: hasDesc ? '12px 14px 12px 44px' : '10px 14px 10px 44px',
+                                        cursor: loading ? 'not-allowed' : 'pointer',
+                                        opacity: loading ? 0.6 : 1,
+                                    }}
+                                    onMouseEnter={e => {
+                                        if (loading) return
+                                        const el = e.currentTarget as HTMLButtonElement
+                                        el.style.borderColor = '#6366f1'
+                                        el.style.background = 'rgba(99,102,241,0.04)'
+                                        el.style.transform = 'translateY(-1px)'
+                                    }}
+                                    onMouseLeave={e => {
+                                        const el = e.currentTarget as HTMLButtonElement
+                                        el.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.07)'
+                                        el.style.background = isSelected
+                                            ? 'rgba(99,102,241,0.06)'
+                                            : '#ffffff'
+                                        el.style.transform = 'translateY(0)'
+                                    }}
+                                >
+                                    {/* Number badge */}
+                                    <span style={{
+                                        position: 'absolute',
+                                        left: 12,
+                                        top: hasDesc ? 12 : 10,
+                                        width: 24,
+                                        height: 24,
+                                        borderRadius: 8,
+                                        background: isSelected
+                                            ? '#6366f1'
+                                            : 'rgba(99,102,241,0.08)',
+                                        color: isSelected ? '#fff' : '#6366f1',
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        transition: 'all 0.15s',
+                                    }}>
+                                        {isSelected ? '✓' : idx + 1}
+                                    </span>
+
+                                    {/* Label */}
+                                    <p style={{
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        color: '#1e293b',
+                                        lineHeight: 1.4,
+                                        margin: 0,
+                                    }}>
+                                        {card.label}
+                                    </p>
+
+                                    {/* Description */}
+                                    {hasDesc && (
+                                        <p style={{
+                                            fontSize: 10,
+                                            color: '#64748b',
+                                            lineHeight: 1.5,
+                                            marginTop: 3,
+                                            marginBottom: 0,
+                                        }}>
+                                            {card.description}
+                                        </p>
+                                    )}
+                                </button>
+                            )
+                        })}
+                    </div>
+
+                    {/* Multi-select confirm button */}
+                    {multiple && selectedIds.size > 0 && (
+                        <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() => onReply({
+                                kind: 'card_select',
+                                selected_ids: [...selectedIds] as [string, ...string[]]
+                            } as CardSelectResume)}
+                            className={btnBase}
+                            style={{
+                                marginTop: 10,
+                                borderColor: 'rgba(99,102,241,0.18)',
+                                boxShadow: 'var(--edms-shadow-xs)'
+                            }}
+                        >
+                            <Check size={13}/>Выбрать ({selectedIds.size})
+                        </button>
+                    )}
+                </div>
+            )
+        }
+
+        case 'select':
+        default: {
+            // Fallback for SelectInterrupt and GenericSelectInterrupt
+            const options: InterruptOption[] = (interrupt as any).options ?? []
+            if (options.length === 0) {
+                return (
+                    <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
+                        <p className="font-medium" style={{fontSize: 13, color: '#1e293b'}}>
+                            {interrupt.prompt ?? 'Ожидание ввода...'}
+                        </p>
+                    </div>
+                )
+            }
             return (
                 <div className="mt-3" style={{animation: 'edms-fade-in-up .3s ease-out'}}>
                     <p className="mb-1 font-medium" style={{fontSize: 13, color: '#1e293b'}}>
                         {interrupt.prompt}
                     </p>
                     <div className="flex flex-col gap-1.5">
-                        {interrupt.options.map(opt => (
+                        {options.map(opt => (
                             <button
                                 key={opt.id}
                                 type="button"
                                 disabled={loading}
                                 onClick={() => onReply({kind: 'select', selected_id: opt.id} as SelectResume)}
                                 className="group flex items-center gap-3 w-full px-3.5 py-2.5 rounded-xl border bg-white text-left hover:bg-indigo-600 hover:border-indigo-600 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
-                                style={{borderColor: 'rgba(0,0,0,0.05)', color: '#1e293b', fontSize: 12, boxShadow: 'var(--edms-shadow-xs)'}}
+                                style={{
+                                    borderColor: 'rgba(0,0,0,0.05)',
+                                    color: '#1e293b',
+                                    fontSize: 12,
+                                    boxShadow: 'var(--edms-shadow-xs)'
+                                }}
                             >
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold truncate leading-tight">{opt.label}</p>
-                                    {opt.description && <p className="truncate mt-0.5 leading-tight opacity-60" style={{fontSize: 10}}>{opt.description}</p>}
+                                    {opt.description && <p className="truncate mt-0.5 leading-tight opacity-60"
+                                                           style={{fontSize: 10}}>{opt.description}</p>}
                                 </div>
                                 <ChevronRight size={14} className="flex-shrink-0 opacity-25 group-hover:opacity-80"/>
                             </button>
@@ -447,9 +652,6 @@ const InterruptCard = memo(({interrupt, loading, onReply}: InterruptCardProps) =
                 </div>
             )
         }
-
-        default:
-            return null
     }
 })
 InterruptCard.displayName = 'InterruptCard'
@@ -677,9 +879,11 @@ export function AssistantWidget() {
             const newHeight = Math.min(Math.max(resizeStartRef.current.height - dy, 400), window.innerHeight - 64)
             setWidgetSize({width: newWidth, height: newHeight})
         }
+
         function onMouseUp() {
             isResizingRef.current = false
         }
+
         window.addEventListener('mousemove', onMouseMove)
         window.addEventListener('mouseup', onMouseUp)
         return () => {
@@ -962,12 +1166,67 @@ export function AssistantWidget() {
         )
     }, [refreshDocumentForm])
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ★ NEW: send a command through the SSE stream (replaces /chat POST)
+    // ═══════════════════════════════════════════════════════════════════════
+    const sendFixViaStream = useCallback(async (fixMessage: string) => {
+        const token = getAuthToken() ?? 'no_token'
+        const tid = threadId
+        if (!tid) {
+            toast.error('Нет активного диалога', 'Ошибка')
+            return
+        }
+        if (loading) {
+            toast.info('Подождите завершения текущей операции', 'Занято')
+            return
+        }
+
+        // Add user message to chat
+        setMessages(prev => [...prev, {
+            role: 'user' as const,
+            content: fixMessage,
+            id: newMsgId(),
+            timestamp: Date.now(),
+        }])
+        setLoading(true)
+
+        try {
+            const handle = streamChat('streamChatMessage', {
+                message: fixMessage,
+                user_token: token,
+                thread_id: tid,
+                context_ui_id: extractDocIdFromUrl(),
+            })
+            streamHandleRef.current = handle
+            await processStream(handle, tid, extractDocIdFromUrl(), serverPathRef.current)
+        } catch (err: unknown) {
+            if (!String(err).includes('aborted')) {
+                setMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: makeErrorMessage(err),
+                    isError: true,
+                    id: newMsgId(),
+                    timestamp: Date.now(),
+                }])
+            }
+            setLoading(false)
+        }
+    }, [threadId, loading])
+
     /** Process SSE stream events from the backend */
-    const processStream = async (handle: StreamHandle, tid: string, docId: string | null, finalFilePath: string | null) => {
+
+    const processStream = async (
+        handle: StreamHandle,
+        tid: string,
+        docId: string | null,
+        finalFilePath: string | null
+    ) => {
         let assistantMsgId = newMsgId()
         let assistantContent = ''
         let currentInterrupt: InterruptPayload | null = null
         let currentInterruptId: string | null = null
+        let currentCompliance: ComplianceData | null = null
+        let currentNavigateUrl: string | null = null
 
         try {
             for await (const ev of handle.events) {
@@ -977,7 +1236,14 @@ export function AssistantWidget() {
                     setMessages(prev => {
                         const existing = prev.find(m => m.id === assistantMsgId)
                         if (existing) {
-                            return prev.map(m => m.id === assistantMsgId ? {...m, content: assistantContent} : m)
+                            return prev.map(m => m.id === assistantMsgId
+                                ? {
+                                    ...m,
+                                    content: assistantContent,
+                                    compliance: m.compliance ?? currentCompliance,
+                                }
+                                : m
+                            )
                         }
                         return [...prev, {
                             role: 'assistant' as const,
@@ -986,13 +1252,13 @@ export function AssistantWidget() {
                             timestamp: Date.now(),
                             cacheFilePath: finalFilePath,
                             cacheContextId: docId ?? null,
+                            compliance: currentCompliance,
                         }]
                     })
                 } else if (ev.kind === 'interrupt') {
                     const intData = ev.data
                     currentInterrupt = intData.payload as InterruptPayload
                     currentInterruptId = intData.interrupt_id ?? null
-                    // If no assistant content yet, add a placeholder message
                     if (!assistantContent) {
                         assistantContent = currentInterrupt.prompt ?? ''
                         setMessages(prev => [...prev, {
@@ -1002,31 +1268,105 @@ export function AssistantWidget() {
                             timestamp: Date.now(),
                             interrupt: currentInterrupt,
                             interruptId: currentInterruptId,
+                            compliance: currentCompliance,
                         }])
                     } else {
-                        // Attach interrupt to existing assistant message
                         setMessages(prev => prev.map(m =>
                             m.id === assistantMsgId
-                                ? {...m, interrupt: currentInterrupt, interruptId: currentInterruptId}
+                                ? {
+                                    ...m,
+                                    interrupt: currentInterrupt,
+                                    interruptId: currentInterruptId,
+                                }
                                 : m
                         ))
                     }
-                } else if (ev.kind === 'done') {
-                    const doneData = ev.data
-                    if (doneData.paused) {
-                        // Graph is paused — keep the interrupt card visible
+                } else if (ev.kind === 'ui_component') {
+                    const uiData = ev.data
+                    const componentType = uiData.type
+
+                    if (componentType === 'compliance_result') {
+                        const validOverall = (['ok', 'has_mismatches', 'cannot_verify'] as const)
+                            .includes(uiData.overall as any)
+                            ? (uiData.overall as ComplianceData['overall'])
+                            : 'ok' as ComplianceData['overall']
+
+                        currentCompliance = {
+                            overall: validOverall,
+                            summary: uiData.summary ?? '',
+                            document_id: uiData.document_id,
+                            fields: (uiData.fields ?? []).map((f: any) => ({
+                                field_key: f.field_key,
+                                label: f.label,
+                                card_value: f.card_value ?? '',
+                                file_value: f.file_value ?? null,
+                                correct_value: f.correct_value ?? null,
+                                status: (['ok', 'mismatch', 'not_found'].includes(f.status)
+                                    ? f.status
+                                    : 'ok') as ComplianceField['status'],
+                                update_field: f.update_field ?? f.field_key,
+                                recommendation: f.recommendation ?? null,
+                            })),
+                            stats: uiData.stats,
+                            fix_hint: uiData.fix_hint,
+                        }
+
+                        setMessages(prev => {
+                            const existing = prev.find(m => m.id === assistantMsgId)
+                            if (existing) {
+                                return prev.map(m => m.id === assistantMsgId
+                                    ? {...m, compliance: currentCompliance}
+                                    : m
+                                )
+                            }
+                            return prev
+                        })
                     }
-                    // Stream finished normally
+
+                    if (componentType === 'navigate' && uiData.url) {
+                        currentNavigateUrl = uiData.url
+                        const newTab = uiData.new_tab !== false
+                        void chrome.runtime.sendMessage(
+                            {type: 'navigateTo', payload: {url: uiData.url, newTab}},
+                            (r) => {
+                                if (!r?.success) {
+                                    try {
+                                        if (newTab) {
+                                            window.open(uiData.url, '_blank', 'noopener,noreferrer')
+                                        } else {
+                                            window.open(uiData.url, '_self')
+                                        }
+                                    } catch {
+                                        toast.info(`Откройте документ: ${uiData.url}`)
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                } else if (ev.kind === 'done') {
                     break
                 } else if (ev.kind === 'error') {
                     const errData = ev.data
-                    setMessages(prev => [...prev, {
-                        role: 'assistant',
-                        content: `__error__:${errData.message ?? 'Stream error'}`,
-                        isError: true,
-                        id: newMsgId(),
-                        timestamp: Date.now(),
-                    }])
+                    const errMsg = errData.message ?? 'Stream error'
+                    if (errMsg.toLowerCase().includes('dangling') ||
+                        errMsg.toLowerCase().includes('statecorrupted')) {
+                        setMessages(prev => [...prev, {
+                            role: 'assistant',
+                            content: `⚠️ Состояние диалога повреждено (прерванный вызов инструмента). Начните новый диалог кнопкой «+ Новый диалог».`,
+                            isError: true,
+                            id: newMsgId(),
+                            timestamp: Date.now(),
+                        }])
+                    } else {
+                        setMessages(prev => [...prev, {
+                            role: 'assistant',
+                            content: `__error__:${errMsg}`,
+                            isError: true,
+                            id: newMsgId(),
+                            timestamp: Date.now(),
+                        }])
+                    }
                     break
                 }
             }
@@ -1469,7 +1809,10 @@ export function AssistantWidget() {
                                                             textareaRef.current?.focus()
                                                         }}
                                                         className="edms-action-btn px-3 py-1.5 text-xs font-medium rounded-xl border bg-white text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 transition-all duration-150"
-                                                        style={{borderColor: 'rgba(99,102,241,0.2)', boxShadow: 'var(--edms-shadow-xs)'}}
+                                                        style={{
+                                                            borderColor: 'rgba(99,102,241,0.2)',
+                                                            boxShadow: 'var(--edms-shadow-xs)'
+                                                        }}
                                                     >
                                                         {chip.label}
                                                     </button>
@@ -1504,21 +1847,31 @@ export function AssistantWidget() {
                                                     data={msg.compliance}
                                                     threadId={threadId}
                                                     onFieldFixed={(fieldKey, newValue) => {
+                                                        // ★ UPDATED: optimistic update + send fix via stream
+                                                        const field = msg.compliance?.fields.find(f => f.field_key === fieldKey)
+                                                        const label = field?.label ?? fieldKey
                                                         const updated = messagesRef.current.map(m => {
                                                             if (m.id !== msg.id || !m.compliance) return m
                                                             return {
                                                                 ...m,
                                                                 compliance: rebuildCompliance(m.compliance, f =>
                                                                     f.field_key === fieldKey
-                                                                        ? { ...f, status: 'ok' as const, card_value: newValue }
+                                                                        ? {
+                                                                            ...f,
+                                                                            status: 'ok' as const,
+                                                                            card_value: newValue
+                                                                        }
                                                                         : null
                                                                 ),
                                                             }
                                                         })
                                                         setMessages(updated)
-                                                        void refreshDocumentForm(updated)
+                                                        void sendFixViaStream(
+                                                            `Исправь поле "${label}" (${fieldKey}) на значение: ${newValue}`
+                                                        )
                                                     }}
                                                     onAllFixed={(fixedFields) => {
+                                                        // ★ UPDATED: optimistic update + send fix-all via stream
                                                         const fixedKeysSet = new Set(fixedFields.map(f => f.fieldKey))
                                                         const updated = messagesRef.current.map(m => {
                                                             if (m.id !== msg.id || !m.compliance) return m
@@ -1526,28 +1879,22 @@ export function AssistantWidget() {
                                                                 ...m,
                                                                 compliance: rebuildCompliance(m.compliance, f =>
                                                                     fixedKeysSet.has(f.field_key)
-                                                                        ? { ...f, status: 'ok' as const, card_value: f.correct_value ?? f.card_value }
+                                                                        ? {
+                                                                            ...f,
+                                                                            status: 'ok' as const,
+                                                                            card_value: f.correct_value ?? f.card_value
+                                                                        }
                                                                         : null
                                                                 ),
                                                             }
                                                         })
-                                                        let finalMsgs = updated
-                                                        if (fixedFields.length > 0) {
-                                                            const summary =
-                                                                `✅ **Исправлены расхождения:**\n` +
-                                                                fixedFields.map(f => `• **${f.label}** → ${f.newValue}`).join('\n')
-                                                            finalMsgs = [
-                                                                ...updated,
-                                                                {
-                                                                    role: 'assistant' as const,
-                                                                    content: summary,
-                                                                    id: newMsgId(),
-                                                                    timestamp: Date.now(),
-                                                                },
-                                                            ]
-                                                        }
-                                                        setMessages(finalMsgs)
-                                                        void refreshDocumentForm(finalMsgs)
+                                                        setMessages(updated)
+                                                        const fixDetails = fixedFields
+                                                            .map(f => `• ${f.label} → ${f.newValue}`)
+                                                            .join('\n')
+                                                        void sendFixViaStream(
+                                                            `Исправь все расхождения в документе:\n${fixDetails}`
+                                                        )
                                                     }}
                                                 />
                                             )}
@@ -1723,7 +2070,9 @@ export function AssistantWidget() {
                                             {canSend && (
                                                 <button
                                                     type="button"
-                                                    onClick={(e) => { void send(e) }}
+                                                    onClick={(e) => {
+                                                        void send(e)
+                                                    }}
                                                     className="edms-icon-btn"
                                                     title="Отправить"
                                                     style={{

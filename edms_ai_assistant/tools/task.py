@@ -1,5 +1,5 @@
 # edms_ai_assistant/tools/task.py
-"""Task Creation Tool with Sequential Disambiguation."""
+"""Task Creation Tool with Native HITL Disambiguation."""
 
 import logging
 from datetime import UTC, datetime
@@ -9,8 +9,15 @@ from typing import Any, Annotated
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
+from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field
 
+from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.interrupt_contract import (
+    DisambiguationInterrupt,
+    InterruptOption,
+)
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.domain.task_models import TaskType
 from edms_ai_assistant.services.task_service import TaskService
 
@@ -73,13 +80,13 @@ class TaskCreateInput(BaseModel):
         None, description="Плановая дата окончания в ISO 8601"
     )
     task_type: TaskType | None = Field(
-        TaskType.GENERAL, description="Тип поручения (по умолчанию: GENERAL)"
+        None, description="Тип поручения (по умолчанию: GENERAL)"
     )
     selected_employee_ids: list[str] | None = Field(
         None,
         description=(
-            "UUID выбранных сотрудников из предыдущих раундов disambiguation. "
-            "Заполняется автоматически системой. НЕ заполняйте вручную."
+            "UUID выбранных сотрудников. Используйте, если UUID уже известен, "
+            "иначе система сама предложит выбор через карточки."
         ),
         max_length=100,
     )
@@ -95,10 +102,9 @@ async def task_create_tool(
         personal_group_names: list[str] | None = None,
         include_subordinates: bool | None = None,
         planed_date_end: str | None = None,
-        task_type: TaskType | None = TaskType.GENERAL,
+        task_type: TaskType | None = None,
         selected_employee_ids: list[str] | None = None,
-        document_id: Annotated[str, InjectedToolArg] = "",
-        token: Annotated[str, InjectedToolArg] = "",
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
     Создает поручение с поддержкой различных типов исполнителей.
@@ -113,6 +119,10 @@ async def task_create_tool(
     Можно комбинировать:
     "Создай поручение для Петрова, отдела ИТ, группы Бухгалтеры и моей команды"
 
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Если найдено несколько сотрудников с одинаковыми фамилиями, система
+    АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
+
     Args:
         task_text: Текст поручения.
         executor_last_names: Фамилии исполнителей.
@@ -123,10 +133,16 @@ async def task_create_tool(
         include_subordinates: Включить подчинённых.
         planed_date_end: Плановая дата окончания.
         task_type: Тип поручения.
-        selected_employee_ids: UUID выбранных сотрудников.
-        document_id: UUID документа (инжектируется автоматически).
-        token: JWT токен авторизации (инжектируется автоматически).
+        selected_employee_ids: UUID выбранных сотрудников (если уже известны).
+        config: Конфигурация LangGraph (инжектируется автоматически).
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
     if not task_text or not task_text.strip():
         return {"status": "error", "message": "Текст поручения не может быть пустым."}
 
@@ -139,7 +155,7 @@ async def task_create_tool(
         except ValueError as e:
             return {"status": "error", "message": f"Неверный формат даты: {e}"}
 
-    effective_task_type = task_type or TaskType.GENERAL
+    effective_task_type = task_type if task_type is not None else TaskType.GENERAL
     preselected_ids: list[str] = list(selected_employee_ids or [])
 
     try:
@@ -179,21 +195,44 @@ async def task_create_tool(
                     token, executor_last_names, responsible_last_name
                 )
 
-                if ambiguous:
-                    return _build_sequential_disambiguation_response(
-                        ambiguous_results=ambiguous,
-                        executor_last_names=executor_last_names,
-                        already_selected_ids=[str(u) for u in all_uuids],
-                        already_resolved_uuids=[str(u) for u in all_uuids],
-                        task_text=task_text,
-                        not_found=not_found + bulk_not_found,
-                    )
-
                 if executors:
                     all_uuids.extend(e.employeeId for e in executors)
                 bulk_not_found.extend(not_found)
 
-            # Убираем дубликаты
+                if ambiguous:
+                    for amb in ambiguous:
+                        search_term = amb.get("search_query", "Неизвестно")
+                        matches = amb.get("matches", [])
+                        if not matches:
+                            continue
+
+                        options = [
+                            InterruptOption(
+                                id=m.get("id", ""),
+                                label=m.get("full_name", "Не указано"),
+                                description=f"{m.get('post', '') or ''}, {m.get('department', '') or ''}".strip(", ")
+                            ) for m in matches
+                        ]
+
+                        prompt_msg = f"Уточните исполнителя для «{search_term}» ({len(matches)} совпадений)."
+
+                        try:
+                            resume = ask_human(DisambiguationInterrupt(
+                                entity_type="employee",
+                                prompt=prompt_msg,
+                                options=options,
+                                search_term=search_term,
+                            ))
+                            selected_id = resume.selected_ids[0]
+                            all_uuids.append(UUID(selected_id))
+                        except ToolAborted:
+                            return {"status": "cancelled", "message": "Выбор исполнителя отменён."}
+                        except GraphInterrupt:
+                            raise
+                        except Exception as exc:
+                            logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
+                            return {"status": "error", "message": f"Ошибка выбора исполнителя: {exc}"}
+
             seen: set[UUID] = set()
             unique_uuids: list[UUID] = []
             for uid in all_uuids:
@@ -225,7 +264,7 @@ async def task_create_tool(
             )
 
             if result.success:
-                response = {
+                response: dict[str, Any] = {
                     "status": "success",
                     "message": (
                         f"✅ Поручение успешно создано. "
@@ -244,71 +283,9 @@ async def task_create_tool(
                 "not_found_employees": result.not_found_employees,
             }
 
+    except GraphInterrupt:
+        raise
+
     except Exception as e:
         logger.error("[TASK-TOOL] Error: %s", e, exc_info=True)
         return {"status": "error", "message": f"Произошла ошибка: {e!s}"}
-
-
-# ---------------------------------------------------------------------------
-# Sequential Disambiguation Response Builder
-# ---------------------------------------------------------------------------
-
-
-def _build_sequential_disambiguation_response(
-    ambiguous_results: list[dict[str, Any]],
-    executor_last_names: list[str],
-    already_selected_ids: list[str],
-    already_resolved_uuids: list[str],
-    task_text: str,
-    not_found: list[str],
-) -> dict[str, Any]:
-    """Формирует ответ для последовательного disambiguation."""
-    groups: list[dict[str, Any]] = []
-    for amb in ambiguous_results:
-        groups.append(
-            {
-                "search_term": amb.get("search_query", "Неизвестно"),
-                "matches": amb.get("matches", []),
-            }
-        )
-
-    if not groups:
-        return {"status": "error", "message": "Нет групп для disambiguation."}
-
-    current = groups[0]
-    remaining = groups[1:]
-
-    formatted_choices = [
-        {
-            "id": m.get("id", ""),
-            "full_name": m.get("full_name", "Не указано"),
-            "post": m.get("post", "Не указана"),
-            "department": m.get("department", "Не указан"),
-            "search_term": current["search_term"],
-        }
-        for m in current["matches"]
-    ]
-
-    msg = f"Уточните сотрудника для «{current['search_term']}» ({len(current['matches'])} совпадений)."
-    if remaining:
-        msg += f" Осталось уточнить: {', '.join(g['search_term'] for g in remaining)}."
-    if already_selected_ids:
-        msg += f" Уже выбрано: {len(already_selected_ids)} сотрудник(ов)."
-
-    return {
-        "status": "requires_disambiguation",
-        "action_type": "select_employee",
-        "message": msg,
-        "ambiguous_matches": formatted_choices,
-        "current_group": current["search_term"],
-        "remaining_groups": [g["search_term"] for g in remaining],
-        "already_selected_ids": already_selected_ids,
-        "already_resolved_uuids": already_resolved_uuids,
-        "original_executor_last_names": executor_last_names,
-        "original_task_text": task_text,
-        "disambiguation_groups": [
-            {"search_term": g["search_term"], "count": len(g["matches"])}
-            for g in groups
-        ],
-        "not_found": not_found,
-    }

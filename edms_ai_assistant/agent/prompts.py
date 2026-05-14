@@ -19,6 +19,7 @@ from typing import Final
 from edms_ai_assistant.agent.context import ContextParams
 from edms_ai_assistant.services.nlp_service import UserIntent
 
+
 # ---------------------------------------------------------------------------
 # XML sanitizer — prevents prompt injection via user-supplied text
 # ---------------------------------------------------------------------------
@@ -156,6 +157,14 @@ _CORE_TEMPLATE: Final[str] = """\
     - Если нашёл несколько — покажи карточки (disambiguation), жди выбора.
     - control_type_id НЕ нужен — всегда опускай, автоподбор.
     - НИКОГДА не проси пользователя вводить UUID вручную.
+    
+13. **Выбор из списка — ТОЛЬКО через ask_user_to_select**:
+    - Если нужно предложить пользователю выбор из 2+ вариантов —
+      ВЫЗЫВАЙ ask_user_to_select(prompt="...", options=[...]).
+    - ЗАПРЕЩЕНО выводить списки вариантов текстом (маркированные списки с просьбой выбрать).
+    - Правильно: ask_user_to_select(prompt="Выберите формат", options=["Краткий", "Полный", "Тезисный"])
+    - Неправильно: "Выберите формат: 1. Краткий 2. Полный 3. Тезисный"
+    - Это касается ЛЮБЫХ выборов: заголовки, форматы, типы документов, категории и т.д.
 </critical_rules>
 
 <available_tools_guide>
@@ -173,8 +182,9 @@ _CORE_TEMPLATE: Final[str] = """\
 | Создание поручения                       | task_create_tool                                             |
 | Контроль документа                       | employee_search_tool → doc_control                           |
 | Снять/удалить контроль                   | doc_control(action="remove"/"delete")                        |
-| Автозаполнение обращения                 | autofill_appeal_document                                     |
+| Автозаполнение обращения (APPEAL)        | autofill_appeal_document                                     |
 | Создать документ из файла                | create_document_from_file                                    |
+| Выбор из списка вариантов                | ask_user_to_select                                           |
 </available_tools_guide>
 
 <response_format>
@@ -191,7 +201,6 @@ _CORE_TEMPLATE: Final[str] = """\
 ❌ JSON-структуры в ответе пользователю
 ❌ Фразы "как ИИ я не могу..." — просто помогай
 </response_format>"""
-
 
 # ---------------------------------------------------------------------------
 # Lean system prompt template
@@ -223,7 +232,6 @@ _LEAN_TEMPLATE: Final[str] = """\
 6. UUID в ответах запрещены. Вместо UUID → имя/название.
 7. Поля документа: **Поле**: значение. Таблицы (| col |) — только для doc_search_tool.
 </rules>"""
-
 
 # ---------------------------------------------------------------------------
 # Intent snippets — FULL
@@ -365,8 +373,32 @@ set/edit workflow:
 
 ЗАПРЕЩЕНО: UUID вручную, task_create_tool для контроля.
 </control_guide>""",
-}
+    UserIntent.APPEAL_AUTOFILL: """
+<appeal_autofill_guide>
+⚠️ Для заполнения карточки обращения ВСЕГДА вызывай autofill_appeal_document.
 
+Триггеры (когда вызывать):
+  - «заполни обращение», «автозаполнить обращение», «заполнить карточку»
+  - «создай обращение» (для существующего документа APPEAL, НЕ из файла)
+  - «проанализируй обращение и заполни»
+  - «извлеки данные из обращения»
+
+ВЫЗОВ:
+  autofill_appeal_document(
+      attachment_id=None,                        # авто-подбор вложения
+      generate_summary_choices=False             # True если просят выбрать заголовок
+  )
+
+token и document_id инжектируются автоматически — НЕ указывай их.
+
+ПОСЛЕ вызова:
+  - success → сообщи пользователю какие поля заполнены
+  - warnings → перечисли предупреждения
+  - error → сообщи об ошибке
+
+НЕ пытайся заполнить поля обращения вручную — только через инструмент!
+</appeal_autofill_guide>""",
+}
 
 # ---------------------------------------------------------------------------
 # Intent snippets — LEAN
@@ -426,6 +458,10 @@ _LEAN_SNIPPETS: Final[dict[UserIntent, str]] = {
         "control_employee_id=<UUID>, date_control_end=<ISO>). "
         "control_type_id не нужен.</workflow>"
     ),
+    UserIntent.APPEAL_AUTOFILL: (
+        "\n<workflow>autofill_appeal_document() — автозаполнение обращения. "
+        "token/document_id авто. НЕ заполняй поля вручную.</workflow>"
+    ),
 }
 
 
@@ -442,11 +478,11 @@ class PromptBuilder:
 
     @staticmethod
     def build(
-        context: ContextParams,
-        intent: UserIntent,
-        semantic_xml: str,
-        *,
-        lean: bool = False,
+            context: ContextParams,
+            intent: UserIntent,
+            semantic_xml: str,
+            *,
+            lean: bool = False,
     ) -> str:
         """Build the complete system prompt.
 

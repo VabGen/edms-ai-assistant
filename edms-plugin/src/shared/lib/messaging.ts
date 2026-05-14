@@ -26,17 +26,48 @@ export function sendMsg<T = unknown>(
     })
 }
 
+// ── UI-component event payload ───────────────────────────────────────────
+
+/** Payload carried by ``event: ui_component`` SSE frames. */
+export interface UiComponentEvent {
+    /** Discriminator: ``"compliance_result"`` | ``"navigate"`` | … */
+    type: string
+    /** Compliance fields (when type === "compliance_result") */
+    overall?: string
+    summary?: string
+    document_id?: string
+    document_category?: string
+    fields?: Array<{
+        field_key: string
+        label: string
+        card_value?: string
+        file_value?: string | null
+        correct_value?: string | null
+        status?: string
+        update_field?: string
+        recommendation?: string | null
+    }>
+    stats?: { total: number; mismatches: number; ok: number; not_found: number }
+    fix_hint?: string
+    /** Navigate URL (when type === "navigate") */
+    url?: string
+    /** Whether to open navigate URL in a new tab (default true) */
+    new_tab?: boolean
+}
+
 // ── SSE streaming ───────────────────────────────────────────────────────
 
 export type SseEvent =
     | { kind: 'message'; data: MessageEvent }
     | { kind: 'interrupt'; data: InterruptEvent }
+    | { kind: 'ui_component'; data: UiComponentEvent }
     | { kind: 'done'; data: DoneEvent }
     | { kind: 'error'; data: ErrorEvent }
 
 export interface StreamHandle {
     /** Async iterator yielding parsed SSE events */
     events: AsyncIterable<SseEvent>
+
     /** Abort the in-flight stream */
     abort(): void
 }

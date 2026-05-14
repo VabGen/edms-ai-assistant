@@ -4,6 +4,8 @@ EDMS AI Assistant - Introduction Tool.
 Инструмент для создания списков ознакомления с документами.
 """
 
+from __future__ import annotations
+
 import logging
 from uuid import UUID
 
@@ -11,8 +13,15 @@ from typing import Any, Annotated
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
+from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.interrupt_contract import (
+    DisambiguationInterrupt,
+    InterruptOption,
+)
+from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
 from edms_ai_assistant.services.introduction_service import IntroductionService
 
 logger = logging.getLogger(__name__)
@@ -60,8 +69,8 @@ class IntroductionInput(BaseModel):
     selected_employee_ids: list[str] | None = Field(
         None,
         description=(
-            "UUID выбранных сотрудников для разрешения disambiguation. "
-            "Используется после выбора пользователем из списка неоднозначных совпадений."
+            "UUID выбранных сотрудников. Используйте, если UUID уже известен, "
+            "иначе система сама предложит выбор через карточки."
         ),
         max_length=100,
     )
@@ -99,8 +108,7 @@ async def introduction_create_tool(
         include_subordinates: bool | None = None,
         comment: str | None = None,
         selected_employee_ids: list[str] | None = None,
-        document_id: Annotated[str, InjectedToolArg] = "",
-        token: Annotated[str, InjectedToolArg] = "",
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
     Создает список ознакомления с документом.
@@ -115,6 +123,10 @@ async def introduction_create_tool(
     Можно комбинировать:
     "Добавь ознакомление для Петрова, отдела ИТ и моей команды"
 
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Если найдено несколько сотрудников с одинаковыми фамилиями, система
+    АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
+
     Args:
         last_names: Фамилии сотрудников.
         department_names: Подразделения.
@@ -122,10 +134,16 @@ async def introduction_create_tool(
         personal_group_names: Личные группы.
         include_subordinates: Включить подчинённых.
         comment: Комментарий.
-        selected_employee_ids: UUID выбранных сотрудников (для disambiguation).
-        document_id: UUID документа (инжектируется автоматически).
-        token: JWT токен авторизации (инжектируется автоматически).
+        selected_employee_ids: UUID выбранных сотрудников (если уже известны).
+        config: LangGraph RunnableConfig (инжектируется автоматически).
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
     logger.info(
         "Creating introduction",
         extra={
@@ -162,6 +180,8 @@ async def introduction_create_tool(
                 comment=comment,
             )
 
+    except GraphInterrupt:
+        raise
     except Exception as e:
         logger.error(
             f"Introduction creation failed: {e}",
@@ -228,7 +248,7 @@ async def _handle_search_and_create(
     include_subordinates: bool,
     comment: str | None,
 ) -> dict[str, Any]:
-    """Обработка поиска сотрудников с последовательным disambiguation."""
+    """Обработка поиска сотрудников с native HITL disambiguation."""
     resolution_result = await service.resolve_employees(
         token=token,
         last_names=last_names or [],
@@ -238,17 +258,46 @@ async def _handle_search_and_create(
         include_subordinates=include_subordinates,
     )
 
-    employee_ids = resolution_result.employee_ids
+    employee_ids = list(resolution_result.employee_ids)
     not_found = resolution_result.not_found
     ambiguous_results = resolution_result.ambiguous
 
     if ambiguous_results:
         logger.info(f"Found {len(ambiguous_results)} ambiguous search terms")
-        return _build_sequential_disambiguation_response(
-            ambiguous_results=ambiguous_results,
-            original_last_names=last_names or [],
-            not_found=not_found,
-        )
+
+        for amb in ambiguous_results:
+            search_term = amb.get("search_query", "Неизвестно")
+            matches = amb.get("matches", [])
+            if not matches:
+                continue
+
+            options = [
+                InterruptOption(
+                    id=m.get("id", ""),
+                    label=m.get("full_name", "Не указано"),
+                    description=f"{m.get('post', '') or ''}, {m.get('department', '') or ''}".strip(", ")
+                ) for m in matches
+            ]
+
+            prompt_msg = f"Уточните сотрудника для «{search_term}» ({len(matches)} совпадений)."
+
+            try:
+                resume = ask_human(DisambiguationInterrupt(
+                    entity_type="employee",
+                    prompt=prompt_msg,
+                    options=options,
+                    search_term=search_term,
+                ))
+                # Граф возобновится после клика пользователя
+                selected_id = resume.selected_ids[0]
+                employee_ids.append(UUID(selected_id))
+            except ToolAborted:
+                return {"status": "cancelled", "message": "Выбор сотрудника отменён."}
+            except GraphInterrupt:
+                raise
+            except Exception as exc:
+                logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
+                return {"status": "error", "message": f"Ошибка выбора сотрудника: {exc}"}
 
     if not employee_ids:
         not_found_str = (
@@ -265,12 +314,12 @@ async def _handle_search_and_create(
     result = await service.create_introduction(
         token=token,
         document_id=document_id,
-        employee_ids=list(employee_ids),
+        employee_ids=employee_ids,
         comment=comment,
     )
 
     if result.success:
-        response = {
+        response: dict[str, Any] = {
             "status": "success",
             "message": (
                 f"✅ Успешно добавлено {result.added_count} сотрудников "
@@ -289,58 +338,4 @@ async def _handle_search_and_create(
     return {
         "status": "error",
         "message": result.error_message or "❌ Не удалось создать ознакомление.",
-    }
-
-
-def _build_sequential_disambiguation_response(
-    ambiguous_results: list[dict[str, Any]],
-    original_last_names: list[str],
-    not_found: list[str],
-) -> dict[str, Any]:
-    """Формирует ответ для последовательного disambiguation."""
-    groups: list[dict[str, Any]] = []
-    for amb in ambiguous_results:
-        search_term = amb.get("search_query", "Неизвестно")
-        matches = amb.get("matches", [])
-        groups.append({"search_term": search_term, "matches": matches})
-
-    if not groups:
-        return {
-            "status": "error",
-            "message": "Неожиданная ошибка: нет групп для disambiguation.",
-        }
-
-    current = groups[0]
-    remaining = groups[1:]
-
-    formatted_choices = [
-        {
-            "id": m.get("id", ""),
-            "full_name": m.get("full_name", "Не указано"),
-            "post": m.get("post", "Не указана"),
-            "department": m.get("department", "Не указан"),
-            "search_term": current["search_term"],
-        }
-        for m in current["matches"]
-    ]
-
-    msg = f"Уточните сотрудника для «{current['search_term']}» ({len(current['matches'])} совпадений)."
-    if remaining:
-        remaining_names = [g["search_term"] for g in remaining]
-        msg += f" Осталось уточнить: {', '.join(remaining_names)}."
-
-    return {
-        "status": "requires_disambiguation",
-        "action_type": "select_employee",
-        "message": msg,
-        "ambiguous_matches": formatted_choices,
-        "current_group": current["search_term"],
-        "remaining_groups": [g["search_term"] for g in remaining],
-        "already_selected_ids": [],
-        "original_last_names": original_last_names,
-        "disambiguation_groups": [
-            {"search_term": g["search_term"], "count": len(g["matches"])}
-            for g in groups
-        ],
-        "not_found": not_found,
     }

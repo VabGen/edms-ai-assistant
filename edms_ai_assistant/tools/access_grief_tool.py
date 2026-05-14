@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
+import httpx
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field, model_validator
@@ -179,6 +180,12 @@ async def _resolve_grief_name(token: str, name: str) -> str | None:
             return str(griefs[0]["id"])
 
         return None
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            logger.warning("User lacks ReadAccessGrief permission")
+            raise PermissionError("У вас нет прав для просмотра грифов доступа (403 Forbidden).") from exc
+        logger.error("Failed to resolve grief name '%s'", name, exc_info=True)
+        return None
     except Exception:
         logger.error("Failed to resolve grief name '%s'", name, exc_info=True)
         return None
@@ -198,15 +205,12 @@ async def _get_grief_employees(
         }
 
         async with AccessGriefClient() as client:
-            # Получаем информацию о грифе
             grief_info = await client.get_grief(token, grief_id)
-            # Получаем сотрудников
             raw_employees = await client.get_grief_employees(
                 token, grief_id, pageable=pageable
             )
 
         employees = [_format_grief_employee(e) for e in raw_employees]
-
         grief_label = grief_name or (
             grief_info.get("name") if grief_info else grief_id[:8]
         )
@@ -232,11 +236,76 @@ async def _get_grief_employees(
             "total": len(employees),
             "employees": employees,
         }
+    except PermissionError as exc:
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:
         logger.error("Failed to get grief employees", exc_info=True)
         return {
             "status": "error",
             "message": f"Ошибка получения сотрудников с грифом: {exc}",
+        }
+
+
+async def _get_employee_griefs(token: str, employee_id: str) -> dict[str, Any]:
+    """Получает грифы доступа конкретного сотрудника."""
+    try:
+        async with EmployeeClient() as client:
+            griefs_raw = await client.get_employee_griefs(token, employee_id)
+
+        if not griefs_raw:
+            return {
+                "status": "not_found",
+                "message": f"У сотрудника {employee_id[:8]}... нет грифов доступа.",
+                "access_griefs": [],
+            }
+
+        griefs = [_format_employee_grief(g) for g in griefs_raw]
+        return {
+            "status": "found",
+            "employee_id": employee_id,
+            "access_griefs": griefs,
+        }
+    except PermissionError as exc:
+        return {"status": "error", "message": str(exc)}
+    except Exception as exc:
+        logger.error(
+            "Failed to get employee griefs",
+            exc_info=True,
+            extra={"employee_id": employee_id},
+        )
+        return {
+            "status": "error",
+            "message": f"Ошибка получения грифов сотрудника: {exc}",
+        }
+
+
+async def _list_all_griefs(token: str) -> dict[str, Any]:
+    """Возвращает список всех грифов доступа в системе."""
+    try:
+        async with AccessGriefClient() as client:
+            griefs = await client.search_griefs(
+                token, pageable={"page": 0, "size": 100, "sort": "name,ASC"}
+            )
+
+        if not griefs:
+            return {
+                "status": "not_found",
+                "message": "Грифы доступа не найдены.",
+                "griefs": [],
+            }
+
+        return {
+            "status": "found",
+            "total": len(griefs),
+            "griefs": [_format_grief_brief(g) for g in griefs],
+        }
+    except PermissionError as exc:
+        return {"status": "error", "message": str(exc)}
+    except Exception as exc:
+        logger.error("Failed to list griefs", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Ошибка получения списка грифов: {exc}",
         }
 
 

@@ -22,6 +22,7 @@ from .introduction import introduction_create_tool
 from .local_file_tool import read_local_file_content
 from .summarization import doc_summarize_text
 from .task import task_create_tool
+from edms_ai_assistant.tools.ask_user_select import ask_user_to_select
 
 all_tools = [
     # Documents
@@ -51,6 +52,8 @@ all_tools = [
     access_grief_tool,
     # Process bpmn
     doc_next_process,
+
+    ask_user_to_select
 ]
 
 __all__ = [

@@ -35,6 +35,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 
@@ -425,8 +426,6 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
 async def doc_next_process(
     next_step: str | None = None,
     employees: list[str] | None = None,
-    document_id: Annotated[str, InjectedToolArg] = "",
-    token: Annotated[str, InjectedToolArg] = "",
     config: RunnableConfig = None,
 ) -> dict[str, Any]:
     """Переводит документ на следующий этап бизнес-процесса.
@@ -440,6 +439,9 @@ async def doc_next_process(
 
     Примеры: next_step="1", next_step="Регистрация", next_step="REVIEW"
 
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+        Тебе НЕ НУЖНО запрашивать их у пользователя.
+
     Args:
         next_step: Название или номер этапа.
         employees: Список ФИО или UUID исполнителей.
@@ -450,6 +452,13 @@ async def doc_next_process(
     Returns:
         Dict со статусом и результатом.
     """
+    try:
+        document_id = get_document_id_from_config(config)
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
     logger.info(
         "doc_next_process: doc=%s next_step=%s employees=%s",
         document_id[:8] if document_id else "N/A",

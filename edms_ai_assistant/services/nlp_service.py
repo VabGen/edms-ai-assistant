@@ -80,7 +80,8 @@ class UserIntent(Enum):
     # NOTIFICATION = "notification"
     COMPLIANCE_CHECK = "compliance_check"
     CONTROL = "control"
-    ACCESS_GRIEF = "access_grief"
+    ACCESS_GRIEF = "access_grief",
+    APPEAL_AUTOFILL = "appeal_autofill"
 
 
 class QueryComplexity(Enum):

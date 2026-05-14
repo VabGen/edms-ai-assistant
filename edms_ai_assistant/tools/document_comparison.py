@@ -31,7 +31,6 @@ async def doc_compare_documents(
         document_id_1: str,
         document_id_2: str,
         comparison_focus: str | None = "all",
-        # token: Annotated[str, InjectedToolArg] = "",
         config: RunnableConfig = None,
 ) -> dict[str, Any]:
     """

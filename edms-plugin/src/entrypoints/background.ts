@@ -112,9 +112,9 @@ export default defineBackground({
                     return false
                 }
 
-                case 'sendChatMessage':
-                    doFetch(`${API}/chat`, msg.payload, reqId, sendResponse)
-                    return true
+                // case 'sendChatMessage':
+                //     doFetch(`${API}/chat`, msg.payload, reqId, sendResponse)
+                //     return true
 
                 case 'summarizeDocument':
                     doFetch(`${API}/actions/summarize`, msg.payload, reqId, sendResponse)

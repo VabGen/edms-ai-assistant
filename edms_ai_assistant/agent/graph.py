@@ -26,6 +26,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from opentelemetry import trace
 
 from edms_ai_assistant.agent.messages_utils import (
     trim_pairwise,
@@ -35,6 +36,7 @@ from edms_ai_assistant.config import settings
 from edms_ai_assistant.model import AgentState
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class GraphBuilder:
@@ -83,58 +85,84 @@ class GraphBuilder:
         # ── Node: call_model (PURE — no string parsing, no injection) ────
 
         async def call_model(state: AgentState) -> dict[str, Any]:
-            """Вызывает LLM с парно-обрезанной историей.
+            """Вызывает LLM с парно-обрезанной историей."""
+            with tracer.start_as_current_span("call_model") as span:
+                all_sys: list[BaseMessage] = [
+                    m for m in state["messages"] if isinstance(m, SystemMessage)
+                ]
+                non_sys: list[BaseMessage] = [
+                    m for m in state["messages"] if not isinstance(m, SystemMessage)
+                ]
 
-            Единственная ответственность — подготовить messages и вызвать
-            модель. Никакого парсинга ToolMessage, никаких динамических
-            SystemMessage-инъекций.
-            """
-            all_sys: list[BaseMessage] = [
-                m for m in state["messages"] if isinstance(m, SystemMessage)
-            ]
-            non_sys: list[BaseMessage] = [
-                m for m in state["messages"] if not isinstance(m, SystemMessage)
-            ]
-
-            # Pair-aware trim: AIMessage(tool_calls) + ToolMessage* — атомарны
-            non_sys = trim_pairwise(
-                non_sys, settings.AGENT_MAX_CONTEXT_MESSAGES
-            )
-
-            # Последний system prompt (без динамических инъекций)
-            sys_msgs: list[BaseMessage] = all_sys[-1:] if all_sys else []
-
-            candidate: list[BaseMessage] = sys_msgs + non_sys
-
-            # Validate structural invariant — fail loud in dev, log in prod
-            validate_no_dangling_tool_calls(
-                candidate, fail_loud=getattr(settings, "DEBUG", False)
-            )
-
-            if builder_ref._model is None:
-                raise RuntimeError(
-                    "Model not set. Call GraphBuilder.set_model() before invoking."
+                # Pair-aware trim
+                non_sys = trim_pairwise(
+                    non_sys, settings.AGENT_MAX_CONTEXT_MESSAGES
                 )
 
-            llm_timeout = getattr(settings, "AGENT_LLM_TIMEOUT", 30.0)
-            try:
-                response = await asyncio.wait_for(
-                    builder_ref._model.ainvoke(candidate),
-                    timeout=llm_timeout,
+                sys_msgs: list[BaseMessage] = all_sys[-1:] if all_sys else []
+                candidate: list[BaseMessage] = sys_msgs + non_sys
+
+                validate_no_dangling_tool_calls(
+                    candidate, fail_loud=getattr(settings, "DEBUG", False)
                 )
-                return {"messages": [response]}
-            except asyncio.TimeoutError:
-                logger.error("LLM call timed out after %.1fs", llm_timeout)
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=(
-                                "Превышено время ожидания ответа. "
-                                "Попробуйте переформулировать запрос."
+
+                if not candidate:
+                    logger.error(
+                        "Attempted to invoke LLM with empty messages list. "
+                        "Checkpoint might be missing or history over-trimmed."
+                    )
+                    span.set_attribute("error", True)
+                    return {
+                        "messages": [
+                            AIMessage(
+                                content=(
+                                    "Контекст диалога был утерян (возможно, из-за перезапуска сервера). "
+                                    "Пожалуйста, начните новый чат."
+                                )
                             )
-                        )
-                    ]
-                }
+                        ]
+                    }
+
+                if builder_ref._model is None:
+                    raise RuntimeError(
+                        "Model not set. Call GraphBuilder.set_model() before invoking."
+                    )
+
+                span.set_attribute("messages.count", len(candidate))
+                llm_timeout = getattr(settings, "AGENT_LLM_TIMEOUT", 30.0)
+
+                try:
+                    response = await asyncio.wait_for(
+                        builder_ref._model.ainvoke(candidate),
+                        timeout=llm_timeout,
+                    )
+                    return {"messages": [response]}
+                except asyncio.TimeoutError:
+                    span.set_attribute("error", "timeout")
+                    logger.error("LLM call timed out after %.1fs", llm_timeout)
+                    return {
+                        "messages": [
+                            AIMessage(
+                                content=(
+                                    "Превышено время ожидания ответа. "
+                                    "Попробуйте переформулировать запрос."
+                                )
+                            )
+                        ]
+                    }
+                except Exception as exc:
+                    span.set_attribute("error", str(exc))
+                    logger.error("LLM invocation failed: %s", exc, exc_info=True)
+                    return {
+                        "messages": [
+                            AIMessage(
+                                content=(
+                                    "Произошла ошибка при обращении к языковой модели. "
+                                    "Пожалуйста, попробуйте еще раз или переформулируйте запрос."
+                                )
+                            )
+                        ]
+                    }
 
         # ── Routing ──────────────────────────────────────────────────────
 
@@ -145,14 +173,6 @@ class GraphBuilder:
             return END
 
         # ── Wire graph ───────────────────────────────────────────────────
-        #
-        # Канонический ReAct цикл:
-        #   agent -> (tools or END) -> tools -> agent
-        #
-        # Узел validator удалён. Тулы обязаны возвращать понятный текст
-        # (или структурированный JSON с понятными полями), который LLM
-        # сможет интерпретировать самостоятельно без инъекций подсказок.
-
         workflow.add_node("agent", call_model)
         workflow.add_node("tools", ToolNode(tools=self._tools))
 

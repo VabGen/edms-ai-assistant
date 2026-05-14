@@ -375,7 +375,7 @@ class AppealFieldsBuilder:
         d = document.documentAppeal or self._create_empty_appeal()
         payload: dict[str, Any] = {}
 
-        GEO_KEY_ORDER = [
+        geo_key_order = [
             "countryAppealId",
             "countryAppealName",
             "regionId",
@@ -385,7 +385,7 @@ class AppealFieldsBuilder:
             "cityId",
             "cityName",
         ]
-        for key in GEO_KEY_ORDER:
+        for key in geo_key_order:
             if key in geo_data:
                 payload[key] = geo_data[key]
 
@@ -499,11 +499,11 @@ class AppealFieldsBuilder:
         if fields.declarantType:
             if isinstance(fields.declarantType, str):
                 try:
-                    payload["declarantType"] = GeneratedDeclarantType[
-                        fields.declarantType.upper()
-                    ]
+                    payload["declarantType"] = getattr(
+                        GeneratedDeclarantType, fields.declarantType.upper()
+                    )
                     logger.info("declarantType from LLM: %s", fields.declarantType)
-                except KeyError:
+                except AttributeError:
                     logger.warning(
                         "Unknown declarantType: %s, using INDIVIDUAL",
                         fields.declarantType,
@@ -677,8 +677,8 @@ class AppealAutofillOrchestrator:
         self.token = token
         self.attachment_id = attachment_id
         self.warnings: list[str] = []
-        self._last_extracted_text: str | None = None
-        self._last_short_summary: str | None = None
+        self.last_extracted_text: str | None = None
+        self.last_short_summary: str | None = None
 
     async def execute(self) -> AutofillResult:
         document = await self._load_document()
@@ -738,8 +738,8 @@ class AppealAutofillOrchestrator:
     async def _analyze_text(self, text: str) -> AppealFields:
         extraction_service = AppealExtractionService()
         fields = await extraction_service.extract_appeal_fields(text)
-        self._last_extracted_text = text
-        self._last_short_summary = getattr(fields, "shortSummary", None)
+        self.last_extracted_text = text
+        self.last_short_summary = getattr(fields, "shortSummary", None)
         logger.info("LLM analysis complete")
         return fields
 
@@ -830,7 +830,7 @@ class AppealAutofillOrchestrator:
 
 
 async def _generate_summary_variants(
-        text: str, current_summary: str | None, token: str | None = None
+        text: str, current_summary: str | None
 ) -> list[str]:
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
@@ -883,17 +883,27 @@ async def autofill_appeal_document(
         config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
-    Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ.
+    Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ вложенного документа.
 
-    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
+    ВЫЗЫВАЙ ЭТОТ ИНСТРУМЕНТ КОГДА:
+    - Пользователь просит «создать обращение», «заполнить обращение»,
+      «автозаполнить обращение», «заполнить карточку обращения»
+    - Пользователь просит «проанализировать обращение» и открыт документ APPEAL
+    - Пользователь говорит «заполни документ» для документа категории APPEAL
+    - Нужно извлечь данные из вложения и заполнить поля обращения
 
-    Используй generate_summary_choices=True когда пользователь хочет
-    выбрать или изменить заголовок (краткое содержание) документа.
+    НЕ вызывай для других категорий (INCOMING, OUTGOING и т.д.).
+
+    Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    НЕ запрашивай их у пользователя и НЕ передавай в аргументах.
 
     Args:
         attachment_id: UUID конкретного вложения для анализа (опционально).
-        generate_summary_choices: Вернуть 3 варианта заголовка для выбора.
+            Если не указан — анализируется первое подходящее вложение.
+        generate_summary_choices: Если True — после заполнения возвращает
+            3 варианта заголовка для выбора пользователем.
+        config: LangGraph RunnableConfig, инжектируется автоматически.
+            Содержит token авторизации и document_id.
 
     Returns:
         Dict с результатом операции. Если generate_summary_choices=True —
@@ -920,10 +930,10 @@ async def autofill_appeal_document(
 
         result_dict = result.to_dict()
 
-        if generate_summary_choices and orchestrator._last_extracted_text:
-            current_summary = orchestrator._last_short_summary
+        if generate_summary_choices and orchestrator.last_extracted_text:
+            current_summary = orchestrator.last_short_summary
             variants = await _generate_summary_variants(
-                orchestrator._last_extracted_text, current_summary
+                orchestrator.last_extracted_text, current_summary
             )
             if variants:
                 result_dict["summary_choices"] = variants

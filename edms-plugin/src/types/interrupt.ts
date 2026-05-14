@@ -12,6 +12,13 @@ export interface InterruptOption {
   metadata?: Record<string, unknown> | null;
 }
 
+/** A single card in a CardSelectInterrupt */
+export interface InterruptCard {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
 // ── Outbound payloads (server → frontend) ───────────────────────────────
 
 export interface DisambiguationInterrupt {
@@ -50,11 +57,34 @@ export interface SelectInterrupt {
   default?: string | null;
 }
 
+/** Beautiful card-select interrupt from ask_user_to_select tool.
+ *  Each card has a label and optional description. */
+export interface CardSelectInterrupt {
+  schema_version?: typeof INTERRUPT_SCHEMA_VERSION;
+  kind: 'card_select';
+  prompt: string;
+  cards: InterruptCard[];
+  multiple: boolean;
+  layout?: 'list' | 'grid';
+}
+
+export interface GenericSelectInterrupt {
+  schema_version?: typeof INTERRUPT_SCHEMA_VERSION;
+  kind: string;
+  prompt: string;
+  options: InterruptOption[];
+  multiple?: boolean;
+  entity_type?: string;
+  [key: string]: unknown;
+}
+
 export type InterruptPayload =
   | DisambiguationInterrupt
   | ConfirmationInterrupt
   | TextInputInterrupt
-  | SelectInterrupt;
+  | SelectInterrupt
+  | CardSelectInterrupt
+  | GenericSelectInterrupt;
 
 // ── Inbound resume values (frontend → server) ───────────────────────────
 
@@ -78,6 +108,12 @@ export interface SelectResume {
   selected_id: string;
 }
 
+/** Resume value for CardSelectInterrupt */
+export interface CardSelectResume {
+  kind: 'card_select';
+  selected_ids: [string, ...string[]];
+}
+
 export interface AbortResume {
   kind: '__abort__';
   reason?: string | null;
@@ -88,6 +124,7 @@ export type ResumeValue =
   | ConfirmationResume
   | TextInputResume
   | SelectResume
+  | CardSelectResume
   | AbortResume;
 
 // ── SSE event envelopes ──────────────────────────────────────────────────

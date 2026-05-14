@@ -13,6 +13,9 @@ Design contract:
     - The frontend never parses LLM text. Interruptions arrive as structured
       ``event: interrupt`` payloads matching
       ``edms_ai_assistant.agent.interrupt_contract.InterruptPayload``.
+    - Structured tool outputs (compliance, navigate) arrive as
+      ``event: ui_component`` payloads — the frontend renders interactive
+      widgets directly instead of relying on LLM prose.
     - Resume is a pure POST that injects ``Command(resume=value)`` into the
       same ``thread_id``. No history mutation. No LLM re-invocation.
     - Both streaming endpoints respond with ``text/event-stream``.
@@ -27,7 +30,7 @@ from typing import Annotated, Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command, Interrupt
 from pydantic import BaseModel, Field, ValidationError
@@ -40,6 +43,14 @@ from edms_ai_assistant.agent.interrupt_contract import (
 from edms_ai_assistant.api.deps import get_agent
 from edms_ai_assistant.api.helpers import resolve_user_context
 from edms_ai_assistant.api.sse import format_sse
+from edms_ai_assistant.api.sse_events import (
+    build_compliance_sse_event,
+    build_navigate_sse_event,
+    extract_compliance_from_tool_message,
+    extract_navigate_url_from_tool_message,
+    _parse_tool_content,
+)
+
 from edms_ai_assistant.model import NewChatRequest, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 
@@ -97,12 +108,67 @@ class ChatStateResponse(BaseModel):
 
 # ── Internal helpers ──────────────────────────────────────────────────────
 
+async def _ensure_clean_state(
+    agent: EdmsDocumentAgent,
+    config: dict[str, Any],
+) -> None:
+    """Repair the graph state if it contains dangling tool_calls.
+
+    This happens if a previous stream was aborted (e.g. user clicked Stop)
+    while the LLM had requested a tool call or while the tool node was
+    executing.  Without this repair the thread becomes permanently unusable.
+
+    IMPORTANT: If there are pending interrupts, the graph is NOT corrupted —
+    it is legitimately waiting for a HITL resume.  Do NOT repair in that case,
+    otherwise we break the interrupt/resume cycle and cause infinite loops.
+    """
+    snapshot = await agent.graph.aget_state(config)
+    if not snapshot or not snapshot.values:
+        return
+
+    for task in getattr(snapshot, "tasks", []) or []:
+        for itr in getattr(task, "interrupts", []) or []:
+            if isinstance(itr, Interrupt):
+                logger.debug(
+                    "Pending interrupt found (id=%s) — skipping state repair",
+                    getattr(itr, "id", "?"),
+                )
+                return
+
+    messages = snapshot.values.get("messages", [])
+    if not messages:
+        return
+
+    last_msg = messages[-1]
+    if not isinstance(last_msg, AIMessage) or not last_msg.tool_calls:
+        return
+
+    tool_messages = []
+    for tc in last_msg.tool_calls:
+        tool_messages.append(
+            ToolMessage(
+                content="Выполнение инструмента было прервано пользователем или системой.",
+                tool_call_id=tc["id"],
+                name=tc.get("name"),
+                status="error",
+            )
+        )
+
+    agent.graph.update_state(
+        config,
+        {"messages": tool_messages},
+        as_node="tools",
+    )
+    logger.warning(
+        "Repaired dangling tool calls: %s",
+        [tc["id"] for tc in last_msg.tool_calls],
+    )
 
 def _make_config(
-    thread_id: str,
-    user_token: str,
-    user_id: str,
-    document_id: str | None = None,
+        thread_id: str,
+        user_token: str,
+        user_id: str,
+        document_id: str | None = None,
 ) -> dict[str, Any]:
     """Build the RunnableConfig consumed by graph nodes and tools.
 
@@ -146,17 +212,17 @@ def _extract_pending_interrupts(snapshot: Any) -> list[dict[str, Any]]:
                 continue
             results.append({
                 "interrupt_id": getattr(itr, "id", None)
-                or getattr(itr, "ns", [""])[-1],
+                                or getattr(itr, "ns", [""])[-1],
                 "payload": itr.value,
             })
     return results
 
 
 async def _validate_resume_kind(
-    graph: Any,
-    config: dict[str, Any],
-    interrupt_id: str | None,
-    resume_kind: str,
+        graph: Any,
+        config: dict[str, Any],
+        interrupt_id: str | None,
+        resume_kind: str,
 ) -> None:
     """Return silently on match, raise 409 on mismatch."""
     if not interrupt_id:
@@ -175,27 +241,33 @@ async def _validate_resume_kind(
                 return  # found, matches
 
 
+# ── Streaming core ────────────────────────────────────────────────────────
+
 async def _stream_graph_events(
     agent: EdmsDocumentAgent,
     payload: Any,
     config: dict[str, Any],
     thread_id: str,
 ) -> AsyncIterator[str]:
-    """Drive ``graph.astream(...)`` and translate LangGraph events into SSE.
+    """Drive graph.astream and translate events into SSE.
 
-    Strategy:
-        - ``stream_mode=["updates", "custom"]`` exposes the ``__interrupt__``
-          channel and the ``custom`` channel (for UIDirective / ui_update).
-        - ``GraphInterrupt`` is also caught defensively — older LangGraph
-          builds raise it instead of yielding ``__interrupt__``.
+    Guarantees:
+      - Always emits a terminal event (done/error) so the frontend
+        never gets stuck in loading state.
+      - Handles GraphInterrupt, CancelledError, and unexpected exceptions.
+      - Sends ui_component events for compliance/navigate ToolMessages.
     """
+    compliance_sent = False
+    navigate_sent = False
+    sent_done = False
+
     try:
         async for mode, chunk in agent.graph.astream(
             payload,
             config=config,
             stream_mode=["updates", "custom"],
         ):
-            # ── Custom channel: UIDirective (ui_update) ──────────────
+            # ── Custom channel: UIDirective ──────────────────────────────
             if mode == "custom":
                 if isinstance(chunk, dict) and "ui" in chunk:
                     directive = chunk["ui"]
@@ -209,33 +281,88 @@ async def _stream_graph_events(
                     )
                 continue
 
-            # ── Updates channel: interrupts + agent messages ──────────
-            if mode == "updates":
-                if not isinstance(chunk, dict):
+            # ── Updates channel ──────────────────────────────────────────
+            if mode != "updates" or not isinstance(chunk, dict):
+                continue
+
+            # ── Interrupts ──────────────────────────────────────────────
+            interrupts = chunk.get("__interrupt__")
+            if interrupts:
+                for itr in interrupts:
+                    value = getattr(itr, "value", itr)
+                    interrupt_id = getattr(itr, "id", None)
+                    yield format_sse(
+                        "interrupt",
+                        {
+                            "interrupt_id": interrupt_id,
+                            "thread_id": thread_id,
+                            "payload": value,
+                        },
+                    )
+                yield format_sse("done", {"thread_id": thread_id, "paused": True})
+                return
+
+            # ── Scan ALL nodes for ToolMessages with structured data ────
+            for node_name, node_update in chunk.items():
+                if node_name == "__interrupt__":
+                    continue
+                if not isinstance(node_update, dict):
                     continue
 
-                interrupts = chunk.get("__interrupt__")
-                if interrupts:
-                    for itr in interrupts:
-                        value = getattr(itr, "value", itr)
-                        interrupt_id = getattr(itr, "id", None)
-                        yield format_sse(
-                            "interrupt",
-                            {
-                                "interrupt_id": interrupt_id,
-                                "thread_id": thread_id,
-                                "payload": value,
-                            },
-                        )
-                    yield format_sse("done", {"thread_id": thread_id, "paused": True})
-                    return
+                messages = node_update.get("messages", []) or []
+                for msg in messages:
+                    if not isinstance(msg, ToolMessage):
+                        continue
 
-                agent_update = chunk.get("agent")
-                if isinstance(agent_update, dict):
-                    for msg in agent_update.get("messages", []) or []:
-                        rendered = _serialise_message(msg)
-                        if rendered is not None and rendered["role"] == "assistant":
-                            yield format_sse("message", rendered)
+                    logger.debug(
+                        "ToolMessage from node=%s name=%s content_type=%s",
+                        node_name,
+                        getattr(msg, "name", "?"),
+                        type(msg.content).__name__,
+                    )
+
+                    # Compliance data
+                    if not compliance_sent:
+                        compliance_data = extract_compliance_from_tool_message(msg)
+                        if compliance_data:
+                            yield build_compliance_sse_event(compliance_data)
+                            compliance_sent = True
+                            logger.info(
+                                "Compliance UI event sent: overall=%s fields=%d",
+                                compliance_data.get("overall"),
+                                len(compliance_data.get("fields", [])),
+                            )
+
+                    # Navigate URL
+                    if not navigate_sent:
+                        nav_url = extract_navigate_url_from_tool_message(msg)
+                        if nav_url:
+                            yield build_navigate_sse_event(nav_url)
+                            navigate_sent = True
+                            logger.info("Navigate UI event sent: %s", nav_url)
+                        else:
+                            data = _parse_tool_content(msg.content)
+                            if isinstance(data, dict) and data.get("status") == "success":
+                                logger.debug(
+                                    "ToolMessage success but no navigate derived: "
+                                    "keys=%s document_id=%s has_overall=%s has_fields=%s",
+                                    list(data.keys()),
+                                    data.get("document_id"),
+                                    "overall" in data,
+                                    "fields" in data,
+                                )
+
+            # ── Agent messages (text responses) ─────────────────────────
+            agent_update = chunk.get("agent")
+            if isinstance(agent_update, dict):
+                for msg in agent_update.get("messages", []) or []:
+                    rendered = _serialise_message(msg)
+                    if rendered is not None and rendered["role"] == "assistant":
+                        logger.debug(
+                            "Agent message sent: content_len=%d",
+                            len(rendered.get("content", "")),
+                        )
+                        yield format_sse("message", rendered)
 
     except GraphInterrupt as exc:
         for itr in getattr(exc, "args", []):
@@ -251,7 +378,10 @@ async def _stream_graph_events(
         yield format_sse("done", {"thread_id": thread_id, "paused": True})
         return
     except asyncio.CancelledError:
-        raise
+        # Stream was aborted by user clicking Stop — send done so frontend resets
+        logger.info("Stream cancelled for thread=%s", thread_id)
+        yield format_sse("done", {"thread_id": thread_id, "paused": False})
+        return
     except Exception as exc:
         logger.exception("chat stream failed for thread=%s", thread_id)
         yield format_sse(
@@ -272,8 +402,8 @@ async def _stream_graph_events(
     response_class=StreamingResponse,
 )
 async def chat_stream(
-    body: ChatStreamRequest,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+        body: ChatStreamRequest,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> StreamingResponse:
     try:
         user_id = extract_user_id_from_token(body.user_token)
@@ -281,8 +411,8 @@ async def chat_stream(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     thread_id = (
-        body.thread_id
-        or f"user_{user_id}_doc_{body.context_ui_id or 'general'}"
+            body.thread_id
+            or f"user_{user_id}_doc_{body.context_ui_id or 'general'}"
     )
 
     if body.context is not None:
@@ -292,8 +422,8 @@ async def chat_stream(
         user_context = await resolve_user_context(bridged, user_id)
 
     if (
-        body.preferred_summary_format
-        and body.preferred_summary_format != "ask"
+            body.preferred_summary_format
+            and body.preferred_summary_format != "ask"
     ):
         user_context["preferred_summary_format"] = body.preferred_summary_format
 
@@ -308,6 +438,7 @@ async def chat_stream(
     )
 
     config = _make_config(thread_id, body.user_token, str(user_id), body.context_ui_id)
+    await _ensure_clean_state(agent, config)
 
     return StreamingResponse(
         _stream_graph_events(agent, inputs, config, thread_id),
@@ -325,8 +456,8 @@ async def chat_stream(
     response_class=StreamingResponse,
 )
 async def chat_resume(
-    body: ChatResumeRequest,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+        body: ChatResumeRequest,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> StreamingResponse:
     try:
         validated = ResumeValueAdapter.validate_python(body.resume_value)
@@ -338,14 +469,26 @@ async def chat_resume(
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    config = _make_config(body.thread_id, body.user_token, str(user_id), body.context_ui_id)
+    document_id = body.context_ui_id
+    if not document_id:
+        try:
+            snapshot = await agent.graph.aget_state(
+                {"configurable": {"thread_id": body.thread_id}}
+            )
+            if snapshot and snapshot.values:
+                document_id = snapshot.values.get("document_id")
+        except Exception as exc:
+            logger.warning("Could not fetch state to restore document_id: %s", exc)
 
-    # Validate kind match before resuming (Костыль №4)
+    config = _make_config(body.thread_id, body.user_token, str(user_id), document_id)
+
     await _validate_resume_kind(
         agent.graph, config, body.interrupt_id, validated.kind
     )
 
     resume_value = validated.model_dump(mode="json")
+
+    await _ensure_clean_state(agent, config)
 
     return StreamingResponse(
         _stream_graph_events(
@@ -368,8 +511,8 @@ async def chat_resume(
     summary="Get current thread snapshot (for reconnect)",
 )
 async def chat_state(
-    thread_id: str,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+        thread_id: str,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> ChatStateResponse:
     """Return the latest state for ``thread_id``.
 
@@ -424,8 +567,8 @@ async def chat_state(
     summary="Get conversation history for a thread (flat list)",
 )
 async def get_history(
-    thread_id: str,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+        thread_id: str,
+        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
     try:
         snapshot = await agent.graph.aget_state(

@@ -9,7 +9,7 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import json
 from typing import AsyncIterator
@@ -50,6 +50,27 @@ _MODE_MAP: dict[str, SummaryMode] = {  # noqa: E501
     "abstractive": SummaryMode.ABSTRACTIVE,
     "thesis": SummaryMode.THESIS,
 }
+
+
+# ── Helper: build RunnableConfig for direct tool invocation ────────────────
+
+def _make_tool_config(
+    user_token: str,
+    document_id: str | None,
+    thread_id: str = "action",
+    user_id: str = "action_user",
+) -> dict:
+    """Build RunnableConfig for direct tool invocation outside the agent graph."""
+    cfg: dict[str, Any] = {
+        "configurable": {
+            "thread_id": thread_id,
+            "user_token": user_token,
+            "user_id": user_id,
+        }
+    }
+    if document_id:
+        cfg["configurable"]["document_id"] = document_id
+    return cfg
 
 
 async def _run_agent_once(
@@ -130,12 +151,21 @@ async def _resolve_file_bytes(
 
     if is_uuid and user_input.context_ui_id:
         try:
-            tool_input = {
-                "token": user_input.user_token,
-                "document_id": user_input.context_ui_id,
-                "attachment_id": current_path,
-            }
-            raw_result = await doc_get_file_content.ainvoke(tool_input)
+            try:
+                uid = str(extract_user_id_from_token(user_input.user_token))
+            except Exception:
+                uid = "action_user"
+
+            tool_config = _make_tool_config(
+                user_token=user_input.user_token,
+                document_id=user_input.context_ui_id,
+                thread_id="action_resolve",
+                user_id=uid,
+            )
+            raw_result = await doc_get_file_content.ainvoke(
+                {"attachment_id": current_path},
+                config=tool_config,
+            )
             if isinstance(raw_result, bytes):
                 file_bytes = raw_result
             elif isinstance(raw_result, str):
@@ -173,6 +203,14 @@ async def api_direct_summarize(
     user_id = extract_user_id_from_token(user_input.user_token)
     new_thread_id = f"action_{user_id}_{uuid.uuid4().hex[:8]}"
     file_identifier: str | None = None
+
+    # Build tool config for direct tool invocations
+    tool_config = _make_tool_config(
+        user_token=user_input.user_token,
+        document_id=user_input.context_ui_id,
+        thread_id=new_thread_id,
+        user_id=str(user_id),
+    )
 
     logger.info(
         "START SUMMARIZE",
@@ -272,12 +310,10 @@ async def api_direct_summarize(
 
             elif is_uuid and user_input.context_ui_id:
                 try:
-                    tool_input = {
-                        "token": user_input.user_token,
-                        "document_id": user_input.context_ui_id,
-                        "attachment_id": current_path,
-                    }
-                    raw_result = await doc_get_file_content.ainvoke(tool_input)
+                    raw_result = await doc_get_file_content.ainvoke(
+                        {"attachment_id": current_path},
+                        config=tool_config,
+                    )
 
                     if isinstance(raw_result, bytes):
                         file_bytes = raw_result
@@ -351,12 +387,10 @@ async def api_direct_summarize(
     raw_text = ""
     try:
         if is_uuid and user_input.context_ui_id:
-            tool_input = {
-                "token": user_input.user_token,
-                "document_id": user_input.context_ui_id,
-                "attachment_id": current_path,
-            }
-            result = await doc_get_file_content.ainvoke(tool_input)
+            result = await doc_get_file_content.ainvoke(
+                {"attachment_id": current_path},
+                config=tool_config,
+            )
             if isinstance(result, dict):
                 raw_text = result.get("content", "") or ""
             elif isinstance(result, bytes):

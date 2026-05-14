@@ -7,6 +7,14 @@ EDMS AI Assistant — File Comparison Tool.
 
 from __future__ import annotations
 
+from langgraph.errors import GraphInterrupt
+
+from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.interrupt_contract import (
+    DisambiguationInterrupt,
+    InterruptOption,
+)
+
 import difflib
 import logging
 import os
@@ -20,6 +28,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
@@ -227,8 +236,7 @@ async def doc_compare_attachment_with_local(
         local_file_path: str,
         attachment_id: str | None = None,
         original_filename: str | None = None,
-        document_id: Annotated[str, InjectedToolArg] = "",
-        token: Annotated[str, InjectedToolArg] = "",
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """СРАВНИТЬ локальный файл с вложением документа в СЭД.
 
@@ -243,15 +251,11 @@ async def doc_compare_attachment_with_local(
     ПАРАМЕТРЫ:
     • attachment_id: UUID вложения ИЛИ имя файла. Если не указан — ищем по имени загруженного файла.
     • local_file_path: БЕРЁТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
-    • document_id: БЕРЁТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
+    • document_id и token: БЕРУТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
 
     ПОСЛЕ DISAMBIGUATION:
     Если пользователь выбрал UUID из списка вложений — передай этот UUID в `attachment_id`
     и вызови этот инструмент снова. НЕ вызывай `doc_compare`!
-
-    Примеры:
-    • doc_compare_attachment_with_local(attachment_id="363ca517-...") # ✅ (document_id подставится сам)
-    • doc_compare(document_id_2="363ca517-...") # ❌ ОШИБКА: это UUID вложения, не документа!
 
     Возвращает: {"status": "success" | "requires_disambiguation" | "error",
                     "similarity_percent": float, # % схожести
@@ -261,9 +265,15 @@ async def doc_compare_attachment_with_local(
         local_file_path: Путь к локальному файлу.
         attachment_id: UUID или имя вложения.
         original_filename: Оригинальное имя файла.
-        document_id: UUID документа (инжектируется автоматически).
-        token: JWT токен авторизации (инжектируется автоматически).
+        config: LangGraph RunnableConfig (инжектируется автоматически).
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
     local_path = Path(local_file_path)
     display_name: str = (
         original_filename.strip()
@@ -311,26 +321,56 @@ async def doc_compare_attachment_with_local(
             "message": "В документе нет вложений для сравнения.",
         }
 
-    # ── 3. Разрешение целевого вложения ───────────────────────────────────────
+    # ── 3. Разрешение целевого вложения (с HITL Disambiguation) ──────────────
+    target = None
     if attachment_id:
         target = _resolve_attachment(attachments, attachment_id)
-        if target is None:
-            logger.info(
-                "attachment_id '%s' not resolved → disambiguation", attachment_id
-            )
-            return _disambiguation_response(
-                attachments, display_name, hint=attachment_id
-            )
     else:
         target = _resolve_attachment(attachments, display_name)
         if target is None and display_name != local_path.name:
             target = _resolve_attachment(attachments, local_path.name)
-        if target is None:
-            logger.info(
-                "Auto-match failed for '%s' → disambiguation",
-                display_name,
+
+    if target is None:
+        logger.info("Attachment resolution failed → HITL disambiguation")
+
+        # Формируем опции для карточек
+        options = [
+            InterruptOption(
+                id=_att_id(a),
+                label=_att_name(a) or "без имени",
+                description="Документ СЭД"  #  размер из DTO
             )
-            return _disambiguation_response(attachments, display_name)
+            for a in attachments if _att_id(a)
+        ]
+
+        hint = attachment_id or display_name
+        prompt_msg = (
+            f"Вложение «{hint}» не найдено в документе. "
+            f"Уточните, какое вложение сравнить с «{display_name}»:"
+            if attachment_id
+            else f"Не удалось автоматически определить вложение для сравнения "
+                 f"с «{display_name}». Выберите нужное:"
+        )
+
+        try:
+            resume = ask_human(DisambiguationInterrupt(
+                entity_type="attachment",
+                prompt=prompt_msg,
+                options=options,
+                search_term=hint,
+            ))
+            selected_id = resume.selected_ids[0]
+            target = next((a for a in attachments if _att_id(a) == selected_id), None)
+
+        except ToolAborted:
+            return {"status": "cancelled", "message": "Выбор вложения отменён."}
+
+        except GraphInterrupt:
+            raise
+
+        except Exception as exc:
+            logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
+            return {"status": "error", "message": f"Ошибка выбора вложения: {exc}"}
 
     resolved_id = _att_id(target)
     resolved_name = _att_name(target) or "attachment"
@@ -345,7 +385,6 @@ async def doc_compare_attachment_with_local(
         )
 
     logger.info("Attachment resolved: '%s' (%s…)", resolved_name, resolved_id[:8])
-
     # ── 4. Скачивание вложения ────────────────────────────────────────────────
     try:
         async with EdmsAttachmentClient() as att_client:

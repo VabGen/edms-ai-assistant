@@ -12,7 +12,7 @@ class ReferenceClient(EdmsBaseClient):
     Client for EDMS reference book (справочники) API.
     """
 
-    _CANONICAL_NAME_FIELDS: dict[str, tuple] = {
+    _CANONICAL_NAME_FIELDS: dict[str, tuple[str, ...]] = {
         "country": ("fullName", "name", "shortName"),
         "region": ("nameRegion", "name", "shortName"),
         "district": ("nameDistrict", "name", "shortName"),

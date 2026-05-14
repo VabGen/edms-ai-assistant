@@ -272,8 +272,11 @@ async def doc_get_file_content(
 
     Args:
         attachment_id: Attachment UUID or filename to read.
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен (инжектируется автоматически).
         analysis_mode: One of text | tables | metadata | full.
         summary_type: Summarisation format to forward to doc_summarize_text.
+        config: LangGraph RunnableConfig (инжектируется автоматически, содержит token и document_id).
 
     Returns:
         Dict containing:
@@ -285,8 +288,6 @@ async def doc_get_file_content(
         - ``is_truncated``  : bool — whether text was trimmed to 15 000 chars.
         - ``total_chars``   : int — full character count before truncation.
     """
-
-    # Безопасное извлечение токена и document_id из конфига
     try:
         token = get_token_from_config(config)
         document_id = get_document_id_from_config(config)

@@ -157,7 +157,8 @@ class EdmsDocumentAgent:
             "messages": [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=message),
-            ]
+            ],
+            "document_id": context.document_id or "",
         }
 
     @staticmethod

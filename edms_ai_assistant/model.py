@@ -21,6 +21,7 @@ from typing_extensions import TypedDict
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     last_ui_directives: Annotated[dict[str, str], or_]
+    document_id: str
 
 
 # ─────────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
@@ -715,9 +716,7 @@ def _compute_summary(overall: str, names: list[str], stats: dict[str, int]) -> s
 async def doc_compliance_check(
         attachment_id: str | None = None,
         check_all: bool = False,
-        document_id: Annotated[str, InjectedToolArg] = "",
-        token: Annotated[str, InjectedToolArg] = "",
-        config: RunnableConfig = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
     Проверяет соответствие заполненных полей карточки EDMS-документа содержимому вложения.
@@ -739,6 +738,7 @@ async def doc_compliance_check(
     - "not_found" — не найдено в файле
 
     ВАЖНО: после получения результата сразу формулируй ответ пользователю.
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
     НЕ вызывай этот инструмент повторно — данные уже получены.
 
     Args:
@@ -746,8 +746,16 @@ async def doc_compliance_check(
         check_all: Анализировать все вложения (опционально).
         document_id: UUID документа (инжектируется автоматически).
         token: JWT токен (инжектируется автоматически).
-        config: Конфиг Runable (инжектируется автоматически).
+        config: LangGraph RunnableConfig (инжектируется автоматически, содержит token и document_id).
+
     """
+    try:
+        document_id = get_document_id_from_config(config)
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
     logger.info(
         "doc_compliance_check: doc=%s... att=%s check_all=%s",
         document_id[:8] if document_id else "N/A",
@@ -994,3 +1002,5 @@ async def doc_compliance_check(
             else None
         ),
     }
+
+# 5
