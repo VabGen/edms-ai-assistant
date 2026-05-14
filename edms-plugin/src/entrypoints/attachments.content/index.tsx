@@ -1,43 +1,46 @@
-import {getAuthToken} from '@/shared/lib/auth'
-import {extractDocIdFromUrl} from '@/shared/lib/url'
-import {toast} from '@/shared/lib/toast'
+import { getAuthToken } from '@/shared/lib/auth'
+import { extractDocIdFromUrl } from '@/shared/lib/url'
+import { toast } from '@/shared/lib/toast'
+import { storage } from 'wxt/storage'
+import { STORAGE_KEYS } from '@shared/storage/keys'
+import { sendMessage } from '@shared/api/messaging'
 
-let assistantEnabled = true;
+const enabledStorage = storage.defineItem<boolean>(STORAGE_KEYS.assistantEnabled, {
+  fallback: true,
+})
 
 export default defineContentScript({
-    matches: [
-        'http://localhost:3000/*',
-        'http://localhost:3001/*',
-        'http://localhost:8080/*',
-        'https://next.edo.iba/*',
-        'http://127.0.0.1:*/*',
-    ],
-    runAt: 'document_idle',
+  matches: [
+    'http://localhost:3000/*',
+    'http://localhost:3001/*',
+    'http://localhost:8080/*',
+    'https://next.edo.iba/*',
+    'http://127.0.0.1:*/*',
+  ],
+  runAt: 'document_idle',
 
-    async main() {
+  async main(ctx) {
+    let enabled = (await enabledStorage.getValue()) ?? true
 
-        const res = await chrome.storage.local.get(['assistantEnabled']);
-        assistantEnabled = res.assistantEnabled !== false;
+    if (enabled) injectButtons()
 
-        chrome.storage.onChanged.addListener((changes) => {
-            if (changes.assistantEnabled) {
-                assistantEnabled = changes.assistantEnabled.newValue;
-                if (!assistantEnabled) {
-                    removeButtons();
-                } else {
-                    injectButtons();
-                }
-            }
-        });
+    const observer = new MutationObserver(() => {
+      if (enabled) injectButtons()
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
 
-        const observer = new MutationObserver(() => {
-            if (assistantEnabled) injectButtons();
-        });
+    const unwatch = enabledStorage.watch((val) => {
+      enabled = val ?? true
+      if (!enabled) removeButtons()
+      else injectButtons()
+    })
 
-        observer.observe(document.body, {childList: true, subtree: true});
-
-        if (assistantEnabled) injectButtons();
-    },
+    ctx.onInvalidated(() => {
+      observer.disconnect()
+      unwatch()
+      removeButtons()
+    })
+  },
 })
 
 function removeButtons() {
@@ -58,7 +61,6 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
 // ─── Inject ───────────────────────────────────────────────────────────────────
 function injectButtons() {
-    if (!assistantEnabled) return;
 
     document.querySelectorAll<HTMLElement>(ATTACHMENT_SEL).forEach(el => {
         if (el.getAttribute(INJECTED_ATTR)) return;
@@ -225,45 +227,43 @@ function handleAction(summaryType: string, row: HTMLElement, fileName: string, b
     btn.innerHTML = spinnerSVG()
     btn.style.color = '#6366f1'
 
-    chrome.runtime.sendMessage({
-        type: 'summarizeDocument',
-        payload: {
-            message: fileName,
-            user_token: token,
-            context_ui_id: docId,
-            file_path: effectiveFileId,
-            preferred_summary_format: summaryType,
-        },
-    }, res => {
-        btn.innerHTML = sparklesSVG()
-        btn.style.color = '#94a3b8'
+    void sendMessage('summarizeDocument', {
+      message: fileName,
+      user_token: token,
+      context_ui_id: docId,
+      file_path: effectiveFileId,
+      preferred_summary_format: summaryType,
+    }).then((res) => {
+      btn.innerHTML = sparklesSVG()
+      btn.style.color = '#94a3b8'
 
-        if (res?.success) {
-            toast.success(`Анализ файла "${fileName}" готов`, 'Готово')
+      if (res.success) {
+        toast.success(`Анализ файла "${fileName}" готов`, 'Готово')
 
-            // ── Передаём cache-поля из ответа сервера ──
-            const cacheFileIdentifier: string | null =
-                res.data?.metadata?.cache_file_identifier ?? null
-            const cacheSummaryType: string | null =
-                res.data?.metadata?.cache_summary_type ?? summaryType ?? null
-            const cacheContextId: string | null =
-                res.data?.metadata?.cache_context_ui_id ?? docId ?? null
+        const metadata = (res.data as Record<string, unknown> | undefined)?.['metadata'] as Record<string, unknown> | undefined
+        const cacheFileIdentifier = (metadata?.['cache_file_identifier'] as string | undefined) ?? null
+        const cacheSummaryType = (metadata?.['cache_summary_type'] as string | undefined) ?? summaryType ?? null
+        const cacheContextId = (metadata?.['cache_context_ui_id'] as string | undefined) ?? docId ?? null
+        const responseText = (res.data as Record<string, unknown> | undefined)?.['response'] as string | undefined
 
-            window.postMessage({
-                type: 'REFRESH_CHAT_HISTORY',
-                cache_file_identifier: cacheFileIdentifier,
-                cache_summary_type: cacheSummaryType,
-                cache_file_path: effectiveFileId,
-                cache_context_id: cacheContextId,
-                messages: [
-                    {type: 'human', content: `Анализ файла: ${fileName}`},
-                    {type: 'ai', content: res.data?.response ?? 'Анализ завершён.'},
-                ],
-            }, '*')
-        } else {
-            const errMsg = res?.error ?? 'Неизвестная ошибка'
-            toast.error(humanizeActionError(errMsg), 'Ошибка анализа')
-        }
+        window.postMessage({
+          type: 'REFRESH_CHAT_HISTORY',
+          cache_file_identifier: cacheFileIdentifier,
+          cache_summary_type: cacheSummaryType,
+          cache_file_path: effectiveFileId,
+          cache_context_id: cacheContextId,
+          messages: [
+            { type: 'human', content: `Анализ файла: ${fileName}` },
+            { type: 'ai', content: responseText ?? 'Анализ завершён.' },
+          ],
+        }, '*')
+      } else {
+        toast.error(humanizeActionError(res.error ?? 'Неизвестная ошибка'), 'Ошибка анализа')
+      }
+    }).catch((err: unknown) => {
+      btn.innerHTML = sparklesSVG()
+      btn.style.color = '#94a3b8'
+      toast.error(humanizeActionError(err instanceof Error ? err.message : 'Ошибка'), 'Ошибка анализа')
     })
 }
 

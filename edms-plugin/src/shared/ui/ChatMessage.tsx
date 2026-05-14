@@ -149,7 +149,7 @@ function detectStructuredOutput(content: string): StructuredOutput | null {
             ?? content.match(/```\s*([\s\S]*?)\s*```/)
         if (m) {
             try {
-                parsed = JSON.parse(m[1])
+                parsed = JSON.parse(m[1] ?? '')
             } catch {
             }
         }
@@ -427,7 +427,7 @@ function factCat(key: string) {
         .replace(/NUMBER/g, 'НОМЕР')
         .replace(/NUM/g, 'НОМЕР');
 
-    return FACT_CATEGORY[upper] ?? FACT_CATEGORY['ПРОЧЕЕ']
+    return (FACT_CATEGORY[upper] ?? FACT_CATEGORY['ПРОЧЕЕ'])!
 }
 
 const LANG_NAMES: Record<string, string> = {
@@ -861,7 +861,7 @@ function AbstractiveResult({data}: { data: AbstractiveData }) {
                 }}>
                     {data.key_themes.map((theme, i) => {
                         const colors = Object.values(THEME_PALETTE)
-                        const c = colors[(i + 1) % colors.length]
+                        const c = colors[(i + 1) % colors.length] ?? colors[0]!
                         return (
                             <span key={i} style={{
                                 ...BADGE_BASE,
@@ -1047,7 +1047,7 @@ function ActionItemsResult({data}: { data: ActionItemsData }) {
 
             <div style={{padding: '8px 0'}}>
                 {sorted.map((item, i) => {
-                    const cfg = PRIORITY_CFG[item.priority] ?? PRIORITY_CFG.medium
+                    const cfg = (PRIORITY_CFG[item.priority] ?? PRIORITY_CFG['medium'])!
                     return (
                         <div key={i} style={{
                             padding: '10px 16px',
@@ -1502,7 +1502,7 @@ function sanitizeHtmlToMarkdown(raw: string): string {
         .replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, '![]($1)')
         .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, inner) => {
             const lines = inner.trim().split('\n')
-            return '\n' + lines.map(l => '> ' + l.trim()).join('\n') + '\n'
+            return '\n' + lines.map((l: string) => '> ' + l.trim()).join('\n') + '\n'
         })
         .replace(/<th[^>]*>([\s\S]*?)<\/th>/gi, '| $1 ')
         .replace(/<\/tr>/gi, '|\n')
@@ -1592,8 +1592,8 @@ function isAttachmentTable(headers: string[]): boolean {
 
 function isKeyValueTable(headers: string[]): boolean {
     if (headers.length !== 2) return false
-    const h0 = headers[0].toLowerCase()
-    const h1 = headers[1].toLowerCase()
+    const h0 = (headers[0] ?? '').toLowerCase()
+    const h1 = (headers[1] ?? '').toLowerCase()
     const kvKeys = ['параметр', 'поле', 'ключ', 'field', 'key', 'свойство', 'атрибут']
     const kvVals = ['информация', 'значение', 'value', 'данные', 'data', 'содержание']
     return kvKeys.some(k => h0.includes(k)) || kvVals.some(k => h1.includes(k))
@@ -1991,7 +1991,6 @@ export function ChatMessage({
                     boxShadow: '0 2px 16px rgba(99,102,241,0.25)',
                     wordBreak: 'break-word',
                     overflowWrap: 'break-word',
-                    minWidth: 200,
                 } : {
                     background: '#ffffff',
                     color: '#0f172a',
@@ -1999,7 +1998,6 @@ export function ChatMessage({
                     boxShadow: '0 1px 4px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.03)',
                     wordBreak: 'break-word',
                     overflowWrap: 'break-word',
-                    minWidth: 300,
                 }}
             >
                 <AttachmentClickContext.Provider value={onAttachmentClick ?? null}>
@@ -2084,7 +2082,7 @@ export function ChatMessage({
                                             ? children.map(c => typeof c === 'string' ? c : (c?.props?.children ?? '')).join('')
                                             : typeof children === 'string' ? children : ''
                                         const fileMatch = rawText.match(/Файл:\s*(\S[^\t\n]+?)(?:\s{2,}|\s*Размер:)/)
-                                        if (fileMatch && !isUser && onAttachmentClick) {
+                                        if (fileMatch?.[1] && !isUser && onAttachmentClick) {
                                             const fileName = fileMatch[1].trim()
                                             return (
                                                 <button type="button" onClick={() => onAttachmentClick(fileName)}

@@ -3,28 +3,36 @@
  * @description Chrome Extension popup — toggle EDMS Assistant.
  */
 
-import {useState, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent} from 'react'
+import { useState, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { storage } from 'wxt/storage'
+import { STORAGE_KEYS } from '@shared/storage/keys'
+
+const enabledStorage = storage.defineItem<boolean>(STORAGE_KEYS.assistantEnabled, {
+  fallback: true,
+})
 
 export function Popup() {
-    const [enabled, setEnabled] = useState(true)
-    const [mounted, setMounted] = useState(false)
-    const [glow, setGlow] = useState(false)
-    const ref = useRef<HTMLDivElement>(null)
+  const [enabled, setEnabled] = useState(true)
+  const [mounted, setMounted] = useState(false)
+  const [glow, setGlow] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
 
-    useEffect(() => {
-        chrome.storage.local.get(['assistantEnabled'], r => {
-            if (r.assistantEnabled !== undefined) setEnabled(r.assistantEnabled as boolean)
-        })
-        requestAnimationFrame(() => requestAnimationFrame(() => setMounted(true)))
-    }, [])
+  useEffect(() => {
+    let cancelled = false
+    void enabledStorage.getValue().then((val) => {
+      if (!cancelled) setEnabled(val ?? true)
+    })
+    requestAnimationFrame(() => requestAnimationFrame(() => setMounted(true)))
+    return () => { cancelled = true }
+  }, [])
 
-    const toggle = () => {
-        const next = !enabled
-        setGlow(true)
-        setEnabled(next)
-        setTimeout(() => setGlow(false), 600)
-        chrome.storage.local.set({assistantEnabled: next})
-    }
+  const toggle = () => {
+    const next = !enabled
+    setGlow(true)
+    setEnabled(next)
+    setTimeout(() => setGlow(false), 600)
+    void enabledStorage.setValue(next)
+  }
 
     const onKey = (e: ReactKeyboardEvent) => {
         if (e.key === ' ' || e.key === 'Enter') {

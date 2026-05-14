@@ -1,5 +1,5 @@
 import {useState, useEffect, useCallback, useRef} from 'react'
-import {sendMsg} from '../lib/messaging'
+import {sendMessage} from '../api/messaging'
 import {getAuthToken} from '../lib/auth'
 
 export type FontSize = 'small' | 'medium' | 'large'
@@ -270,8 +270,8 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             setDraft({user: userPrefs, tech: techInit})
 
             const [metaRes, techRes] = await Promise.allSettled([
-                sendMsg<{ show_technical: boolean }>('fetchSettingsMeta', {}),
-                sendMsg<Record<string, any>>('fetchSettings', {user_token: getAuthToken() ?? ''}),
+                sendMessage('fetchSettingsMeta', undefined),
+                sendMessage('fetchSettings', {user_token: getAuthToken() ?? ''}),
             ])
             if (!alive) return
 
@@ -314,7 +314,7 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             chromeSet(USER_KEY, draft.user)
             setSavedUser(draft.user)
             if (showTechnical) {
-                const updated = await sendMsg<Record<string, any>>('updateSettings', {
+                const updated = await sendMessage('updateSettings', {
                     user_token: getAuthToken() ?? '',
                     settings: techToBackend(draft.tech)
                 })
@@ -338,8 +338,8 @@ export function useSettingsStore(): UseSettingsStoreReturn {
     const resetToDefaults = useCallback(async () => {
         setSaveStatus('saving')
         try {
-            await sendMsg<void>('resetSettings', {user_token: getAuthToken() ?? ''})
-            const updated = await sendMsg<Record<string, any>>('fetchSettings', {user_token: getAuthToken() ?? ''})
+            await sendMessage('resetSettings', {user_token: getAuthToken() ?? ''})
+            const updated = await sendMessage('fetchSettings', {user_token: getAuthToken() ?? ''})
             if (updated) {
                 const mapped = techFromBackend(updated)
                 setSavedTech(mapped)

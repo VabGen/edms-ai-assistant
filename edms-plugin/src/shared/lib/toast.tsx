@@ -258,11 +258,11 @@ export function showToast(opts: ToastOptions): void {
 // ─── Convenience aliases ──────────────────────────────────────────────────────
 export const toast = {
     success: (message: string, title?: string) =>
-        showToast({message, type: 'success', title}),
+        showToast({message, type: 'success', ...(title !== undefined && {title})}),
     error: (message: string, title?: string) =>
-        showToast({message, type: 'error', title}),
+        showToast({message, type: 'error', ...(title !== undefined && {title})}),
     info: (message: string, title?: string) =>
-        showToast({message, type: 'info', title}),
+        showToast({message, type: 'info', ...(title !== undefined && {title})}),
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
