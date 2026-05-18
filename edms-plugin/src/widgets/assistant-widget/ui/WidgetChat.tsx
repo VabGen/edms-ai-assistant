@@ -209,8 +209,6 @@ export function WidgetChat() {
 
     const handleInterruptReply = useCallback(
         async (resume: ResumeValue) => {
-            if (loading) return
-
             const token = getAuthToken()
             if (!token) {
                 toast.error('Войдите в систему', 'Авторизация')
@@ -238,6 +236,9 @@ export function WidgetChat() {
 
     const applyOptimisticFix = useCallback(
         (messageId: string, fixed: Array<{ fieldKey: string; newValue: string }>) => {
+            // Immediately request reload of the active tab so the user sees changes faster
+            void sendMessage('reloadActiveTab', undefined)
+
             updateMessage(messageId, (m) => {
                 if (!m.compliance) return m
                 const keys = new Set(fixed.map((f) => f.fieldKey))
@@ -262,10 +263,6 @@ export function WidgetChat() {
                     },
                 }
             })
-            // Give the agent ~3s to call doc_update_field before reloading the page.
-            window.setTimeout(() => {
-                void sendMessage('reloadActiveTab', undefined)
-            }, 3000)
         },
         [updateMessage],
     )
@@ -328,9 +325,34 @@ export function WidgetChat() {
         void sendMessage('navigateTo', {url: `/document/${docId}`, newTab: true})
     }, [])
 
-    const handleAttachmentClick = useCallback((fileName: string) => {
-        toast.info(`Открываю вложение: ${fileName}`, 'Вложение')
-    }, [])
+    const handleAttachmentClick = useCallback(
+        async (fileName: string) => {
+            if (loading) return
+
+            const token = getAuthToken()
+            if (!token) {
+                toast.error('Войдите в систему', 'Авторизация')
+                return
+            }
+
+            let tid: string
+            try {
+                tid = await getOrCreateThreadId()
+            } catch {
+                return
+            }
+
+            streamHandleRef.current = startStream({
+                message: `Проанализируй вложение: ${fileName}`,
+                userToken: token,
+                threadId: tid,
+                contextUiId: extractDocIdFromUrl(),
+                filePath: null,
+                resumeValue: null,
+            })
+        },
+        [loading, getOrCreateThreadId, startStream],
+    )
 
     const handleFieldFixed = useCallback(
         (messageId: string, fieldKey: string, newValue: string) => {
