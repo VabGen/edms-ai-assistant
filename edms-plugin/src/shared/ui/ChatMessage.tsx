@@ -11,8 +11,8 @@ import {
     Check,
     AlertCircle,
     ExternalLink,
-    User,
-    FileText,
+    Paperclip,
+    Clock,
 } from 'lucide-react'
 import { DocCard } from './cards/DocCard'
 import { AttachmentCard } from './cards/AttachmentCard'
@@ -27,6 +27,7 @@ import { ExecutiveSummaryResult } from '@/features/chat/ui/structured/ExecutiveS
 import { DetailedNotesResult } from '@/features/chat/ui/structured/DetailedNotesResult'
 import { MultilingualResult } from '@/features/chat/ui/structured/MultilingualResult'
 import type { StructuredOutput } from '@/entities/message/model/types'
+import { cn } from '@shared/lib/cn'
 
 
 interface Props {
@@ -52,26 +53,14 @@ function CopyButton({text}: { text: string }) {
         <button
             onClick={handleCopy}
             title={copied ? 'Скопировано!' : 'Копировать код'}
-            style={{
-                position: 'absolute',
-                top: 8,
-                right: 8,
-                background: copied ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.08)',
-                border: 'none',
-                borderRadius: 6,
-                padding: '4px 7px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                color: copied ? '#6ee7b7' : '#94a3b8',
-                fontSize: 11,
-                fontWeight: 500,
-                transition: 'all 0.15s',
-            }}
+            className={cn(
+                "absolute top-2 right-2 p-1.5 rounded-lg border transition-all duration-200",
+                copied
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-600"
+                  : "bg-white/80 border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:border-zinc-300 shadow-sm"
+            )}
         >
-            {copied ? <Check size={12}/> : <Copy size={12}/>}
-            {copied ? 'OK' : ''}
+            {copied ? <Check size={14}/> : <Copy size={14}/>}
         </button>
     )
 }
@@ -250,22 +239,13 @@ function isKeyValueTable(headers: string[]): boolean {
 
 function KeyValueList({rows}: { rows: string[][] }) {
     return (
-        <div style={{display: 'flex', flexDirection: 'column', gap: 2, margin: '8px 0'}}>
+        <div className="flex flex-col gap-1 my-3 bg-zinc-50 dark:bg-zinc-800/30 rounded-xl p-2 border border-zinc-100 dark:border-zinc-800">
             {rows.map(([key, value], i) => (
-                <div key={i} style={{
-                    display: 'flex', gap: 12, padding: '6px 10px', borderRadius: 10,
-                    background: i % 2 === 0 ? 'rgba(248,250,252,0.70)' : 'transparent',
-                    alignItems: 'flex-start',
-                }}>
-                    <span style={{
-                        fontSize: 11, fontWeight: 600, color: '#64748b',
-                        minWidth: 120, flexShrink: 0, lineHeight: 1.6,
-                    }}>
+                <div key={i} className="flex gap-4 p-2.5 rounded-lg hover:bg-white dark:hover:bg-zinc-800 transition-colors shadow-none hover:shadow-sm">
+                    <span className="text-[11px] font-bold text-zinc-400 dark:text-zinc-500 min-w-[120px] flex-shrink-0 uppercase tracking-wider mt-0.5">
                         {key}
                     </span>
-                    <span style={{
-                        fontSize: 12, color: '#1e293b', lineHeight: 1.6, wordBreak: 'break-word',
-                    }}>
+                    <span className="text-[13px] text-zinc-800 dark:text-zinc-200 font-medium break-words leading-relaxed">
                         {value || '—'}
                     </span>
                 </div>
@@ -280,11 +260,8 @@ function SmartTable({children}: { children: React.ReactNode }) {
 
     if (!headers.length || !rows.length) {
         return (
-            <div style={{
-                overflowX: 'auto', margin: '8px 0', borderRadius: 12,
-                border: '1px solid rgba(0,0,0,0.05)',
-            }}>
-                <table style={{width: '100%', fontSize: 12, borderCollapse: 'collapse'}}>{children}</table>
+            <div className="overflow-x-auto my-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                <table className="w-full text-[13px] border-collapse bg-white dark:bg-zinc-900">{children}</table>
             </div>
         )
     }
@@ -293,7 +270,7 @@ function SmartTable({children}: { children: React.ReactNode }) {
 
     if (isAttachmentTable(headers)) {
         return (
-            <div style={{margin: '6px 0'}}>
+            <div className="my-2 space-y-2">
                 {rows.map((row, i) => <AttachmentCard key={i} headers={headers} row={row} index={i}/>)}
             </div>
         )
@@ -304,18 +281,15 @@ function SmartTable({children}: { children: React.ReactNode }) {
 
     if (isDocList) {
         return (
-            <div style={{margin: '6px 0'}}>
+            <div className="my-2 space-y-3">
                 {rows.map((row, i) => <DocCard key={i} headers={headers} row={row} index={i}/>)}
             </div>
         )
     }
 
     return (
-        <div style={{
-            overflowX: 'auto', margin: '8px 0', borderRadius: 12,
-            border: '1px solid rgba(0,0,0,0.05)', background: '#ffffff',
-        }}>
-            <table style={{width: '100%', fontSize: 12, borderCollapse: 'collapse'}}>{children}</table>
+        <div className="overflow-x-auto my-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <table className="w-full text-[13px] border-collapse bg-white dark:bg-zinc-900">{children}</table>
         </div>
     )
 }
@@ -325,32 +299,16 @@ function SmartTable({children}: { children: React.ReactNode }) {
 function ErrorMessage({raw, timeLabel}: { raw: string; timeLabel: string }) {
     const friendly = humanizeError(raw)
     return (
-        <div style={{
-            background: 'linear-gradient(135deg, rgba(239,68,68,0.04), rgba(244,63,94,0.04))',
-            border: '1px solid rgba(239,68,68,0.12)',
-            borderRadius: '22px 22px 22px 6px',
-            padding: '14px 18px',
-            maxWidth: '85%',
-            animation: 'edms-slide-up .25s ease-out',
-        }}>
-            <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                marginBottom: 6,
-            }}>
-                <AlertCircle size={16} style={{color: '#ef4444', flexShrink: 0}}/>
-                <span style={{fontSize: 13, fontWeight: 600, color: '#991b1b'}}>
-                    Ошибка
-                </span>
+        <div className="bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/20 rounded-xl p-4 max-w-[90%] animate-edms-slide-up">
+            <div className="flex items-center gap-2 mb-2">
+                <AlertCircle size={16} className="text-rose-500" />
+                <span className="text-[13px] font-bold text-rose-800 dark:text-rose-400 uppercase tracking-tight">Ошибка</span>
             </div>
-            <p style={{
-                margin: 0, fontSize: 12, color: '#7f1d1d', lineHeight: 1.6,
-            }}>
+            <p className="text-[14px] text-rose-700 dark:text-rose-300 leading-relaxed m-0">
                 {friendly}
             </p>
-            <div style={{
-                marginTop: 6, opacity: 0.45, textAlign: 'left',
-                color: '#94a3b8', fontSize: 10,
-            }}>
+            <div className="mt-2.5 text-[11px] text-rose-400 dark:text-rose-500/60 font-medium flex items-center gap-1.5">
+                <Clock size={11} />
                 {timeLabel}
             </div>
         </div>
@@ -375,7 +333,7 @@ export function ChatMessage({
     if (isRawError) {
         const rawText = content.replace(/^__error__:\s*/, '')
         return (
-            <div className="flex w-full justify-start">
+            <div className="flex w-full justify-start px-2">
                 <ErrorMessage raw={rawText} timeLabel={timeLabel}/>
             </div>
         )
@@ -388,25 +346,14 @@ export function ChatMessage({
     const sanitized = sanitizeHtmlToMarkdown(content)
 
     return (
-        <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}
-             style={{animation: 'edms-fade-in .25s ease-out'}}>
+        <div className={cn("flex w-full mb-1", isUser ? "justify-end" : "justify-start")}>
             <div
-                className="max-w-full px-4 py-3 leading-relaxed edms-chat-text"
-                style={isUser ? {
-                    background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)',
-                    color: '#ffffff',
-                    borderRadius: '22px 22px 6px 22px',
-                    boxShadow: '0 2px 16px rgba(99,102,241,0.25)',
-                    wordBreak: 'break-word',
-                    overflowWrap: 'break-word',
-                } : {
-                    background: '#ffffff',
-                    color: '#0f172a',
-                    borderRadius: '22px 22px 22px 6px',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.03)',
-                    wordBreak: 'break-word',
-                    overflowWrap: 'break-word',
-                }}
+                className={cn(
+                    "max-w-[92%] px-4 py-3 edms-chat-text transition-all duration-300 animate-edms-fade-in",
+                    isUser
+                        ? "bg-blue-600 dark:bg-blue-600 text-white rounded-2xl rounded-tr-sm shadow-sm"
+                        : "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800 rounded-2xl rounded-tl-sm shadow-sm"
+                )}
             >
                 <AttachmentClickContext.Provider value={onAttachmentClick ?? null}>
                     <DocumentClickContext.Provider value={onDocumentClick ?? null}>
@@ -418,72 +365,33 @@ export function ChatMessage({
                                 remarkPlugins={[remarkGfm, remarkLazyList]}
                                 components={{
                                     table: ({children}) => <SmartTable>{children}</SmartTable>,
-                                    thead: ({children}) => <thead>{children}</thead>,
+                                    thead: ({children}) => <thead className="bg-zinc-50 dark:bg-zinc-800/50">{children}</thead>,
                                     tbody: ({children}) => <tbody>{children}</tbody>,
-                                    tr: ({children}) => <tr>{children}</tr>,
-                                    th: ({children}) => <th style={{
-                                        padding: '8px 14px',
-                                        borderBottom: '2px solid rgba(99,102,241,0.08)',
-                                        fontWeight: 600,
-                                        background: 'rgba(99,102,241,0.03)',
-                                        textAlign: 'left',
-                                        fontSize: 11,
-                                        color: '#475569',
-                                    }}>{children}</th>,
-                                    td: ({children}) => <td style={{
-                                        padding: '8px 14px',
-                                        borderBottom: '1px solid rgba(0,0,0,0.03)',
-                                        fontSize: 12,
-                                        color: '#334155',
-                                    }}>{children}</td>,
+                                    tr: ({children}) => <tr className="border-b border-zinc-100 dark:border-zinc-800 last:border-0">{children}</tr>,
+                                    th: ({children}) => <th className="px-4 py-2.5 text-left text-[11px] font-bold text-zinc-500 uppercase tracking-wider">{children}</th>,
+                                    td: ({children}) => <td className="px-4 py-3 text-[13px] text-zinc-700 dark:text-zinc-300 leading-relaxed">{children}</td>,
                                     code({inline, className, children, ...props}: any) {
                                         const codeText = String(children).replace(/\n$/, '')
                                         if (!inline) {
                                             const lang = className?.replace(/^language-/, '') || ''
                                             return (
-                                                <div style={{position: 'relative', margin: '10px 0'}}>
+                                                <div className="relative my-4 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
                                                     {lang && (
-                                                        <div style={{
-                                                            position: 'absolute',
-                                                            top: 8,
-                                                            left: 12,
-                                                            fontSize: 9,
-                                                            fontWeight: 600,
-                                                            color: '#64748b',
-                                                            textTransform: 'uppercase',
-                                                            letterSpacing: 0.5,
-                                                            zIndex: 1,
-                                                        }}>
+                                                        <div className="bg-zinc-50 dark:bg-zinc-800 px-4 py-1.5 text-[10px] font-bold text-zinc-500 border-b border-zinc-200 dark:border-zinc-700 uppercase tracking-widest">
                                                             {lang}
                                                         </div>
                                                     )}
-                                                    <pre style={{
-                                                        overflow: 'auto',
-                                                        padding: lang ? '28px 14px 14px' : '14px',
-                                                        borderRadius: 12,
-                                                        background: '#0f172a',
-                                                        border: '1px solid rgba(255,255,255,0.04)',
-                                                        fontSize: 12,
-                                                        lineHeight: 1.6,
-                                                    }}>
-                                                        <code className={className} style={{
-                                                            fontFamily: 'ui-monospace, monospace',
-                                                            fontSize: 12,
-                                                            color: '#a5b4fc',
-                                                        }} {...props}>{children}</code>
+                                                    <pre className="p-4 bg-zinc-900 dark:bg-black overflow-x-auto">
+                                                        <code className={cn("font-mono text-[13px] leading-relaxed text-zinc-200", className)} {...props}>{children}</code>
                                                     </pre>
                                                     <CopyButton text={codeText}/>
                                                 </div>
                                             )
                                         }
-                                        return <code style={{
-                                            fontFamily: 'ui-monospace, monospace',
-                                            fontSize: '0.88em',
-                                            padding: '2px 7px',
-                                            borderRadius: 5,
-                                            background: isUser ? 'rgba(255,255,255,0.18)' : 'rgba(99,102,241,0.07)',
-                                            color: isUser ? '#fff' : '#4338ca',
-                                        }} {...props}>{children}</code>
+                                        return <code className={cn(
+                                            "font-mono text-[0.9em] px-1.5 py-0.5 rounded-md",
+                                            isUser ? "bg-white/20 text-white" : "bg-zinc-100 dark:bg-zinc-800 text-blue-600 dark:text-blue-400"
+                                        )} {...props}>{children}</code>
                                     },
                                     p: ({children}) => {
                                         const rawText = Array.isArray(children)
@@ -492,183 +400,54 @@ export function ChatMessage({
                                         const fileMatch = rawText.match(/Файл:\s*(\S[^\t\n]+?)(?:\s{2,}|\s*Размер:)/)
                                         if (fileMatch?.[1] && !isUser && onAttachmentClick) {
                                             const fileName = fileMatch[1].trim()
+                                            const fileSize = rawText.match(/Размер:\s*([^\n]+)/)?.[1]?.trim() ?? ''
                                             return (
-                                                <button type="button" onClick={() => onAttachmentClick(fileName)}
-                                                        style={{
-                                                            display: 'flex', alignItems: 'center', gap: 8,
-                                                            width: '100%', padding: '9px 12px', marginBottom: 4,
-                                                            borderRadius: 12, cursor: 'pointer', textAlign: 'left',
-                                                            background: 'rgba(248,250,252,0.80)',
-                                                            border: '1px solid rgba(0,0,0,0.04)',
-                                                            color: '#334155', fontSize: 12, fontWeight: 500,
-                                                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                                        }}
-                                                        onMouseEnter={e => {
-                                                            const el = e.currentTarget as HTMLButtonElement
-                                                            el.style.background = 'rgba(99,102,241,0.05)'
-                                                            el.style.borderColor = 'rgba(99,102,241,0.15)'
-                                                            el.style.transform = 'translateX(2px)'
-                                                        }}
-                                                        onMouseLeave={e => {
-                                                            const el = e.currentTarget as HTMLButtonElement
-                                                            el.style.background = 'rgba(248,250,252,0.80)'
-                                                            el.style.borderColor = 'rgba(0,0,0,0.04)'
-                                                            el.style.transform = 'translateX(0)'
-                                                        }}
+                                                <div
+                                                  className="flex items-center gap-3 p-3 my-2 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 transition-all cursor-pointer group"
+                                                  onClick={() => onAttachmentClick(fileName)}
                                                 >
-                                                    <span style={{fontSize: 15, flexShrink: 0}}>📎</span>
-                                                    <span style={{
-                                                        flex: 1, minWidth: 0,
-                                                        overflow: 'hidden', textOverflow: 'ellipsis',
-                                                        whiteSpace: 'nowrap',
-                                                    }}>{fileName}</span>
-                                                    <span style={{
-                                                        fontSize: 10, color: '#94a3b8',
-                                                        flexShrink: 0, fontWeight: 400,
-                                                    }}>
-                                                        {rawText.match(/Размер:\s*([^\n]+)/)?.[1]?.trim() ?? ''}
-                                                    </span>
-                                                </button>
+                                                    <div className="p-2 bg-white dark:bg-zinc-800 rounded-lg shadow-sm group-hover:text-blue-500">
+                                                      <Paperclip size={16} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate">{fileName}</div>
+                                                        {fileSize && <div className="text-[11px] text-zinc-500 mt-0.5">{fileSize}</div>}
+                                                    </div>
+                                                    <ExternalLink size={14} className="text-zinc-400 group-hover:text-blue-500" />
+                                                </div>
                                             )
                                         }
-                                        return <p style={{
-                                            marginBottom: 8, lineHeight: 1.75,
-                                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                                        }}>{children}</p>
+                                        return <p className="mb-2 last:mb-0 leading-relaxed text-[15px]">{children}</p>
                                     },
                                     ul: ({children, depth}: any) => (
-                                        <ul style={{
-                                            paddingLeft: depth > 0 ? 16 : 20,
-                                            marginBottom: 8,
-                                            listStyle: 'none',
-                                        }}>{children}</ul>
+                                        <ul className={cn("mb-3 space-y-1.5 list-none", depth > 0 ? "pl-4" : "pl-1")}>{children}</ul>
                                     ),
                                     ol: ({children}: any) => (
-                                        <ol style={{
-                                            paddingLeft: 20, marginBottom: 8,
-                                            counterReset: 'edms-ol',
-                                            listStyle: 'none',
-                                        }}>{children}</ol>
+                                        <ol className="mb-3 space-y-1.5 list-none pl-1 counter-reset-edms-ol">{children}</ol>
                                     ),
-                                    li: ({children, ordered, index, depth}: any) => (
-                                        <li style={{
-                                            marginBottom: 3, position: 'relative',
-                                            paddingLeft: 4,
-                                            lineHeight: 1.65,
-                                        }}>
-                                            <span style={{
-                                                position: 'absolute',
-                                                left: depth > 0 ? -16 : -14,
-                                                color: isUser ? 'rgba(255,255,255,0.6)' : '#6366f1',
-                                                fontSize: 10,
-                                                fontWeight: 700,
-                                            }}>
+                                    li: ({children, ordered, index}: any) => (
+                                        <li className="relative pl-7 text-[15px] leading-relaxed">
+                                            <span className="absolute left-0 top-1.5 flex items-center justify-center w-4 h-4 text-[10px] font-bold text-blue-500 dark:text-blue-400">
                                                 {ordered ? `${(index ?? 0) + 1}.` : '•'}
                                             </span>
                                             {children}
                                         </li>
                                     ),
-                                    h1: ({children}) => {
-                                        const text = typeof children === 'string'
-                                            ? children
-                                            : Array.isArray(children)
-                                                ? children.map(c => typeof c === 'string' ? c : '').join('')
-                                                : ''
-                                        return <div style={{
-                                            fontWeight: 700, fontSize: 15, marginTop: 14, marginBottom: 6,
-                                            color: isUser ? '#fff' : '#0f172a',
-                                            paddingBottom: 6,
-                                            borderBottom: isUser
-                                                ? '1px solid rgba(255,255,255,0.15)'
-                                                : '2px solid rgba(99,102,241,0.12)',
-                                            lineHeight: 1.4,
-                                        }}>{text || children}</div>
-                                    },
-                                    h2: ({children}) => {
-                                        const text = typeof children === 'string'
-                                            ? children
-                                            : Array.isArray(children)
-                                                ? children.map(c => typeof c === 'string' ? c : '').join('')
-                                                : ''
-                                        if (text.includes('Открой любой документ')) return null
-                                        return <div style={{
-                                            fontWeight: 700, fontSize: 14, marginTop: 14, marginBottom: 6,
-                                            color: isUser ? '#fff' : '#0f172a',
-                                            paddingBottom: 5,
-                                            borderBottom: isUser
-                                                ? '1px solid rgba(255,255,255,0.12)'
-                                                : '1px solid rgba(99,102,241,0.1)',
-                                            lineHeight: 1.4,
-                                        }}>{text || children}</div>
-                                    },
-                                    h3: ({children}) => {
-                                        const text = typeof children === 'string'
-                                            ? children
-                                            : Array.isArray(children)
-                                                ? children.map(c => typeof c === 'string' ? c : '').join('')
-                                                : ''
-                                        return <div style={{
-                                            fontWeight: 600, fontSize: 13, marginTop: 10, marginBottom: 4,
-                                            color: isUser ? 'rgba(255,255,255,0.9)' : '#334155',
-                                            lineHeight: 1.4,
-                                        }}>{text || children}</div>
-                                    },
-                                    h4: ({children}) => {
-                                        const text = typeof children === 'string'
-                                            ? children
-                                            : Array.isArray(children)
-                                                ? children.map(c => typeof c === 'string' ? c : '').join('')
-                                                : ''
-                                        return <div style={{
-                                            fontWeight: 600, fontSize: 12, marginTop: 8, marginBottom: 3,
-                                            color: isUser ? 'rgba(255,255,255,0.85)' : '#475569',
-                                        }}>{text || children}</div>
-                                    },
-                                    strong: ({children}) => <strong style={{
-                                        fontWeight: 650,
-                                        color: isUser ? '#fff' : '#0f172a',
-                                    }}>{children}</strong>,
-                                    em: ({children}) => <em style={{
-                                        fontStyle: 'italic',
-                                        color: isUser ? 'rgba(255,255,255,0.85)' : '#64748b',
-                                    }}>{children}</em>,
-                                    a: ({children, href}) => <a href={href} target="_blank" rel="noopener noreferrer"
-                                                                style={{
-                                                                    textDecoration: 'underline',
-                                                                    fontWeight: 500,
-                                                                    color: isUser ? 'rgba(255,255,255,0.85)' : '#6366f1',
-                                                                    transition: 'opacity 0.15s',
-                                                                }}>{children}</a>,
+                                    h1: ({children}) => <h1 className="text-xl font-bold mt-6 mb-3 text-zinc-900 dark:text-zinc-100 tracking-tight">{children}</h1>,
+                                    h2: ({children}) => <h2 className="text-lg font-bold mt-5 mb-2.5 text-zinc-900 dark:text-zinc-100 tracking-tight">{children}</h2>,
+                                    h3: ({children}) => <h3 className="text-base font-bold mt-4 mb-2 text-zinc-900 dark:text-zinc-100 tracking-tight">{children}</h3>,
+                                    h4: ({children}) => <h4 className="text-sm font-bold mt-3 mb-1.5 text-zinc-900 dark:text-zinc-100 tracking-tight uppercase tracking-wider">{children}</h4>,
+                                    strong: ({children}) => <strong className="font-bold text-zinc-900 dark:text-zinc-100">{children}</strong>,
+                                    em: ({children}) => <em className="italic text-zinc-700 dark:text-zinc-300">{children}</em>,
+                                    a: ({children, href}) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 font-medium underline underline-offset-4 decoration-blue-500/30 hover:decoration-blue-500 transition-all">{children}</a>,
                                     blockquote: ({children}) => (
-                                        <blockquote style={{
-                                            borderLeft: `3px solid ${isUser ? 'rgba(255,255,255,0.30)' : '#c7d2fe'}`,
-                                            paddingLeft: 14, marginLeft: 0, marginRight: 0,
-                                            fontStyle: 'italic',
-                                            color: isUser ? 'rgba(255,255,255,0.75)' : '#64748b',
-                                            margin: '8px 0',
-                                        }}>
+                                        <blockquote className="border-l-4 border-zinc-200 dark:border-zinc-800 pl-4 my-4 italic text-zinc-600 dark:text-zinc-400 leading-relaxed">
                                             {children}
                                         </blockquote>
                                     ),
-                                    hr: () => (
-                                        <hr style={{
-                                            border: 'none',
-                                            height: 1,
-                                            background: isUser
-                                                ? 'rgba(255,255,255,0.15)'
-                                                : 'rgba(0,0,0,0.06)',
-                                            margin: '12px 0',
-                                        }}/>
-                                    ),
+                                    hr: () => <hr className="my-6 border-zinc-100 dark:border-zinc-800"/>,
                                     img: ({src, alt}) => (
-                                        <img src={src} alt={alt || ''}
-                                             style={{
-                                                 maxWidth: '100%',
-                                                 borderRadius: 10,
-                                                 margin: '8px 0',
-                                                 border: '1px solid rgba(0,0,0,0.05)',
-                                             }}
-                                        />
+                                        <img src={src} alt={alt || ''} className="max-w-full rounded-xl my-4 border border-zinc-100 dark:border-zinc-800 shadow-md"/>
                                     ),
                                 }}
                             >
@@ -678,13 +457,11 @@ export function ChatMessage({
                     </DocumentClickContext.Provider>
                 </AttachmentClickContext.Provider>
 
-                <div style={{
-                    marginTop: 5,
-                    opacity: 0.45,
-                    textAlign: isUser ? 'right' : 'left',
-                    color: isUser ? 'rgba(255,255,255,0.75)' : '#94a3b8',
-                    fontSize: 10,
-                }}>
+                <div className={cn(
+                    "mt-2 text-[10px] font-medium flex items-center gap-1 opacity-50",
+                    isUser ? "justify-end text-white" : "justify-start text-zinc-500"
+                )}>
+                    <Clock size={10} />
                     {timeLabel}
                 </div>
             </div>

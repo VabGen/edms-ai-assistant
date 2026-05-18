@@ -1,46 +1,61 @@
 import { useContext } from 'react'
-import { FileText, ChevronRight } from 'lucide-react'
-import { BaseCard } from '../primitives/BaseCard'
+import { FileText, Download, FileCode, FileSpreadsheet, FileDigit, FileType, File } from 'lucide-react'
+import { Card, CardHeader, CardTitle, CardDescription, IconBox } from '../primitives'
 import { AttachmentClickContext } from '../ChatContext'
 
+const getFileIcon = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || ''
+    if (['doc', 'docx', 'txt', 'rtf'].includes(ext)) return FileText
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return FileSpreadsheet
+    if (['pdf'].includes(ext)) return FileType
+    if (['zip', 'rar', '7z'].includes(ext)) return FileDigit
+    if (['html', 'css', 'js', 'json'].includes(ext)) return FileCode
+    return File
+}
+
 interface AttachmentCardProps {
-  headers: string[]
-  row: string[]
-  index: number
+    headers: string[]
+    row: string[]
+    index: number
 }
 
 export function AttachmentCard({ headers, row, index }: AttachmentCardProps) {
     const onAttachmentClick = useContext(AttachmentClickContext)
-    const pairs = headers.map((h, i) => ({key: h, value: row[i] || ''}))
+    const pairs = headers.map((h, i) => ({ key: h, value: row[i] || '' }))
 
     const fileName = pairs.find(p => /файл|название|name/i.test(p.key))?.value
-        || pairs.find(p => p.value && /\.(docx?|pdf|xlsx?|txt|rtf)/i.test(p.value))?.value || ''
+        || pairs.find(p => p.value && /\.(docx?|pdf|xlsx?|txt|rtf|zip|rar|csv)/i.test(p.value))?.value || ''
     const fileSize = pairs.find(p => /размер|size/i.test(p.key))?.value || ''
     const fileDate = pairs.find(p => /дата|date/i.test(p.key))?.value || ''
 
+    const Icon = getFileIcon(fileName)
+
     return (
-        <BaseCard
-            onClick={() => fileName && onAttachmentClick?.(fileName)}
+        <Card
             isClickable={!!onAttachmentClick}
+            onClick={() => fileName && onAttachmentClick?.(fileName)}
+            className="mb-2 group"
         >
-            <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-indigo-50/50 flex items-center justify-center shrink-0 text-indigo-500 text-[12px] font-bold">
-                  {index + 1}
-                </div>
-
-                <FileText size={18} className="text-indigo-500 opacity-70 shrink-0"/>
-
+            <CardHeader className="flex-row items-center gap-3 p-3 space-y-0">
+                <IconBox
+                    icon={Icon}
+                    variant="zinc"
+                    size="sm"
+                />
                 <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-slate-900 truncate">
-                      {fileName || `Вложение ${index + 1}`}
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex gap-2">
-                        {fileSize && <span>{fileSize}</span>}
-                        {fileDate && <span>{fileDate}</span>}
-                    </div>
+                    <CardTitle className="text-sm truncate group-hover:text-blue-600 transition-colors">
+                        {fileName || `Вложение ${index + 1}`}
+                    </CardTitle>
+                    {(fileSize || fileDate) && (
+                        <CardDescription className="text-[11px] mt-0.5 flex items-center gap-2">
+                            {fileSize && <span>{fileSize}</span>}
+                            {fileSize && fileDate && <span className="w-1 h-1 rounded-full bg-zinc-300" />}
+                            {fileDate && <span>{fileDate}</span>}
+                        </CardDescription>
+                    )}
                 </div>
-                {onAttachmentClick && <ChevronRight size={16} className="text-slate-300 shrink-0"/>}
-            </div>
-        </BaseCard>
+                <Download size={14} className="text-zinc-400 group-hover:text-blue-500 transition-colors shrink-0" />
+            </CardHeader>
+        </Card>
     )
 }

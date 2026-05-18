@@ -1,182 +1,39 @@
-import { FileSearch } from 'lucide-react'
+import {
+    FileSearch, Calendar, User, Building2, Banknote, ShieldAlert, Hourglass,
+    MapPin, Phone, Mail, FileText, Network, Briefcase, Hash, Activity,
+    Scale, Link, Contact, AlertTriangle, Play, MoreHorizontal
+} from 'lucide-react'
 import type { ExtractiveData } from '@/entities/message/model/types'
-import { CARD, CARD_HEADER, BADGE_BASE, CardFooter } from './common'
+import { CardFooter } from './common'
+import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
+import { cn } from '@shared/lib/cn'
 
-const STRICT_SVG_PROPS = {
-    width: 12,
-    height: 12,
-    viewBox: '0 0 16 16',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.5,
-    strokeLinecap: 'square' as const,
-    strokeLinejoin: 'miter' as const,
-};
+const FACT_CONFIG: Record<string, { variant: 'primary' | 'success' | 'warning' | 'error' | 'zinc'; icon: any }> = {
+    'ДАТА': { variant: 'primary', icon: Calendar },
+    'ПЕРСОНА': { variant: 'primary', icon: User },
+    'ОРГАНИЗАЦИЯ': { variant: 'success', icon: Building2 },
+    'СУММА': { variant: 'warning', icon: Banknote },
+    'ТРЕБОВАНИЕ': { variant: 'error', icon: ShieldAlert },
+    'СРОК': { variant: 'error', icon: Hourglass },
+    'АДРЕС': { variant: 'primary', icon: MapPin },
+    'ТЕЛЕФОН': { variant: 'primary', icon: Phone },
+    'ЭЛ. ПОЧТА': { variant: 'primary', icon: Mail },
+    'ДОКУМЕНТ': { variant: 'zinc', icon: FileText },
+    'ПОДРАЗДЕЛЕНИЕ': { variant: 'success', icon: Network },
+    'ДОЛЖНОСТЬ': { variant: 'warning', icon: Briefcase },
+    'НОМЕР': { variant: 'zinc', icon: Hash },
+    'СТАТУС': { variant: 'primary', icon: Activity },
+    'ЗАКОН': { variant: 'primary', icon: Scale },
+    'ССЫЛКА': { variant: 'primary', icon: Link },
+    'КОНТАКТ': { variant: 'primary', icon: Contact },
+    'РИСК': { variant: 'error', icon: AlertTriangle },
+    'ДЕЙСТВИЕ': { variant: 'warning', icon: Play },
+    'ПРОЧЕЕ': { variant: 'zinc', icon: MoreHorizontal },
+}
 
-const FACT_CATEGORY: Record<string, { bg: string; text: string; icon: React.ReactNode; border: string }> = {
-    'ДАТА': {
-        bg: 'rgba(59,130,246,0.08)',
-        text: '#1d4ed8',
-        border: 'rgba(59,130,246,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 4h12v10H2V4zM2 7h12M5 4V2M11 4V2"/>
-        </svg>,
-    },
-    'ПЕРСОНА': {
-        bg: 'rgba(139,92,246,0.08)',
-        text: '#5b21b6',
-        border: 'rgba(139,92,246,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M8 6a2 2 0 100-4 2 2 0 000 4zM3 14v-2a5 5 0 0110 0v2"/>
-        </svg>,
-    },
-    'ОРГАНИЗАЦИЯ': {
-        bg: 'rgba(16,185,129,0.08)',
-        text: '#065f46',
-        border: 'rgba(16,185,129,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 14V2h5v4h7v8H7M7 6v8"/>
-        </svg>,
-    },
-    'СУММА': {
-        bg: 'rgba(245,158,11,0.08)',
-        text: '#92400e',
-        border: 'rgba(245,158,11,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 4h12v8H2V4zM5 4v8M8 7h3M8 10h3"/>
-        </svg>,
-    },
-    'ТРЕБОВАНИЕ': {
-        bg: 'rgba(239,68,68,0.08)',
-        text: '#991b1b',
-        border: 'rgba(239,68,68,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M8 1l6 3v5c0 3.5-6 6-6 6s-6-2.5-6-6V4l6-3zM8 5v3M8 11.5v0.5"/>
-        </svg>,
-    },
-    'СРОК': {
-        bg: 'rgba(244,63,94,0.08)',
-        text: '#9f1239',
-        border: 'rgba(244,63,94,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M4 2h8v3L8 8l4 3v3H4v-3l4-3-4-3V2z"/>
-        </svg>,
-    },
-    'АДРЕС': {
-        bg: 'rgba(6,182,212,0.08)',
-        text: '#155e75',
-        border: 'rgba(6,182,212,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M8 14s-5-4-5-8a5 5 0 0110 0c0 4-5 8-5 8z"/>
-        </svg>,
-    },
-    'ТЕЛЕФОН': {
-        bg: 'rgba(139,92,246,0.08)',
-        text: '#5b21b6',
-        border: 'rgba(139,92,246,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M4 1h8v14H4V1zM7 13h2"/>
-        </svg>,
-    },
-    'ЭЛ. ПОЧТА': {
-        bg: 'rgba(59,130,246,0.08)',
-        text: '#1d4ed8',
-        border: 'rgba(59,130,246,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 3h12v10H2V3zM2 3l6 6 6-6"/>
-        </svg>,
-    },
-    'ДОКУМЕНТ': {
-        bg: 'rgba(99,102,241,0.08)',
-        text: '#4338ca',
-        border: 'rgba(99,102,241,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M3 2h7l3 3v9H3V2zM10 2v3h3M5 7h6M5 9h6M5 11h4"/>
-        </svg>,
-    },
-    'ПОДРАЗДЕЛЕНИЕ': {
-        bg: 'rgba(20,184,166,0.08)',
-        text: '#115e59',
-        border: 'rgba(20,184,166,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M8 2v4M4 6h8M4 6v3M12 6v3M4 9h2M12 9h2"/>
-        </svg>,
-    },
-    'ДОЛЖНОСТЬ': {
-        bg: 'rgba(249,115,22,0.08)',
-        text: '#9a3412',
-        border: 'rgba(249,115,22,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M8 2l2.5 5H5.5L8 2zM6 7v5M10 7v5M5 12h6"/>
-        </svg>,
-    },
-    'НОМЕР': {
-        bg: 'rgba(100,116,139,0.08)',
-        text: '#334155',
-        border: 'rgba(100,116,139,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M4 3h8M7 2v12M4 13h8"/>
-        </svg>,
-    },
-    'СТАТУС': {
-        bg: 'rgba(192,38,211,0.08)',
-        text: '#86198f',
-        border: 'rgba(192,38,211,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 2h12v12H2V2zM4 8l3 3 5-5"/>
-        </svg>,
-    },
-    'ЗАКОН': {
-        bg: 'rgba(14,165,233,0.08)',
-        text: '#0369a1',
-        border: 'rgba(14,165,233,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 4h12M4 4l2 8M12 4l-2 8M6 12h4M8 2v2"/>
-        </svg>,
-    },
-    'ССЫЛКА': {
-        bg: 'rgba(59,130,246,0.08)',
-        text: '#1d4ed8',
-        border: 'rgba(59,130,246,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M6 6L3 9l4 4 3-3M10 10l3-3-4-4-3 3"/>
-        </svg>,
-    },
-    'КОНТАКТ': {
-        bg: 'rgba(139,92,246,0.08)',
-        text: '#5b21b6',
-        border: 'rgba(139,92,246,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M8 6a2 2 0 100-4 2 2 0 000 4zM3 14v-2a5 5 0 0110 0v2"/>
-        </svg>,
-    },
-    'РИСК': {
-        bg: 'rgba(239,68,68,0.08)',
-        text: '#991b1b',
-        border: 'rgba(239,68,68,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M2 14L8 2l6 12H2zM8 6v3M8 11.5v0.5"/>
-        </svg>,
-    },
-    'ДЕЙСТВИЕ': {
-        bg: 'rgba(245,158,11,0.08)',
-        text: '#92400e',
-        border: 'rgba(245,158,11,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M4 2l9 6-9 6V2z"/>
-        </svg>,
-    },
-    'ПРОЧЕЕ': {
-        bg: 'rgba(100,116,139,0.08)',
-        text: '#475569',
-        border: 'rgba(100,116,139,0.12)',
-        icon: <svg {...STRICT_SVG_PROPS}>
-            <path d="M3 4h10M3 8h10M3 12h10"/>
-        </svg>,
-    },
-};
+const DEFAULT_CONFIG = FACT_CONFIG['ПРОЧЕЕ']!
 
-function factCat(key: string) {
+function getFactConfig(key: string) {
     const upper = key.toUpperCase()
         .replace(/EMAIL/g, 'ЭЛ. ПОЧТА')
         .replace(/E-?MAIL/g, 'ЭЛ. ПОЧТА')
@@ -189,107 +46,86 @@ function factCat(key: string) {
         .replace(/NUMBER/g, 'НОМЕР')
         .replace(/NUM/g, 'НОМЕР');
 
-    return (FACT_CATEGORY[upper] ?? FACT_CATEGORY['ПРОЧЕЕ'])!
+    return FACT_CONFIG[upper] ?? DEFAULT_CONFIG
 }
 
 export function ExtractiveResult({data}: { data: ExtractiveData }) {
     const categories = [...new Set(data.facts.map(f => f.category.toUpperCase()))]
 
     return (
-        <div style={CARD}>
-            <div style={{
-                ...CARD_HEADER,
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.04), rgba(99,102,241,0.04))',
-            }}>
-                <div style={{
-                    width: 32, height: 32, borderRadius: 10,
-                    background: 'rgba(59,130,246,0.1)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                }}>
-                    <FileSearch size={16} style={{color: '#3b82f6'}}/>
-                </div>
-                <div style={{flex: 1}}>
-                    <div style={{fontSize: 14, fontWeight: 700, color: '#0f172a'}}>
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
+            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-900/10 dark:to-indigo-900/10 border-b border-zinc-100 dark:border-zinc-800">
+                <IconBox
+                    icon={FileSearch}
+                    variant="primary"
+                    size="md"
+                />
+                <div className="flex-1 min-w-0">
+                    <CardTitle className="text-base font-bold leading-snug">
                         Извлечённые факты
-                    </div>
+                    </CardTitle>
                     {data.document_summary && (
-                        <div style={{fontSize: 11, color: '#64748b', marginTop: 1}}>
+                        <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-1">
                             {data.document_summary}
                         </div>
                     )}
                 </div>
-                <span style={{
-                    ...BADGE_BASE,
-                    background: 'rgba(59,130,246,0.08)', color: '#1d4ed8',
-                }}>
+                <div className="px-2 py-1 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider border border-blue-200 dark:border-blue-800">
                     {data.facts.length} фактов
-                </span>
-            </div>
+                </div>
+            </CardHeader>
 
             {categories.length > 1 && (
-                <div style={{
-                    display: 'flex', flexWrap: 'wrap', gap: 4,
-                    padding: '8px 16px',
-                    borderBottom: '1px solid rgba(0,0,0,0.04)',
-                    background: '#fafbfc',
-                }}>
+                <div className="flex flex-wrap gap-2 p-4 bg-zinc-50/50 dark:bg-zinc-800/30 border-b border-zinc-100 dark:border-zinc-800">
                     {categories.map(cat => {
-                        const cfg = factCat(cat)
+                        const cfg = getFactConfig(cat)
                         const count = data.facts.filter(f => f.category.toUpperCase() === cat).length
+                        const Icon = cfg.icon
                         return (
-                            <span key={cat} style={{
-                                ...BADGE_BASE,
-                                background: cfg.bg, color: cfg.text,
-                            }}>
-                                {cfg.icon} {cat} ({count})
-                            </span>
+                            <div key={cat} className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-tight",
+                                cfg.variant === 'primary' && "bg-blue-50 border-blue-100 text-blue-600",
+                                cfg.variant === 'success' && "bg-emerald-50 border-emerald-100 text-emerald-600",
+                                cfg.variant === 'warning' && "bg-amber-50 border-amber-100 text-amber-600",
+                                cfg.variant === 'error' && "bg-rose-50 border-rose-100 text-rose-600",
+                                cfg.variant === 'zinc' && "bg-zinc-100 border-zinc-200 text-zinc-600",
+                            )}>
+                                <Icon size={12} /> {cat} ({count})
+                            </div>
                         )
                     })}
                 </div>
             )}
 
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-                gap: 8,
-                padding: '12px 16px',
-            }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
                 {data.facts.map((fact, i) => {
-                    const cfg = factCat(fact.category)
+                    const cfg = getFactConfig(fact.category)
+                    const Icon = cfg.icon
                     return (
-                        <div key={i} style={{
-                            padding: '10px 12px',
-                            borderRadius: 10,
-                            background: cfg.bg,
-                            border: `1px solid ${cfg.border}`,
-                        }}>
-                            <div style={{
-                                display: 'flex', justifyContent: 'space-between',
-                                alignItems: 'center', marginBottom: 4,
-                            }}>
-                                <span style={{
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    color: cfg.text,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4
-                                }}>
-                                    {cfg.icon} {fact.label}
-                                </span>
-                                <span style={{
-                                    fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
-                                    color: cfg.text, opacity: 0.7,
-                                    display: 'inline-flex', alignItems: 'center', gap: 3
-                                }}>
-                                   {cfg.icon} {fact.category}
-                                </span>
+                        <div key={i} className={cn(
+                            "p-3.5 rounded-xl border transition-all hover:shadow-md",
+                            cfg.variant === 'primary' && "bg-blue-50/30 border-blue-100/50 hover:border-blue-200",
+                            cfg.variant === 'success' && "bg-emerald-50/30 border-emerald-100/50 hover:border-emerald-200",
+                            cfg.variant === 'warning' && "bg-amber-50/30 border-amber-100/50 hover:border-amber-200",
+                            cfg.variant === 'error' && "bg-rose-50/30 border-rose-100/50 hover:border-rose-200",
+                            cfg.variant === 'zinc' && "bg-zinc-50/30 border-zinc-200/50 hover:border-zinc-300",
+                        )}>
+                            <div className="flex items-center justify-between gap-2 mb-2.5">
+                                <div className={cn(
+                                    "flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider",
+                                    cfg.variant === 'primary' && "text-blue-600",
+                                    cfg.variant === 'success' && "text-emerald-600",
+                                    cfg.variant === 'warning' && "text-amber-600",
+                                    cfg.variant === 'error' && "text-rose-600",
+                                    cfg.variant === 'zinc' && "text-zinc-500",
+                                )}>
+                                    <Icon size={12} /> {fact.label}
+                                </div>
+                                <div className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest opacity-60">
+                                    {fact.category}
+                                </div>
                             </div>
-                            <div style={{
-                                fontSize: 12, color: '#1e293b',
-                                wordBreak: 'break-word', lineHeight: 1.5,
-                            }}>
+                            <div className="text-[13px] font-bold text-zinc-900 dark:text-zinc-100 break-words leading-relaxed">
                                 {fact.value}
                             </div>
                         </div>
@@ -298,6 +134,6 @@ export function ExtractiveResult({data}: { data: ExtractiveData }) {
             </div>
 
             <CardFooter/>
-        </div>
+        </Card>
     )
 }

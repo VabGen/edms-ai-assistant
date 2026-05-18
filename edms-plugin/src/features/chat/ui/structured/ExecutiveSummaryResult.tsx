@@ -1,54 +1,35 @@
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Lightbulb, Info } from 'lucide-react'
 import type { ExecutiveSummaryData } from '@/entities/message/model/types'
-import { CARD, CARD_HEADER, CardFooter } from './common'
+import { CardFooter } from './common'
+import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
 
 export function ExecutiveSummaryResult({data}: { data: ExecutiveSummaryData }) {
     return (
-        <div style={CARD}>
-            <div style={{
-                ...CARD_HEADER,
-                background: 'linear-gradient(135deg, rgba(139,92,246,0.04), rgba(99,102,241,0.04))',
-            }}>
-                <div style={{
-                    width: 32, height: 32, borderRadius: 10,
-                    background: 'rgba(139,92,246,0.1)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                }}>
-                    <Sparkles size={16} style={{color: '#8b5cf6'}}/>
-                </div>
-                <div style={{flex: 1}}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 600, color: '#8b5cf6',
-                        textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2,
-                    }}>
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
+            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-violet-50/50 to-indigo-50/50 dark:from-violet-900/10 dark:to-indigo-900/10 border-b border-zinc-100 dark:border-zinc-800">
+                <IconBox
+                    icon={Sparkles}
+                    variant="primary"
+                    size="md"
+                />
+                <div className="flex-1 min-w-0">
+                    <div className="text-[10px] font-bold text-violet-500 uppercase tracking-widest mb-1">
                         Резюме
                     </div>
-                    <div style={{fontSize: 14, fontWeight: 700, color: '#0f172a', lineHeight: 1.45}}>
+                    <CardTitle className="text-base font-bold leading-snug">
                         {data.headline}
-                    </div>
+                    </CardTitle>
                 </div>
-            </div>
+            </CardHeader>
 
             {data.bullets.length > 0 && (
-                <div style={{padding: '12px 16px'}}>
+                <div className="p-4 space-y-3">
                     {data.bullets.map((bullet, i) => (
-                        <div key={i} style={{
-                            display: 'flex', alignItems: 'flex-start', gap: 10,
-                            padding: '7px 0',
-                            borderBottom: i < data.bullets.length - 1
-                                ? '1px solid rgba(0,0,0,0.04)' : 'none',
-                        }}>
-                            <span style={{
-                                minWidth: 22, height: 22, borderRadius: 7,
-                                background: `rgba(139,92,246,${0.06 + i * 0.02})`,
-                                color: '#5b21b6', fontSize: 10, fontWeight: 700,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                flexShrink: 0, marginTop: 1,
-                            }}>
+                        <div key={i} className="flex items-start gap-3 group">
+                            <div className="w-5 h-5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5 border border-violet-100 dark:border-violet-800/50">
                                 {i + 1}
-                            </span>
-                            <span style={{fontSize: 12, color: '#334155', lineHeight: 1.6}}>
+                            </div>
+                            <span className="text-[14px] text-zinc-700 dark:text-zinc-300 leading-relaxed">
                                 {bullet}
                             </span>
                         </div>
@@ -57,21 +38,18 @@ export function ExecutiveSummaryResult({data}: { data: ExecutiveSummaryData }) {
             )}
 
             {data.recommendation && (
-                <div style={{
-                    margin: '0 16px 12px', padding: '10px 14px',
-                    background: '#fffbeb', border: '1px solid #fcd34d',
-                    borderRadius: 10, fontSize: 12, color: '#92400e',
-                    display: 'flex', gap: 8, alignItems: 'flex-start', lineHeight: 1.5,
-                }}>
-                    <span style={{fontSize: 14, flexShrink: 0}}>💡</span>
+                <div className="mx-4 mb-4 p-4 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-xl flex gap-3 items-start shadow-sm">
+                    <IconBox icon={Lightbulb} variant="warning" size="sm" className="bg-white dark:bg-zinc-800 shadow-sm mt-0.5" />
                     <div>
-                        <div style={{fontWeight: 600, marginBottom: 2}}>Рекомендация</div>
-                        {data.recommendation}
+                        <div className="text-[11px] font-bold text-amber-700 dark:text-amber-500 uppercase tracking-tight mb-1">Рекомендация</div>
+                        <div className="text-[13px] text-zinc-800 dark:text-zinc-200 leading-relaxed font-medium">
+                            {data.recommendation}
+                        </div>
                     </div>
                 </div>
             )}
 
             <CardFooter/>
-        </div>
+        </Card>
     )
 }

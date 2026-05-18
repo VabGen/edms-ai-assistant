@@ -1,81 +1,52 @@
-import { Brain, Clock } from 'lucide-react'
+import { Brain, Clock, Hash } from 'lucide-react'
 import type { DetailedNotesData } from '@/entities/message/model/types'
-import { CARD, CARD_HEADER, BADGE_BASE, CardFooter, CollapsibleSection } from './common'
+import { CardFooter, CollapsibleSection } from './common'
+import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
+import { cn } from '@shared/lib/cn'
 
 export function DetailedNotesResult({data}: { data: DetailedNotesData }) {
     return (
-        <div style={CARD}>
-            <div style={{
-                ...CARD_HEADER,
-                background: 'linear-gradient(135deg, rgba(6,182,212,0.04), rgba(59,130,246,0.04))',
-            }}>
-                <div style={{
-                    width: 32, height: 32, borderRadius: 10,
-                    background: 'rgba(6,182,212,0.1)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                }}>
-                    <Brain size={16} style={{color: '#06b6d4'}}/>
-                </div>
-                <div style={{flex: 1}}>
-                    <div style={{fontSize: 14, fontWeight: 700, color: '#0f172a'}}>
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
+            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/10 dark:to-blue-900/10 border-b border-zinc-100 dark:border-zinc-800">
+                <IconBox
+                    icon={Brain}
+                    variant="primary"
+                    size="md"
+                />
+                <div className="flex-1 min-w-0">
+                    <CardTitle className="text-base font-bold leading-snug">
                         Подробные заметки
-                    </div>
-                    <div style={{
-                        display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap',
-                    }}>
-                        <span style={{
-                            ...BADGE_BASE,
-                            background: 'rgba(6,182,212,0.08)', color: '#155e75',
-                        }}>
+                    </CardTitle>
+                    <div className="flex flex-wrap gap-2 mt-1.5">
+                        <div className="px-1.5 py-0.5 rounded-md bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-400 text-[10px] font-bold uppercase tracking-wider border border-cyan-200 dark:border-cyan-800">
                             {data.document_type}
-                        </span>
+                        </div>
                         {data.date_range && (
-                            <span style={{
-                                ...BADGE_BASE,
-                                background: 'rgba(59,130,246,0.06)', color: '#1d4ed8',
-                            }}>
-                                <Clock size={9}/> {data.date_range}
-                            </span>
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 text-[10px] font-bold border border-blue-100 dark:border-blue-800">
+                                <Clock size={10}/> {data.date_range}
+                            </div>
                         )}
                     </div>
                 </div>
-            </div>
+            </CardHeader>
 
-            <div style={{padding: '4px 0'}}>
+            <div className="px-1 py-1">
                 {data.sections.map((section, i) => (
                     <CollapsibleSection
                         key={i}
                         title={section.title}
                         defaultOpen={i === 0}
-                        icon={
-                            <span style={{
-                                ...BADGE_BASE, borderRadius: 6, fontSize: 10,
-                                background: 'rgba(6,182,212,0.08)', color: '#155e75',
-                            }}>
-                                {i + 1}
-                            </span>
-                        }
                     >
-                        <div style={{
-                            fontSize: 12, color: '#334155',
-                            lineHeight: 1.7, marginBottom: 6,
-                        }}>
+                        <div className="text-[14px] text-zinc-700 dark:text-zinc-300 font-medium leading-relaxed mb-4">
                             {section.content}
                         </div>
 
                         {section.subsections && section.subsections.length > 0 && (
-                            <div style={{
-                                paddingLeft: 12,
-                                borderLeft: '2px solid rgba(6,182,212,0.2)',
-                                marginTop: 4,
-                            }}>
+                            <div className="space-y-2 border-l-2 border-cyan-100 dark:border-cyan-900/50 pl-4 py-1">
                                 {section.subsections.map((sub, j) => (
-                                    <div key={j} style={{
-                                        fontSize: 11, color: '#64748b',
-                                        lineHeight: 1.5, padding: '2px 0',
-                                    }}>
-                                        → {sub}
+                                    <div key={j} className="flex items-start gap-2 text-[12px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-medium">
+                                        <div className="w-1 h-1 rounded-full bg-cyan-400 mt-2 shrink-0" />
+                                        {sub}
                                     </div>
                                 ))}
                             </div>
@@ -85,34 +56,21 @@ export function DetailedNotesResult({data}: { data: DetailedNotesData }) {
             </div>
 
             {data.key_entities.length > 0 && (
-                <div style={{
-                    padding: '10px 16px',
-                    borderTop: '1px solid rgba(0,0,0,0.04)',
-                    background: '#fafbfc',
-                }}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 600, color: '#94a3b8',
-                        textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6
-                    }}>
-                        Ключевые сущности
+                <div className="p-4 bg-zinc-50/50 dark:bg-zinc-800/30 border-t border-zinc-100 dark:border-zinc-800">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <Hash size={10} /> Ключевые сущности
                     </div>
-                    <div style={{display: 'flex', flexWrap: 'wrap', gap: 4}}>
+                    <div className="flex flex-wrap gap-2">
                         {data.key_entities.map((entity, i) => (
-                            <span key={i} style={{
-                                ...BADGE_BASE,
-                                background: 'rgba(100,116,139,0.06)',
-                                color: '#475569',
-                                fontFamily: 'ui-monospace, monospace',
-                                fontSize: 10,
-                            }}>
+                            <div key={i} className="px-2 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 font-mono text-[11px] font-bold shadow-sm">
                                 {entity}
-                            </span>
+                            </div>
                         ))}
                     </div>
                 </div>
             )}
 
             <CardFooter/>
-        </div>
+        </Card>
     )
 }

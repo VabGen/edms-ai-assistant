@@ -1,127 +1,120 @@
-import { FileText, XCircle, AlertTriangle, CheckCircle } from 'lucide-react'
+import { FileText, XCircle, AlertTriangle, CheckCircle, Info, Lightbulb } from 'lucide-react'
 import type { ComplianceData, ComplianceField } from '@/entities/message/model/types'
-import { CARD, CARD_HEADER, BADGE_BASE } from './common'
+import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
+import { cn } from '@shared/lib/cn'
 
 export function ComplianceCheckResult({data}: { data: ComplianceData }) {
     const isError = data.overall === 'has_mismatches'
     const isWarning = data.overall === 'cannot_verify'
 
-    const statusColor = isError ? '#ef4444' : (isWarning ? '#f59e0b' : '#10b981')
-    const statusIcon = isError
-        ? <XCircle size={18} color={statusColor}/>
-        : (isWarning ? <AlertTriangle size={18} color={statusColor}/> : <CheckCircle size={18} color={statusColor}/>)
+    const statusVariant = isError ? 'error' as const : (isWarning ? 'warning' as const : 'success' as const)
+    const StatusIcon = isError ? XCircle : (isWarning ? AlertTriangle : CheckCircle)
     const statusText = isError
         ? 'Найдены расхождения'
-        : (isWarning ? 'Требуется проверка' : 'Проверка пройдена успешно')
+        : (isWarning ? 'Требуется проверка' : 'Проверка пройдена')
 
     const okCount = data.fields.filter((f: ComplianceField) => f.status === 'ok').length
     const errCount = data.fields.filter((f: ComplianceField) => f.status === 'mismatch').length
     const naCount = data.fields.filter((f: ComplianceField) => f.status === 'not_found').length
 
     return (
-        <div style={CARD}>
-            <div style={{
-                ...CARD_HEADER,
-                background: isError
-                    ? 'rgba(239,68,68,0.04)'
-                    : (isWarning ? 'rgba(245,158,11,0.04)' : 'rgba(16,185,129,0.04)'),
-            }}>
-                <FileText size={18} style={{color: '#64748b'}}/>
-                <div style={{flex: 1}}>
-                    <div style={{
-                        fontWeight: 700, color: '#0f172a', fontSize: 14,
-                        display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                        {statusIcon}
-                        {statusText}
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
+            <CardHeader className={cn(
+                "flex-row items-start gap-4 p-4 space-y-0 border-b",
+                isError && "bg-rose-50/50 dark:bg-rose-900/10 border-rose-100/50 dark:border-rose-900/20",
+                isWarning && "bg-amber-50/50 dark:bg-amber-900/10 border-amber-100/50 dark:border-amber-900/20",
+                !isError && !isWarning && "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-100/50 dark:border-emerald-900/20"
+            )}>
+                <IconBox
+                    icon={StatusIcon}
+                    variant={statusVariant}
+                    size="md"
+                    className="mt-1"
+                />
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                        <CardTitle className={cn(
+                            "text-base font-bold flex items-center gap-2",
+                            isError && "text-rose-600 dark:text-rose-400",
+                            isWarning && "text-amber-600 dark:text-amber-400",
+                            !isError && !isWarning && "text-emerald-600 dark:text-emerald-400"
+                        )}>
+                            {statusText}
+                        </CardTitle>
                     </div>
-                    <div style={{color: '#64748b', fontSize: 12, marginTop: 2}}>
+                    <div className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed font-medium">
                         {data.summary}
                     </div>
                 </div>
-            </div>
+            </CardHeader>
 
-            <div style={{
-                display: 'flex', gap: 16, padding: '10px 16px',
-                borderBottom: '1px solid rgba(0,0,0,0.04)',
-                background: '#fafbfc',
-            }}>
+            <div className="flex items-center gap-4 px-4 py-3 bg-zinc-50/50 dark:bg-zinc-800/30 border-b border-zinc-100 dark:border-zinc-800">
                 {okCount > 0 && (
-                    <span style={{fontSize: 11, color: '#059669', fontWeight: 600}}>
-                        ✓ {okCount} совпадают
-                    </span>
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-tight">
+                        <CheckCircle size={12} /> {okCount} ок
+                    </div>
                 )}
                 {errCount > 0 && (
-                    <span style={{fontSize: 11, color: '#dc2626', fontWeight: 600}}>
-                        ✗ {errCount} расхождений
-                    </span>
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-tight">
+                        <XCircle size={12} /> {errCount} ошибка
+                    </div>
                 )}
                 {naCount > 0 && (
-                    <span style={{fontSize: 11, color: '#94a3b8', fontWeight: 500}}>
-                        ? {naCount} не найдено
-                    </span>
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-tight">
+                        <Info size={12} /> {naCount} не найдено
+                    </div>
                 )}
             </div>
 
-            <div style={{padding: '0 0 8px 0'}}>
+            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {data.fields.map((field: ComplianceField, idx: number) => {
                     const isFieldError = field.status === 'mismatch'
                     const isFieldOk = field.status === 'ok'
 
                     return (
-                        <div key={idx} style={{
-                            padding: '10px 16px',
-                            borderBottom: idx < data.fields.length - 1
-                                ? '1px solid rgba(0,0,0,0.04)' : 'none',
-                            background: idx % 2 === 0 ? 'transparent' : 'rgba(248,250,252,0.5)',
-                        }}>
-                            <div style={{
-                                display: 'flex', justifyContent: 'space-between',
-                                alignItems: 'center', marginBottom: 4,
-                            }}>
-                                <span style={{fontWeight: 600, color: '#334155'}}>{field.label}</span>
-                                <span style={{
-                                    ...BADGE_BASE,
-                                    background: isFieldError
-                                        ? 'rgba(239,68,68,0.1)'
-                                        : (isFieldOk ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.1)'),
-                                    color: isFieldError
-                                        ? '#b91c1c'
-                                        : (isFieldOk ? '#047857' : '#64748b'),
-                                    textTransform: 'uppercase',
-                                }}>
-                                    {isFieldError ? 'Ошибка' : (isFieldOk ? 'OK' : 'Не найдено')}
+                        <div key={idx} className="p-4 hover:bg-zinc-50/30 dark:hover:bg-zinc-800/20 transition-all group">
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-2.5">
+                                    <div className={cn(
+                                        "w-1.5 h-1.5 rounded-full shrink-0",
+                                        isFieldError ? "bg-rose-500" : (isFieldOk ? "bg-emerald-500" : "bg-zinc-300")
+                                    )} />
+                                    <span className="text-[13px] font-bold text-zinc-800 dark:text-zinc-200 leading-none">{field.label}</span>
+                                </div>
+                                <span className={cn(
+                                    "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
+                                    isFieldError ? "bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400" :
+                                    (isFieldOk ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                                    "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400")
+                                )}>
+                                    {isFieldError ? 'Ошибка' : (isFieldOk ? 'OK' : 'Пропуск')}
                                 </span>
                             </div>
 
-                            <div style={{
-                                display: 'grid', gridTemplateColumns: '1fr 1fr',
-                                gap: 12, fontSize: 12,
-                            }}>
-                                <div>
-                                    <div style={{fontSize: 10, color: '#94a3b8', marginBottom: 2}}>В карточке</div>
-                                    <div style={{color: '#1e293b', wordBreak: 'break-word'}}>{field.card_value}</div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-zinc-50 dark:bg-zinc-800/40 p-2.5 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В карточке</div>
+                                    <div className="text-[12px] font-medium text-zinc-700 dark:text-zinc-300 break-words leading-relaxed">{field.card_value}</div>
                                 </div>
-                                <div>
-                                    <div style={{fontSize: 10, color: '#94a3b8', marginBottom: 2}}>В файле</div>
-                                    <div style={{
-                                        color: field.file_value ? '#1e293b' : '#cbd5e1',
-                                        wordBreak: 'break-word',
-                                    }}>
+                                <div className={cn(
+                                    "p-2.5 rounded-lg border",
+                                    isFieldError ? "bg-rose-50/30 dark:bg-rose-900/10 border-rose-100/50 dark:border-rose-900/20" : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-100 dark:border-zinc-800"
+                                )}>
+                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В файле</div>
+                                    <div className={cn(
+                                        "text-[12px] font-bold break-words leading-relaxed",
+                                        isFieldError ? "text-rose-600 dark:text-rose-400" : "text-zinc-700 dark:text-zinc-300",
+                                        !field.file_value && "text-zinc-300 dark:text-zinc-700 italic font-normal"
+                                    )}>
                                         {field.file_value || '—'}
                                     </div>
                                 </div>
                             </div>
 
                             {field.recommendation && (
-                                <div style={{
-                                    marginTop: 6, padding: '6px 10px',
-                                    background: '#fffbeb', border: '1px solid #fcd34d',
-                                    borderRadius: 6, fontSize: 11, color: '#92400e',
-                                    display: 'flex', gap: 6, alignItems: 'flex-start',
-                                }}>
-                                    <span style={{fontWeight: 700}}>💡</span>
-                                    <span>{field.recommendation}</span>
+                                <div className="mt-3 p-3 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-xl text-[12px] text-amber-700 dark:text-amber-400 flex gap-2.5 items-start font-medium leading-relaxed">
+                                    <Lightbulb size={14} className="shrink-0 mt-0.5 text-amber-500" />
+                                    {field.recommendation}
                                 </div>
                             )}
                         </div>
@@ -129,12 +122,10 @@ export function ComplianceCheckResult({data}: { data: ComplianceData }) {
                 })}
             </div>
 
-            <div style={{
-                padding: '8px 16px', fontSize: 11, color: '#94a3b8',
-                borderTop: '1px solid rgba(0,0,0,0.05)', background: '#f8fafc',
-            }}>
-                Проверено AI. Результат добавлен в краткое содержание документа.
+            <div className="p-3 bg-zinc-50/50 dark:bg-zinc-800/30 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-400 font-medium flex items-center gap-2">
+                <Info size={12} className="text-zinc-300" />
+                Проверено AI. Результат добавлен в карточку.
             </div>
-        </div>
+        </Card>
     )
 }

@@ -1,10 +1,11 @@
 import { useRef, useCallback, useEffect, type CSSProperties } from 'react'
-import { X } from 'lucide-react'
+import { X, PanelLeftClose, PanelLeftOpen, LayoutPanelLeft } from 'lucide-react'
 import { useChatStore } from '@features/chat/model/useChatStore'
 import { useWidgetState } from '../model/useWidgetState'
 import { WidgetSidebar } from './WidgetSidebar'
 import { WidgetChat } from './WidgetChat'
 import { SettingsPanelWrapper } from './SettingsPanelWrapper'
+import { cn } from '@shared/lib/cn'
 
 interface WidgetPanelProps {
   onClose: () => void
@@ -66,17 +67,13 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
   return (
     <div
-      className="pointer-events-auto relative flex flex-col overflow-hidden"
+      className="pointer-events-auto relative flex flex-col overflow-hidden bg-white dark:bg-zinc-900 border border-white/60 dark:border-zinc-800 shadow-2xl animate-edms-fade-in"
       style={{
         width: widgetSize.width,
         height: widgetSize.height,
-        background: 'var(--glass-bg, white)',
         backdropFilter: 'blur(20px) saturate(1.5)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
-        borderRadius: 16,
-        boxShadow: '0 8px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.06)',
-        border: '1px solid rgba(255,255,255,0.60)',
-        fontSize: 'var(--edms-font-size, 14px)',
+        borderRadius: 24,
       }}
     >
       <div
@@ -85,7 +82,7 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
           isResizingRef.current = true
           resizeStartRef.current = { x: e.clientX, y: e.clientY, width: widgetSize.width, height: widgetSize.height }
         }}
-        style={{ position: 'absolute', top: 0, left: 0, width: 20, height: 20, cursor: 'nw-resize', zIndex: 20 }}
+        className="absolute top-0 left-0 w-6 h-6 cursor-nw-resize z-50 rounded-tl-3xl hover:bg-blue-500/5 transition-colors"
       />
 
       <WidgetHeader
@@ -96,9 +93,12 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
       <div className="flex flex-1 min-h-0">
         {isSidebarOpen && (
-          isSettingsOpen
-            ? <SettingsPanelWrapper onClose={() => setIsSettingsOpen(false)} />
-            : <WidgetSidebar onOpenSettings={() => setIsSettingsOpen(true)} />
+          <div className="w-72 shrink-0 border-r border-zinc-100 dark:border-zinc-800 animate-slide-in-left">
+            {isSettingsOpen
+              ? <SettingsPanelWrapper onClose={() => setIsSettingsOpen(false)} />
+              : <WidgetSidebar onOpenSettings={() => setIsSettingsOpen(true)} />
+            }
+          </div>
         )}
         <WidgetChat />
       </div>
@@ -112,69 +112,37 @@ interface WidgetHeaderProps {
   onClose: () => void
 }
 
-function AnimatedBurger({ isOpen }: { isOpen: boolean }) {
-  const bar: CSSProperties = {
-    display: 'block',
-    width: 16,
-    height: 1.5,
-    borderRadius: 1,
-    background: isOpen ? '#6366f1' : '#94a3b8',
-    transition: 'transform 0.22s ease, opacity 0.15s ease, background 0.15s',
-    transformOrigin: 'center',
-  }
-  return (
-    <span style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', width: 16, pointerEvents: 'none' }}>
-      <span style={{ ...bar, transform: isOpen ? 'translateY(5.5px) rotate(45deg)' : 'none' }} />
-      <span style={{ ...bar, opacity: isOpen ? 0 : 1 }} />
-      <span style={{ ...bar, transform: isOpen ? 'translateY(-5.5px) rotate(-45deg)' : 'none' }} />
-    </span>
-  )
-}
-
 function WidgetHeader({ isSidebarOpen, onToggleSidebar, onClose }: WidgetHeaderProps) {
   return (
     <header
-      className="flex items-center shrink-0 px-3"
-      style={{ height: 52, borderBottom: '1px solid rgba(0,0,0,0.06)' }}
+      className="flex items-center justify-between shrink-0 px-4 h-14 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-800/20"
     >
       <button
         type="button"
         onClick={onToggleSidebar}
-        title={isSidebarOpen ? 'Скрыть' : 'История'}
-        style={{
-          width: 32, height: 32,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          borderRadius: 8, border: 'none',
-          background: isSidebarOpen ? 'rgba(99,102,241,0.08)' : 'transparent',
-          cursor: 'pointer', flexShrink: 0,
-        }}
+        title={isSidebarOpen ? 'Скрыть' : 'Меню'}
+        className={cn(
+            "p-2 rounded-xl transition-all duration-200",
+            isSidebarOpen ? "bg-white dark:bg-zinc-800 text-blue-600 shadow-sm border border-zinc-200 dark:border-zinc-700" : "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        )}
       >
-        <AnimatedBurger isOpen={isSidebarOpen} />
+        {isSidebarOpen ? <PanelLeftClose size={18} /> : <LayoutPanelLeft size={18} />}
       </button>
 
       <div
-        className="flex items-center gap-1.5 flex-1 justify-center"
-        style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}
+        className="flex items-center gap-2 font-bold text-zinc-900 dark:text-zinc-100 tracking-tight"
       >
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }} />
-        EDMS Assistant
+        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <span className="text-[14px]">EDMS Assistant</span>
       </div>
 
       <button
         type="button"
         onClick={onClose}
         title="Закрыть"
-        style={{
-          width: 32, height: 32,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          borderRadius: 8, border: 'none', background: 'transparent',
-          color: '#94a3b8', cursor: 'pointer', flexShrink: 0,
-          transition: 'background 0.15s, color 0.15s',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.05)'; e.currentTarget.style.color = '#475569' }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8' }}
+        className="p-2 rounded-xl text-zinc-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all border border-transparent hover:border-rose-100 dark:hover:border-rose-900/50"
       >
-        <X size={15} />
+        <X size={18} />
       </button>
     </header>
   )
