@@ -329,33 +329,33 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
     }
 
     return (
-        <div className="w-full flex flex-col h-full bg-white dark:bg-zinc-900 rounded-2xl overflow-hidden animate-edms-fade-in">
+        <div className="w-full flex flex-col h-full bg-white rounded-2xl overflow-hidden animate-edms-fade-in">
             {/* Header */}
-            <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/30">
-                <div className="flex items-center gap-3">
+            <div className="px-6 py-5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
+                <div className="flex items-center gap-4">
                     <button
                         type="button"
                         onClick={() => { discardDraft(); onClose() }}
-                        className="p-2 -ml-2 rounded-xl hover:bg-white dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-900 transition-all border border-transparent hover:border-zinc-200"
+                        className="p-2.5 -ml-2 rounded-2xl hover:bg-white text-zinc-400 hover:text-zinc-900 transition-all border border-transparent hover:border-zinc-200"
                     >
-                        <ArrowLeft size={18}/>
+                        <ArrowLeft size={20}/>
                     </button>
                     <div>
-                        <h2 className="text-[15px] font-bold text-zinc-900 dark:text-zinc-100 leading-none">Настройки</h2>
-                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">Персонализация</p>
+                        <h2 className="text-[17px] font-bold text-zinc-900 leading-none">Настройки</h2>
+                        <p className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest mt-1.5">Персонализация</p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                     {isDirty && (
-                        <div className="flex items-center gap-2 pr-2 border-r border-zinc-200 dark:border-zinc-700">
+                        <div className="flex items-center gap-2 pr-3 border-r border-zinc-100">
                              <button
                                 type="button"
                                 onClick={showTechnical ? resetToDefaults : resetAll}
-                                className="p-2 rounded-xl text-zinc-400 hover:text-amber-600 hover:bg-amber-50 transition-all"
+                                className="p-2.5 rounded-2xl text-zinc-400 hover:text-amber-600 hover:bg-amber-50 transition-all"
                                 title="Сбросить"
                             >
-                                <RotateCcw size={16}/>
+                                <RotateCcw size={18}/>
                             </button>
                         </div>
                     )}
@@ -365,16 +365,16 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
 
             {/* Offline Alert */}
             {isTechOffline && showTechnical && (
-                <div className="mx-4 mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/20 flex items-start gap-3 animate-edms-slide-up">
-                    <WifiOff size={16} className="text-amber-500 shrink-0 mt-0.5" />
-                    <p className="text-[11px] font-medium text-amber-800 dark:text-amber-400 leading-relaxed">
+                <div className="mx-6 mt-6 p-4 rounded-[20px] bg-amber-50 border border-amber-100 flex items-start gap-3 animate-edms-slide-up">
+                    <WifiOff size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-[12px] font-medium text-amber-800 leading-relaxed">
                         Связь с сервером потеряна. Технические настройки загружены из локального кэша.
                     </p>
                 </div>
             )}
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto px-5 py-6 scrollbar-thin">
+            <div className="flex-1 overflow-y-auto px-6 py-8 scrollbar-thin">
                 <TabBar
                   tabs={USER_TABS}
                   active={isUserTab ? activeTab : 'appearance'}
@@ -390,11 +390,11 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                 </div>
 
                 {showTechnical && (
-                    <div className="mt-10 space-y-6">
-                        <div className="flex items-center gap-4">
-                            <div className="flex-1 h-px bg-zinc-100 dark:bg-zinc-800" />
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">Системные</span>
-                            <div className="flex-1 h-px bg-zinc-100 dark:bg-zinc-800" />
+                    <div className="mt-12 space-y-8">
+                        <div className="flex items-center gap-5">
+                            <div className="flex-1 h-px bg-zinc-100" />
+                            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-[0.3em]">Системные</span>
+                            <div className="flex-1 h-px bg-zinc-100" />
                         </div>
 
                         <TabBar
@@ -411,9 +411,9 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
             </div>
 
             {/* Footer */}
-            <div className="p-5 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/30 dark:bg-zinc-800/20">
+            <div className="p-6 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/30">
                 {isDirty && saveStatus === 'idle' ? (
-                    <Button variant="ghost" onClick={discardDraft} className="text-zinc-500 hover:text-zinc-900">
+                    <Button variant="ghost" onClick={discardDraft} className="text-zinc-500 hover:text-zinc-900 rounded-2xl px-6">
                         Отменить
                     </Button>
                 ) : <div/>}

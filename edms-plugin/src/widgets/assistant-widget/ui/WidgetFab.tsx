@@ -10,24 +10,23 @@ export function WidgetFab({ onClick }: WidgetFabProps) {
       type="button"
       onClick={onClick}
       title="EDMS Assistant"
-      className="pointer-events-auto"
+      className="pointer-events-auto group"
       style={{
-        width: 52,
-        height: 52,
-        borderRadius: 16,
-        background: 'rgba(255,255,255,0.96)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)',
-        border: 'none',
+        width: 60,
+        height: 60,
+        borderRadius: 20,
+        background: 'rgb(var(--edms-bg))',
+        boxShadow: 'var(--edms-shadow-lg)',
+        border: '1px solid rgba(var(--zinc-200), 0.5)',
         cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'transform 0.15s, box-shadow 0.15s',
+        transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.06)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
     >
-      <MessageSquare size={22} strokeWidth={1.8} color="#6366f1" />
+      <div className="absolute inset-0 rounded-[20px] bg-indigo-500/0 group-hover:bg-indigo-500/5 transition-colors duration-300" />
+      <MessageSquare size={24} strokeWidth={2} className="text-indigo-600 group-hover:scale-110 transition-transform duration-300" />
     </button>
   )
 }

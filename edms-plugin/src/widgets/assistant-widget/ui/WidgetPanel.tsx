@@ -1,10 +1,11 @@
 import { useRef, useCallback, useEffect, type CSSProperties } from 'react'
-import { X, PanelLeftClose, PanelLeftOpen, LayoutPanelLeft } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useChatStore } from '@features/chat/model/useChatStore'
 import { useWidgetState } from '../model/useWidgetState'
 import { WidgetSidebar } from './WidgetSidebar'
 import { WidgetChat } from './WidgetChat'
 import { SettingsPanelWrapper } from './SettingsPanelWrapper'
+import { AnimatedBurger } from '@shared/ui/AnimatedBurger'
 import { cn } from '@shared/lib/cn'
 
 interface WidgetPanelProps {
@@ -67,12 +68,10 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
   return (
     <div
-      className="pointer-events-auto relative flex flex-col overflow-hidden bg-white dark:bg-zinc-900 border border-white/60 dark:border-zinc-800 shadow-2xl animate-edms-fade-in"
+      className="pointer-events-auto relative flex flex-col overflow-hidden glass-premium animate-edms-fade-in"
       style={{
         width: widgetSize.width,
         height: widgetSize.height,
-        backdropFilter: 'blur(20px) saturate(1.5)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
         borderRadius: 24,
       }}
     >
@@ -93,7 +92,7 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
       <div className="flex flex-1 min-h-0">
         {isSidebarOpen && (
-          <div className="w-72 shrink-0 border-r border-zinc-100 dark:border-zinc-800 animate-slide-in-left">
+          <div className="w-[280px] shrink-0 border-r border-zinc-100/50 animate-slide-in-left overflow-hidden">
             {isSettingsOpen
               ? <SettingsPanelWrapper onClose={() => setIsSettingsOpen(false)} />
               : <WidgetSidebar onOpenSettings={() => setIsSettingsOpen(true)} />
@@ -115,18 +114,18 @@ interface WidgetHeaderProps {
 function WidgetHeader({ isSidebarOpen, onToggleSidebar, onClose }: WidgetHeaderProps) {
   return (
     <header
-      className="flex items-center justify-between shrink-0 px-4 h-14 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-800/20"
+      className="flex items-center justify-between shrink-0 px-6 h-20 border-b border-zinc-100/40 bg-white/20"
     >
       <button
         type="button"
         onClick={onToggleSidebar}
         title={isSidebarOpen ? 'Скрыть' : 'Меню'}
         className={cn(
-            "p-2 rounded-xl transition-all duration-200",
-            isSidebarOpen ? "bg-white dark:bg-zinc-800 text-blue-600 shadow-sm border border-zinc-200 dark:border-zinc-700" : "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            "p-3 rounded-2xl transition-all duration-300 hover:bg-white/80 active:scale-90",
+            isSidebarOpen ? "bg-white text-indigo-600 shadow-sm border border-zinc-200" : "text-zinc-400"
         )}
       >
-        {isSidebarOpen ? <PanelLeftClose size={18} /> : <LayoutPanelLeft size={18} />}
+        <AnimatedBurger isOpen={isSidebarOpen} />
       </button>
 
       <div
