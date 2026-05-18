@@ -2,6 +2,7 @@ import {useState} from 'react'
 import {ExternalLink, User, FileText, ChevronRight} from 'lucide-react'
 import type {InterruptPayload, ResumeValue} from '@entities/interrupt/model/types'
 import {sendMessage} from '@shared/api/messaging'
+import {BaseCard} from './primitives/BaseCard'
 
 interface Props {
     payload: InterruptPayload
@@ -34,42 +35,17 @@ export function InterruptRenderer({payload, onReply}: Props) {
                         card.badges?.some(b => b.toLowerCase().includes('сотрудник') || b.toLowerCase().includes('физлицо'));
 
                     return (
-                        <div key={card.id} style={{display: 'flex', alignItems: 'stretch', gap: 6}}>
-                            <button
-                                type="button"
+                        <div key={card.id} className="flex items-stretch gap-1.5">
+                            <BaseCard
+                                isSelected={isSelected}
                                 onClick={() =>
                                     handleSelect(card.id, {
                                         kind: 'card_select',
                                         selected_ids: [card.id],
                                     })
                                 }
-                                style={{
-                                    padding: '12px 16px',
-                                    borderRadius: 16,
-                                    border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
-                                    background: isSelected ? '#7c3aed' : '#ffffff',
-                                    cursor: 'pointer',
-                                    textAlign: 'left',
-                                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                    boxShadow: isSelected
-                                        ? '0 4px 12px rgba(124, 58, 237, 0.25)'
-                                        : '0 1px 3px rgba(0,0,0,0.04)',
-                                    flex: 1,
-                                    minWidth: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 12,
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
-                                    e.currentTarget.style.transform = 'translateY(-1px)'
-                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)'
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'
-                                    e.currentTarget.style.transform = 'translateY(0)'
-                                    e.currentTarget.style.boxShadow = isSelected ? '0 4px 12px rgba(124, 58, 237, 0.25)' : '0 1px 3px rgba(0,0,0,0.04)'
-                                }}
+                                className="flex-1 min-w-0 flex-row items-center gap-3 py-3"
+                                style={isSelected ? { background: '#7c3aed' } : {}}
                             >
                                 <div style={{
                                     width: 32,
@@ -146,7 +122,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     flexShrink: 0,
                                     marginLeft: 'auto'
                                 }}/>
-                            </button>
+                            </BaseCard>
 
                             {cardUrl && (
                                 <button
