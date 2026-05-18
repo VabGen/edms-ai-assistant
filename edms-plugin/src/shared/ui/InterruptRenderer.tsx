@@ -13,6 +13,8 @@ export function InterruptRenderer({payload, onReply}: Props) {
     const [selectedId, setSelectedId] = useState<string | null>(null)
 
     const handleSelect = (id: string, resume: ResumeValue) => {
+        // We no longer block repeated selections by only updating state if null.
+        // Even if already selected, allowing re-click can re-trigger agent action if desired.
         setSelectedId(id)
         onReply(resume)
     }
@@ -45,36 +47,81 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     })
                                 }
                                 className="flex-1 min-w-0 flex-row items-center gap-3 py-3"
-                                style={isSelected ? { background: '#7c3aed' } : {}}
+                                    style={isSelected ? { background: '#6366f1' } : {}}
                             >
-                                <div style={{
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: '50%',
-                                    background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    flexShrink: 0,
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    color: isSelected ? '#ffffff' : '#6366f1',
-                                }}>
-                                    {idx + 1}
-                                </div>
 
                                 {isEmployee ? (
-                                    <User size={18} style={{
-                                        color: isSelected ? '#ffffff' : '#6366f1',
-                                        opacity: isSelected ? 0.9 : 0.7,
-                                        flexShrink: 0
-                                    }}/>
+                                    <>
+                                        <div style={{
+                                            width: 30,
+                                            height: 30,
+                                            borderRadius: '50%',
+                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                            fontSize: 11,
+                                            fontWeight: 800,
+                                            color: isSelected ? '#ffffff' : '#6366f1',
+                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(99,102,241,0.1)'}`
+                                        }}>
+                                            {idx + 1}
+                                        </div>
+
+                                        <div style={{
+                                            width: 36,
+                                            height: 36,
+                                            borderRadius: 10,
+                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(124,58,237,0.1) 100%)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(99,102,241,0.1)'}`
+                                        }}>
+                                            <User size={20} style={{
+                                                color: isSelected ? '#ffffff' : '#6366f1',
+                                                opacity: isSelected ? 1 : 0.8,
+                                            }}/>
+                                        </div>
+                                    </>
                                 ) : (
-                                    <FileText size={18} style={{
-                                        color: isSelected ? '#ffffff' : '#6366f1',
-                                        opacity: isSelected ? 0.9 : 0.7,
-                                        flexShrink: 0
-                                    }}/>
+                                    <>
+                                        <div style={{
+                                            width: 30,
+                                            height: 30,
+                                            borderRadius: '50%',
+                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                            fontSize: 11,
+                                            fontWeight: 800,
+                                            color: isSelected ? '#ffffff' : '#6366f1',
+                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(99,102,241,0.1)'}`
+                                        }}>
+                                            {idx + 1}
+                                        </div>
+
+                                        <div style={{
+                                            width: 36,
+                                            height: 36,
+                                            borderRadius: 10,
+                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.03)'}`
+                                        }}>
+                                            <FileText size={20} style={{
+                                                color: isSelected ? '#ffffff' : '#6366f1',
+                                                opacity: isSelected ? 1 : 0.8,
+                                            }}/>
+                                        </div>
+                                    </>
                                 )}
 
                                 <div style={{flex: 1, minWidth: 0}}>
@@ -93,9 +140,12 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                             fontSize: 11,
                                             color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b',
                                             marginTop: 1,
-                                            whiteSpace: 'nowrap',
+                                            whiteSpace: 'normal',
+                                            wordBreak: 'break-word',
                                             overflow: 'hidden',
-                                            textOverflow: 'ellipsis'
+                                            display: '-webkit-box',
+                                            WebkitLineClamp: 2,
+                                            WebkitBoxOrient: 'vertical'
                                         }}>
                                             {card.description}
                                         </div>

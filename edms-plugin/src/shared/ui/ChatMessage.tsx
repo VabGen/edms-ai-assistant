@@ -300,7 +300,7 @@ function SmartTable({children}: { children: React.ReactNode }) {
     }
 
     const h = headers.join(' ').toLowerCase()
-    const isDocList = /id/.test(h) || /рег.*номер|рег\.номер/.test(h) || (/дата/.test(h) && /категор/.test(h))
+    const isDocList = /(id|uuid|идентификатор|doc.*id|document.*id)/.test(h) || /рег.*номер|рег\.номер/.test(h) || (/дата/.test(h) && /категор/.test(h))
 
     if (isDocList) {
         return (

@@ -43,11 +43,11 @@ export function DocCard({ headers, row, index }: DocCardProps) {
     const status = pairs.find(p => /статус|status/i.test(p.key))?.value
     const address = pairs.find(p => /адрес|address/i.test(p.key))?.value
 
-    const rawId = pairs.find(p => /^id$/i.test(p.key))?.value ?? ''
+    const rawId = pairs.find(p => /^(id|uuid|идентификатор|doc.*id|document.*id)$/i.test(p.key))?.value ?? ''
     const docId = rawId ? normalizeUuid(rawId) : ''
     const isClickable = Boolean(onDocumentClick && docId && isValidUuid(docId))
 
-    const _skipKeys = /^[№#]$|^id$|рег.*номер|reg.*num|^номер$|^дата$|^date$|рег.*дата|reg.*date|категор|category|тип|type|содержан|summary|краткое|описан|автор|author|статус|status|адрес|address/i
+    const _skipKeys = /^[№#]$|^(id|uuid|идентификатор|doc.*id|document.*id)$|рег.*номер|reg.*num|^номер$|^дата$|^date$|рег.*дата|reg.*date|категор|category|тип|type|содержан|summary|краткое|описан|автор|author|статус|status|адрес|address/i
     const extraPairs = pairs.filter(p => !_skipKeys.test(p.key) && p.value && p.value !== '—')
 
     const catStyle = category ? getCategoryStyle(category) : null
