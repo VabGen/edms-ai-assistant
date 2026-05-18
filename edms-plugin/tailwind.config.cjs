@@ -3,6 +3,10 @@ module.exports = {
   content: ['./src/**/*.{ts,tsx,html}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['SF Mono', 'Fira Code', 'Consolas', 'monospace'],
+      },
       keyframes: {
         fadeInScale: {
           '0%':   { opacity: '0', transform: 'scale(0.92) translateY(8px)' },

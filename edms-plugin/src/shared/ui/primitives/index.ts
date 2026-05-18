@@ -4,3 +4,8 @@ export { Slider } from './Slider'
 export { Field } from './Field'
 export { TextInput } from './TextInput'
 export { Segmented } from './Segmented'
+
+export * from './Card'
+export * from './IconBox'
+export * from './ProgressBar'
+export * from './CollapsibleSection'

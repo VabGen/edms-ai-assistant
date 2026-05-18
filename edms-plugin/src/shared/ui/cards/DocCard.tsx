@@ -1,38 +1,39 @@
 import { useContext } from 'react'
-import { User, ExternalLink } from 'lucide-react'
-import { BaseCard } from '../primitives/BaseCard'
+import { FileText, ExternalLink, FilePieChart, FileSearch, FileSignature, FileClock, ShieldCheck, Briefcase, Users } from 'lucide-react'
+import { Card, CardHeader, CardTitle, CardDescription, IconBox } from '../primitives'
 import { DocumentClickContext } from '../ChatContext'
 import { normalizeUuid, isValidUuid } from '@/shared/lib/url'
+import { cn } from '@shared/lib/cn'
 
-const CATEGORY_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-    'INCOMING': {bg: 'rgba(59,130,246,0.08)', text: '#1d4ed8', label: 'Входящий'},
-    'OUTGOING': {bg: 'rgba(16,185,129,0.08)', text: '#065f46', label: 'Исходящий'},
-    'INTERN': {bg: 'rgba(139,92,246,0.08)', text: '#5b21b6', label: 'Внутренний'},
-    'APPEAL': {bg: 'rgba(245,158,11,0.08)', text: '#92400e', label: 'Обращение'},
-    'CONTRACT': {bg: 'rgba(239,68,68,0.08)', text: '#991b1b', label: 'Договор'},
-    'MEETING': {bg: 'rgba(99,102,241,0.08)', text: '#3730a3', label: 'Совещание'},
-    'ORDER': {bg: 'rgba(244,63,94,0.08)', text: '#9f1239', label: 'Приказ'},
-    'CITIZEN': {bg: 'rgba(245,158,11,0.08)', text: '#92400e', label: 'Гражданин'},
+const CATEGORY_MAP: Record<string, { variant: any; icon: any; label: string }> = {
+    'INCOMING': { variant: 'primary', icon: FileSearch, label: 'Входящий' },
+    'OUTGOING': { variant: 'zinc', icon: ExternalLink, label: 'Исходящий' },
+    'INTERN': { variant: 'default', icon: FileText, label: 'Внутренний' },
+    'APPEAL': { variant: 'warning', icon: FilePieChart, label: 'Обращение' },
+    'CONTRACT': { variant: 'success', icon: FileSignature, label: 'Договор' },
+    'MEETING': { variant: 'primary', icon: Users, label: 'Совещание' },
+    'ORDER': { variant: 'error', icon: ShieldCheck, label: 'Приказ' },
+    'CITIZEN': { variant: 'warning', icon: Briefcase, label: 'Гражданин' },
 }
 
-function getCategoryStyle(raw: string) {
+function getCategoryConfig(raw: string) {
     const upper = raw.toUpperCase().replace(/[()]/g, '').trim()
-    for (const [key, val] of Object.entries(CATEGORY_COLORS)) {
+    for (const [key, val] of Object.entries(CATEGORY_MAP)) {
         if (upper.includes(key)) return val
     }
-    return {bg: 'rgba(100,116,139,0.08)', text: '#334155', label: raw}
+    return { variant: 'default', icon: FileText, label: raw }
 }
 
 interface DocCardProps {
-  headers: string[]
-  row: string[]
-  index: number
+    headers: string[]
+    row: string[]
+    index: number
 }
 
 export function DocCard({ headers, row, index }: DocCardProps) {
     const onDocumentClick = useContext(DocumentClickContext)
 
-    const pairs = headers.map((h, i) => ({key: h.trim(), value: (row[i] || '—').trim()}))
+    const pairs = headers.map((h, i) => ({ key: h.trim(), value: (row[i] || '—').trim() }))
 
     const num = pairs.find(p => /^[№#]$/.test(p.key))?.value
     const regNum = pairs.find(p => /рег.*номер|reg.*num|^номер$/i.test(p.key))?.value
@@ -41,103 +42,76 @@ export function DocCard({ headers, row, index }: DocCardProps) {
     const summary = pairs.find(p => /содержан|summary|краткое|описан/i.test(p.key))?.value
     const author = pairs.find(p => /автор|author/i.test(p.key))?.value
     const status = pairs.find(p => /статус|status/i.test(p.key))?.value
-    const address = pairs.find(p => /адрес|address/i.test(p.key))?.value
 
     const rawId = pairs.find(p => /^(id|uuid|идентификатор|doc.*id|document.*id)$/i.test(p.key))?.value ?? ''
     const docId = rawId ? normalizeUuid(rawId) : ''
     const isClickable = Boolean(onDocumentClick && docId && isValidUuid(docId))
 
-    const _skipKeys = /^[№#]$|^(id|uuid|идентификатор|doc.*id|document.*id)$|рег.*номер|reg.*num|^номер$|^дата$|^date$|рег.*дата|reg.*date|категор|category|тип|type|содержан|summary|краткое|описан|автор|author|статус|status|адрес|address/i
-    const extraPairs = pairs.filter(p => !_skipKeys.test(p.key) && p.value && p.value !== '—')
-
-    const catStyle = category ? getCategoryStyle(category) : null
+    const config = category ? getCategoryConfig(category) : { variant: 'default' as const, icon: FileText, label: 'Документ' }
 
     return (
-        <BaseCard
-            onClick={isClickable ? () => onDocumentClick!(docId) : null}
-            title={isClickable ? 'Открыть документ в новой вкладке' : undefined}
+        <Card
             isClickable={isClickable}
+            onClick={isClickable ? () => onDocumentClick!(docId) : undefined}
+            className="mb-3 group"
         >
-            <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold"
-                    style={{
-                      background: isClickable ? 'rgba(99,102,241,0.08)' : 'rgba(148,163,184,0.08)',
-                      color: isClickable ? '#6366f1' : '#94a3b8',
-                    }}
-                >
-                    {num ?? index + 1}
-                </span>
-
-                {regNum && regNum !== '—'
-                    ? <span className="text-[12px] font-bold text-slate-900 flex-1">{regNum}</span>
-                    : <span className="text-[12px] text-slate-400 flex-1">—</span>
-                }
-
-                {date && date !== '—' && (
-                    <span className="text-[10px] text-slate-400 shrink-0">{date}</span>
-                )}
-
-                {isClickable && (
-                    <span className="shrink-0 text-indigo-500 opacity-50 flex items-center">
-                        <ExternalLink size={12}/>
-                    </span>
-                )}
-            </div>
-
-            {summary && summary !== '—' && (
-                <p className="text-[12px] text-slate-600 leading-relaxed line-clamp-2 m-0">
-                    {summary}
-                </p>
-            )}
-
-            <div className="flex flex-wrap gap-1 items-center">
-                {catStyle && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: catStyle.bg, color: catStyle.text }}
-                    >
-                        {catStyle.label}
-                    </span>
-                )}
-                {author && author !== '—' && (
-                    <span className="text-[10px] text-slate-500 px-2 py-0.5 rounded-full bg-slate-100 flex items-center gap-1">
-                        <User size={10} className="opacity-70"/>
-                        {author}
-                    </span>
-                )}
-                {status && status !== '—' && (
-                    <span className="text-[9px] text-slate-500 font-semibold px-2 py-0.5 rounded-[4px] bg-slate-100 uppercase">
-                        {status}
-                    </span>
-                )}
-
-                {address && address !== '—' && (
-                    <div className="w-full mt-0.5 text-[11px] text-slate-500 flex items-start gap-1.5 leading-tight">
-                        <span className="shrink-0 mt-[1px]">📍</span>
-                        <span className="break-all">{address}</span>
+            <CardHeader className="flex-row items-start gap-4 p-4 space-y-0">
+                <IconBox
+                    icon={config.icon}
+                    variant={config.variant}
+                    size="md"
+                    className="mt-0.5"
+                />
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                        <CardTitle className="truncate">
+                            {regNum && regNum !== '—' ? regNum : `Документ #${num ?? index + 1}`}
+                        </CardTitle>
+                        {isClickable && (
+                            <ExternalLink size={14} className="text-zinc-400 transition-colors group-hover:text-blue-500 shrink-0" />
+                        )}
                     </div>
-                )}
-
-                {extraPairs.map(({key, value}) => {
-                    const isContact = key.toLowerCase().includes('контакт') || key.toLowerCase().includes('contact')
-                    if (isContact && value) {
-                        const parts = value.split(/\s{2,}|\n/).filter(part => part.trim().length > 0)
-                        return (
-                            <div key={key} className="flex flex-wrap gap-1.5 items-center w-full mt-0.5">
-                                {parts.map((part, i) => (
-                                    <span key={i} className="text-[10px] text-slate-600 px-2 py-0.5 rounded-[6px] bg-slate-50 border border-black/5 whitespace-nowrap font-mono">
-                                        {part.trim()}
-                                    </span>
-                                ))}
-                            </div>
-                        )
-                    }
-                    return (
-                        <span key={key} className="text-[10px] text-slate-500 px-2 py-0.5 rounded-full bg-slate-100">
-                          {key}: {value}
+                    <CardDescription className="flex items-center gap-2 mb-2">
+                        <span className={cn(
+                            "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
+                            config.variant === 'primary' && "bg-blue-50 text-blue-600",
+                            config.variant === 'success' && "bg-emerald-50 text-emerald-600",
+                            config.variant === 'warning' && "bg-amber-50 text-amber-600",
+                            config.variant === 'error' && "bg-rose-50 text-rose-600",
+                            config.variant === 'zinc' && "bg-zinc-100 text-zinc-600",
+                            config.variant === 'default' && "bg-zinc-100 text-zinc-500",
+                        )}>
+                            {config.label}
                         </span>
-                    )
-                })}
-            </div>
-        </BaseCard>
+                        {date && date !== '—' && (
+                            <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+                                <FileClock size={12} />
+                                {date}
+                            </span>
+                        )}
+                    </CardDescription>
+
+                    {summary && summary !== '—' && (
+                        <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed line-clamp-2 m-0 mb-2">
+                            {summary}
+                        </p>
+                    )}
+
+                    <div className="flex flex-wrap gap-2 items-center">
+                        {author && author !== '—' && (
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500">
+                                <Users size={12} />
+                                {author}
+                            </div>
+                        )}
+                        {status && status !== '—' && (
+                            <div className="px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[10px] font-semibold text-zinc-500 uppercase tracking-tight">
+                                {status}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </CardHeader>
+        </Card>
     )
 }

@@ -1,27 +1,28 @@
-import { ListChecks, User, Clock, Quote } from 'lucide-react'
+import { ListChecks, User, Clock, Quote, Zap, Flame } from 'lucide-react'
 import type { ActionItemsData } from '@/entities/message/model/types'
-import { CARD, CARD_HEADER, BADGE_BASE, CardFooter } from './common'
+import { CardFooter } from './common'
+import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
+import { cn } from '@shared/lib/cn'
 
-const PRIORITY_CFG: Record<string, { bg: string; text: string; icon: React.ReactNode; label: string }> = {
+const PRIORITY_CONFIG: Record<string, { variant: 'error' | 'warning' | 'zinc'; icon: any; label: string }> = {
     high: {
-        bg: 'rgba(239,68,68,0.08)',
-        text: '#b91c1c',
-        icon: <span style={{fontSize: 10}}>🔥</span>,
+        variant: 'error',
+        icon: Flame,
         label: 'Высокий',
     },
     medium: {
-        bg: 'rgba(245,158,11,0.08)',
-        text: '#92400e',
-        icon: <span style={{fontSize: 10}}>⚡</span>,
+        variant: 'warning',
+        icon: Zap,
         label: 'Средний',
     },
     low: {
-        bg: 'rgba(100,116,139,0.08)',
-        text: '#475569',
-        icon: <Clock size={10}/>,
+        variant: 'zinc',
+        icon: Clock,
         label: 'Низкий',
     },
 }
+
+const DEFAULT_PRIORITY = PRIORITY_CONFIG['medium']!
 
 function formatDate(raw: string): string {
     try {
@@ -35,113 +36,76 @@ function formatDate(raw: string): string {
 
 export function ActionItemsResult({data}: { data: ActionItemsData }) {
     const sorted = [...data.action_items].sort((a, b) => {
-        const order = {high: 0, medium: 1, low: 2}
+        const order: Record<string, number> = {high: 0, medium: 1, low: 2}
         return (order[a.priority] ?? 1) - (order[b.priority] ?? 1)
     })
 
     return (
-        <div style={CARD}>
-            <div style={{
-                ...CARD_HEADER,
-                background: 'linear-gradient(135deg, rgba(245,158,11,0.04), rgba(239,68,68,0.04))',
-            }}>
-                <div style={{
-                    width: 32, height: 32, borderRadius: 10,
-                    background: 'rgba(245,158,11,0.1)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                }}>
-                    <ListChecks size={16} style={{color: '#f59e0b'}}/>
-                </div>
-                <div style={{flex: 1}}>
-                    <div style={{fontSize: 14, fontWeight: 700, color: '#0f172a'}}>
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
+            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-amber-50/50 to-rose-50/50 dark:from-amber-900/10 dark:to-rose-900/10 border-b border-zinc-100 dark:border-zinc-800">
+                <IconBox
+                    icon={ListChecks}
+                    variant="warning"
+                    size="md"
+                />
+                <div className="flex-1 min-w-0">
+                    <CardTitle className="text-base font-bold leading-snug">
                         Задачи и действия
-                    </div>
+                    </CardTitle>
                     {data.document_context && (
-                        <div style={{fontSize: 11, color: '#64748b', marginTop: 1}}>
+                        <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-1">
                             {data.document_context}
                         </div>
                     )}
                 </div>
-                <span style={{
-                    ...BADGE_BASE,
-                    background: 'rgba(245,158,11,0.08)', color: '#92400e',
-                }}>
+                <div className="px-2 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-200 dark:border-amber-800">
                     {data.action_items.length} задач
-                </span>
-            </div>
+                </div>
+            </CardHeader>
 
-            <div style={{padding: '8px 0'}}>
+            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {sorted.map((item, i) => {
-                    const cfg = (PRIORITY_CFG[item.priority] ?? PRIORITY_CFG['medium'])!
+                    const cfg = PRIORITY_CONFIG[item.priority] ?? DEFAULT_PRIORITY
+                    const Icon = cfg.icon
                     return (
-                        <div key={i} style={{
-                            padding: '10px 16px',
-                            borderBottom: i < sorted.length - 1
-                                ? '1px solid rgba(0,0,0,0.04)' : 'none',
-                            background: i % 2 === 0 ? 'transparent' : 'rgba(248,250,252,0.5)',
-                        }}>
-                            <div style={{
-                                display: 'flex', alignItems: 'flex-start', gap: 10,
-                            }}>
-                                <div style={{
-                                    minWidth: 6, height: 6, borderRadius: '50%',
-                                    background: cfg.text,
-                                    marginTop: 6, flexShrink: 0,
-                                }}/>
+                        <div key={i} className="p-4 hover:bg-zinc-50/30 dark:hover:bg-zinc-800/20 transition-all group">
+                            <div className="flex items-start gap-4">
+                                <div className={cn(
+                                    "w-1.5 h-1.5 rounded-full mt-2 shrink-0",
+                                    item.priority === 'high' ? "bg-rose-500" : (item.priority === 'medium' ? "bg-amber-500" : "bg-zinc-300")
+                                )} />
 
-                                <div style={{flex: 1}}>
-                                    <div style={{
-                                        fontSize: 12, fontWeight: 600, color: '#1e293b',
-                                        lineHeight: 1.5,
-                                    }}>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[14px] font-bold text-zinc-900 dark:text-zinc-100 leading-relaxed mb-3">
                                         {item.task}
                                     </div>
 
-                                    <div style={{
-                                        display: 'flex', flexWrap: 'wrap', gap: 6,
-                                        marginTop: 5,
-                                    }}>
-                                        <span style={{
-                                            ...BADGE_BASE,
-                                            background: cfg.bg, color: cfg.text,
-                                        }}>
-                                            {cfg.icon} {cfg.label}
-                                        </span>
+                                    <div className="flex flex-wrap gap-2 mb-3">
+                                        <div className={cn(
+                                            "flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-tight border",
+                                            cfg.variant === 'error' && "bg-rose-50 border-rose-100 text-rose-600",
+                                            cfg.variant === 'warning' && "bg-amber-50 border-amber-100 text-amber-600",
+                                            cfg.variant === 'zinc' && "bg-zinc-50 border-zinc-200 text-zinc-500",
+                                        )}>
+                                            <Icon size={12} /> {cfg.label}
+                                        </div>
 
                                         {item.owner && (
-                                            <span style={{
-                                                ...BADGE_BASE,
-                                                background: 'rgba(139,92,246,0.06)',
-                                                color: '#5b21b6',
-                                            }}>
-                                                <User size={9}/> {item.owner}
-                                            </span>
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/30 border border-violet-100 dark:border-violet-800/50 text-violet-600 dark:text-violet-400 text-[10px] font-bold uppercase tracking-tight">
+                                                <User size={12}/> {item.owner}
+                                            </div>
                                         )}
 
                                         {item.deadline && (
-                                            <span style={{
-                                                ...BADGE_BASE,
-                                                background: 'rgba(59,130,246,0.06)',
-                                                color: '#1d4ed8',
-                                            }}>
-                                                <Clock size={9}/> {formatDate(item.deadline)}
-                                            </span>
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800/50 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-tight">
+                                                <Clock size={12}/> {formatDate(item.deadline)}
+                                            </div>
                                         )}
                                     </div>
 
                                     {item.source_fragment && (
-                                        <div style={{
-                                            marginTop: 5, padding: '4px 10px',
-                                            background: '#f8fafc', borderRadius: 6,
-                                            border: '1px solid rgba(0,0,0,0.04)',
-                                            fontSize: 11, color: '#64748b',
-                                            fontStyle: 'italic', lineHeight: 1.5,
-                                            display: 'flex', gap: 5,
-                                        }}>
-                                            <Quote size={10} style={{
-                                                flexShrink: 0, marginTop: 2, color: '#94a3b8',
-                                            }}/>
+                                        <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 text-[12px] text-zinc-500 dark:text-zinc-400 italic leading-relaxed flex gap-2.5 items-start">
+                                            <Quote size={14} className="shrink-0 mt-0.5 text-zinc-300 dark:text-zinc-600" />
                                             {item.source_fragment}
                                         </div>
                                     )}
@@ -153,6 +117,6 @@ export function ActionItemsResult({data}: { data: ActionItemsData }) {
             </div>
 
             <CardFooter/>
-        </div>
+        </Card>
     )
 }

@@ -2,7 +2,8 @@ import {useState} from 'react'
 import {ExternalLink, User, FileText, ChevronRight} from 'lucide-react'
 import type {InterruptPayload, ResumeValue} from '@entities/interrupt/model/types'
 import {sendMessage} from '@shared/api/messaging'
-import {BaseCard} from './primitives/BaseCard'
+import {Card, CardHeader, CardTitle, CardDescription, IconBox} from './primitives'
+import {cn} from '@shared/lib/cn'
 
 interface Props {
     payload: InterruptPayload
@@ -13,8 +14,6 @@ export function InterruptRenderer({payload, onReply}: Props) {
     const [selectedId, setSelectedId] = useState<string | null>(null)
 
     const handleSelect = (id: string, resume: ResumeValue) => {
-        // We no longer block repeated selections by only updating state if null.
-        // Even if already selected, allowing re-click can re-trigger agent action if desired.
         setSelectedId(id)
         onReply(resume)
     }
@@ -22,9 +21,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
     // ── card_select ────────────────────────────────────────────────────────
     if (payload.kind === 'card_select') {
         return (
-            <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+            <div className="flex flex-col gap-2">
                 {payload.prompt && (
-                    <p style={{fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.5}}>
+                    <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-1 ml-1 px-1">
                         {payload.prompt}
                     </p>
                 )}
@@ -37,142 +36,74 @@ export function InterruptRenderer({payload, onReply}: Props) {
                         card.badges?.some(b => b.toLowerCase().includes('сотрудник') || b.toLowerCase().includes('физлицо'));
 
                     return (
-                        <div key={card.id} className="flex items-stretch gap-1.5">
-                            <BaseCard
+                        <div key={card.id} className="flex items-stretch gap-2 group/row">
+                            <Card
                                 isSelected={isSelected}
+                                isClickable={true}
                                 onClick={() =>
                                     handleSelect(card.id, {
                                         kind: 'card_select',
                                         selected_ids: [card.id],
                                     })
                                 }
-                                className="flex-1 min-w-0 flex-row items-center gap-3 py-3"
-                                    style={isSelected ? { background: '#6366f1' } : {}}
-                            >
-
-                                {isEmployee ? (
-                                    <>
-                                        <div style={{
-                                            width: 30,
-                                            height: 30,
-                                            borderRadius: '50%',
-                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            fontSize: 11,
-                                            fontWeight: 800,
-                                            color: isSelected ? '#ffffff' : '#6366f1',
-                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(99,102,241,0.1)'}`
-                                        }}>
-                                            {idx + 1}
-                                        </div>
-
-                                        <div style={{
-                                            width: 36,
-                                            height: 36,
-                                            borderRadius: 10,
-                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(124,58,237,0.1) 100%)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(99,102,241,0.1)'}`
-                                        }}>
-                                            <User size={20} style={{
-                                                color: isSelected ? '#ffffff' : '#6366f1',
-                                                opacity: isSelected ? 1 : 0.8,
-                                            }}/>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div style={{
-                                            width: 30,
-                                            height: 30,
-                                            borderRadius: '50%',
-                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            fontSize: 11,
-                                            fontWeight: 800,
-                                            color: isSelected ? '#ffffff' : '#6366f1',
-                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(99,102,241,0.1)'}`
-                                        }}>
-                                            {idx + 1}
-                                        </div>
-
-                                        <div style={{
-                                            width: 36,
-                                            height: 36,
-                                            borderRadius: 10,
-                                            background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            border: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.03)'}`
-                                        }}>
-                                            <FileText size={20} style={{
-                                                color: isSelected ? '#ffffff' : '#6366f1',
-                                                opacity: isSelected ? 1 : 0.8,
-                                            }}/>
-                                        </div>
-                                    </>
+                                className={cn(
+                                    "flex-1 min-w-0 transition-all duration-300",
+                                    isSelected && "border-blue-500 bg-blue-50/30 dark:bg-blue-900/10"
                                 )}
-
-                                <div style={{flex: 1, minWidth: 0}}>
-                                    <div style={{
-                                        fontSize: 13,
-                                        fontWeight: 600,
-                                        color: isSelected ? '#ffffff' : '#0f172a',
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis'
-                                    }}>
-                                        {card.label}
+                            >
+                                <CardHeader className="flex-row items-center gap-3 p-4 space-y-0">
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold border transition-all",
+                                        isSelected
+                                          ? "bg-blue-500 border-blue-400 text-white"
+                                          : "bg-zinc-100 border-zinc-200 text-zinc-500 group-hover/row:bg-zinc-200"
+                                    )}>
+                                        {idx + 1}
                                     </div>
-                                    {card.description && (
-                                        <div style={{
-                                            fontSize: 11,
-                                            color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b',
-                                            marginTop: 1,
-                                            whiteSpace: 'normal',
-                                            wordBreak: 'break-word',
-                                            overflow: 'hidden',
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 2,
-                                            WebkitBoxOrient: 'vertical'
-                                        }}>
-                                            {card.description}
-                                        </div>
-                                    )}
-                                    {Object.keys(card.primary_attrs ?? {}).length > 0 && (
-                                        <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4}}>
-                                            {Object.entries(card.primary_attrs).map(([k, v]) => (
-                                                <div key={k} style={{
-                                                    fontSize: 10,
-                                                    color: isSelected ? 'rgba(255,255,255,0.7)' : '#475569',
-                                                    display: 'flex',
-                                                    gap: 3
-                                                }}>
-                                                    <span style={{opacity: 0.7}}>{k}:</span>
-                                                    <span>{v}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
 
-                                <ChevronRight size={16} style={{
-                                    color: isSelected ? '#ffffff' : '#cbd5e1',
-                                    flexShrink: 0,
-                                    marginLeft: 'auto'
-                                }}/>
-                            </BaseCard>
+                                    <IconBox
+                                        icon={isEmployee ? User : FileText}
+                                        variant={isSelected ? 'primary' : 'zinc'}
+                                        size="sm"
+                                    />
+
+                                    <div className="flex-1 min-w-0">
+                                        <CardTitle className={cn(
+                                            "text-[14px] font-bold truncate transition-colors",
+                                            isSelected && "text-blue-700 dark:text-blue-300"
+                                        )}>
+                                            {card.label}
+                                        </CardTitle>
+                                        {card.description && (
+                                            <CardDescription className={cn(
+                                                "text-[12px] line-clamp-2 mt-0.5",
+                                                isSelected && "text-blue-600/70 dark:text-blue-400/70"
+                                            )}>
+                                                {card.description}
+                                            </CardDescription>
+                                        )}
+                                        {Object.keys(card.primary_attrs ?? {}).length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mt-2">
+                                                {Object.entries(card.primary_attrs).map(([k, v]) => (
+                                                    <div key={k} className={cn(
+                                                        "text-[10px] font-bold px-1.5 py-0.5 rounded-md border tracking-tight uppercase",
+                                                        isSelected
+                                                          ? "bg-blue-100/50 border-blue-200/50 text-blue-600"
+                                                          : "bg-zinc-50 border-zinc-100 text-zinc-400"
+                                                    )}>
+                                                        <span className="opacity-60">{k}:</span> {v}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <ChevronRight className={cn(
+                                        "w-4 h-4 transition-all",
+                                        isSelected ? "text-blue-500 transform translate-x-1" : "text-zinc-300"
+                                    )} />
+                                </CardHeader>
+                            </Card>
 
                             {cardUrl && (
                                 <button
@@ -182,32 +113,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                         e.stopPropagation()
                                         void sendMessage('navigateTo', {url: cardUrl, newTab: true})
                                     }}
-                                    style={{
-                                        flexShrink: 0,
-                                        width: 42,
-                                        border: '1px solid rgba(0,0,0,0.08)',
-                                        borderRadius: 16,
-                                        background: '#ffffff',
-                                        color: '#6366f1',
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        transition: 'all 0.2s',
-                                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.background = 'rgba(99,102,241,0.08)'
-                                        e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
-                                        e.currentTarget.style.transform = 'translateY(-1px)'
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.background = '#ffffff'
-                                        e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
-                                        e.currentTarget.style.transform = 'translateY(0)'
-                                    }}
+                                    className="shrink-0 w-12 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 text-zinc-400 hover:text-blue-500 hover:border-blue-200 dark:hover:border-blue-900/50 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all flex items-center justify-center shadow-sm"
                                 >
-                                    <ExternalLink size={16}/>
+                                    <ExternalLink size={18}/>
                                 </button>
                             )}
                         </div>
@@ -220,60 +128,49 @@ export function InterruptRenderer({payload, onReply}: Props) {
     // ── disambiguation ─────────────────────────────────────────────────────
     if (payload.kind === 'disambiguation') {
         return (
-            <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+            <div className="flex flex-col gap-2">
                 {payload.prompt && (
-                    <p style={{fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.5}}>
+                    <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-1 ml-1 px-1">
                         {payload.prompt}
                     </p>
                 )}
                 {payload.options.map((opt) => {
                     const isSelected = selectedId === opt.id
                     return (
-                        <button
+                        <Card
                             key={opt.id}
-                            type="button"
+                            isSelected={isSelected}
+                            isClickable={true}
                             onClick={() =>
                                 handleSelect(opt.id, {
                                     kind: 'disambiguation',
                                     selected_ids: [opt.id],
                                 })
                             }
-                            style={{
-                                padding: '10px 14px',
-                                borderRadius: 12,
-                                border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
-                                background: isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff',
-                                cursor: 'pointer',
-                                textAlign: 'left',
-                                transition: 'all 0.15s',
-                                boxShadow: isSelected
-                                    ? '0 0 0 2px rgba(99,102,241,0.2)'
-                                    : '0 1px 3px rgba(0,0,0,0.04)',
-                                width: '100%',
-                                maxWidth: '100%',
-                                overflow: 'hidden',
-                                whiteSpace: 'normal',
-                                wordBreak: 'break-word',
-                                overflowWrap: 'anywhere',
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
-                                e.currentTarget.style.background = 'rgba(99,102,241,0.04)'
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'
-                                e.currentTarget.style.background = isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff'
-                            }}
+                            className="p-4 transition-all duration-300"
                         >
-                            <div style={{fontSize: 13, fontWeight: 600, color: '#0f172a', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere'}}>
-                                {opt.label}
-                            </div>
-                            {opt.description && (
-                                <div style={{fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.4}}>
-                                    {opt.description}
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="flex-1 min-w-0">
+                                    <CardTitle className={cn(
+                                        "text-[14px] font-bold mb-1",
+                                        isSelected && "text-blue-700 dark:text-blue-300"
+                                    )}>
+                                        {opt.label}
+                                    </CardTitle>
+                                    {opt.description && (
+                                        <CardDescription className="text-[12px] line-clamp-1">
+                                            {opt.description}
+                                        </CardDescription>
+                                    )}
                                 </div>
-                            )}
-                        </button>
+                                <div className={cn(
+                                    "w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",
+                                    isSelected ? "border-blue-500 bg-blue-500" : "border-zinc-200 bg-white"
+                                )}>
+                                    {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                                </div>
+                            </div>
+                        </Card>
                     )
                 })}
             </div>
@@ -283,13 +180,15 @@ export function InterruptRenderer({payload, onReply}: Props) {
     // ── select ─────────────────────────────────────────────────────────────
     if (payload.kind === 'select') {
         return (
-            <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+            <Card className="overflow-hidden">
                 {payload.prompt && (
-                    <p style={{fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.5}}>
-                        {payload.prompt}
-                    </p>
+                    <div className="p-3.5 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800">
+                        <p className="text-[13px] font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-tight">
+                            {payload.prompt}
+                        </p>
+                    </div>
                 )}
-                <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
                     {payload.options.map((opt) => {
                         const isSelected = selectedId === opt.id
                         return (
@@ -302,100 +201,71 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                         selected_id: opt.id,
                                     })
                                 }
-                                style={{
-                                    padding: '8px 14px',
-                                    borderRadius: 10,
-                                    border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
-                                    background: isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff',
-                                cursor: 'pointer',
-                                    textAlign: 'left',
-                                    fontSize: 12,
-                                    fontWeight: isSelected ? 600 : 400,
-                                    color: isSelected ? '#4338ca' : '#334155',
-                                    transition: 'all 0.15s',
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
-                                    e.currentTarget.style.background = 'rgba(99,102,241,0.04)'
-                                }}
-                                onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'
-                                e.currentTarget.style.background = isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff'
-                                }}
-                            >
-                                {opt.label}
-                                {opt.description && (
-                                    <span style={{color: '#94a3b8', fontSize: 10, marginLeft: 6}}>
-                    {opt.description}
-                  </span>
+                                className={cn(
+                                    "w-full px-4 py-3 text-left transition-all flex items-center justify-between group",
+                                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30"
                                 )}
+                            >
+                                <div className="flex-1 min-w-0">
+                                    <div className={cn(
+                                        "text-[13px] font-bold transition-colors",
+                                        isSelected ? "text-blue-600 dark:text-blue-400" : "text-zinc-700 dark:text-zinc-200"
+                                    )}>
+                                        {opt.label}
+                                    </div>
+                                    {opt.description && (
+                                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{opt.description}</div>
+                                    )}
+                                </div>
+                                <ChevronRight className={cn(
+                                    "w-4 h-4 transition-all",
+                                    isSelected ? "text-blue-500 opacity-100" : "text-zinc-200 opacity-0 group-hover:opacity-100"
+                                )} />
                             </button>
                         )
                     })}
                 </div>
-            </div>
+            </Card>
         )
     }
 
     // ── confirmation ───────────────────────────────────────────────────────
     if (payload.kind === 'confirmation') {
         return (
-            <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+            <Card className="p-4 border-l-4 border-l-blue-500 dark:border-l-blue-600">
                 {payload.prompt && (
-                    <p style={{fontSize: 12, color: '#475569', margin: 0, lineHeight: 1.5}}>
+                    <p className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200 mb-4 leading-relaxed px-1">
                         {payload.prompt}
                     </p>
                 )}
-                <div style={{display: 'flex', gap: 8}}>
+                <div className="flex gap-2">
                     <button
                         type="button"
-                        disabled={!!selectedId}
                         onClick={() => {
                             setSelectedId('confirm')
                             onReply({kind: 'confirmation', confirmed: true})
                         }}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: 10,
-                            border: 'none',
-                            background:
-                                selectedId === 'confirm'
-                                    ? '#4f46e5'
-                                    : payload.danger
-                                        ? '#ef4444'
-                                        : '#6366f1',
-                            color: '#fff',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: selectedId ? 'default' : 'pointer',
-                            opacity: selectedId && selectedId !== 'confirm' ? 0.5 : 1,
-                            transition: 'all 0.15s',
-                        }}
+                        className={cn(
+                            "flex-1 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-all shadow-sm active:scale-95",
+                            payload.danger
+                                ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200 dark:shadow-none"
+                                : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200 dark:shadow-none"
+                        )}
                     >
                         {payload.confirm_label ?? 'Подтвердить'}
                     </button>
                     <button
                         type="button"
-                        disabled={!!selectedId}
                         onClick={() => {
                             setSelectedId('cancel')
                             onReply({kind: 'confirmation', confirmed: false})
                         }}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: 10,
-                            border: '1px solid rgba(0,0,0,0.1)',
-                            background: selectedId === 'cancel' ? 'rgba(0,0,0,0.05)' : '#fff',
-                            fontSize: 12,
-                            cursor: selectedId ? 'default' : 'pointer',
-                            opacity: selectedId && selectedId !== 'cancel' ? 0.5 : 1,
-                            transition: 'all 0.15s',
-                        }}
+                        className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-zinc-600 dark:text-zinc-400 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all shadow-sm active:scale-95"
                     >
                         {payload.cancel_label ?? 'Отмена'}
                     </button>
                 </div>
-            </div>
+            </Card>
         )
     }
 
@@ -405,8 +275,6 @@ export function InterruptRenderer({payload, onReply}: Props) {
 
     return null
 }
-
-// ── Отдельный компонент для text_input ────────────────────────────────────
 
 function TextInputInterruptForm({
                                     payload,
@@ -425,49 +293,31 @@ function TextInputInterruptForm({
     }
 
     return (
-        <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+        <Card className="p-4 border-l-4 border-l-blue-500">
             {payload.prompt && (
-                <p style={{fontSize: 12, color: '#475569', margin: 0, lineHeight: 1.5}}>
+                <p className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200 mb-4 px-1">
                     {payload.prompt}
                 </p>
             )}
-            <div style={{display: 'flex', gap: 8}}>
+            <div className="flex gap-2">
                 <input
                     type={payload.secret ? 'password' : 'text'}
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                    placeholder={payload.placeholder ?? ''}
+                    placeholder={payload.placeholder ?? 'Введите значение...'}
                     disabled={submitted}
-                    style={{
-                        flex: 1,
-                        padding: '8px 12px',
-                        borderRadius: 10,
-                        border: '1px solid rgba(0,0,0,0.1)',
-                        fontSize: 12,
-                        outline: 'none',
-                        background: submitted ? '#f8fafc' : '#fff',
-                    }}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/50 text-[14px] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all disabled:opacity-50"
                 />
                 <button
                     type="button"
                     onClick={handleSubmit}
                     disabled={!value.trim() || submitted}
-                    style={{
-                        padding: '8px 14px',
-                        borderRadius: 10,
-                        border: 'none',
-                        background: value.trim() && !submitted ? '#6366f1' : 'rgba(0,0,0,0.06)',
-                        color: value.trim() && !submitted ? '#fff' : '#94a3b8',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: value.trim() && !submitted ? 'pointer' : 'not-allowed',
-                        transition: 'all 0.15s',
-                    }}
+                    className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 text-white text-[13px] font-bold transition-all shadow-sm shadow-blue-200 dark:shadow-none active:scale-95"
                 >
                     OK
                 </button>
             </div>
-        </div>
+        </Card>
     )
 }

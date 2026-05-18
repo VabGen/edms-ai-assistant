@@ -1,57 +1,29 @@
 import React, { useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight, Sparkles, LucideIcon } from 'lucide-react'
+import { CardFooter as BaseCardFooter, IconBox } from '@shared/ui/primitives'
+import { cn } from '@shared/lib/cn'
 
-export const CARD: React.CSSProperties = {
-    background: '#ffffff',
-    borderRadius: 14,
-    border: '1px solid rgba(0,0,0,0.06)',
-    overflow: 'hidden',
-    fontSize: 13,
-}
-
-export const CARD_HEADER: React.CSSProperties = {
-    padding: '14px 16px',
-    borderBottom: '1px solid rgba(0,0,0,0.05)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-}
-
-export const BADGE_BASE: React.CSSProperties = {
-    fontSize: 10,
-    fontWeight: 600,
-    padding: '3px 9px',
-    borderRadius: 20,
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    whiteSpace: 'nowrap',
-}
-
-export const THEME_PALETTE: Record<string, { bg: string; text: string; border: string }> = {
-    default: {bg: 'rgba(100,116,139,0.07)', text: '#475569', border: 'rgba(100,116,139,0.12)'},
-    blue: {bg: 'rgba(59,130,246,0.07)', text: '#1d4ed8', border: 'rgba(59,130,246,0.12)'},
-    indigo: {bg: 'rgba(99,102,241,0.07)', text: '#4338ca', border: 'rgba(99,102,241,0.12)'},
-    violet: {bg: 'rgba(139,92,246,0.07)', text: '#5b21b6', border: 'rgba(139,92,246,0.12)'},
-    green: {bg: 'rgba(16,185,129,0.07)', text: '#065f46', border: 'rgba(16,185,129,0.12)'},
-    amber: {bg: 'rgba(245,158,11,0.07)', text: '#92400e', border: 'rgba(245,158,11,0.12)'},
-    red: {bg: 'rgba(239,68,68,0.07)', text: '#991b1b', border: 'rgba(239,68,68,0.12)'},
-    rose: {bg: 'rgba(244,63,94,0.07)', text: '#9f1239', border: 'rgba(244,63,94,0.12)'},
-    cyan: {bg: 'rgba(6,182,212,0.07)', text: '#155e75', border: 'rgba(6,182,212,0.12)'},
+export const THEME_PALETTE = {
+    default: { variant: 'zinc' as const, bg: 'bg-zinc-50', text: 'text-zinc-600', border: 'border-zinc-200' },
+    blue: { variant: 'primary' as const, bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
+    indigo: { variant: 'primary' as const, bg: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-200' },
+    violet: { variant: 'primary' as const, bg: 'bg-violet-50', text: 'text-violet-600', border: 'border-violet-200' },
+    green: { variant: 'success' as const, bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200' },
+    amber: { variant: 'warning' as const, bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
+    red: { variant: 'error' as const, bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-200' },
+    rose: { variant: 'error' as const, bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-200' },
+    cyan: { variant: 'primary' as const, bg: 'bg-cyan-50', text: 'text-cyan-600', border: 'border-cyan-200' },
 }
 
 export function CardFooter() {
     return (
-        <div style={{
-            padding: '8px 16px', fontSize: 10, color: '#94a3b8',
-            borderTop: '1px solid rgba(0,0,0,0.04)', background: '#fafbfc',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-            <span>Сгенерировано AI</span>
-            <span style={{display: 'flex', alignItems: 'center', gap: 3}}>
-                <Sparkles size={9}/> EDMS Assistant
-            </span>
-        </div>
+        <BaseCardFooter className="flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 border-t border-zinc-100 dark:border-zinc-800 py-2.5">
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Сгенерировано AI</span>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                <Sparkles size={10} className="text-blue-500"/>
+                <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-300">EDMS Assistant</span>
+            </div>
+        </BaseCardFooter>
     )
 }
 
@@ -59,43 +31,41 @@ export function CollapsibleSection({
                                 title,
                                 children,
                                 defaultOpen = true,
-                                icon,
+                                icon: Icon,
                                 right,
                             }: {
     title: string
     children: ReactNode
     defaultOpen?: boolean
-    icon?: ReactNode
+    icon?: LucideIcon
     right?: ReactNode
 }) {
     const [open, setOpen] = useState(defaultOpen)
     return (
-        <div style={{marginBottom: 4}}>
+        <div className="mb-1 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
             <button
                 onClick={() => setOpen(v => !v)}
-                style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 16px',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    color: '#0f172a',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    transition: 'background 0.15s',
-                }}
+                className="w-full flex items-center gap-3 py-3.5 px-1 text-left hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-all group"
             >
-                {open ? <ChevronDown size={14} style={{flexShrink: 0, color: '#94a3b8'}}/>
-                    : <ChevronRight size={14} style={{flexShrink: 0, color: '#94a3b8'}}/>}
-                {icon}
-                <span style={{flex: 1}}>{title}</span>
+                <div className={cn(
+                    "flex items-center justify-center w-5 h-5 rounded-md border border-zinc-200 dark:border-zinc-700 transition-colors",
+                    open ? "bg-zinc-100 dark:bg-zinc-800" : "bg-white dark:bg-zinc-900"
+                )}>
+                   {open ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
+                </div>
+
+                {Icon && <Icon size={16} className="text-zinc-400 group-hover:text-zinc-600 transition-colors" />}
+                <span className="flex-1 text-[13px] font-bold text-zinc-700 dark:text-zinc-200 tracking-tight">{title}</span>
                 {right}
             </button>
-            {open && <div style={{paddingLeft: 16, paddingRight: 16}}>{children}</div>}
+            <div className={cn(
+                "overflow-hidden transition-all duration-300 ease-in-out",
+                open ? "max-h-[5000px] opacity-100 mb-4" : "max-h-0 opacity-0"
+            )}>
+                <div className="pl-8 pr-1 py-1">
+                    {children}
+                </div>
+            </div>
         </div>
     )
 }
