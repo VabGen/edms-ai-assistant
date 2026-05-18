@@ -11,8 +11,9 @@ from langgraph.errors import GraphInterrupt
 
 from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
 from edms_ai_assistant.agent.interrupt_contract import (
-    DisambiguationInterrupt,
-    InterruptOption,
+    CardSelectInterrupt,
+    CardSelectResume,
+    InterruptCard,
 )
 
 import difflib
@@ -333,12 +334,14 @@ async def doc_compare_attachment_with_local(
     if target is None:
         logger.info("Attachment resolution failed → HITL disambiguation")
 
-        # Формируем опции для карточек
-        options = [
-            InterruptOption(
+        # Формируем карточки для выбора
+        cards = [
+            InterruptCard(
                 id=_att_id(a),
                 label=_att_name(a) or "без имени",
-                description="Документ СЭД"  #  размер из DTO
+                description="Вложение документа",
+                badges=["Документ"],
+                metadata={"id": _att_id(a), "name": _att_name(a)}
             )
             for a in attachments if _att_id(a)
         ]
@@ -353,12 +356,14 @@ async def doc_compare_attachment_with_local(
         )
 
         try:
-            resume = ask_human(DisambiguationInterrupt(
-                entity_type="attachment",
+            resume = ask_human(CardSelectInterrupt(
                 prompt=prompt_msg,
-                options=options,
-                search_term=hint,
+                cards=cards,
+                multiple=False,
             ))
+            if not isinstance(resume, CardSelectResume):
+                raise ToolAborted("Expected CardSelectResume")
+
             selected_id = resume.selected_ids[0]
             target = next((a for a in attachments if _att_id(a) == selected_id), None)
 

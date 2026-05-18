@@ -14,8 +14,9 @@ from pydantic import BaseModel, Field
 
 from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
 from edms_ai_assistant.agent.interrupt_contract import (
-    DisambiguationInterrupt,
-    InterruptOption,
+    CardSelectInterrupt,
+    CardSelectResume,
+    InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.domain.task_models import TaskType
@@ -206,23 +207,28 @@ async def task_create_tool(
                         if not matches:
                             continue
 
-                        options = [
-                            InterruptOption(
+                        cards = [
+                            InterruptCard(
                                 id=m.get("id", ""),
                                 label=m.get("full_name", "Не указано"),
-                                description=f"{m.get('post', '') or ''}, {m.get('department', '') or ''}".strip(", ")
+                                description=m.get('post', '') or "Сотрудник",
+                                badges=["Сотрудник"],
+                                primary_attrs={
+                                    "Подразделение": m.get('department', '') or "—",
+                                }
                             ) for m in matches
                         ]
 
                         prompt_msg = f"Уточните исполнителя для «{search_term}» ({len(matches)} совпадений)."
 
                         try:
-                            resume = ask_human(DisambiguationInterrupt(
-                                entity_type="employee",
+                            resume = ask_human(CardSelectInterrupt(
                                 prompt=prompt_msg,
-                                options=options,
-                                search_term=search_term,
+                                cards=cards,
+                                multiple=False,
                             ))
+                            if not isinstance(resume, CardSelectResume):
+                                raise ToolAborted("Expected CardSelectResume")
                             selected_id = resume.selected_ids[0]
                             all_uuids.append(UUID(selected_id))
                         except ToolAborted:

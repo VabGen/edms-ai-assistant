@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
-    DisambiguationInterrupt,
-    DisambiguationResume,
-    InterruptOption,
+    CardSelectInterrupt,
+    CardSelectResume,
+    InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -327,23 +327,23 @@ async def _resolve_via_ask_human(
     """Disambiguate over native ``ask_human`` and return the picked card."""
     index: dict[str, dict[str, Any]] = {str(r.get("id", "")): r for r in results}
 
-    # Возвращаем DisambiguationInterrupt, так как фронтенд умеет рендерить только его
-    resume = ask_human(DisambiguationInterrupt(
-        entity_type="employee",
+    # Возвращаем CardSelectInterrupt для красивых карточек
+    resume = ask_human(CardSelectInterrupt(
         prompt=(
             f"Уточните «{merged_last_name}»"
             if merged_last_name
             else "Уточните сотрудника"
         ),
-        search_term=merged_last_name,
-        options=[
-            InterruptOption(
+        cards=[
+            InterruptCard(
                 id=brief["id"],
                 label=brief["full_name"],
-                description=" · ".join(
-                    p for p in (brief.get("post"), brief.get("department"))
-                    if p and p != "—"
-                ) or None,
+                description=brief.get("post") or "Сотрудник",
+                badges=["Сотрудник"] + ([ "Активен" ] if brief.get("active") else []),
+                primary_attrs={
+                    "Подразделение": brief.get("department") or "—",
+                    "Email": brief.get("email") or "—",
+                },
                 metadata={
                     "active": brief.get("active"),
                     "fired": brief.get("fired"),
@@ -354,9 +354,9 @@ async def _resolve_via_ask_human(
         multiple=False,
     ))
 
-    if not isinstance(resume, DisambiguationResume):
+    if not isinstance(resume, CardSelectResume):
         raise ToolAborted(
-            f"Contract mismatch: expected DisambiguationResume, "
+            f"Contract mismatch: expected CardSelectResume, "
             f"got {type(resume).__name__}"
         )
 
