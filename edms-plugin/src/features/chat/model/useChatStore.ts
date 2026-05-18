@@ -46,21 +46,28 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   threads: [],
   isSnapshotLoaded: false,
 
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => {
+    set({ messages })
+    void get().saveSnapshot(true)
+  },
 
-  appendMessage: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
+  appendMessage: (message) => {
+    set((state) => ({ messages: [...state.messages, message] }))
+    void get().saveSnapshot(true)
+  },
 
-  updateLastMessage: (updater) =>
+  updateLastMessage: (updater) => {
     set((state) => {
       const msgs = [...state.messages]
       const last = msgs[msgs.length - 1]
       if (!last) return state
       msgs[msgs.length - 1] = updater(last)
       return { messages: msgs }
-    }),
+    })
+    void get().saveSnapshot(true)
+  },
 
-  updateMessage: (id, updater) =>
+  updateMessage: (id, updater) => {
     set((state) => {
       const idx = state.messages.findIndex((m) => m.id === id)
       if (idx < 0) return state
@@ -69,9 +76,14 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       const msgs = [...state.messages]
       msgs[idx] = updater(target)
       return { messages: msgs }
-    }),
+    })
+    void get().saveSnapshot(true)
+  },
 
-  setThreadId: (threadId) => set({ threadId }),
+  setThreadId: (threadId) => {
+    set({ threadId })
+    void get().saveSnapshot(true)
+  },
   setLoading: (loading) => set({ loading }),
   setThreads: (threads) => set({ threads }),
 

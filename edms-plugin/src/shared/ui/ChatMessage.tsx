@@ -32,6 +32,7 @@ import {
     Zap,
     ArrowRight,
     Quote,
+    ExternalLink,
 } from 'lucide-react'
 
 
@@ -159,6 +160,7 @@ function detectStructuredOutput(content: string): StructuredOutput | null {
 
     if ('overall' in parsed && 'fields' in parsed)
         return {type: 'compliance', data: parsed as ComplianceCheckData}
+    if (parsed.tool_use || parsed.tool_calls || parsed.action === 'call_tool') return null
     if ('main_argument' in parsed && 'sections' in parsed)
         return {type: 'thesis', data: parsed as ThesisPlanData}
     if ('key_themes' in parsed && 'summary' in parsed && !('headline' in parsed))
@@ -1632,6 +1634,8 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; label: string 
     'APPEAL': {bg: 'rgba(245,158,11,0.08)', text: '#92400e', label: 'Обращение'},
     'CONTRACT': {bg: 'rgba(239,68,68,0.08)', text: '#991b1b', label: 'Договор'},
     'MEETING': {bg: 'rgba(99,102,241,0.08)', text: '#3730a3', label: 'Совещание'},
+    'ORDER': {bg: 'rgba(244,63,94,0.08)', text: '#9f1239', label: 'Приказ'},
+    'CITIZEN': {bg: 'rgba(245,158,11,0.08)', text: '#92400e', label: 'Гражданин'},
 }
 
 function getCategoryStyle(raw: string) {
@@ -1640,18 +1644,6 @@ function getCategoryStyle(raw: string) {
         if (upper.includes(key)) return val
     }
     return {bg: 'rgba(100,116,139,0.08)', text: '#334155', label: raw}
-}
-
-function IconOpenNew() {
-    return (
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
-             style={{flexShrink: 0}}>
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-            <polyline points="15 3 21 3 21 9"/>
-            <line x1="10" y1="14" x2="21" y2="3"/>
-        </svg>
-    )
 }
 
 function DocCard({headers, row, index}: { headers: string[]; row: string[]; index: number }) {
@@ -1711,7 +1703,7 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
         >
             <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
                 <span style={{
-                    width: 24, height: 24, borderRadius: 8,
+                    width: 24, height: 24, borderRadius: '50%',
                     background: isClickable ? 'rgba(99,102,241,0.08)' : 'rgba(148,163,184,0.08)',
                     color: isClickable ? '#6366f1' : '#94a3b8',
                     fontSize: 10, fontWeight: 700,
@@ -1732,7 +1724,7 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
                         flexShrink: 0, color: '#6366f1', opacity: 0.5,
                         display: 'flex', alignItems: 'center',
                     }}>
-                        <IconOpenNew/>
+                        <ExternalLink size={12}/>
                     </span>
                 )}
             </div>
@@ -1745,7 +1737,7 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
                 }}>{summary}</p>
             )}
 
-            <div style={{display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'flex-start'}}>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center'}}>
                 {catStyle && (
                     <span style={{
                         fontSize: 10, fontWeight: 600,
@@ -1760,13 +1752,18 @@ function DocCard({headers, row, index}: { headers: string[]; row: string[]; inde
                         fontSize: 10, color: '#64748b',
                         padding: '2px 8px', borderRadius: 20,
                         background: 'rgba(100,116,139,0.06)',
-                    }}>👤 {author}</span>
+                        display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                        <User size={10} style={{opacity: 0.7}}/>
+                        {author}
+                    </span>
                 )}
                 {status && status !== '—' && (
                     <span style={{
-                        fontSize: 10, color: '#64748b',
-                        padding: '2px 8px', borderRadius: 20,
-                        background: 'rgba(100,116,139,0.06)',
+                        fontSize: 9, color: '#64748b', fontWeight: 600,
+                        padding: '2px 8px', borderRadius: 4,
+                        background: 'rgba(100,116,139,0.08)',
+                        textTransform: 'uppercase',
                     }}>{status}</span>
                 )}
 
@@ -1823,46 +1820,55 @@ function AttachmentCard({headers, row, index}: { headers: string[]; row: string[
     const fileSize = pairs.find(p => /размер|size/i.test(p.key))?.value || ''
     const fileDate = pairs.find(p => /дата|date/i.test(p.key))?.value || ''
 
-    const ext = (fileName.match(/\.([a-z]+)$/i)?.[1] || '').toLowerCase()
-    const icon = ext === 'pdf' ? '📄' : (ext === 'doc' || ext === 'docx') ? '📝'
-        : (ext === 'xls' || ext === 'xlsx') ? '📊' : '📎'
-
     return (
         <div
             onClick={() => fileName && onAttachmentClick?.(fileName)}
             style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '10px 14px', marginBottom: 5, borderRadius: 12,
-                background: 'rgba(248,250,252,0.80)',
-                border: '1px solid rgba(0,0,0,0.04)',
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '12px 16px', marginBottom: 6, borderRadius: 16,
+                background: '#ffffff',
+                border: '1px solid rgba(0,0,0,0.06)',
                 cursor: onAttachmentClick ? 'pointer' : 'default',
                 transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
             }}
             onMouseEnter={e => {
                 if (!onAttachmentClick) return
                 const el = e.currentTarget as HTMLDivElement
-                el.style.background = 'rgba(99,102,241,0.05)'
-                el.style.borderColor = 'rgba(99,102,241,0.15)'
-                el.style.transform = 'translateX(2px)'
+                el.style.background = '#fafbff'
+                el.style.borderColor = 'rgba(99,102,241,0.18)'
+                el.style.transform = 'translateY(-1px)'
+                el.style.boxShadow = '0 2px 12px rgba(99,102,241,0.08)'
             }}
             onMouseLeave={e => {
                 const el = e.currentTarget as HTMLDivElement
-                el.style.background = 'rgba(248,250,252,0.80)'
-                el.style.borderColor = 'rgba(0,0,0,0.04)'
-                el.style.transform = 'translateX(0)'
+                el.style.background = '#ffffff'
+                el.style.borderColor = 'rgba(0,0,0,0.06)'
+                el.style.transform = 'translateY(0)'
+                el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.03)'
             }}
         >
-            <span style={{fontSize: 20, flexShrink: 0, lineHeight: 1}}>{icon}</span>
+            <div style={{
+                width: 32, height: 32, borderRadius: '50%',
+                background: 'rgba(99,102,241,0.06)',
+                color: '#6366f1',
+                fontSize: 12, fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>{index + 1}</div>
+
+            <FileText size={18} style={{color: '#6366f1', opacity: 0.7, flexShrink: 0}}/>
+
             <div style={{flex: 1, minWidth: 0}}>
-                <p style={{
-                    margin: 0, fontSize: 12, fontWeight: 600, color: '#1e293b',
+                <div style={{
+                    fontSize: 13, fontWeight: 600, color: '#0f172a',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{fileName || `Вложение ${index + 1}`}</p>
-                <p style={{margin: 0, fontSize: 10, color: '#94a3b8', marginTop: 2}}>
-                    {[fileDate, fileSize].filter(Boolean).join('  ·  ')}
-                </p>
+                }}>{fileName || `Вложение ${index + 1}`}</div>
+                <div style={{fontSize: 11, color: '#64748b', marginTop: 1, display: 'flex', gap: 8}}>
+                    {fileSize && <span>{fileSize}</span>}
+                    {fileDate && <span>{fileDate}</span>}
+                </div>
             </div>
-            {onAttachmentClick && <span style={{color: '#94a3b8', fontSize: 14, flexShrink: 0}}>›</span>}
+            {onAttachmentClick && <ChevronRight size={16} style={{color: '#cbd5e1', flexShrink: 0}}/>}
         </div>
     )
 }

@@ -12,7 +12,6 @@ export function InterruptRenderer({payload, onReply}: Props) {
     const [selectedId, setSelectedId] = useState<string | null>(null)
 
     const handleSelect = (id: string, resume: ResumeValue) => {
-        if (selectedId) return
         setSelectedId(id)
         onReply(resume)
     }
@@ -38,7 +37,6 @@ export function InterruptRenderer({payload, onReply}: Props) {
                         <div key={card.id} style={{display: 'flex', alignItems: 'stretch', gap: 6}}>
                             <button
                                 type="button"
-                                disabled={!!selectedId && !isSelected}
                                 onClick={() =>
                                     handleSelect(card.id, {
                                         kind: 'card_select',
@@ -50,10 +48,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     borderRadius: 16,
                                     border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
                                     background: isSelected ? '#7c3aed' : '#ffffff',
-                                    cursor: selectedId ? (isSelected ? 'default' : 'not-allowed') : 'pointer',
+                                    cursor: 'pointer',
                                     textAlign: 'left',
                                     transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                    opacity: selectedId && !isSelected ? 0.5 : 1,
                                     boxShadow: isSelected
                                         ? '0 4px 12px rgba(124, 58, 237, 0.25)'
                                         : '0 1px 3px rgba(0,0,0,0.04)',
@@ -64,16 +61,14 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     gap: 12,
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (selectedId) return
                                     e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
                                     e.currentTarget.style.transform = 'translateY(-1px)'
                                     e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)'
                                 }}
                                 onMouseLeave={(e) => {
-                                    if (selectedId) return
-                                    e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
+                                    e.currentTarget.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'
                                     e.currentTarget.style.transform = 'translateY(0)'
-                                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)'
+                                    e.currentTarget.style.boxShadow = isSelected ? '0 4px 12px rgba(124, 58, 237, 0.25)' : '0 1px 3px rgba(0,0,0,0.04)'
                                 }}
                             >
                                 <div style={{
@@ -211,7 +206,6 @@ export function InterruptRenderer({payload, onReply}: Props) {
                         <button
                             key={opt.id}
                             type="button"
-                            disabled={!!selectedId && !isSelected}
                             onClick={() =>
                                 handleSelect(opt.id, {
                                     kind: 'disambiguation',
@@ -223,10 +217,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 borderRadius: 12,
                                 border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
                                 background: isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff',
-                                cursor: selectedId ? (isSelected ? 'default' : 'not-allowed') : 'pointer',
+                                cursor: 'pointer',
                                 textAlign: 'left',
                                 transition: 'all 0.15s',
-                                opacity: selectedId && !isSelected ? 0.5 : 1,
                                 boxShadow: isSelected
                                     ? '0 0 0 2px rgba(99,102,241,0.2)'
                                     : '0 1px 3px rgba(0,0,0,0.04)',
@@ -238,14 +231,12 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 overflowWrap: 'anywhere',
                             }}
                             onMouseEnter={(e) => {
-                                if (selectedId) return
                                 e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
                                 e.currentTarget.style.background = 'rgba(99,102,241,0.04)'
                             }}
                             onMouseLeave={(e) => {
-                                if (selectedId) return
-                                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
-                                e.currentTarget.style.background = '#ffffff'
+                                e.currentTarget.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'
+                                e.currentTarget.style.background = isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff'
                             }}
                         >
                             <div style={{fontSize: 13, fontWeight: 600, color: '#0f172a', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere'}}>
@@ -279,7 +270,6 @@ export function InterruptRenderer({payload, onReply}: Props) {
                             <button
                                 key={opt.id}
                                 type="button"
-                                disabled={!!selectedId && !isSelected}
                                 onClick={() =>
                                     handleSelect(opt.id, {
                                         kind: 'select',
@@ -291,23 +281,20 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     borderRadius: 10,
                                     border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
                                     background: isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff',
-                                    cursor: selectedId ? (isSelected ? 'default' : 'not-allowed') : 'pointer',
+                                cursor: 'pointer',
                                     textAlign: 'left',
                                     fontSize: 12,
                                     fontWeight: isSelected ? 600 : 400,
                                     color: isSelected ? '#4338ca' : '#334155',
                                     transition: 'all 0.15s',
-                                    opacity: selectedId && !isSelected ? 0.5 : 1,
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (selectedId) return
                                     e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
                                     e.currentTarget.style.background = 'rgba(99,102,241,0.04)'
                                 }}
                                 onMouseLeave={(e) => {
-                                    if (selectedId) return
-                                    e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
-                                    e.currentTarget.style.background = '#ffffff'
+                                e.currentTarget.style.borderColor = isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'
+                                e.currentTarget.style.background = isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff'
                                 }}
                             >
                                 {opt.label}
