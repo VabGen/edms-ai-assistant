@@ -110,10 +110,12 @@ async def ask_user_to_select(
                         rich = None
 
                 if rich is not None:
-                    url = rich.get("url")
-                    metadata: dict[str, Any] | None = (
-                        {"url": url} if isinstance(url, str) and url else None
-                    )
+                    metadata: dict[str, Any] = {}
+                    if url := rich.get("url"):
+                        metadata["url"] = url
+                    if cat := rich.get("category"):
+                        metadata["category"] = cat
+
                     cards.append(
                         InterruptCard(
                             id=str(rich.get("id", i)),
@@ -124,7 +126,7 @@ async def ask_user_to_select(
                                 str(k): str(v)
                                 for k, v in (rich.get("attrs") or {}).items()
                             },
-                            metadata=metadata,
+                            metadata=metadata if metadata else None,
                         )
                     )
                 else:

@@ -12,21 +12,19 @@ Usage inside a ``@tool``-decorated function:
 
     from edms_ai_assistant.agent.hitl_primitives import ask_human
     from edms_ai_assistant.agent.interrupt_contract import (
-        DisambiguationInterrupt, DisambiguationResume, InterruptOption,
+        CardSelectInterrupt, CardSelectResume, InterruptCard,
     )
 
     @tool
     async def employee_search_tool(last_name: str) -> dict:
         matches = await client.search(last_name)
         if len(matches) > 1:
-            resume = ask_human(DisambiguationInterrupt(
-                entity_type="employee",
+            resume = ask_human(CardSelectInterrupt(
                 prompt=f"Уточните «{last_name}»",
-                search_term=last_name,
-                options=[InterruptOption(id=m.id, label=m.full_name,
-                                         description=m.department) for m in matches],
+                cards=[InterruptCard(id=m.id, label=m.full_name,
+                                     description=m.department) for m in matches],
             ))
-            assert isinstance(resume, DisambiguationResume)
+            assert isinstance(resume, CardSelectResume)
             matches = [m for m in matches if m.id in resume.selected_ids]
         ...
 

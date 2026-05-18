@@ -5,7 +5,7 @@ import { DocumentClickContext } from '../ChatContext'
 import { normalizeUuid, isValidUuid } from '@/shared/lib/url'
 import { cn } from '@shared/lib/cn'
 
-const CATEGORY_MAP: Record<string, { variant: any; icon: any; label: string }> = {
+export const CATEGORY_MAP: Record<string, { variant: 'primary' | 'success' | 'warning' | 'error' | 'zinc' | 'default'; icon: any; label: string }> = {
     'INCOMING': { variant: 'primary', icon: FileSearch, label: 'Входящий' },
     'OUTGOING': { variant: 'zinc', icon: ExternalLink, label: 'Исходящий' },
     'INTERN': { variant: 'default', icon: FileText, label: 'Внутренний' },
@@ -16,12 +16,12 @@ const CATEGORY_MAP: Record<string, { variant: any; icon: any; label: string }> =
     'CITIZEN': { variant: 'warning', icon: Briefcase, label: 'Гражданин' },
 }
 
-function getCategoryConfig(raw: string) {
+export function getCategoryConfig(raw: string) {
     const upper = raw.toUpperCase().replace(/[()]/g, '').trim()
     for (const [key, val] of Object.entries(CATEGORY_MAP)) {
         if (upper.includes(key)) return val
     }
-    return { variant: 'default', icon: FileText, label: raw }
+    return { variant: 'default' as const, icon: FileText, label: raw }
 }
 
 interface DocCardProps {

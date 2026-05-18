@@ -4,6 +4,7 @@ import type {InterruptPayload, ResumeValue} from '@entities/interrupt/model/type
 import {sendMessage} from '@shared/api/messaging'
 import {Card, CardHeader, CardTitle, CardDescription, IconBox} from './primitives'
 import {cn} from '@shared/lib/cn'
+import {getCategoryConfig} from './cards/DocCard'
 
 interface Props {
     payload: InterruptPayload
@@ -32,8 +33,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
                     const cardUrl = typeof card.metadata?.['url'] === 'string'
                         ? (card.metadata['url'] as string)
                         : null
-                    const isEmployee = card.description?.toLowerCase().includes('подразделение') ||
-                        card.badges?.some(b => b.toLowerCase().includes('сотрудник') || b.toLowerCase().includes('физлицо'));
+                    const isEmployee = card.badges?.some(b => b.toLowerCase().includes('сотрудник') || b.toLowerCase().includes('физлицо'));
+                    const docCategory = card.metadata?.['category'] as string | undefined;
+                    const docConfig = docCategory ? getCategoryConfig(docCategory) : null;
 
                     return (
                         <div key={card.id} className="flex items-stretch gap-2 group/row">
@@ -48,7 +50,14 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 }
                                 className={cn(
                                     "flex-1 min-w-0 transition-all duration-300",
-                                    isSelected && "border-blue-500 bg-blue-50/30 dark:bg-blue-900/10"
+                                    isSelected && "border-blue-500 bg-blue-50/30 dark:bg-blue-900/10",
+                                    !isSelected && docConfig && (
+                                        docConfig.variant === 'primary' ? "hover:border-blue-200" :
+                                        docConfig.variant === 'success' ? "hover:border-emerald-200" :
+                                        docConfig.variant === 'warning' ? "hover:border-amber-200" :
+                                        docConfig.variant === 'error' ? "hover:border-rose-200" :
+                                        "hover:border-zinc-300"
+                                    )
                                 )}
                             >
                                 <CardHeader className="flex-row items-center gap-3 p-4 space-y-0">
@@ -61,11 +70,17 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                         {idx + 1}
                                     </div>
 
-                                    <IconBox
-                                        icon={isEmployee ? User : FileText}
-                                        variant={isSelected ? 'primary' : 'zinc'}
-                                        size="sm"
-                                    />
+                                    {card.image_url ? (
+                                        <div className="shrink-0 w-8 h-8 rounded-full overflow-hidden border border-zinc-100">
+                                            <img src={card.image_url} alt="" className="w-full h-full object-cover" />
+                                        </div>
+                                    ) : (
+                                        <IconBox
+                                            icon={isEmployee ? User : (docConfig?.icon || FileText)}
+                                            variant={isSelected ? 'primary' : (docConfig?.variant || 'zinc')}
+                                            size="sm"
+                                        />
+                                    )}
 
                                     <div className="flex-1 min-w-0">
                                         <CardTitle className={cn(
@@ -82,20 +97,36 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                                 {card.description}
                                             </CardDescription>
                                         )}
-                                        {Object.keys(card.primary_attrs ?? {}).length > 0 && (
-                                            <div className="flex flex-wrap gap-2 mt-2">
-                                                {Object.entries(card.primary_attrs).map(([k, v]) => (
-                                                    <div key={k} className={cn(
-                                                        "text-[10px] font-bold px-1.5 py-0.5 rounded-md border tracking-tight uppercase",
-                                                        isSelected
-                                                          ? "bg-blue-100/50 border-blue-200/50 text-blue-600"
-                                                          : "bg-zinc-50 border-zinc-100 text-zinc-400"
-                                                    )}>
-                                                        <span className="opacity-60">{k}:</span> {v}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                            {docConfig && (
+                                                <div className={cn(
+                                                    "px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider",
+                                                    docConfig.variant === 'primary' && "bg-blue-50 text-blue-600",
+                                                    docConfig.variant === 'success' && "bg-emerald-50 text-emerald-600",
+                                                    docConfig.variant === 'warning' && "bg-amber-50 text-amber-600",
+                                                    docConfig.variant === 'error' && "bg-rose-50 text-rose-600",
+                                                    docConfig.variant === 'zinc' && "bg-zinc-100 text-zinc-600",
+                                                    docConfig.variant === 'default' && "bg-zinc-100 text-zinc-500",
+                                                )}>
+                                                    {docConfig.label}
+                                                </div>
+                                            )}
+                                            {card.badges?.map(badge => (
+                                                <div key={badge} className="px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-[9px] font-bold uppercase tracking-wider">
+                                                    {badge}
+                                                </div>
+                                            ))}
+                                            {Object.entries(card.primary_attrs ?? {}).map(([k, v]) => (
+                                                <div key={k} className={cn(
+                                                    "text-[10px] font-bold px-1.5 py-0.5 rounded-md border tracking-tight uppercase",
+                                                    isSelected
+                                                      ? "bg-blue-100/50 border-blue-200/50 text-blue-600"
+                                                      : "bg-zinc-50 border-zinc-100 text-zinc-400"
+                                                )}>
+                                                    <span className="opacity-60">{k}:</span> {v}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
 
                                     <ChevronRight className={cn(

@@ -35,9 +35,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from edms_ai_assistant.agent.hitl_primitives import ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
-    DisambiguationInterrupt,
-    DisambiguationResume,
-    InterruptOption,
+    CardSelectInterrupt,
+    CardSelectResume,
+    InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.document_client import DocumentClient
@@ -206,32 +206,35 @@ async def doc_search_tool(
 
     # ── Если LLM запросила формат "cards" для UI ──────────────────────
     if display_mode == "cards":
-        options = [
-            InterruptOption(
+        cards = [
+            InterruptCard(
                 id=doc["id"],
                 label=doc["reg_number"],
                 description=doc["short_summary"],
+                badges=[doc["category"], doc["status"]],
+                primary_attrs={
+                    "Дата": doc["reg_date"],
+                    "Автор": doc["author"],
+                },
                 metadata={
-                    "status": doc["status"],
+                    "url": f"/document/{doc['id']}",
                     "category": doc["category"],
-                    "date": doc["reg_date"],
+                    "status": doc["status"],
                 }
             )
             for doc in documents
         ]
 
         # Выбрасываем Interrupt — это остановит граф и отправит JSON на фронтенд
-        resume = ask_human(DisambiguationInterrupt(
-            entity_type="document",  # Фронтенд по этому флагу сделает карточки кликабельными ссылками
+        resume = ask_human(CardSelectInterrupt(
             prompt=f"Найдено документов: {len(content)}",
-            search_term=short_summary or reg_number or author_last_name,
-            options=options,
+            cards=cards,
             multiple=False,
         ))
 
         # Граф возобновлен. Инструмент возвращает ID выбранного документа,
         # чтобы LLM могла продолжить работу (например, ответить "Открываю документ...")
-        if isinstance(resume, DisambiguationResume) and resume.selected_ids:
+        if isinstance(resume, CardSelectResume) and resume.selected_ids:
             selected_id = resume.selected_ids[0]
             return {
                 "status": "selected",
