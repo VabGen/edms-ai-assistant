@@ -324,6 +324,14 @@ export function WidgetChat() {
         [updateMessage, threadId],
     )
 
+    const handleDocumentClick = useCallback((docId: string) => {
+        void sendMessage('navigateTo', {url: `/document/${docId}`, newTab: true})
+    }, [])
+
+    const handleAttachmentClick = useCallback((fileName: string) => {
+        toast.info(`Открываю вложение: ${fileName}`, 'Вложение')
+    }, [])
+
     const handleFieldFixed = useCallback(
         (messageId: string, fieldKey: string, newValue: string) => {
             applyOptimisticFix(messageId, [{fieldKey, newValue}])
@@ -443,6 +451,8 @@ export function WidgetChat() {
                             onFieldFixed={handleFieldFixed}
                             onAllFixed={handleAllFixed}
                             onRefreshSummary={handleRefreshSummary}
+                            onDocumentClick={handleDocumentClick}
+                            onAttachmentClick={handleAttachmentClick}
                         />
                     )
                 })}
@@ -616,6 +626,8 @@ interface MessageRowProps {
         messageId: string,
         meta: NonNullable<ChatMessageType['refreshMeta']>,
     ) => Promise<void>
+    onDocumentClick: (docId: string) => void
+    onAttachmentClick: (fileName: string) => void
 }
 
 const SUMMARY_TYPE_LABELS: Record<string, string> = {
@@ -624,7 +636,16 @@ const SUMMARY_TYPE_LABELS: Record<string, string> = {
     thesis: 'Тезисы',
 }
 
-function MessageRow({msg, threadId, onInterruptReply, onFieldFixed, onAllFixed, onRefreshSummary}: MessageRowProps) {
+function MessageRow({
+                        msg,
+                        threadId,
+                        onInterruptReply,
+                        onFieldFixed,
+                        onAllFixed,
+                        onRefreshSummary,
+                        onDocumentClick,
+                        onAttachmentClick,
+                    }: MessageRowProps) {
     const handleFieldFixed = useCallback(
         (fieldKey: string, newValue: string) => onFieldFixed(msg.id, fieldKey, newValue),
         [msg.id, onFieldFixed],
@@ -652,6 +673,8 @@ function MessageRow({msg, threadId, onInterruptReply, onFieldFixed, onAllFixed, 
                         role={msg.role}
                         timestamp={msg.timestamp}
                         isError={msg.isError === true}
+                        onDocumentClick={onDocumentClick}
+                        onAttachmentClick={onAttachmentClick}
                     />
                 )}
 

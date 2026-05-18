@@ -1,5 +1,5 @@
 import {useState} from 'react'
-import {ExternalLink} from 'lucide-react'
+import {ExternalLink, User, FileText, ChevronRight} from 'lucide-react'
 import type {InterruptPayload, ResumeValue} from '@entities/interrupt/model/types'
 import {sendMessage} from '@shared/api/messaging'
 
@@ -26,120 +26,169 @@ export function InterruptRenderer({payload, onReply}: Props) {
                         {payload.prompt}
                     </p>
                 )}
-                {payload.cards.map((card) => {
+                {payload.cards.map((card, idx) => {
                     const isSelected = selectedId === card.id
                     const cardUrl = typeof card.metadata?.['url'] === 'string'
                         ? (card.metadata['url'] as string)
                         : null
+                    const isEmployee = card.description?.toLowerCase().includes('подразделение') ||
+                        card.badges?.some(b => b.toLowerCase().includes('сотрудник') || b.toLowerCase().includes('физлицо'));
+
                     return (
                         <div key={card.id} style={{display: 'flex', alignItems: 'stretch', gap: 6}}>
-                        <button
-                            type="button"
-                            disabled={!!selectedId && !isSelected}
-                            onClick={() =>
-                                handleSelect(card.id, {
-                                    kind: 'card_select',
-                                    selected_ids: [card.id],
-                                })
-                            }
-                            style={{
-                                padding: '10px 14px',
-                                borderRadius: 12,
-                                border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
-                                background: isSelected ? 'rgba(99,102,241,0.08)' : '#ffffff',
-                                cursor: selectedId ? (isSelected ? 'default' : 'not-allowed') : 'pointer',
-                                textAlign: 'left',
-                                transition: 'all 0.15s',
-                                opacity: selectedId && !isSelected ? 0.5 : 1,
-                                boxShadow: isSelected
-                                    ? '0 0 0 2px rgba(99,102,241,0.2)'
-                                    : '0 1px 3px rgba(0,0,0,0.04)',
-                                flex: 1,
-                                minWidth: 0,
-                                overflow: 'hidden',
-                                whiteSpace: 'normal',
-                                wordBreak: 'break-word',
-                                overflowWrap: 'anywhere',
-                            }}
-                            onMouseEnter={(e) => {
-                                if (selectedId) return
-                                e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
-                                e.currentTarget.style.background = 'rgba(99,102,241,0.04)'
-                            }}
-                            onMouseLeave={(e) => {
-                                if (selectedId) return
-                                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
-                                e.currentTarget.style.background = '#ffffff'
-                            }}
-                        >
-                            <div style={{fontSize: 13, fontWeight: 600, color: '#0f172a', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere'}}>
-                                {card.label}
-                            </div>
-                            {card.description && (
-                                <div style={{fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.4}}>
-                                    {card.description}
-                                </div>
-                            )}
-                            {Object.keys(card.primary_attrs ?? {}).length > 0 && (
-                                <div style={{display: 'flex', flexDirection: 'column', gap: 2, marginTop: 6}}>
-                                    {Object.entries(card.primary_attrs).map(([k, v]) => (
-                                        <div key={k} style={{fontSize: 11, color: '#475569', lineHeight: 1.4, display: 'flex', gap: 4}}>
-                                            <span style={{color: '#94a3b8', fontSize: 10, flexShrink: 0}}>{k}:</span>
-                                            <span style={{wordBreak: 'break-word', overflowWrap: 'anywhere'}}>{v}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                            {card.badges && card.badges.length > 0 && (
-                                <div style={{display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6}}>
-                                    {card.badges.map((b, idx) => (
-                                        <span key={`${b}-${idx}`} style={{
-                                            fontSize: 9,
-                                            fontWeight: 700,
-                                            padding: '2px 7px',
-                                            borderRadius: 20,
-                                            background: 'rgba(99,102,241,0.10)',
-                                            color: '#4f46e5',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.04em',
-                                        }}>{b}</span>
-                                    ))}
-                                </div>
-                            )}
-                        </button>
-                        {cardUrl && (
                             <button
                                 type="button"
-                                title="Открыть в новой вкладке"
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    void sendMessage('navigateTo', {url: cardUrl, newTab: true})
-                                }}
+                                disabled={!!selectedId && !isSelected}
+                                onClick={() =>
+                                    handleSelect(card.id, {
+                                        kind: 'card_select',
+                                        selected_ids: [card.id],
+                                    })
+                                }
                                 style={{
-                                    flexShrink: 0,
-                                    width: 36,
-                                    border: '1px solid rgba(0,0,0,0.08)',
-                                    borderRadius: 12,
-                                    background: '#ffffff',
-                                    color: '#6366f1',
-                                    cursor: 'pointer',
+                                    padding: '12px 16px',
+                                    borderRadius: 16,
+                                    border: `1px solid ${isSelected ? '#6366f1' : 'rgba(0,0,0,0.08)'}`,
+                                    background: isSelected ? '#7c3aed' : '#ffffff',
+                                    cursor: selectedId ? (isSelected ? 'default' : 'not-allowed') : 'pointer',
+                                    textAlign: 'left',
+                                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    opacity: selectedId && !isSelected ? 0.5 : 1,
+                                    boxShadow: isSelected
+                                        ? '0 4px 12px rgba(124, 58, 237, 0.25)'
+                                        : '0 1px 3px rgba(0,0,0,0.04)',
+                                    flex: 1,
+                                    minWidth: 0,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 12,
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (selectedId) return
+                                    e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
+                                    e.currentTarget.style.transform = 'translateY(-1px)'
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)'
+                                }}
+                                onMouseLeave={(e) => {
+                                    if (selectedId) return
+                                    e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
+                                    e.currentTarget.style.transform = 'translateY(0)'
+                                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)'
+                                }}
+                            >
+                                <div style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: '50%',
+                                    background: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(99,102,241,0.06)',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    transition: 'all 0.15s',
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.background = 'rgba(99,102,241,0.08)'
-                                    e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.background = '#ffffff'
-                                    e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
-                                }}
-                            >
-                                <ExternalLink size={14}/>
+                                    flexShrink: 0,
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: isSelected ? '#ffffff' : '#6366f1',
+                                }}>
+                                    {idx + 1}
+                                </div>
+
+                                {isEmployee ? (
+                                    <User size={18} style={{
+                                        color: isSelected ? '#ffffff' : '#6366f1',
+                                        opacity: isSelected ? 0.9 : 0.7,
+                                        flexShrink: 0
+                                    }}/>
+                                ) : (
+                                    <FileText size={18} style={{
+                                        color: isSelected ? '#ffffff' : '#6366f1',
+                                        opacity: isSelected ? 0.9 : 0.7,
+                                        flexShrink: 0
+                                    }}/>
+                                )}
+
+                                <div style={{flex: 1, minWidth: 0}}>
+                                    <div style={{
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        color: isSelected ? '#ffffff' : '#0f172a',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis'
+                                    }}>
+                                        {card.label}
+                                    </div>
+                                    {card.description && (
+                                        <div style={{
+                                            fontSize: 11,
+                                            color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b',
+                                            marginTop: 1,
+                                            whiteSpace: 'nowrap',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis'
+                                        }}>
+                                            {card.description}
+                                        </div>
+                                    )}
+                                    {Object.keys(card.primary_attrs ?? {}).length > 0 && (
+                                        <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4}}>
+                                            {Object.entries(card.primary_attrs).map(([k, v]) => (
+                                                <div key={k} style={{
+                                                    fontSize: 10,
+                                                    color: isSelected ? 'rgba(255,255,255,0.7)' : '#475569',
+                                                    display: 'flex',
+                                                    gap: 3
+                                                }}>
+                                                    <span style={{opacity: 0.7}}>{k}:</span>
+                                                    <span>{v}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <ChevronRight size={16} style={{
+                                    color: isSelected ? '#ffffff' : '#cbd5e1',
+                                    flexShrink: 0,
+                                    marginLeft: 'auto'
+                                }}/>
                             </button>
-                        )}
+
+                            {cardUrl && (
+                                <button
+                                    type="button"
+                                    title="Открыть в новой вкладке"
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        void sendMessage('navigateTo', {url: cardUrl, newTab: true})
+                                    }}
+                                    style={{
+                                        flexShrink: 0,
+                                        width: 42,
+                                        border: '1px solid rgba(0,0,0,0.08)',
+                                        borderRadius: 16,
+                                        background: '#ffffff',
+                                        color: '#6366f1',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        transition: 'all 0.2s',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'rgba(99,102,241,0.08)'
+                                        e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'
+                                        e.currentTarget.style.transform = 'translateY(-1px)'
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#ffffff'
+                                        e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)'
+                                        e.currentTarget.style.transform = 'translateY(0)'
+                                    }}
+                                >
+                                    <ExternalLink size={16}/>
+                                </button>
+                            )}
                         </div>
                     )
                 })}
