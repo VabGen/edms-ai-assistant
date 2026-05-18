@@ -5,6 +5,7 @@ Universal tool for rendering LLM-driven choices as clickable cards.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Annotated
 
@@ -34,7 +35,17 @@ class AskUserSelectInput(BaseModel):
     )
     options: list[str] = Field(
         ...,
-        description="Список вариантов для выбора",
+        description=(
+            "Список вариантов. Каждая опция может быть:\n"
+            "  • простая строка: 'Заголовок'\n"
+            "  • с описанием: 'Заголовок | Описание'\n"
+            "  • со ссылкой: 'Заголовок | Описание | /document-form/UUID'\n"
+            "  • JSON-объект-строка для богатой карточки документа:\n"
+            '    \'{"label":"77Вх","description":"тема","attrs":{"Дата":"27.11.2025","Исполнитель":"ФИО"},"badges":["EXECUTION"],"url":"/document-form/UUID"}\'\n'
+            "JSON-формат ОБЯЗАТЕЛЕН для списков найденных документов: даёт "
+            "пользователю кнопку «Открыть в новой вкладке» и компактную "
+            "таблицу атрибутов."
+        ),
         min_length=2,
         max_length=20,
     )
@@ -86,21 +97,49 @@ async def ask_user_to_select(
 
     try:
         if style == "cards":
-            # Красивые карточки с заголовком и описанием
             cards = []
             for i, opt in enumerate(options):
-                # Пытаемся разделить на заголовок и описание если есть разделитель
-                parts = opt.split(" | ", 1)
-                label = parts[0].strip()
-                description = parts[1].strip() if len(parts) > 1 else None
+                stripped = opt.strip()
+                rich: dict[str, Any] | None = None
+                if stripped.startswith("{") and stripped.endswith("}"):
+                    try:
+                        parsed = json.loads(stripped)
+                        if isinstance(parsed, dict) and parsed.get("label"):
+                            rich = parsed
+                    except (json.JSONDecodeError, TypeError):
+                        rich = None
 
-                cards.append(
-                    InterruptCard(
-                        id=str(i),
-                        label=label[:100],
-                        description=description,
+                if rich is not None:
+                    url = rich.get("url")
+                    metadata: dict[str, Any] | None = (
+                        {"url": url} if isinstance(url, str) and url else None
                     )
-                )
+                    cards.append(
+                        InterruptCard(
+                            id=str(rich.get("id", i)),
+                            label=str(rich["label"])[:100],
+                            description=rich.get("description"),
+                            badges=list(rich.get("badges") or []),
+                            primary_attrs={
+                                str(k): str(v)
+                                for k, v in (rich.get("attrs") or {}).items()
+                            },
+                            metadata=metadata,
+                        )
+                    )
+                else:
+                    parts = [p.strip() for p in stripped.split(" | ", 2)]
+                    label = parts[0]
+                    description = parts[1] if len(parts) > 1 and parts[1] else None
+                    url = parts[2] if len(parts) > 2 and parts[2] else None
+                    cards.append(
+                        InterruptCard(
+                            id=str(i),
+                            label=label[:100],
+                            description=description,
+                            metadata={"url": url} if url else None,
+                        )
+                    )
 
             resume = ask_human(
                 CardSelectInterrupt(
@@ -119,7 +158,6 @@ async def ask_user_to_select(
             selected_text = options[selected_index]
 
         else:
-            # Компактный список
             interrupt_options = [
                 InterruptOption(id=str(i), label=opt[:100])
                 for i, opt in enumerate(options)

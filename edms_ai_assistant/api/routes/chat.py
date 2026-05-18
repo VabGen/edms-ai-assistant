@@ -535,7 +535,6 @@ async def chat_state(
         if item is not None:
             rendered.append(item)
 
-    # Extract all pending interrupts (Фаза 6)
     pending_list = _extract_pending_interrupts(snapshot)
     valid_pending: list[dict[str, Any]] = []
     for p in pending_list:
@@ -547,7 +546,6 @@ async def chat_state(
                 "stale interrupt payload on thread=%s — dropping", thread_id
             )
 
-    # Extract UI directives for reconnect (Фаза 5)
     raw_directives = (snapshot.values or {}).get("last_ui_directives") or {}
     active_ui = [
         {"directive_id": did, "component": comp}

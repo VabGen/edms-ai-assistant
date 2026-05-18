@@ -29,7 +29,6 @@ def _parse_tool_content(content: Any) -> Any:
             return json.loads(content)
         except (json.JSONDecodeError, TypeError):
             pass
-    # Some tools return a list of artefacts
     if isinstance(content, list):
         for item in content:
             if isinstance(item, dict):
@@ -45,7 +44,6 @@ def extract_compliance_from_tool_message(msg: ToolMessage) -> dict | None:
     data = _parse_tool_content(msg.content)
     if not data or not isinstance(data, dict):
         return None
-    # Heuristic: the tool always returns {"status":"success", "fields":[…], "overall":"…"}
     if data.get("status") == "success" and "fields" in data and "overall" in data:
         return data
     return None
@@ -74,15 +72,12 @@ def extract_navigate_url_from_tool_message(msg: ToolMessage) -> str | None:
                 return match.group(1)
         return None
 
-    # Strategy 1: explicit navigate_url
     if data.get("navigate_url"):
         return data["navigate_url"]
 
-    # Strategy 3: derive from document_id (document creation / autofill)
     if (
         data.get("status") == "success"
         and data.get("document_id")
-        # Exclude compliance results — they have their own widget
         and "overall" not in data
         and "fields" not in data
     ):

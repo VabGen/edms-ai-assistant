@@ -1,6 +1,6 @@
 # edms_ai_assistant/agent/repositories.py
 """
-Document repository: interface (Protocol) and production implementation.
+Document repository: interface (Protocol).
 
 Applying Dependency Inversion here lets the agent depend on the abstract
 IDocumentRepository rather than the concrete HTTP client, which makes

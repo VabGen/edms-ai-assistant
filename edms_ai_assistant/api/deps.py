@@ -63,7 +63,7 @@ async def get_current_user(
 
     token = credentials.credentials
 
-    # TODO: Замените на реальную логику декодирования JWT
+    # TODO: Заменить на реальную логику декодирования JWT
     # from edms_ai_assistant.core.security import decode_access_token
     # user_data = decode_access_token(token)
     # if not user_data:
@@ -86,7 +86,6 @@ async def get_admin_user(
     Raises:
         HTTPException 403: Пользователь авторизован, но не имеет роли 'admin'.
     """
-    # Адаптируйте ключ 'role' под вашу модель пользователя / claims в JWT
     user_role = user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
 
     if user_role != "admin":

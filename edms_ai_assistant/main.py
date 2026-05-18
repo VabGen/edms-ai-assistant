@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import FileResponse  # <-- ДОБАВЛЕН ИМПОРТ
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
@@ -35,11 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_telemetry(app: FastAPI) -> None:
-    """Настройка OpenTelemetry инструментации.
-
-    Безопасно импортирует instrumentors. Если пакеты не установлены
-    или OTEL_ENABLED=false, просто логирует предупреждение.
-    """
+    """Настройка OpenTelemetry инструментации."""
     if not settings.OTEL_ENABLED:
         return
 
@@ -68,7 +65,6 @@ async def lifespan(_app: FastAPI):
     await init_db()
     await init_redis()
 
-    # Agent init (fail-fast)
     try:
         agent = EdmsDocumentAgent()
         _app.state.agent = agent
@@ -77,7 +73,6 @@ async def lifespan(_app: FastAPI):
         logger.critical("Agent initialization failed. Exiting.", exc_info=True)
         raise SystemExit(1) from exc
 
-    # Summarization init (optional)
     try:
         summarization_service = await build_summarization_service(settings)
         _app.state.summarization_service = summarization_service
@@ -88,7 +83,6 @@ async def lifespan(_app: FastAPI):
 
     yield
 
-    # Shutdown
     await close_redis()
     service = getattr(_app.state, "summarization_service", None)
     if service is not None:
@@ -115,7 +109,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,
@@ -124,7 +117,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Routers
     application.include_router(chat_router)
     application.include_router(files_router)
     application.include_router(actions_router)
@@ -136,8 +128,24 @@ def create_app() -> FastAPI:
 
     return application
 
-
 app = create_app()
+
+@app.get("/download/extension", tags=["Plugin"])
+async def download_extension():
+    """
+    Скачивание браузерного расширения EDMS AI Assistant (.zip).
+    Плагин собирается на этапе сборки Docker-образа и лежит в static/plugin/extension.zip
+    """
+    plugin_zip = "static/plugin/extension.zip"
+
+    if not os.path.exists(plugin_zip):
+        return {"error": "Extension is not built in this environment. Check Dockerfile."}
+
+    return FileResponse(
+        plugin_zip,
+        media_type="application/zip",
+        filename="edms-ai-assistant-extension.zip"
+    )
 
 if __name__ == "__main__":
     uvicorn.run(

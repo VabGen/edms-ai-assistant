@@ -172,6 +172,25 @@ async def doc_summarize_text(
 
     clean_text = _unwrap_json_envelope(text)
 
+    _MIN_USEFUL_CHARS: int = 120
+    if len(clean_text) < _MIN_USEFUL_CHARS:
+        logger.warning(
+            "doc_summarize_text rejected: input too short (%d < %d chars)",
+            len(clean_text),
+            _MIN_USEFUL_CHARS,
+        )
+        return {
+            "status": "error",
+            "message": (
+                f"Передан слишком короткий текст ({len(clean_text)} симв.) — "
+                "вероятно, это заголовок или метаданные, а не содержимое файла. "
+                "Сначала вызови `doc_get_file_content(attachment_id=...)` "
+                "(или `read_local_file_content(file_path=...)` для локального файла), "
+                "затем повторно вызови `doc_summarize_text` с полученным "
+                "содержимым в параметре `text`."
+            ),
+        }
+
     if summary_type is None:
         hint = _heuristic_recommendation(clean_text)
         resume = ask_human(

@@ -1,5 +1,32 @@
 ARG PYTHON_VERSION=3.13-slim
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Build Browser Extension (WXT + React)
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS extension-builder
+
+WORKDIR /extension
+
+COPY edms-plugin/package.json edms-plugin/package-lock.json* ./
+
+RUN npm install
+
+COPY edms-plugin/ ./
+
+RUN npm run zip
+
+RUN zip_file=$(find . -name "*.zip" -type f | head -n 1) && \
+    if [ -n "$zip_file" ]; then \
+        echo "Found zip archive: $zip_file" && \
+        mv "$zip_file" /tmp/extension.zip; \
+    else \
+        echo "ERROR: No .zip file found after npm run zip!" && exit 1; \
+    fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 1: Python Builder
+# ─────────────────────────────────────────────────────────────────────────────
 FROM python:${PYTHON_VERSION} AS builder
 
 ARG TORCH_VARIANT=cpu
@@ -61,13 +88,17 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 
+# Создаем папку и копируем собранный ZIP-архив плагина
+RUN mkdir -p /app/static/plugin
+COPY --from=extension-builder /tmp/extension.zip /app/static/plugin/extension.zip
+
 COPY --chown=appuser:appuser edms_ai_assistant/ ./edms_ai_assistant/
 COPY --chown=appuser:appuser migrations/ ./migrations/
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser pyproject.toml ./
 COPY --chown=appuser:appuser docker/entrypoint.sh ./entrypoint.sh
 
-RUN mkdir -p /app/uploads && chown -R appuser:appuser /app/uploads
+RUN mkdir -p /app/uploads && chown -R appuser:appuser /app/uploads /app/static
 RUN chmod +x /app/entrypoint.sh
 
 USER appuser

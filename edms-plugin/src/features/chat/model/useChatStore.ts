@@ -30,6 +30,7 @@ interface ChatActions {
   setMessages: (messages: ChatMessage[]) => void
   appendMessage: (message: ChatMessage) => void
   updateLastMessage: (updater: (msg: ChatMessage) => ChatMessage) => void
+  updateMessage: (id: string, updater: (msg: ChatMessage) => ChatMessage) => void
   setThreadId: (id: string | null) => void
   setLoading: (loading: boolean) => void
   setThreads: (threads: Thread[]) => void
@@ -56,6 +57,17 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       const last = msgs[msgs.length - 1]
       if (!last) return state
       msgs[msgs.length - 1] = updater(last)
+      return { messages: msgs }
+    }),
+
+  updateMessage: (id, updater) =>
+    set((state) => {
+      const idx = state.messages.findIndex((m) => m.id === id)
+      if (idx < 0) return state
+      const target = state.messages[idx]
+      if (!target) return state
+      const msgs = [...state.messages]
+      msgs[idx] = updater(target)
       return { messages: msgs }
     }),
 

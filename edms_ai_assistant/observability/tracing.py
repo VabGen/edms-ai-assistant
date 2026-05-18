@@ -21,7 +21,6 @@ def setup_tracing(service_name: str, otlp_endpoint: str | None = None) -> None:
 
     provider = TracerProvider(resource=resource)
 
-    # ── Production Exporter (OTLP) ──────────────────────────────────────────
     if otlp_endpoint:
         try:
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -33,9 +32,6 @@ def setup_tracing(service_name: str, otlp_endpoint: str | None = None) -> None:
                 "opentelemetry-exporter-otlp-proto-grpc not installed. Traces will not be exported."
             )
 
-    # ── Local Debug Exporter (Console) ──────────────────────────────────────
-    # Выводит трейсы прямо в stdout. Удобно для локальной разработки.
-    # В production (DEBUG=False) этот блок не выполнится.
     if settings.DEBUG:
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
         logger.info("Console Span Exporter enabled (DEBUG mode).")

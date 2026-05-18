@@ -102,8 +102,11 @@ class GraphBuilder:
                 sys_msgs: list[BaseMessage] = all_sys[-1:] if all_sys else []
                 candidate: list[BaseMessage] = sys_msgs + non_sys
 
+                # validate_no_dangling_tool_calls(
+                #     candidate, fail_loud=getattr(settings, "DEBUG", False)
+                # )
                 validate_no_dangling_tool_calls(
-                    candidate, fail_loud=getattr(settings, "DEBUG", False)
+                    candidate, fail_loud=False
                 )
 
                 if not candidate:

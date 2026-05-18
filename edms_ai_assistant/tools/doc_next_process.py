@@ -38,17 +38,13 @@ from pydantic import BaseModel, Field, field_validator
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
+from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
 
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-
 
 def _is_uuid(value: str) -> bool:
-    return bool(_UUID_RE.match(str(value).strip()))
+    return bool(UUID_RE.match(str(value).strip()))
 
 
 PROCESS_TYPE_LABELS: dict[str, str] = {
@@ -132,7 +128,7 @@ def _get_next_available(steps: list[ProcessStep]) -> list[ProcessStep]:
             break
     if current_idx == -1:
         return [s for s in steps if not s.is_completed and not s.is_current]
-    return [s for s in steps[current_idx + 1 :] if not s.is_completed]
+    return [s for s in steps[current_idx + 1:] if not s.is_completed]
 
 
 def _format_step_list(steps: list[ProcessStep], show_status: bool = True) -> str:
@@ -154,7 +150,7 @@ def _format_step_list(steps: list[ProcessStep], show_status: bool = True) -> str
 
 
 def _resolve_step_selection(
-    steps: list[ProcessStep], selection: str
+        steps: list[ProcessStep], selection: str
 ) -> ProcessStep | None:
     """Разрешает выбор этапа по номеру, названию или типу."""
     selection = selection.strip()
@@ -182,7 +178,7 @@ def _resolve_step_selection(
 class _ProcessClient(EdmsBaseClient):
 
     async def get_bpmn_activity(
-        self, token: str, document_id: str
+            self, token: str, document_id: str
     ) -> dict[str, Any] | None:
         """GET /api/document/{id}/bpmn — BPMN-схема и активности."""
         result = await self._make_request(
@@ -211,11 +207,11 @@ class _ProcessClient(EdmsBaseClient):
         return result if isinstance(result, dict) and result else None
 
     async def next_process(
-        self,
-        token: str,
-        document_id: str,
-        next_id: str,
-        employees: list[str] | None = None,
+            self,
+            token: str,
+            document_id: str,
+            next_id: str,
+            employees: list[str] | None = None,
     ) -> None:
         """POST /api/document/process/next — переход на следующий этап.
 
@@ -276,7 +272,7 @@ class DocNextProcessInput(BaseModel):
 
 
 async def _resolve_employees(
-    token: str, employees: list[str]
+        token: str, employees: list[str]
 ) -> tuple[list[str], list[str]]:
     """Разрешает список сотрудников: UUID → как есть, ФИО → поиск."""
     resolved: list[str] = []
@@ -309,8 +305,8 @@ async def _find_employee(token: str, last_name: str) -> str | None:
 
 
 def _resolve_next_id(
-    process_data: dict[str, Any] | None,
-    doc_data: dict[str, Any] | None,
+        process_data: dict[str, Any] | None,
+        doc_data: dict[str, Any] | None,
 ) -> str | None:
     """Определяет nextId для POST /process/next.
 
@@ -327,10 +323,10 @@ def _resolve_next_id(
 
         # ── Вариант 2: ID текущего/завершённого item ──────────────────
         items = (
-            process_data.get("items")
-            or process_data.get("processItems")
-            or process_data.get("stages")
-            or []
+                process_data.get("items")
+                or process_data.get("processItems")
+                or process_data.get("stages")
+                or []
         )
         for item in items:
             if not isinstance(item, dict):
@@ -424,9 +420,9 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
 
 @tool("doc_next_process", args_schema=DocNextProcessInput)
 async def doc_next_process(
-    next_step: str | None = None,
-    employees: list[str] | None = None,
-    config: RunnableConfig = None,
+        next_step: str | None = None,
+        employees: list[str] | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """Переводит документ на следующий этап бизнес-процесса.
 
@@ -646,9 +642,9 @@ async def doc_next_process(
                     return {
                         "status": "need_input",
                         "message": (
-                            "Не удалось найти сотрудников: "
-                            + ", ".join(f"«{u}»" for u in unresolved)
-                            + ". Уточните ФИО."
+                                "Не удалось найти сотрудников: "
+                                + ", ".join(f"«{u}»" for u in unresolved)
+                                + ". Уточните ФИО."
                         ),
                     }
                 resolved_employees = resolved
@@ -677,7 +673,7 @@ async def doc_next_process(
                 if post_error["is_employee_empty"]:
                     step_label = post_error["target_step_name"] or selected.name
                     step_type = (
-                        post_error["target_step_type"] or selected.process_type or ""
+                            post_error["target_step_type"] or selected.process_type or ""
                     )
 
                     logger.info(

@@ -6,7 +6,7 @@ import type {
     DoneEvent,
     ErrorEvent,
     ResumeValue,
-} from '@/types/interrupt'
+} from '@entities/interrupt/model/types'
 
 // ── Simple request/response ──────────────────────────────────────────────
 
