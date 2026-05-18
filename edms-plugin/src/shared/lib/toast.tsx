@@ -7,18 +7,18 @@
 export type ToastType = 'success' | 'error' | 'info'
 
 export interface ToastOptions {
-  message: string
-  type?: ToastType
-  duration?: number // ms, default 4000
-  title?: string
+    message: string
+    type?: ToastType
+    duration?: number
+    title?: string
 }
 
 // ─── Inject styles once ──────────────────────────────────────────────────────
 function ensureStyles() {
-  if (document.getElementById('edms-toast-styles')) return
-  const style = document.createElement('style')
-  style.id = 'edms-toast-styles'
-  style.textContent = `
+    if (document.getElementById('edms-toast-styles')) return
+    const style = document.createElement('style')
+    style.id = 'edms-toast-styles'
+    style.textContent = `
     #edms-toast-container {
       position: fixed;
       top: 16px;
@@ -181,53 +181,53 @@ function ensureStyles() {
       to   { width: 0%; }
     }
   `
-  document.head.appendChild(style)
+    document.head.appendChild(style)
 }
 
 // ─── Container ────────────────────────────────────────────────────────────────
 function getContainer(): HTMLElement {
-  let c = document.getElementById('edms-toast-container')
-  if (!c) {
-    c = document.createElement('div')
-    c.id = 'edms-toast-container'
-    document.body.appendChild(c)
-  }
-  return c
+    let c = document.getElementById('edms-toast-container')
+    if (!c) {
+        c = document.createElement('div')
+        c.id = 'edms-toast-container'
+        document.body.appendChild(c)
+    }
+    return c
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const ICONS: Record<ToastType, string> = {
-  success: '✓',
-  error:   '✕',
-  info:    'i',
+    success: '✓',
+    error: '✕',
+    info: 'i',
 }
 
 const TITLES: Record<ToastType, string> = {
-  success: 'Успешно',
-  error:   'Ошибка',
-  info:    'Уведомление',
+    success: 'Успешно',
+    error: 'Ошибка',
+    info: 'Уведомление',
 }
 
 // ─── Show ─────────────────────────────────────────────────────────────────────
 export function showToast(opts: ToastOptions): void {
-  ensureStyles()
-  const container = getContainer()
+    ensureStyles()
+    const container = getContainer()
 
-  const {
-    message,
-    type     = 'info',
-    duration = 4000,
-    title    = TITLES[type],
-  } = opts
+    const {
+        message,
+        type = 'info',
+        duration = 4000,
+        title = TITLES[type],
+    } = opts
 
-  // Toast element
-  const toast = document.createElement('div')
-  toast.className = `edms-toast edms-toast--${type}`
-  toast.style.position = 'relative'
-  toast.setAttribute('role', 'alert')
-  toast.setAttribute('aria-live', 'assertive')
+    // Toast element
+    const toast = document.createElement('div')
+    toast.className = `edms-toast edms-toast--${type}`
+    toast.style.position = 'relative'
+    toast.setAttribute('role', 'alert')
+    toast.setAttribute('aria-live', 'assertive')
 
-  toast.innerHTML = `
+    toast.innerHTML = `
     <div class="edms-toast-icon">${ICONS[type]}</div>
     <div class="edms-toast-body">
       <div class="edms-toast-title">${escapeHtml(title)}</div>
@@ -237,39 +237,39 @@ export function showToast(opts: ToastOptions): void {
     <div class="edms-toast-progress" style="animation-duration:${duration}ms"></div>
   `
 
-  const dismiss = () => {
-    toast.classList.add('edms-toast-out')
-    toast.addEventListener('animationend', () => toast.remove(), { once: true })
-  }
+    const dismiss = () => {
+        toast.classList.add('edms-toast-out')
+        toast.addEventListener('animationend', () => toast.remove(), {once: true})
+    }
 
-  toast.addEventListener('click', dismiss)
-  toast.querySelector('.edms-toast-close')?.addEventListener('click', e => {
-    e.stopPropagation()
-    dismiss()
-  })
+    toast.addEventListener('click', dismiss)
+    toast.querySelector('.edms-toast-close')?.addEventListener('click', e => {
+        e.stopPropagation()
+        dismiss()
+    })
 
-  container.appendChild(toast)
+    container.appendChild(toast)
 
-  if (duration > 0) {
-    setTimeout(dismiss, duration)
-  }
+    if (duration > 0) {
+        setTimeout(dismiss, duration)
+    }
 }
 
 // ─── Convenience aliases ──────────────────────────────────────────────────────
 export const toast = {
-  success: (message: string, title?: string) =>
-    showToast({ message, type: 'success', title }),
-  error: (message: string, title?: string) =>
-    showToast({ message, type: 'error', title }),
-  info: (message: string, title?: string) =>
-    showToast({ message, type: 'info', title }),
+    success: (message: string, title?: string) =>
+        showToast({message, type: 'success', ...(title !== undefined && {title})}),
+    error: (message: string, title?: string) =>
+        showToast({message, type: 'error', ...(title !== undefined && {title})}),
+    info: (message: string, title?: string) =>
+        showToast({message, type: 'info', ...(title !== undefined && {title})}),
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
 }

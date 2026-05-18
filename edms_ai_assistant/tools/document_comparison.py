@@ -1,12 +1,14 @@
 # edms_ai_assistant/tools/document_comparison.py
 import logging
-from typing import Any
+from typing import Any, Annotated
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.llm import get_chat_model
 
@@ -18,7 +20,6 @@ class DocumentComparisonInput(BaseModel):
 
     document_id_1: str = Field(..., description="UUID первого документа/версии")
     document_id_2: str = Field(..., description="UUID второго документа/версии")
-    token: str = Field(..., description="Токен авторизации")
     comparison_focus: str | None = Field(
         None,
         description="Конкретный аспект сравнения (metadata, attachments, content, all)",
@@ -27,10 +28,10 @@ class DocumentComparisonInput(BaseModel):
 
 @tool("doc_compare_documents", args_schema=DocumentComparisonInput)
 async def doc_compare_documents(
-    document_id_1: str,
-    document_id_2: str,
-    token: str,
-    comparison_focus: str | None = "all",
+        document_id_1: str,
+        document_id_2: str,
+        comparison_focus: str | None = "all",
+        config: RunnableConfig = None,
 ) -> dict[str, Any]:
     """
     Сравнивает два документа или версии документа.
@@ -45,7 +46,20 @@ async def doc_compare_documents(
     - "attachments": только вложения
     - "content": только текстовое содержимое вложений
     - "all": полное сравнение
+
+    Args:
+        document_id_1: UUID первого документа.
+        document_id_2: UUID второго документа.
+        comparison_focus: Фокус сравнения.
+        token: JWT токен авторизации (инжектируется автоматически).
+        config: Конфиг Runnable (инжектируется автоматически).
     """
+    try:
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}"}
     try:
         async with DocumentClient() as client:
             doc1 = await client.get_document_metadata(token, document_id_1)

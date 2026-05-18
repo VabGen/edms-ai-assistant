@@ -1,6 +1,7 @@
+// edms-plugin/entrypoints/assistant.content/index.tsx
 import './style.css'
 import { createRoot, type Root } from 'react-dom/client'
-import { AssistantWidget } from './AssistantWidget'
+import { AssistantWidget } from '@widgets/assistant-widget/ui/AssistantWidget'
 
 export default defineContentScript({
   matches: [
@@ -15,8 +16,6 @@ export default defineContentScript({
   runAt: 'document_end',
 
   async main(ctx) {
-    console.log('[EDMS] ✅ Content script started')
-
     const ui = await createShadowRootUi<Root>(ctx, {
       name: 'edms-assistant',
       position: 'inline',
@@ -24,8 +23,6 @@ export default defineContentScript({
       append: 'last',
 
       onMount(container): Root {
-        console.log('[EDMS] ✅ Shadow DOM mounted')
-        // Монтируем в div-обёртку, а не напрямую в container (document.body)
         const wrapper = document.createElement('div')
         container.appendChild(wrapper)
         const root = createRoot(wrapper)
@@ -39,6 +36,5 @@ export default defineContentScript({
     })
 
     ui.mount()
-    console.log('[EDMS] ✅ Widget on page')
   },
 })

@@ -1,4 +1,3 @@
-// plugins/remarkLazyList.ts
 import {visit} from 'unist-util-visit'
 import type {Plugin} from 'unified'
 import type {Root, Paragraph, Text} from 'mdast'
@@ -8,7 +7,7 @@ export const remarkLazyList: Plugin<[], Root> = () => {
         let currentList: any = null
         let currentItems: string[] = []
 
-        visit(tree, 'paragraph', (node: Paragraph, index: number, parent: any) => {
+        visit(tree, 'paragraph', (node: Paragraph, index: number | undefined, parent: any) => {
             const textNode = node.children[0] as Text
             if (!textNode?.value) return
 
@@ -20,7 +19,8 @@ export const remarkLazyList: Plugin<[], Root> = () => {
             )
 
             if (isLazyList && lines.length > 1) {
-                const isOrdered = /^\s*\d+[.)]/.test(lines[0]) || /^\s*[0-9]️?\u20E3?/.test(lines[0])
+                const firstLine = lines[0] ?? ''
+                const isOrdered = /^\s*\d+[.)]/.test(firstLine) || /^\s*[0-9]️?\u20E3?/.test(firstLine)
                 const listItems = lines
                     .filter(line => line.trim())
                     .map(line => ({

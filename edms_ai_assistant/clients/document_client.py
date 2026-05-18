@@ -50,7 +50,7 @@ import logging
 from abc import abstractmethod
 from typing import Any
 
-from .base_client import EdmsBaseClient, EdmsHttpClient
+from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,7 @@ def _build_includes_params(includes: list[str]) -> dict[str, list[str]]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
+class DocumentClient(EdmsDocumentClient, EdmsBaseClient):
     """Concrete async HTTP client for EDMS Document API.
 
     Реализует взаимодействие с DocumentController.java.
@@ -927,15 +927,15 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
             return False
 
     async def execute_document_operations(
-        self,
-        token: str,
-        document_id: str,
-        operations: list[dict[str, Any]],
+            self,
+            token: str,
+            document_id: str,
+            operations: list[dict[str, Any]],
     ) -> bool:
         """Executes a list of operations on a document.
 
         Calls POST api/document/{id}/execute with body List<DocOperation>.
-        Операции: подписать, согласовать, отклонить, ознакомиться и др.
+        Операции: подписать, согласовать, отклонить, ознакомиться, обновить поля и др.
         Возвращает 204 No Content при успехе.
 
         Args:
@@ -943,6 +943,7 @@ class DocumentClient(EdmsDocumentClient, EdmsHttpClient):
             document_id: Document UUID string.
             operations: List of DocOperation dicts, e.g.
                         [{"operationType": "SIGN", "comment": "Согласован"}]
+                        или [{"operationType": "DOCUMENT_MAIN_FIELDS_UPDATE", "body": {...}}]
 
         Returns:
             True on success, False on failure.

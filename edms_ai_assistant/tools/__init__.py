@@ -3,11 +3,14 @@
 EDMS AI Assistant — Tool Registry.
 """
 
+from edms_ai_assistant.tools.access_grief_tool import access_grief_tool
+
 from .appeal_autofill import autofill_appeal_document
 from .attachment import doc_get_file_content
 from .create_document_from_file import create_document_from_file
 from .doc_compliance_check import doc_compliance_check
-from .doc_notification import doc_send_notification
+from .doc_control import doc_control
+from .doc_next_process import doc_next_process
 from .doc_search import doc_search_tool
 from .doc_update_field import doc_update_field
 from .document import doc_get_details
@@ -19,7 +22,7 @@ from .introduction import introduction_create_tool
 from .local_file_tool import read_local_file_content
 from .summarization import doc_summarize_text
 from .task import task_create_tool
-from .update_settings import update_settings_tool
+from edms_ai_assistant.tools.ask_user_select import ask_user_to_select
 
 all_tools = [
     # Documents
@@ -39,14 +42,18 @@ all_tools = [
     task_create_tool,
     autofill_appeal_document,
     doc_update_field,
+    # Control
+    doc_control,
     # People
     employee_search_tool,
-    # Notifications
-    doc_send_notification,
     # Compliance
     doc_compliance_check,
-    # System
-    update_settings_tool,
+    # Access griefs
+    access_grief_tool,
+    # Process bpmn
+    doc_next_process,
+
+    ask_user_to_select
 ]
 
 __all__ = [
@@ -58,14 +65,15 @@ __all__ = [
     "doc_get_file_content",
     "doc_get_versions",
     "doc_search_tool",
-    "doc_send_notification",
     "doc_summarize_text",
     "doc_update_field",
+    "doc_control",
     "employee_search_tool",
     "introduction_create_tool",
     "read_local_file_content",
     "task_create_tool",
     "create_document_from_file",
     "doc_compliance_check",
-    "update_settings_tool",
+    "access_grief_tool",
+    "doc_next_process",
 ]

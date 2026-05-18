@@ -1,53 +1,298 @@
 # edms_ai_assistant/services/task_service.py
 """
 EDMS AI Assistant — Task Service with Disambiguation Support.
+
+✅ v5: Добавлена поддержка личных групп (personal_group_names).
 """
 
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from edms_ai_assistant.clients.department_client import DepartmentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
+from edms_ai_assistant.clients.group_client import GroupClient
 from edms_ai_assistant.clients.task_client import TaskClient
-from edms_ai_assistant.models.task_models import (
+from edms_ai_assistant.domain.task_models import (
     CreateTaskRequest,
     CreateTaskRequestExecutor,
     TaskCreationResult,
     TaskType,
 )
+from edms_ai_assistant.services.search_utils import (
+    DEFAULT_PAGEABLE,
+    build_employee_filter,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class TaskService:
-    """
-    Service for managing document tasks (поручения) with Disambiguation.
+@dataclass(frozen=True)
+class BulkResolutionResult:
+    """Результат массового резолвинга исполнителей."""
 
-    Responsibilities:
-    - Резолвинг исполнителей по фамилии с обработкой неоднозначностей
-    - Создание поручений через TaskClient
-    - Управление lifecycle клиентов через async context manager
-    """
+    employee_ids: set[UUID] = field(default_factory=set)
+    not_found: list[str] = field(default_factory=list)
+    resolved_summary: list[str] = field(default_factory=list)
+
+
+class TaskService:
+    """Service for managing document tasks with Disambiguation."""
 
     def __init__(self) -> None:
-        """Initialises employee and task API clients."""
         self.employee_client = EmployeeClient()
         self.task_client = TaskClient()
+        self.department_client = DepartmentClient()
+        self.group_client = GroupClient()
 
     async def __aenter__(self) -> "TaskService":
-        """Opens underlying HTTP clients."""
         await self.employee_client.__aenter__()
         await self.task_client.__aenter__()
+        await self.department_client.__aenter__()
+        await self.group_client.__aenter__()
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Closes underlying HTTP clients."""
         await self.employee_client.__aexit__(exc_type, exc_val, exc_tb)
         await self.task_client.__aexit__(exc_type, exc_val, exc_tb)
+        await self.department_client.__aexit__(exc_type, exc_val, exc_tb)
+        await self.group_client.__aexit__(exc_type, exc_val, exc_tb)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Public API
+    # Bulk Resolution
+    # ──────────────────────────────────────────────────────────────────────
+
+    async def resolve_bulk_executors(
+        self,
+        token: str,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool = False,
+    ) -> BulkResolutionResult:
+        """Резолвит массовых исполнителей."""
+        found_ids: set[UUID] = set()
+        not_found: list[str] = []
+        summary: list[str] = []
+
+        # ── Подразделения ───────────────────────────────────────────────
+        if department_names:
+            dept_ids, dept_not_found, dept_count = await self._resolve_departments(
+                token, department_names
+            )
+            found_ids.update(dept_ids)
+            not_found.extend(dept_not_found)
+            if dept_count:
+                summary.append(f"подразделения: {dept_count} сотрудников")
+
+        # ── Группы ──────────────────────────────────────────────────────
+        if group_names:
+            group_ids, group_not_found, group_count = await self._resolve_groups(
+                token, group_names, personal=False
+            )
+            found_ids.update(group_ids)
+            not_found.extend(group_not_found)
+            if group_count:
+                summary.append(f"группы: {group_count} сотрудников")
+
+        # ── Личные группы ───────────────────────────────────────────────
+        if personal_group_names:
+            pg_ids, pg_not_found, pg_count = await self._resolve_groups(
+                token, personal_group_names, personal=True
+            )
+            found_ids.update(pg_ids)
+            not_found.extend(pg_not_found)
+            if pg_count:
+                summary.append(f"личные группы: {pg_count} сотрудников")
+
+        # ── Подчинённые ─────────────────────────────────────────────────
+        if include_subordinates:
+            sub_ids, sub_count = await self._resolve_subordinates(token)
+            found_ids.update(sub_ids)
+            if sub_count:
+                summary.append(f"подчинённые: {sub_count} сотрудников")
+
+        logger.info(
+            "[TASK-SERVICE] Bulk resolution: %d employees (%s)",
+            len(found_ids),
+            "; ".join(summary) if summary else "none",
+        )
+
+        return BulkResolutionResult(
+            employee_ids=found_ids,
+            not_found=not_found,
+            resolved_summary=summary,
+        )
+
+    async def _resolve_departments(
+        self,
+        token: str,
+        department_names: list[str],
+    ) -> tuple[set[UUID], list[str], int]:
+        """Резолвит подразделения по названиям → employee UUIDs."""
+        found_ids: set[UUID] = set()
+        not_found: list[str] = []
+        total = 0
+
+        for dept_name in department_names:
+            ns = dept_name.strip()
+            if not ns:
+                continue
+
+            try:
+                dept = await self.department_client.find_by_name(token, ns)
+                if not dept or not dept.get("id"):
+                    not_found.append(f"Подразделение: {ns}")
+                    continue
+
+                dept_id = (
+                    UUID(dept["id"]) if isinstance(dept["id"], str) else dept["id"]
+                )
+                employees = await self.department_client.get_employees_by_department_id(
+                    token, dept_id
+                )
+
+                for emp in employees:
+                    emp_id = (
+                        UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    )
+                    found_ids.add(emp_id)
+
+                total += len(employees)
+            except Exception:
+                logger.warning(
+                    "[TASK-SERVICE] Failed to resolve dept '%s'", ns, exc_info=True
+                )
+                not_found.append(f"Подразделение: {ns}")
+
+        return found_ids, not_found, total
+
+    async def _resolve_groups(
+        self,
+        token: str,
+        group_names: list[str],
+        *,
+        personal: bool = False,
+    ) -> tuple[set[UUID], list[str], int]:
+        """Резолвит группы (обычные или личные) по названиям → employee UUIDs.
+
+        Args:
+            token: JWT токен
+            group_names: Названия групп
+            personal: True — искать в личных группах пользователя,
+                      False — искать в общих группах
+
+        Returns:
+            (employee_ids, not_found_names, total_employee_count)
+        """
+        found_ids: set[UUID] = set()
+        not_found: list[str] = []
+        group_ids: list[UUID] = []
+
+        label = "Личная группа" if personal else "Группа"
+
+        for group_name in group_names:
+            ns = group_name.strip()
+            if not ns:
+                continue
+
+            try:
+                if personal:
+                    group = await self.group_client.find_personal_by_name(token, ns)
+                else:
+                    group = await self.group_client.find_by_name(token, ns)
+
+                if not group or not group.get("id"):
+                    not_found.append(f"{label}: {ns}")
+                    logger.warning("[TASK-SERVICE] %s not found: %s", label, ns)
+                    continue
+
+                group_id = (
+                    UUID(group["id"]) if isinstance(group["id"], str) else group["id"]
+                )
+                group_ids.append(group_id)
+            except Exception:
+                logger.warning(
+                    "[TASK-SERVICE] Failed to resolve %s '%s'",
+                    label.lower(),
+                    ns,
+                    exc_info=True,
+                )
+                not_found.append(f"{label}: {ns}")
+
+        total = 0
+        if group_ids:
+            try:
+                if personal:
+                    employees = (
+                        await self.group_client.get_employees_by_personal_group_ids(
+                            token, group_ids
+                        )
+                    )
+                else:
+                    employees = await self.group_client.get_employees_by_group_ids(
+                        token, group_ids
+                    )
+
+                for emp in employees:
+                    emp_id = (
+                        UUID(emp["id"]) if isinstance(emp["id"], str) else emp["id"]
+                    )
+                    found_ids.add(emp_id)
+                total = len(employees)
+            except Exception:
+                logger.warning(
+                    "[TASK-SERVICE] Failed to get employees for %ss",
+                    label.lower(),
+                    exc_info=True,
+                )
+
+        return found_ids, not_found, total
+
+    async def _resolve_subordinates(
+        self,
+        token: str,
+    ) -> tuple[set[UUID], int]:
+        """Резолвит подчинённых текущего пользователя."""
+        try:
+            current_user = await self.employee_client.get_current_user(token)
+            if not current_user:
+                return set(), 0
+
+            user_id = current_user.get("id")
+            dept_id = current_user.get("departmentId")
+
+            if not dept_id:
+                return set(), 0
+
+            search_filter = {
+                "departmentId": [str(dept_id)],
+                "includes": ["POST", "DEPARTMENT"],
+            }
+
+            employees = await self.employee_client.search_employees_post(
+                token=token,
+                employee_filter=search_filter,
+                pageable={"page": 0, "size": 100, "sort": "lastName,ASC"},
+            )
+
+            found_ids: set[UUID] = set()
+            for emp in employees:
+                emp_id_str = str(emp.get("id", ""))
+                if emp_id_str and emp_id_str != str(user_id):
+                    found_ids.add(UUID(emp_id_str))
+
+            return found_ids, len(found_ids)
+        except Exception:
+            logger.warning(
+                "[TASK-SERVICE] Failed to resolve subordinates", exc_info=True
+            )
+            return set(), 0
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Individual Resolution
     # ──────────────────────────────────────────────────────────────────────
 
     async def collect_executors(
@@ -60,74 +305,54 @@ class TaskService:
         list[str],
         list[dict[str, Any]],
     ]:
-        """
-        Resolves executor employees by last name with disambiguation support.
-
-        Args:
-            token: JWT bearer token.
-            last_names: List of executor last names to search.
-            responsible_last_name: Optional last name of the responsible executor.
-
-        Returns:
-            Tuple of:
-            - executors: List of CreateTaskRequestExecutor (None if disambiguation needed).
-            - not_found: Last names that yielded no results.
-            - ambiguous_results: Disambiguation payloads (one per ambiguous name).
-        """
+        """Resolves executor employees by last name or full name."""
         found_employees: list[dict[str, Any]] = []
         not_found: list[str] = []
         ambiguous_results: list[dict[str, Any]] = []
 
-        for last_name in last_names:
-            employees = await self.employee_client.search_employees(
-                token,
-                {"lastName": last_name, "includes": ["POST", "DEPARTMENT"]},
+        for name_query in last_names:
+            search_filter = build_employee_filter(name_query=name_query)
+
+            employees = await self.employee_client.search_employees_post(
+                token=token,
+                employee_filter=search_filter,
+                pageable=DEFAULT_PAGEABLE,
             )
 
             if not employees:
-                logger.warning("[TASK-SERVICE] Employee not found: %s", last_name)
-                not_found.append(last_name)
+                not_found.append(name_query)
                 continue
 
             if len(employees) > 1:
-                logger.info(
-                    "[TASK-SERVICE] Ambiguous match for '%s': %d results",
-                    last_name,
-                    len(employees),
-                )
                 ambiguous_results.append(
                     {
-                        "search_query": last_name,
+                        "search_query": name_query,
                         "matches": [self._format_employee_match(e) for e in employees],
                     }
                 )
                 continue
 
-            # Только одно совпадение → OK
-            logger.debug(
-                "[TASK-SERVICE] Found single employee: %s -> %s",
-                last_name,
-                employees[0].get("id"),
-            )
             found_employees.append(employees[0])
 
-        # ── Неоднозначности → прерываем, возвращаем для выбора ────────────
         if ambiguous_results:
             return None, not_found, ambiguous_results
 
         if not found_employees:
             return None, not_found, []
 
-        # ── Все найдены однозначно → формируем executors ───────────────────
         responsible_employee: dict[str, Any] | None = None
         if responsible_last_name:
-            responsible_employee = await self.employee_client.find_by_last_name_fts(
-                token, responsible_last_name
+            resp_filter = build_employee_filter(name_query=responsible_last_name)
+            resp_results = await self.employee_client.search_employees_post(
+                token=token,
+                employee_filter=resp_filter,
+                pageable=DEFAULT_PAGEABLE,
             )
-            if not responsible_employee:
-                logger.warning(
-                    "[TASK-SERVICE] Responsible '%s' not found — first executor becomes responsible",
-                    responsible_last_name,
+            if resp_results and len(resp_results) == 1:
+                responsible_employee = resp_results[0]
+            else:
+                responsible_employee = await self.employee_client.find_by_last_name_fts(
+                    token, responsible_last_name
                 )
 
         executors: list[CreateTaskRequestExecutor] = []
@@ -152,6 +377,10 @@ class TaskService:
 
         return executors, not_found, []
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Task Creation
+    # ──────────────────────────────────────────────────────────────────────
+
     async def create_task(
         self,
         token: str,
@@ -162,23 +391,6 @@ class TaskService:
         responsible_last_name: str | None = None,
         task_type: TaskType = TaskType.GENERAL,
     ) -> TaskCreationResult:
-        """
-        Creates a task after resolving executors by last name.
-
-        Returns requires_disambiguation if any name is ambiguous.
-
-        Args:
-            token: JWT bearer token.
-            document_id: Target EDMS document UUID.
-            task_text: Task body text.
-            executor_last_names: List of executor last names.
-            planed_date_end: Deadline (defaults to +7 days UTC).
-            responsible_last_name: Optional responsible executor last name.
-            task_type: Task type enum value.
-
-        Returns:
-            TaskCreationResult with status success | requires_disambiguation | error.
-        """
         logger.info("[TASK-SERVICE] Creating task. Executors: %s", executor_last_names)
 
         if not executor_last_names:
@@ -200,11 +412,6 @@ class TaskService:
         )
 
         if ambiguous_results:
-            logger.info(
-                "[TASK-SERVICE] Disambiguation required. Ambiguous: %d, Not found: %d",
-                len(ambiguous_results),
-                len(not_found),
-            )
             return TaskCreationResult(
                 success=False,
                 status="requires_disambiguation",
@@ -240,26 +447,6 @@ class TaskService:
         responsible_employee_id: UUID | None = None,
         task_type: TaskType = TaskType.GENERAL,
     ) -> TaskCreationResult:
-        """
-        Creates a task for pre-selected employees (post-disambiguation flow).
-
-        Args:
-            token: JWT bearer token.
-            document_id: Target EDMS document UUID.
-            task_text: Task body text.
-            employee_ids: Pre-resolved executor UUIDs.
-            planed_date_end: Deadline (defaults to +7 days UTC).
-            responsible_employee_id: UUID of the responsible executor.
-            task_type: Task type enum value.
-
-        Returns:
-            TaskCreationResult with status success | error.
-        """
-        logger.info(
-            "[TASK-SERVICE] Creating task with pre-selected employees: %d",
-            len(employee_ids),
-        )
-
         if not employee_ids:
             return TaskCreationResult(
                 success=False,
@@ -268,7 +455,6 @@ class TaskService:
             )
 
         responsible_id = responsible_employee_id or employee_ids[0]
-
         executors: list[CreateTaskRequestExecutor] = []
         seen_ids: set[UUID] = set()
         for emp_id in employee_ids:
@@ -292,7 +478,7 @@ class TaskService:
         )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Private helpers
+    # Private
     # ──────────────────────────────────────────────────────────────────────
 
     async def _submit_task(
@@ -305,28 +491,11 @@ class TaskService:
         task_type: TaskType,
         not_found: list[str] | None = None,
     ) -> TaskCreationResult:
-        """
-        Submits the prepared task request to the EDMS API.
-
-        Args:
-            token: JWT bearer token.
-            document_id: Target document UUID.
-            task_text: Task body text.
-            executors: Resolved executor list.
-            planed_date_end: Deadline datetime.
-            task_type: Task type.
-            not_found: Optional list of not-found names (for partial success).
-
-        Returns:
-            TaskCreationResult.
-        """
-        # Нормализация дедлайна
         if not planed_date_end:
             planed_date_end = datetime.now(UTC) + timedelta(days=5)
         elif planed_date_end.tzinfo is None:
             planed_date_end = planed_date_end.replace(tzinfo=UTC)
 
-        # Капитализация первой буквы текста
         formatted_text = (
             task_text[0].upper() + task_text[1:]
             if len(task_text) > 1
@@ -346,67 +515,47 @@ class TaskService:
             success = await self.task_client.create_tasks_batch(
                 token, document_id, [task_request]
             )
-
             if success:
                 logger.info(
-                    "[TASK-SERVICE] Task created successfully. Executors: %d",
-                    len(executors),
+                    "[TASK-SERVICE] Task created. Executors: %d", len(executors)
                 )
-                result = TaskCreationResult(
+                return TaskCreationResult(
                     success=True,
                     status="success",
                     created_count=1,
                     not_found_employees=not_found or [],
                 )
-                return result
-
             return TaskCreationResult(
                 success=False,
                 status="error",
-                error_message=(
-                    "Не удалось создать поручение. "
-                    "Проверьте права доступа или корректность данных."
-                ),
+                error_message="Не удалось создать поручение.",
             )
-
         except Exception as exc:
             logger.error("[TASK-SERVICE] Task creation failed: %s", exc, exc_info=True)
             return TaskCreationResult(
                 success=False,
                 status="error",
-                error_message=f"Ошибка создания поручения: {exc}",
+                error_message=f"Ошибка: {exc}",
             )
 
     @staticmethod
     def _format_employee_match(employee: dict[str, Any]) -> dict[str, Any]:
-        """
-        Formats a raw employee dict for disambiguation UI payload.
-
-        Args:
-            employee: Raw API employee record.
-
-        Returns:
-            Dict with id, full_name, post, department keys.
-        """
         last_name = employee.get("lastName", "")
         first_name = employee.get("firstName", "")
         middle_name = employee.get("middleName") or ""
         full_name = f"{last_name} {first_name} {middle_name}".strip()
-
         post_data = employee.get("post") or {}
         post_name = (
             post_data.get("postName", "Не указана")
             if isinstance(post_data, dict)
             else "Не указана"
         )
-
         dept_data = employee.get("department") or {}
         dept_name = (
             dept_data.get("name", "Не указан")
             if isinstance(dept_data, dict)
             else "Не указан"
         )
-
         return {
             "id": str(employee["id"]),
             "full_name": full_name,
@@ -415,18 +564,5 @@ class TaskService:
         }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Module-level helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-
 def _to_uuid(value: Any) -> UUID:
-    """Converts a string or UUID value to UUID.
-
-    Args:
-        value: Raw id value from API response.
-
-    Returns:
-        UUID instance.
-    """
     return UUID(value) if isinstance(value, str) else value

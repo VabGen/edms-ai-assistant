@@ -1,8 +1,8 @@
-import {memo, useState} from 'react'
+import {memo, useState, useRef, useEffect} from 'react'
 import {
     ArrowLeft, Palette, Mic, FileText,
     Cpu, Bot, Database, Globe,
-    Save, RotateCcw, Check, AlertCircle, Loader2, WifiOff,
+    Save, RotateCcw, Check, AlertCircle, Loader2, WifiOff, ChevronDown,
 } from 'lucide-react'
 import {
     useSettingsStore,
@@ -16,6 +16,85 @@ import {
     type STTLanguage,
     type AutoSendPauseMs,
 } from '../hooks/useSettingsStore'
+
+function SelectField<T extends string>({value, onChange, options}: {
+    value: T
+    onChange: (v: T) => void
+    options: readonly {value: T; label: string}[]
+}) {
+    const [open, setOpen] = useState(false)
+    const ref = useRef<HTMLDivElement>(null)
+    const selectedLabel = options.find(o => o.value === value)?.label ?? value
+
+    useEffect(() => {
+        if (!open) return
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [open])
+
+    return (
+        <div ref={ref} className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen(p => !p)}
+                className="w-full px-3 py-2 rounded-xl text-[11px] flex items-center justify-between cursor-pointer transition-all duration-200"
+                style={{
+                    background: '#ffffff',
+                    border: `1px solid ${open ? 'rgba(99,102,241,0.30)' : 'rgba(0,0,0,0.06)'}`,
+                    color: '#0f172a',
+                    boxShadow: open ? '0 0 0 2px rgba(99,102,241,0.08)' : '0 1px 2px rgba(0,0,0,0.03)',
+                    textAlign: 'left',
+                }}
+            >
+                <span>{selectedLabel}</span>
+                <ChevronDown
+                    size={12}
+                    style={{
+                        color: '#94a3b8',
+                        transform: open ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 0.2s',
+                        flexShrink: 0,
+                    }}
+                />
+            </button>
+            {open && (
+                <div
+                    className="absolute left-0 right-0 z-[9999] mt-1 rounded-xl overflow-hidden"
+                    style={{
+                        background: '#ffffff',
+                        border: '1px solid rgba(0,0,0,0.08)',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    }}
+                >
+                    {options.map(o => (
+                        <button
+                            key={o.value}
+                            type="button"
+                            onClick={() => { onChange(o.value); setOpen(false) }}
+                            className="w-full px-3 py-2 text-left text-[11px] transition-colors duration-150"
+                            style={{
+                                background: o.value === value ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                color: o.value === value ? '#4338ca' : '#0f172a',
+                                fontWeight: o.value === value ? 600 : 400,
+                            }}
+                            onMouseEnter={e => {
+                                if (o.value !== value) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)'
+                            }}
+                            onMouseLeave={e => {
+                                if (o.value !== value) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                            }}
+                        >
+                            {o.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
 
 function Field({label, hint, children}: { label: string; hint?: string; children: React.ReactNode }) {
     return (
@@ -86,7 +165,7 @@ function SliderField({label, hint, value, onChange, min, max, step, fmt}: {
 }) {
     const pct = ((value - min) / (max - min)) * 100
     return (
-        <Field label={label} hint={hint}>
+        <Field label={label} {...(hint !== undefined ? { hint } : {})}>
             <div className="flex items-center gap-2.5">
                 <input type="range" min={min} max={max} step={step} value={value}
                        onChange={(e) => onChange(Number(e.target.value))}
@@ -202,31 +281,16 @@ function DocumentsTab({s, on}: {
     return (
         <div className="flex flex-col gap-4">
             <Field label="Формат суммаризации" hint="Убирает шаг выбора при каждом запросе">
-                <select value={s.defaultSummaryFormat}
-                        onChange={(e) => on({defaultSummaryFormat: e.target.value as SummaryFormat})}
-                        className="w-full px-3 py-2 rounded-xl text-[11px] focus:outline-none cursor-pointer transition-all duration-200"
-                        style={{
-                            background: '#ffffff',
-                            border: '1px solid rgba(0,0,0,0.06)',
-                            color: '#0f172a',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                        }}
-                        onFocus={e => {
-                            const el = e.currentTarget as HTMLSelectElement
-                            el.style.borderColor = 'rgba(99,102,241,0.30)'
-                            el.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.08)'
-                        }}
-                        onBlur={e => {
-                            const el = e.currentTarget as HTMLSelectElement
-                            el.style.borderColor = 'rgba(0,0,0,0.06)'
-                            el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
-                        }}
-                >
-                    <option value="ask">Спрашивать каждый раз</option>
-                    <option value="abstractive">Пересказ (abstractive)</option>
-                    <option value="extractive">Факты (extractive)</option>
-                    <option value="thesis">Тезисы (thesis)</option>
-                </select>
+                <SelectField<SummaryFormat>
+                    value={s.defaultSummaryFormat}
+                    onChange={(v) => on({defaultSummaryFormat: v})}
+                    options={[
+                        {value: 'ask', label: 'Спрашивать каждый раз'},
+                        {value: 'abstractive', label: 'Пересказ (abstractive)'},
+                        {value: 'extractive', label: 'Факты (extractive)'},
+                        {value: 'thesis', label: 'Тезисы (thesis)'},
+                    ]}
+                />
             </Field>
             <div className="h-px" style={{background: 'rgba(0,0,0,0.04)'}}/>
             <ToggleRow label="Автоанализ при открытии" hint="Анализировать документ сразу при открытии"
@@ -276,28 +340,11 @@ function AgentTab({s, on}: { s: TechSettings['agent']; on: (p: Partial<TechSetti
                                                   type="number" min={0} max={10}/></Field>
             <div className="h-px" style={{background: 'rgba(0,0,0,0.04)'}}/>
             <Field label="Log Level">
-                <select value={s.logLevel}
-                        onChange={(e) => on({logLevel: e.target.value as TechSettings['agent']['logLevel']})}
-                        className="w-full px-3 py-2 rounded-xl text-[11px] focus:outline-none cursor-pointer transition-all duration-200"
-                        style={{
-                            background: '#ffffff',
-                            border: '1px solid rgba(0,0,0,0.06)',
-                            color: '#0f172a',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                        }}
-                        onFocus={e => {
-                            const el = e.currentTarget as HTMLSelectElement
-                            el.style.borderColor = 'rgba(99,102,241,0.30)'
-                            el.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.08)'
-                        }}
-                        onBlur={e => {
-                            const el = e.currentTarget as HTMLSelectElement
-                            el.style.borderColor = 'rgba(0,0,0,0.06)'
-                            el.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
-                        }}
-                >
-                    {(['DEBUG', 'INFO', 'WARNING', 'ERROR'] as const).map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
+                <SelectField<TechSettings['agent']['logLevel']>
+                    value={s.logLevel}
+                    onChange={(v) => on({logLevel: v})}
+                    options={(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const).map(v => ({value: v, label: v}))}
+                />
             </Field>
             <ToggleRow label="Трассировка агента" hint="Детальное логирование шагов ReAct" value={s.enableTracing}
                        onChange={(v) => on({enableTracing: v})}/>
@@ -419,6 +466,7 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
         updateTech,
         saveAll,
         resetAll,
+        resetToDefaults,
         discardDraft
     } = useSettingsStore()
     const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
@@ -453,7 +501,9 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                 {isDirty && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{background: '#f59e0b'}}
                                   title="Есть несохранённые изменения"/>}
                 {isDirty && (
-                    <button type="button" onClick={resetAll} title="Сбросить к дефолтам"
+                    <button type="button"
+                            onClick={showTechnical ? resetToDefaults : resetAll}
+                            title={showTechnical ? 'Сбросить к серверным дефолтам' : 'Сбросить к дефолтам'}
                             className="p-1.5 rounded-lg transition-all duration-200 shrink-0"
                             style={{color: '#94a3b8'}}>
                         <RotateCcw size={11}/>
@@ -470,7 +520,7 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                 </div>
             )}
 
-            <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col gap-3 min-h-0">
+            <div className="flex-1 overflow-y-auto scrollbar-none flex flex-col gap-3 min-h-0">
                 {showTechnical && (
                     <p className="text-[8px] font-bold uppercase tracking-[0.15em] px-0.5 shrink-0"
                        style={{color: '#94a3b8'}}>
@@ -496,7 +546,7 @@ export const SettingsPanel = memo(function SettingsPanel({onClose}: SettingsPane
                                   style={{color: '#94a3b8'}}>Технические</span>
                             <div className="flex-1 h-px" style={{background: 'rgba(0,0,0,0.05)'}}/>
                         </div>
-                        <TabBar tabs={TECH_TABS} active={isTechTab ? activeTab : TECH_TABS[0].id}
+                        <TabBar tabs={TECH_TABS} active={isTechTab ? activeTab : TECH_TABS[0]!.id}
                                 onChange={setActiveTab}/>
                         <div className="shrink-0">
                             {activeTab === 'llm' && <LLMTab s={draft.tech.llm} on={(p) => updateTech('llm', p)}/>}

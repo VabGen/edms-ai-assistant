@@ -9,7 +9,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,9 @@ def get_timezone_info() -> dict[str, Any]:
         "current_time_local": now_aware.isoformat(),
         "current_time_utc": datetime.now(UTC_TZ).isoformat(),
         "raw_time_timezone_sec": time.timezone,
-        "raw_time_altzone_sec": time.altsize if hasattr(time, 'altsize') else time.altzone,
+        "raw_time_altzone_sec": (
+            time.altsize if hasattr(time, "altsize") else time.altzone
+        ),
         "raw_tm_isdst": time.localtime().tm_isdst,
         "warning": "DST disabled to prevent +1h error",
     }
@@ -118,6 +120,7 @@ def get_timezone_info() -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════
 # Основные функции (без изменений)
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def to_local_timezone(dt: Any) -> str | None:
     """Конвертирует дату в строку ISO с локальным timezone."""
@@ -134,7 +137,7 @@ def to_local_timezone(dt: Any) -> str | None:
         return _date_to_local(dt)
 
     try:
-        if hasattr(dt, 'isoformat'):
+        if hasattr(dt, "isoformat"):
             return to_local_timezone(str(dt))
     except Exception:
         pass
@@ -164,7 +167,9 @@ def start_of_day_local(dt=None) -> datetime:
     else:
         parsed = to_local_timezone(dt)
         if not parsed:
-            return datetime.now(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+            return datetime.now(LOCAL_TZ).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
         d = datetime.fromisoformat(parsed).date()
 
     return datetime(d.year, d.month, d.day, tzinfo=LOCAL_TZ)
@@ -179,6 +184,7 @@ def end_of_day_local(dt=None) -> datetime:
 # ══════════════════════════════════════════════════════════════════════════════
 # Хелперы
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def _parse_string_to_local(dt_str: str) -> str | None:
     """Парсит строку → локальный TZ."""
@@ -236,12 +242,27 @@ def _date_to_local(d: date) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _DATE_FIELDS = {
-    "regDate", "receiptDate", "createDate", "lastModifyDate",
-    "dateDocCorrespondentOrg", "indexDateCoverLetter", "executionDate", "deadlineDate",
-    "dateControlEnd", "dateControlStart", "dateOfActualExecution",
-    "versionDate", "eventDate", "actionDate",
-    "fromDate", "toDate", "startDate", "endDate",
-    "createdAt", "updatedAt", "deletedAt",
+    "regDate",
+    "receiptDate",
+    "createDate",
+    "lastModifyDate",
+    "dateDocCorrespondentOrg",
+    "indexDateCoverLetter",
+    "executionDate",
+    "deadlineDate",
+    "dateControlEnd",
+    "dateControlStart",
+    "dateOfActualExecution",
+    "versionDate",
+    "eventDate",
+    "actionDate",
+    "fromDate",
+    "toDate",
+    "startDate",
+    "endDate",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
 }
 
 
@@ -265,7 +286,9 @@ def normalize_dates_in_dict(data, parent_key="", depth=0, max_depth=10):
 
     if isinstance(data, list):
         return [
-            normalize_dates_in_dict(item, parent_key=parent_key, depth=depth + 1, max_depth=max_depth)
+            normalize_dates_in_dict(
+                item, parent_key=parent_key, depth=depth + 1, max_depth=max_depth
+            )
             for item in data
         ]
 

@@ -1,57 +1,123 @@
 # edms_ai_assistant/db/database.py
+import asyncio
 import logging
-from datetime import datetime
+import subprocess
+import sys
+from pathlib import Path
+from typing import AsyncGenerator
 
-from sqlalchemy import DateTime, String, Text, UniqueConstraint, func, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
 
 from edms_ai_assistant.config import settings
 
 logger = logging.getLogger(__name__)
-
-engine = create_async_engine(settings.DATABASE_URL)
-AsyncSessionLocal = async_sessionmaker(
-    engine, expire_on_commit=False, class_=AsyncSession
-)
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class SummarizationCache(Base):
-    __tablename__ = "summarization_cache"
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    pool_size=20,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    file_identifier: Mapped[str] = mapped_column(String, index=True, nullable=False)
-    summary_type: Mapped[str] = mapped_column(String, index=True, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (
-        UniqueConstraint(
-            "file_identifier", "summary_type", name="_file_summary_type_uc"
-        ),
-        {"schema": "edms"},
-    )
+AsyncSessionLocal = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
-async def get_db():
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+# ---------------------------------------------------------------------------
+# Alembic Migration Runner (via subprocess in thread)
+# ---------------------------------------------------------------------------
+
+
+def _run_sync_migrations() -> None:
+    """Синхронный запуск миграций Alembic через subprocess."""
+    project_root = Path(__file__).resolve().parent.parent.parent
+    alembic_ini_path = project_root / "alembic.ini"
+
+    if not alembic_ini_path.exists():
+        logger.error(f"alembic.ini not found at {alembic_ini_path}")
+        return
+
+    logger.info(f"Attempting to run Alembic migrations from {project_root}...")
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+
+        if result.returncode == 0:
+            logger.info("Alembic migrations applied successfully.")
+            if result.stdout:
+                logger.debug(f"Alembic output:\n{result.stdout.strip()}")
+        else:
+            logger.error(
+                f"Alembic migration failed with return code {result.returncode}"
+            )
+            logger.error(f"Alembic stderr:\n{result.stderr.strip()}")
+            logger.error(f"Alembic stdout:\n{result.stdout.strip()}")
+            raise RuntimeError("Alembic migration failed")
+
+    except Exception as e:
+        logger.error(f"Failed to run Alembic subprocess: {repr(e)}")
+        raise
+
+
+async def _run_async_migrations() -> None:
+    """
+    Асинхронная обертка. Запускает миграции в отдельном потоке,
+    чтобы не блокировать event loop FastAPI.
+    """
+    await asyncio.to_thread(_run_sync_migrations)
+
+
+# ---------------------------------------------------------------------------
+# Database Initialization
+# ---------------------------------------------------------------------------
 
 
 async def init_db():
-    """Инициализация БД: создание схемы edms и таблиц."""
-    async with engine.begin() as conn:
-        try:
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS edms"))
-            await conn.run_sync(Base.metadata.create_all)
+    """Инициализация БД: применение миграций Alembic и проверка подключения."""
 
-            logger.info(
-                "Database initialized: schema 'edms' and tables checked/created."
-            )
+    # ── 1. Запуск миграций ────────────────────────────────────────────
+    try:
+        await _run_async_migrations()
+    except Exception:
+        pass
+
+    # ── 2. Проверка подключения ───────────────────────────────────────
+    async with engine.connect() as conn:
+        try:
+            await conn.execute(text("SELECT 1"))
+            logger.info("Database connection established.")
         except Exception as e:
-            logger.error(f"Error during database initialization: {e}")
+            logger.error(f"Database connection failed: {e}")
             raise

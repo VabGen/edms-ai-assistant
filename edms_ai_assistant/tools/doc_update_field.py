@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Annotated
 
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
@@ -30,6 +32,8 @@ _ALLOWED_APPEAL_FIELDS: dict[str, str] = {
     "fullAddress": "Адрес заявителя",
     "phone": "Телефон",
     "email": "Email",
+    "index": "Почтовый индекс",
+    "indexDateCoverLetter": "Индекс и дата сопроводительного письма",
     "signed": "Кем подписано (ФИО)",
     "correspondentOrgNumber": "Исх.№ корреспондента",
     "organizationName": "Название организации",
@@ -40,20 +44,13 @@ _ALLOWED_APPEAL_FIELDS: dict[str, str] = {
 
 class UpdateDocumentFieldInput(BaseModel):
     """Validated input for updating a single document field."""
-
-    document_id: str = Field(
-        ...,
-        description="UUID документа в СЭД",
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    )
-    token: str = Field(..., description="JWT токен авторизации")
     field_name: str = Field(
         ...,
         description=(
             "Имя поля для обновления. Допустимые значения:\n"
             "Основные: shortSummary (заголовок), note, pages, additionalPages, exemplarCount\n"
-            "Обращение: fullAddress, phone, email, signed, correspondentOrgNumber, "
-            "organizationName, fioApplicant, reviewProgress"
+            "Обращение: fullAddress, phone, email, index, indexDateCoverLetter, signed, "
+            "correspondentOrgNumber, organizationName, fioApplicant, reviewProgress"
         ),
     )
     field_value: str = Field(
@@ -86,7 +83,7 @@ def _enum_value(val: Any) -> Any:
 
 
 async def _fetch_main_required_fields(
-    client: DocumentClient, token: str, document_id: str
+        client: DocumentClient, token: str, document_id: str
 ) -> dict[str, Any]:
     """
     Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_UPDATE.
@@ -117,7 +114,7 @@ async def _fetch_main_required_fields(
 
 
 async def _fetch_appeal_required_fields(
-    client: DocumentClient, token: str, document_id: str
+        client: DocumentClient, token: str, document_id: str
 ) -> dict[str, Any]:
     """
     Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE.
@@ -138,7 +135,6 @@ async def _fetch_appeal_required_fields(
         return {"declarantType": "INDIVIDUAL", "submissionForm": "WRITTEN"}
 
     # === Обязательные поля ===
-
     declarant = getattr(appeal, "declarantType", None)
     result["declarantType"] = (
         _enum_value(declarant) if declarant is not None else "INDIVIDUAL"
@@ -149,23 +145,10 @@ async def _fetch_appeal_required_fields(
         _enum_value(sub_form) if sub_form is not None else "WRITTEN"
     )
 
-    # === Сохраняем текущие значения ===
-
     _preserve_str = (
-        "fioApplicant",
-        "organizationName",
-        "fullAddress",
-        "phone",
-        "email",
-        "signed",
-        "correspondentOrgNumber",
-        "reviewProgress",
-        "countryAppealName",
-        "regionName",
-        "districtName",
-        "cityName",
-        "index",
-        "indexDateCoverLetter",
+        "fioApplicant", "organizationName", "fullAddress", "phone", "email",
+        "signed", "correspondentOrgNumber", "reviewProgress", "countryAppealName",
+        "regionName", "districtName", "cityName", "index", "indexDateCoverLetter",
     )
     for attr in _preserve_str:
         val = getattr(appeal, attr, None)
@@ -178,14 +161,8 @@ async def _fetch_appeal_required_fields(
             result[attr] = val
 
     _id_fields = (
-        "citizenTypeId",
-        "subjectId",
-        "countryAppealId",
-        "cityId",
-        "districtId",
-        "regionId",
-        "correspondentAppealId",
-        "solutionResultId",
+        "citizenTypeId", "subjectId", "countryAppealId", "cityId", "districtId",
+        "regionId", "correspondentAppealId", "solutionResultId",
     )
     for attr in _id_fields:
         val = getattr(appeal, attr, None)
@@ -205,10 +182,9 @@ async def _fetch_appeal_required_fields(
 
 @tool("doc_update_field", args_schema=UpdateDocumentFieldInput)
 async def doc_update_field(
-    document_id: str,
-    token: str,
     field_name: str,
     field_value: str,
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """Обновляет одно поле документа через API EDMS.
 
@@ -217,17 +193,27 @@ async def doc_update_field(
     - «Измени примечание»                        → field_name="note"
     - «Поправь адрес заявителя»                  → field_name="fullAddress"
     - «Обнови телефон в карточке»                → field_name="phone"
+    - «Исправь почтовый индекс»                  → field_name="index"
     - «Измени ФИО подписанта»                    → field_name="signed"
 
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
+
     Args:
-        document_id: UUID документа.
-        token: JWT токен авторизации.
         field_name: Имя поля (см. описание).
         field_value: Новое значение.
+        config: LangGraph RunnableConfig (инжектируется автоматически, содержит token и document_id).
 
     Returns:
         Dict со статусом операции.
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
     if field_name == "shortSummary" and len(field_value) > 80:
         field_value = field_value[:80]
         logger.warning("shortSummary обрезан до 80 символов: '%s'", field_value)
@@ -273,18 +259,22 @@ async def doc_update_field(
 
             logger.debug("doc_update_field payload keys: %s", list(body.keys()))
 
-            await client._make_request(
-                "POST",
-                f"api/document/{document_id}/execute",
+            success = await client.execute_document_operations(
                 token=token,
-                json=json_payload,
-                is_json_response=False,
+                document_id=document_id,
+                operations=json_payload,
             )
 
+            if not success:
+                return {
+                    "status": "error",
+                    "message": f"❌ Не удалось обновить поле «{field_name}»: API вернул ошибку",
+                }
+
         field_label = (
-            _ALLOWED_FIELDS.get(field_name)
-            or _ALLOWED_APPEAL_FIELDS.get(field_name)
-            or field_name
+                _ALLOWED_FIELDS.get(field_name)
+                or _ALLOWED_APPEAL_FIELDS.get(field_name)
+                or field_name
         )
 
         logger.info("doc_update_field success: %s = %r", field_name, value)

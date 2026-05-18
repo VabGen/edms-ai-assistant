@@ -10,13 +10,15 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Annotated
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
 from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.generated.resources_openapi import DocumentDto
@@ -35,14 +37,13 @@ _SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
     {".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".md"}
 )
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Input schema
 # ══════════════════════════════════════════════════════════════════════════════
 
 
 class DocComplianceCheckInput(BaseModel):
-    document_id: str = Field(..., description="UUID документа в СЭД")
-    token: str = Field(..., description="JWT токен авторизации")
     attachment_id: str | None = Field(
         None,
         description=(
@@ -470,8 +471,8 @@ def _format_value(value: Any) -> str | None:
 
 
 def _extract_card_fields(
-    doc: DocumentDto,
-    category: str,
+        doc: DocumentDto,
+        category: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Возвращает (text_fields, presence_fields).
@@ -523,10 +524,10 @@ def _extract_card_fields(
 
 
 async def _extract_text(
-    token: str,
-    document_id: str,
-    attachment_id: str,
-    attachment_name: str,
+        token: str,
+        document_id: str,
+        attachment_id: str,
+        attachment_name: str,
 ) -> str | None:
     suffix = Path(attachment_name).suffix.lower() or ".tmp"
     if suffix not in _SUPPORTED_EXTENSIONS:
@@ -601,10 +602,10 @@ _USER_PROMPT = """
 
 
 async def _run_llm(
-    category: str,
-    text_fields: list[dict[str, Any]],
-    attachment_text: str,
-    attachment_name: str,
+        category: str,
+        text_fields: list[dict[str, Any]],
+        attachment_text: str,
+        attachment_name: str,
 ) -> list[dict[str, Any]]:
     """LLM-проверка text-полей. Возвращает список field-объектов."""
     if not text_fields:
@@ -668,7 +669,7 @@ async def _run_llm(
 
 
 def _build_presence_results(
-    presence_fields: list[dict[str, Any]],
+        presence_fields: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Presence-поля всегда ok — они заполнены оператором, не ищем в файле."""
     return [
@@ -713,18 +714,23 @@ def _compute_summary(overall: str, names: list[str], stats: dict[str, int]) -> s
 
 @tool("doc_compliance_check", args_schema=DocComplianceCheckInput)
 async def doc_compliance_check(
-    document_id: str,
-    token: str,
-    attachment_id: str | None = None,
-    check_all: bool = False,
+        attachment_id: str | None = None,
+        check_all: bool = False,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
-    Проверяет соответствие заполненных полей карточки документа содержимому вложения.
+    Проверяет соответствие заполненных полей карточки EDMS-документа содержимому вложения.
 
-    Используй когда пользователь просит:
+    ИСПОЛЬЗУЙ ТОЛЬКО когда пользователь явно просит проверить ПОЛЯ КАРТОЧКИ документа:
     - «Проверить документ перед отправкой»
-    - «Всё ли правильно заполнено»
+    - «Всё ли правильно заполнено в карточке»
     - «Соответствует ли карточка файлу»
+
+    ЗАПРЕЩЕНО использовать для:
+    - Вопросов о содержимом ранее проанализированного/суммаризованного файла.
+    - «Проверь на ошибки», «проверь на соответствие», «найди нарушения» — это анализ текста,
+      отвечай напрямую из уже полученного текста документа (doc_summarize_text результат в истории).
+    - Любой follow-up вопрос после doc_summarize_text — отвечай из истории диалога.
 
     Возвращает поля со статусами:
     - "ok"        — совпадает
@@ -732,11 +738,27 @@ async def doc_compliance_check(
     - "not_found" — не найдено в файле
 
     ВАЖНО: после получения результата сразу формулируй ответ пользователю.
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
     НЕ вызывай этот инструмент повторно — данные уже получены.
+
+    Args:
+        attachment_id: UUID или имя вложения (опционально).
+        check_all: Анализировать все вложения (опционально).
+        document_id: UUID документа (инжектируется автоматически).
+        token: JWT токен (инжектируется автоматически).
+        config: LangGraph RunnableConfig (инжектируется автоматически, содержит token и document_id).
+
     """
+    try:
+        document_id = get_document_id_from_config(config)
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
     logger.info(
         "doc_compliance_check: doc=%s... att=%s check_all=%s",
-        document_id[:8],
+        document_id[:8] if document_id else "N/A",
         attachment_id,
         check_all,
     )
@@ -980,3 +1002,5 @@ async def doc_compliance_check(
             else None
         ),
     }
+
+# 5

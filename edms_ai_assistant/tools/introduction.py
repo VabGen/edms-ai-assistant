@@ -4,13 +4,24 @@ EDMS AI Assistant - Introduction Tool.
 Инструмент для создания списков ознакомления с документами.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Any
 from uuid import UUID
 
-from langchain_core.tools import tool
+from typing import Any, Annotated
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
+from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.interrupt_contract import (
+    DisambiguationInterrupt,
+    InterruptOption,
+)
+from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
 from edms_ai_assistant.services.introduction_service import IntroductionService
 
 logger = logging.getLogger(__name__)
@@ -18,13 +29,6 @@ logger = logging.getLogger(__name__)
 
 class IntroductionInput(BaseModel):
     """Валидированная схема входных данных для создания ознакомления."""
-
-    token: str = Field(..., description="JWT токен авторизации пользователя")
-    document_id: str = Field(
-        ...,
-        description="UUID документа для создания ознакомления",
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    )
     last_names: list[str] | None = Field(
         None,
         description="Фамилии сотрудников для поиска (например: ['Иванов', 'Петров'])",
@@ -40,19 +44,40 @@ class IntroductionInput(BaseModel):
         description="Названия групп для массового добавления",
         max_length=20,
     )
+    personal_group_names: list[str] | None = Field(
+        None,
+        description=(
+            "Названия ЛИЧНЫХ групп пользователя. В отличие от обычных групп, "
+            "личная группа принадлежит конкретному пользователю и содержит "
+            "сотрудников, которых он сам добавил. "
+            "Пример: ['Моя команда', 'Контактная группа']"
+        ),
+        max_length=20,
+    )
+    include_subordinates: bool | None = Field(
+        None,
+        description=(
+            "True — включить подчинённых текущего пользователя. "
+            "Подчинённые — сотрудники подразделения, которым руководит пользователь."
+        ),
+    )
     comment: str | None = Field(
-        None, description="Комментарий к ознакомлению", max_length=500
+        None,
+        description="Комментарий к ознакомлению",
+        max_length=500,
     )
     selected_employee_ids: list[str] | None = Field(
         None,
         description=(
-            "UUID выбранных сотрудников для разрешения disambiguation. "
-            "Используется после выбора пользователем из списка неоднозначных совпадений."
+            "UUID выбранных сотрудников. Используйте, если UUID уже известен, "
+            "иначе система сама предложит выбор через карточки."
         ),
         max_length=100,
     )
 
-    @field_validator("last_names", "department_names", "group_names")
+    @field_validator(
+        "last_names", "department_names", "group_names", "personal_group_names"
+    )
     @classmethod
     def validate_string_lists(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
@@ -76,81 +101,49 @@ class IntroductionInput(BaseModel):
 
 @tool("introduction_create_tool", args_schema=IntroductionInput)
 async def introduction_create_tool(
-    token: str,
-    document_id: str,
-    last_names: list[str] | None = None,
-    department_names: list[str] | None = None,
-    group_names: list[str] | None = None,
-    comment: str | None = None,
-    selected_employee_ids: list[str] | None = None,
+        last_names: list[str] | None = None,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool | None = None,
+        comment: str | None = None,
+        selected_employee_ids: list[str] | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
-    Создает список ознакомления с документом через workflow с disambiguation.
+    Создает список ознакомления с документом.
 
-    Поддерживаемые сценарии:
-    1. Прямое добавление по selected_employee_ids (после выбора пользователя)
-    2. Поиск по фамилиям/отделам/группам с автоматическим разрешением
-    3. Disambiguation workflow при неоднозначных совпадениях
+    Типы исполнителей:
+    1. Индивидуальные: по фамилии/ФИО (last_names)
+    2. Подразделения: все сотрудники отдела (department_names)
+    3. Группы: все сотрудники группы (group_names)
+    4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)
+    5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)
 
-    Workflow:
-    --------
-    Шаг 1: Первый вызов
-        ```python
-        introduction_create_tool(
-            token="...",
-            document_id="uuid",
-            last_names=["Иванов", "Петров"]
-        )
-        ```
-        → Если "Иванов" неоднозначен → возврат requires_disambiguation
+    Можно комбинировать:
+    "Добавь ознакомление для Петрова, отдела ИТ и моей команды"
 
-    Шаг 2: Пользователь выбирает из списка (UI interaction)
-
-    Шаг 3: Повторный вызов с выбранными ID
-        ```python
-        introduction_create_tool(
-            token="...",
-            document_id="uuid",
-            selected_employee_ids=["uuid1", "uuid3"]
-        )
-        ```
-        → Создание ознакомления для выбранных сотрудников
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Если найдено несколько сотрудников с одинаковыми фамилиями, система
+    АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
 
     Args:
-        token: JWT токен авторизации
-        document_id: UUID документа
-        last_names: Список фамилий для поиска
-        department_names: Список названий отделов
-        group_names: Список названий групп
-        comment: Комментарий к ознакомлению
-        selected_employee_ids: UUID выбранных сотрудников (для disambiguation)
-
-    Returns:
-        Dict с ключами:
-        - status: "success" | "requires_disambiguation" | "error"
-        - message: Информационное сообщение
-        - action_type: "select_employee" (для disambiguation)
-        - ambiguous_matches: List[Dict] (список неоднозначных совпадений)
-        - added_count: int (количество добавленных сотрудников)
-        - not_found: List[str] (не найденные критерии)
-
-    Examples:
-         # Успешное добавление
-         result = await introduction_create_tool(
-        ...     token="jwt_token",
-        ...     document_id="doc_uuid",
-        ...     last_names=["Иванов"]
-        ... )
-         # {"status": "success", "message": "Успешно добавлено 1 сотрудников", ...}
-
-         # Требуется уточнение
-         result = await introduction_create_tool(
-        ...     token="jwt_token",
-        ...     document_id="doc_uuid",
-        ...     last_names=["Иванов"]  # Несколько Ивановых
-        ... )
-         # {"status": "requires_disambiguation", "ambiguous_matches": [...], ...}
+        last_names: Фамилии сотрудников.
+        department_names: Подразделения.
+        group_names: Группы.
+        personal_group_names: Личные группы.
+        include_subordinates: Включить подчинённых.
+        comment: Комментарий.
+        selected_employee_ids: UUID выбранных сотрудников (если уже известны).
+        config: LangGraph RunnableConfig (инжектируется автоматически).
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
     logger.info(
         "Creating introduction",
         extra={
@@ -158,6 +151,8 @@ async def introduction_create_tool(
             "last_names": last_names,
             "departments": department_names,
             "groups": group_names,
+            "personal_groups": personal_group_names,
+            "subordinates": include_subordinates,
             "has_selected_ids": bool(selected_employee_ids),
         },
     )
@@ -180,9 +175,13 @@ async def introduction_create_tool(
                 last_names=last_names,
                 department_names=department_names,
                 group_names=group_names,
+                personal_group_names=personal_group_names,
+                include_subordinates=bool(include_subordinates),
                 comment=comment,
             )
 
+    except GraphInterrupt:
+        raise
     except Exception as e:
         logger.error(
             f"Introduction creation failed: {e}",
@@ -202,11 +201,7 @@ async def _handle_direct_addition(
     employee_ids: list[str],
     comment: str | None,
 ) -> dict[str, Any]:
-    """
-    Обработка прямого добавления сотрудников по UUID.
-
-    Используется после disambiguation, когда пользователь выбрал конкретных сотрудников.
-    """
+    """Обработка прямого добавления сотрудников по UUID."""
     logger.info(f"Direct addition of {len(employee_ids)} employees")
 
     if not employee_ids:
@@ -249,30 +244,60 @@ async def _handle_search_and_create(
     last_names: list[str] | None,
     department_names: list[str] | None,
     group_names: list[str] | None,
+    personal_group_names: list[str] | None,
+    include_subordinates: bool,
     comment: str | None,
 ) -> dict[str, Any]:
-    """
-    Обработка поиска сотрудников с созданием ознакомления или disambiguation.
-
-    Workflow:
-    1. Резолвинг сотрудников по критериям поиска
-    2. Если есть неоднозначности → возврат requires_disambiguation
-    3. Если все однозначно → создание ознакомления
-    """
+    """Обработка поиска сотрудников с native HITL disambiguation."""
     resolution_result = await service.resolve_employees(
         token=token,
         last_names=last_names or [],
         department_names=department_names or [],
         group_names=group_names or [],
+        personal_group_names=personal_group_names or [],
+        include_subordinates=include_subordinates,
     )
 
-    employee_ids = resolution_result.employee_ids
+    employee_ids = list(resolution_result.employee_ids)
     not_found = resolution_result.not_found
     ambiguous_results = resolution_result.ambiguous
 
     if ambiguous_results:
         logger.info(f"Found {len(ambiguous_results)} ambiguous search terms")
-        return _build_disambiguation_response(ambiguous_results)
+
+        for amb in ambiguous_results:
+            search_term = amb.get("search_query", "Неизвестно")
+            matches = amb.get("matches", [])
+            if not matches:
+                continue
+
+            options = [
+                InterruptOption(
+                    id=m.get("id", ""),
+                    label=m.get("full_name", "Не указано"),
+                    description=f"{m.get('post', '') or ''}, {m.get('department', '') or ''}".strip(", ")
+                ) for m in matches
+            ]
+
+            prompt_msg = f"Уточните сотрудника для «{search_term}» ({len(matches)} совпадений)."
+
+            try:
+                resume = ask_human(DisambiguationInterrupt(
+                    entity_type="employee",
+                    prompt=prompt_msg,
+                    options=options,
+                    search_term=search_term,
+                ))
+                # Граф возобновится после клика пользователя
+                selected_id = resume.selected_ids[0]
+                employee_ids.append(UUID(selected_id))
+            except ToolAborted:
+                return {"status": "cancelled", "message": "Выбор сотрудника отменён."}
+            except GraphInterrupt:
+                raise
+            except Exception as exc:
+                logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
+                return {"status": "error", "message": f"Ошибка выбора сотрудника: {exc}"}
 
     if not employee_ids:
         not_found_str = (
@@ -289,12 +314,12 @@ async def _handle_search_and_create(
     result = await service.create_introduction(
         token=token,
         document_id=document_id,
-        employee_ids=list(employee_ids),
+        employee_ids=employee_ids,
         comment=comment,
     )
 
     if result.success:
-        response = {
+        response: dict[str, Any] = {
             "status": "success",
             "message": (
                 f"✅ Успешно добавлено {result.added_count} сотрудников "
@@ -312,50 +337,5 @@ async def _handle_search_and_create(
 
     return {
         "status": "error",
-        "message": (
-            result.error_message
-            or "❌ Не удалось создать ознакомление. "
-            "Проверьте права доступа или корректность данных."
-        ),
-    }
-
-
-def _build_disambiguation_response(
-    ambiguous_results: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """
-    Формирует структурированный ответ для disambiguation workflow.
-
-    Args:
-        ambiguous_results: Список неоднозначных совпадений из сервиса
-
-    Returns:
-        Стандартизированный ответ с action_type для UI
-    """
-    formatted_choices = []
-
-    for amb in ambiguous_results:
-        search_term = amb.get("search_query", "Неизвестно")
-        matches = amb.get("matches", [])
-
-        for match in matches:
-            formatted_choices.append(
-                {
-                    "id": match.get("id"),
-                    "full_name": match.get("full_name", "Не указано"),
-                    "post": match.get("post", "Не указана"),
-                    "department": match.get("department", "Не указан"),
-                    "search_term": search_term,
-                }
-            )
-
-    return {
-        "status": "requires_disambiguation",
-        "action_type": "select_employee",
-        "message": "Найдено несколько совпадений. Пожалуйста, уточните выбор:",
-        "ambiguous_matches": formatted_choices,
-        "instruction": (
-            "Выберите нужных сотрудников из списка. "
-            "Затем вызовите инструмент повторно с параметром selected_employee_ids."
-        ),
+        "message": result.error_message or "❌ Не удалось создать ознакомление.",
     }

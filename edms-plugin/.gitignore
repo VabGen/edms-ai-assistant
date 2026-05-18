@@ -1,0 +1,8 @@
+!src/shared/lib/
+!src/shared/lib/**
+!src/**/lib/
+!src/**/lib/**
+node_modules/
+.output/
+.wxt/
+dist/

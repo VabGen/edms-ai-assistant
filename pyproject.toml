@@ -18,7 +18,7 @@ version     = "0.1.0"
 description = "AI-Powered EDMS Document Automation Assistant"
 readme      = "README.md"
 license     = { text = "MIT" }
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 authors     = [{ name = "Next", email = "your.email@example.com" }]
 keywords    = ["ai", "edms", "automation", "assistant", "langchain", "langgraph"]
 classifiers = [
@@ -69,13 +69,15 @@ dependencies = [
     "openpyxl>=3.1.0,<4.0.0",
     "xlrd>=2.0.0,<3.0.0",
     "mammoth>=1.12.0,<2.0.0",
+    "pytesseract>=0.3.13",
+    "pillow>=12.2.0",
 
     # ── NLP / ML ─────────────────────────────────────────────────────────────
     "tiktoken>=0.9.0,<1.0.0",
     "torch>=2.5.0,<3.0.0",
 
     # ── Vector DB ────────────────────────────────────────────────────────────
-    "chromadb>=0.6.0,<1.0.0",
+#    "chromadb>=0.6.0,<1.0.0",
 
     # ── Async / FastAPI / AsyncIO ───────────────────────────────────────────
     "asyncpg>=0.31.0,<1.0.0",
@@ -92,7 +94,21 @@ dependencies = [
     "qdrant-client>=1.11.0,<2.0.0",
     "jsonschema>=4.23.0,<5.0.0",
     "prometheus-client>=0.21.0,<1.0.0",
-    "alembic>=1.13.0,<2.0.0"
+    "alembic>=1.18.4,<2.0.0",
+    "opentelemetry.sdk>=1.41.1",
+
+    "transformers>=5.6.2,<6.0.0",
+    "json-repair>=0.59.5,<1.0.0",
+
+    # ── Licenses ──
+    "pip-licenses>=5.5.5",
+
+    # ── Telemetry ──
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.40b0",
+    "opentelemetry-instrumentation-httpx>=0.40b0",
+    "opentelemetry-exporter-otlp>=1.20.0",
 ]
 
 [project.urls]
@@ -225,3 +241,4 @@ testpaths    = ["tests"]
 addopts      = "-ra -q --tb=short"
 
 # uv add docx2txt
+# installer: https://github.com/UB-Mannheim/tesseract/wiki

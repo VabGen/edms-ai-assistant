@@ -1,0 +1,141 @@
+================================================================================
+NOTICE FILE FOR EDMS AI ASSISTANT
+================================================================================
+
+Product: EDMS AI Assistant
+Version: 0.1.0
+Copyright (c) 2025 [Your Company Name]. All rights reserved.
+Primary License: MIT
+
+This product includes software developed by third parties.
+Below is a summary of included components and their respective licenses.
+
+Full license texts are available in the THIRD_PARTY_LICENSES.md file.
+
+================================================================================
+CORE DEPENDENCIES (Runtime)
+================================================================================
+
+1. LangChain Ecosystem
+   • langchain, langchain-community, langchain-core, langchain-openai
+   • langgraph, langgraph-checkpoint-postgres, langchain-ollama
+   License: MIT
+   Source: https://github.com/langchain-ai/
+
+2. Web Framework & API
+   • fastapi (MIT) — https://github.com/tiangolo/fastapi
+   • uvicorn[standard] (BSD-3) — https://github.com/encode/uvicorn
+   • httpx (BSD-3) — https://github.com/encode/httpx
+   • python-multipart (Apache-2.0) — https://github.com/Kludex/python-multipart
+   • aiofiles (Apache-2.0) — https://github.com/Tinche/aiofiles
+
+3. Data Validation & Settings
+   • pydantic, pydantic-settings (MIT) — https://github.com/pydantic/pydantic
+
+4. Authentication
+   • pyjwt[crypto] (MIT) — https://github.com/jpadilla/pyjwt
+
+5. Storage & Database
+   • redis (MIT) — https://github.com/redis/redis-py
+   • psycopg[binary] (LGPL-3.0 / BSD-3) — https://github.com/psycopg/psycopg
+   • sqlalchemy (MIT) — https://github.com/sqlalchemy/sqlalchemy
+   • asyncpg (Apache-2.0) — https://github.com/MagicStack/asyncpg
+   • qdrant-client (Apache-2.0) — https://github.com/qdrant/qdrant
+
+6. Document Processing ⚠️
+   • pypdf (BSD-3) — https://github.com/py-pdf/pypdf
+   • pymupdf (AGPL-3.0 / Commercial) — https://github.com/pymupdf/PyMuPDF
+     ⚠️ WARNING: PyMuPDF uses AGPL-3.0. For commercial closed-source distribution,
+     you may need to purchase a commercial license from Artifex Software.
+   • python-docx (MIT) — https://github.com/python-openxml/python-docx
+   • docx2txt (MIT) — https://github.com/ankushshah89/python-docx2txt
+   • openpyxl (BSD-3) — https://foss.heptapod.net/openpyxl/openpyxl
+   • xlrd (BSD-3) — https://github.com/python-excel/xlrd
+   • mammoth (BSD-2) — https://github.com/mwilliamson/python-mammoth
+   • pytesseract (Apache-2.0) — https://github.com/madmaze/pytesseract
+   • pillow (HPND) — https://github.com/python-pillow/Pillow
+
+7. NLP / ML / Vector Operations
+   • tiktoken (MIT) — https://github.com/openai/tiktoken
+   • torch (BSD-3) — https://github.com/pytorch/pytorch
+   • transformers (Apache-2.0) — https://github.com/huggingface/transformers
+
+8. Utilities & Observability
+   • structlog (MIT / Apache-2.0) — https://github.com/hynek/structlog
+   • anyio (MIT) — https://github.com/agronholm/anyio
+   • jsonpath-ng (BSD-3) — https://github.com/h2non/jsonpath-ng
+   • typing-extensions (PSF) — https://github.com/python/typing_extensions
+   • requests (Apache-2.0) — https://github.com/psf/requests
+   • fastmcp (MIT) — https://github.com/jlowin/fastmcp
+   • jsonschema (MIT) — https://github.com/python-jsonschema/jsonschema
+   • prometheus-client (Apache-2.0) — https://github.com/prometheus/client_python
+   • alembic (MIT) — https://github.com/sqlalchemy/alembic
+   • opentelemetry.sdk (Apache-2.0) — https://github.com/open-telemetry/opentelemetry-python
+   • json-repair (MIT) — https://github.com/josdejong/jsonrepair
+
+9. Build & License Tools
+   • hatchling (MIT) — https://github.com/pypa/hatch
+   • pip-licenses (MIT) — https://github.com/raimon49/pip-licenses
+
+================================================================================
+DEVELOPMENT DEPENDENCIES (Not distributed with production build)
+================================================================================
+
+• pytest, pytest-asyncio, pytest-cov (MIT / Apache-2.0)
+• ruff, mypy, black, isort (MIT)
+• types-requests, types-aiofiles (Apache-2.0 / MIT)
+
+These packages are only required for development and testing.
+They are NOT included in the production distribution.
+
+================================================================================
+IMPORTANT LEGAL NOTICES
+================================================================================
+
+1. PyMuPDF (AGPL-3.0) COMMERCIAL USE WARNING:
+   If you distribute your application (e.g., as a desktop installer) and use
+   PyMuPDF without purchasing a commercial license, you may be required to
+   open-source your entire application under AGPL-3.0 terms.
+
+   Options:
+   • Purchase commercial license: https://pymupdf.readthedocs.io/en/latest/license.html
+   • Replace with pypdf + pdfplumber (both BSD/MIT) for basic PDF text extraction
+   • Use server-side processing where AGPL obligations may not apply*
+     (*consult a lawyer for your jurisdiction)
+
+2. psycopg[binary]:
+   The binary wheels may include OpenSSL. Ensure compliance with OpenSSL
+   licensing if distributing in regions with patent restrictions.
+
+3. torch:
+   Includes NVIDIA CUDA components. Review NVIDIA's license terms if using
+   GPU acceleration in commercial products.
+
+4. Trademark Notice:
+   This product is not affiliated with or endorsed by OpenAI, Hugging Face,
+   LangChain, or any other third-party trademark holders mentioned above.
+
+================================================================================
+HOW TO VERIFY LICENSES (Before Release)
+================================================================================
+
+1. Activate your virtual environment:
+   uv sync  # or: pip install -e .
+
+2. Generate up-to-date license report:
+   $env:PYTHONIOENCODING="utf-8"
+   pip-licenses --format=markdown --with-license-file --output-file THIRD_PARTY_LICENSES.md
+
+3. Review THIRD_PARTY_LICENSES.md for any unexpected licenses.
+
+4. For AGPL/LGPL components, consult legal counsel regarding distribution model.
+
+================================================================================
+CONTACT
+================================================================================
+
+For licensing inquiries: legal@[yourcompany].com
+For security reports: security@[yourcompany].com
+Project repository: https://github.com/your-org/edms-ai-assistant
+
+Last updated: 2025-05-07

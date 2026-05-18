@@ -113,7 +113,12 @@ def async_retry(
                         raise
 
                     if is_last:
-                        logger.error(
+                        is_server_error = (
+                            isinstance(exc, httpx.HTTPStatusError)
+                            and exc.response.status_code >= 500
+                        )
+                        log = logger.warning if is_server_error else logger.error
+                        log(
                             "Fatal error after %d attempts calling %s: %s: %s",
                             max_attempts,
                             func.__name__,

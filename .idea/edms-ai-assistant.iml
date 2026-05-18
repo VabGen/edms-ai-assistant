@@ -4,8 +4,18 @@
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/.venv1" />
+      <excludeFolder url="file://$MODULE_DIR$/edms_ai_assistant/agent/extraction" />
+      <excludeFolder url="file://$MODULE_DIR$/edms_ai_assistant/agent/orchestration" />
+      <excludeFolder url="file://$MODULE_DIR$/edms_ai_assistant/agent/planning" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.12 (edms-ai-assistant)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.13 virtualenv at D:\project\edms-ai-assistant\.venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+  <component name="TemplatesService">
+    <option name="TEMPLATE_FOLDERS">
+      <list>
+        <option value="$MODULE_DIR$/edms_ai_assistant/agent/planning" />
+      </list>
+    </option>
   </component>
 </module>

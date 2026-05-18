@@ -1,89 +1,105 @@
+import {onMessage, SummarizeResponse} from '@shared/api/messaging'
+import {normalizeUuid} from '@shared/lib/normalize'
+import {parseSseEvent} from '@shared/api/sse-schemas'
+
+const API = import.meta.env.VITE_API_URL as string
+
+const controllers = new Map<string, AbortController>()
+
+function authHeaders(userToken?: string): Record<string, string> {
+    const headers: Record<string, string> = {'Content-Type': 'application/json'}
+    if (userToken) headers['Authorization'] = `Bearer ${userToken}`
+    return headers
+}
+
+async function postJson(
+    url: string,
+    payload: unknown,
+    signal?: AbortSignal,
+): Promise<unknown> {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+        signal: signal ?? null,
+    })
+    const data: unknown = await res.json()
+    if (!res.ok) {
+        const detail = (data as Record<string, unknown>)['detail']
+        throw new Error(typeof detail === 'string' ? detail : `Server error: ${res.status}`)
+    }
+    return data
+}
+
 export default defineBackground({
     type: 'module',
     main() {
-        const API = 'http://localhost:8000'
-        const controllers = new Map<string, AbortController>()
+        registerSsePort()
+        registerMessageHandlers()
+    },
+})
 
-        function normalizeUuid(raw: string): string {
-            return raw.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g, '-').trim()
-        }
+function registerSsePort(): void {
+    chrome.runtime.onConnect.addListener((port) => {
+        if (port.name !== 'streamChatMessage' && port.name !== 'resumeChat') return
 
-        chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-            const reqId: string = msg.payload?.requestId ?? 'default'
+        const ctrl = new AbortController()
+        let started = false
 
-            switch (msg.type) {
-                case 'abortRequest': {
-                    controllers.get(reqId)?.abort()
-                    controllers.delete(reqId)
-                    return false
-                }
+        port.onMessage.addListener(async (payload: unknown) => {
+            if (started) return
+            started = true
 
-                case 'sendChatMessage':
-                    doFetch(`${API}/chat`, msg.payload, reqId, sendResponse)
-                    return true
-
-                case 'summarizeDocument':
-                    doFetch(`${API}/actions/summarize`, msg.payload, reqId, sendResponse)
-                    return true
-
-                case 'uploadFile':
-                    doUpload(msg.payload, sendResponse)
-                    return true
-
-                case 'getChatHistory':
-                    doGetHistory(msg.payload.thread_id, sendResponse)
-                    return true
-
-                case 'createNewChat':
-                    doFetch(`${API}/chat/new`, {user_token: msg.payload.user_token}, reqId, sendResponse)
-                    return true
-
-                case 'autofillAppeal':
-                    doFetch(`${API}/appeal/autofill`, {
-                        message: msg.payload.message ?? 'Заполни обращение',
-                        user_token: msg.payload.user_token,
-                        context_ui_id: msg.payload.context_ui_id,
-                        file_path: msg.payload.file_path ?? null,
-                    }, reqId, sendResponse)
-                    return true
-
-                case 'refreshDocumentData':
-                    doRefreshDocument(msg.payload, sendResponse)
-                    return true
-
-                case 'fetchSettingsMeta':
-                    doFetchSettingsMeta(sendResponse)
-                    return true
-
-                case 'fetchSettings':
-                    doFetchSettings(msg.payload?.user_token, sendResponse)
-                    return true
-
-                case 'updateSettings':
-                    doPatchSettings(msg.payload?.user_token, msg.payload?.settings, sendResponse)
-                    return true
-
-                case 'navigateTo':
-                    doNavigateTo(msg.payload, sendResponse)
-                    return true
-
-                case 'deleteCache':
-                    doDeleteCache(msg.payload, sendResponse)
-                    return true
-
-                default:
-                    return false
+            const p = payload as Record<string, any>
+            const msgLower = (p.message || '').trim().toLowerCase()
+            const QUICK_FORMAT_MAP: Record<string, 'thesis' | 'extractive' | 'abstractive'> = {
+                'тезисы': 'thesis',
+                'факты': 'extractive',
+                'пересказ': 'abstractive',
+                'суммаризация': 'abstractive',
             }
-        })
+            const quickFormat = QUICK_FORMAT_MAP[msgLower]
 
-        async function doFetch(
-            url: string,
-            payload: unknown,
-            reqId: string,
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ) {
-            const ctrl = new AbortController()
-            controllers.set(reqId, ctrl)
+            if (port.name === 'streamChatMessage' && quickFormat) {
+                try {
+                    const format = quickFormat
+                    const resJson = await postJson(`${API}/actions/summarize`, {
+                        message: p.message,
+                        user_token: p.user_token,
+                        context_ui_id: p.context_ui_id,
+                        preferred_summary_format: format,
+                        file_path: p.file_path,
+                    }, ctrl.signal)
+
+                    const result = resJson as Record<string, any>
+
+                    if (result.response) {
+                        port.postMessage({
+                            type: 'sse_event',
+                            data: {
+                                kind: 'message',
+                                data: {role: 'assistant', content: result.response}
+                            }
+                        })
+                    } else {
+                        port.postMessage({
+                            type: 'sse_error',
+                            error: 'Суммаризация вернула пустой результат'
+                        })
+                    }
+
+                    port.postMessage({type: 'sse_done'})
+                } catch (err: any) {
+                    port.postMessage({type: 'sse_error', error: err.message || 'Summarization failed'})
+                } finally {
+                    port.disconnect()
+                }
+                return
+            }
+
+            const url =
+                port.name === 'resumeChat' ? `${API}/chat/resume` : `${API}/chat/stream`
+
             try {
                 const res = await fetch(url, {
                     method: 'POST',
@@ -91,210 +107,246 @@ export default defineBackground({
                     body: JSON.stringify(payload),
                     signal: ctrl.signal,
                 })
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? `Ошибка сервера: ${res.status}`)
-                respond({success: true, data})
-            } catch (e: any) {
-                if (e.name === 'AbortError') respond({success: false, error: 'Request aborted'})
-                else respond({success: false, error: e.message})
-            } finally {
-                controllers.delete(reqId)
-            }
-        }
 
-        async function doUpload(
-            payload: { fileData: string; fileName: string; user_token: string },
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ) {
-            try {
-                const blob = await (await fetch(payload.fileData)).blob()
-                const form = new FormData()
-                form.append('file', blob, payload.fileName)
-                form.append('user_token', payload.user_token)
-                const res = await fetch(`${API}/upload-file`, {method: 'POST', body: form})
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? 'Ошибка загрузки файла')
-                respond({success: true, data})
-            } catch (e: any) {
-                respond({success: false, error: e.message})
-            }
-        }
-
-        async function doGetHistory(
-            threadId: string,
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ) {
-            try {
-                const res = await fetch(`${API}/chat/history/${threadId}`)
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? 'Ошибка истории')
-                respond({success: true, data})
-            } catch (e: any) {
-                respond({success: false, error: e.message})
-            }
-        }
-
-        async function doRefreshDocument(
-            payload: { edmsApiUrl: string; documentId: string; user_token: string },
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ) {
-            try {
-                const urls = [
-                    `${API}/document/${payload.documentId}?token=${payload.user_token}`,
-                    `${payload.edmsApiUrl}/api/documents/${payload.documentId}`,
-                    `${payload.edmsApiUrl}/api/document/${payload.documentId}`,
-                ]
-                for (const url of urls) {
-                    try {
-                        const res = await fetch(url, {
-                            headers: {
-                                'Authorization': `Bearer ${payload.user_token}`,
-                                'Content-Type': 'application/json',
-                            },
-                        })
-                        if (res.ok) {
-                            const data = await res.json()
-                            respond({success: true, data})
-                            return
-                        }
-                    } catch {
-                        continue
-                    }
-                }
-                respond({success: false, error: 'Document API endpoint not found'})
-            } catch (e: any) {
-                respond({success: false, error: e.message})
-            }
-        }
-
-        /**
-         * doNavigateTo — умная навигация.
-         *
-         * payload.newTab = true (по умолчанию) → открыть в НОВОЙ вкладке
-         *   Используется для DocCard клика (документы из поиска)
-         *
-         * payload.newTab = false → навигация в ТЕКУЩЕЙ вкладке
-         *   Используется только для create_document_from_file (после создания документа)
-         *
-         * Нормализует URL: заменяет типографские тире в UUID на ASCII дефис.
-         */
-        async function doNavigateTo(
-            payload: { url: string; newTab?: boolean },
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ): Promise<void> {
-            try {
-                const normalizedUrl = normalizeUuid(payload.url)
-
-                const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
-                if (!tab?.id) {
-                    respond({success: false, error: 'No active tab found'})
+                if (!res.ok) {
+                    const errBody = (await res.json().catch(() => ({}))) as Record<string, unknown>
+                    const detail = errBody['detail']
+                    port.postMessage({
+                        type: 'sse_error',
+                        error: typeof detail === 'string' ? detail : `HTTP ${res.status}`,
+                    })
+                    port.disconnect()
                     return
                 }
 
-                const tabUrl = tab.url ?? ''
-                let origin = ''
-                try {
-                    origin = tabUrl ? new URL(tabUrl).origin : ''
-                } catch { /* ignore */
+                const reader = res.body?.getReader()
+                if (!reader) {
+                    port.postMessage({type: 'sse_error', error: 'No response body'})
+                    port.disconnect()
+                    return
                 }
 
-                const targetUrl = normalizedUrl.startsWith('http')
-                    ? normalizedUrl
-                    : `${origin}${normalizedUrl}`
+                const decoder = new TextDecoder()
+                let buffer = ''
 
-                const openInNew = payload.newTab !== false
+                while (true) {
+                    const {done, value} = await reader.read()
+                    if (done) break
 
-                if (openInNew) {
-                    await chrome.tabs.create({url: targetUrl, active: true})
-                    respond({success: true, data: {url: targetUrl, newTab: true}})
-                } else {
-                    try {
-                        await chrome.scripting.executeScript({
-                            target: {tabId: tab.id},
-                            func: (url: string) => {
-                                window.location.href = url
-                            },
-                            args: [targetUrl],
-                        })
-                        respond({success: true, data: {url: targetUrl, newTab: false}})
-                    } catch {
-                        await chrome.tabs.update(tab.id, {url: targetUrl})
-                        respond({success: true, data: {url: targetUrl, newTab: false}})
+                    buffer += decoder.decode(value, {stream: true})
+                    const parts = buffer.split('\n\n')
+                    buffer = parts.pop() ?? ''
+
+                    for (const part of parts) {
+                        if (!part.trim()) continue
+
+                        let eventType = 'message'
+                        let dataStr = ''
+
+                        for (const line of part.split('\n')) {
+                            if (line.startsWith('event: ')) eventType = line.slice(7).trim()
+                            else if (line.startsWith('data: ')) dataStr = line.slice(6)
+                        }
+
+                        if (!dataStr) continue
+
+                        try {
+                            const parsed: unknown = JSON.parse(dataStr)
+                            const event = parseSseEvent({kind: eventType, data: parsed})
+                            if (event) port.postMessage({type: 'sse_event', data: event})
+                        } catch {
+                            // skip malformed JSON
+                        }
                     }
                 }
-            } catch (e: any) {
-                respond({success: false, error: e.message ?? 'Navigation failed'})
-            }
-        }
 
-        async function doDeleteCache(
-            payload: { file_identifier: string; summary_type?: string },
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ): Promise<void> {
-            try {
-                const url = payload.summary_type
-                    ? `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}/${encodeURIComponent(payload.summary_type)}`
-                    : `${API}/api/cache/summarization/${encodeURIComponent(payload.file_identifier)}`
-                const res = await fetch(url, {method: 'DELETE'})
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? `Cache delete error: ${res.status}`)
-                respond({success: true, data})
-            } catch (e: any) {
-                respond({success: false, error: e.message})
+                port.postMessage({type: 'sse_done'})
+            } catch (err: unknown) {
+                if (err instanceof Error && err.name !== 'AbortError') {
+                    port.postMessage({type: 'sse_error', error: err.message})
+                }
+            } finally {
+                port.disconnect()
             }
-        }
+        })
 
-        async function doFetchSettingsMeta(
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ): Promise<void> {
-            try {
-                const res = await fetch(`${API}/api/settings/meta`, {
-                    method: 'GET',
-                    headers: {'Content-Type': 'application/json'},
-                })
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? `Settings meta error: ${res.status}`)
-                respond({success: true, data})
-            } catch {
-                respond({success: true, data: {show_technical: false}})
-            }
-        }
+        port.onDisconnect.addListener(() => {
+            ctrl.abort()
+        })
+    })
+}
 
-        async function doFetchSettings(
-            userToken: string | undefined,
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ): Promise<void> {
-            try {
-                const headers: Record<string, string> = {'Content-Type': 'application/json'}
-                if (userToken) headers['Authorization'] = `Bearer ${userToken}`
-                const res = await fetch(`${API}/api/settings`, {method: 'GET', headers})
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? `Settings fetch error: ${res.status}`)
-                respond({success: true, data})
-            } catch (e: any) {
-                respond({success: false, error: e.message})
-            }
-        }
+function registerMessageHandlers(): void {
+    onMessage('abortRequest', ({data}) => {
+        controllers.get(data.requestId)?.abort()
+        controllers.delete(data.requestId)
+    })
 
-        async function doPatchSettings(
-            userToken: string | undefined,
-            settings: unknown,
-            respond: (r: { success: boolean; data?: unknown; error?: string }) => void,
-        ): Promise<void> {
+    onMessage('summarizeDocument', async ({data}) => {
+        const ctrl = new AbortController()
+        const reqId = crypto.randomUUID()
+        controllers.set(reqId, ctrl)
+        try {
+            const result = await postJson(`${API}/actions/summarize`, data, ctrl.signal)
+            return {success: true as const, data: result as NonNullable<SummarizeResponse['data']>}
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Unknown error'
+            return {success: false, error: msg}
+        } finally {
+            controllers.delete(reqId)
+        }
+    })
+
+    onMessage('uploadFile', async ({data}) => {
+        try {
+            const blob = await (await fetch(data.file_data)).blob()
+            const form = new FormData()
+            form.append('file', blob, data.file_name)
+            form.append('user_token', data.user_token)
+            if (data.thread_id) form.append('thread_id', data.thread_id)
+            if (data.context_ui_id) form.append('context_ui_id', data.context_ui_id)
+            const res = await fetch(`${API}/upload-file`, {method: 'POST', body: form})
+            const result = (await res.json()) as Record<string, unknown>
+            if (!res.ok) throw new Error((result['detail'] as string | undefined) ?? 'Upload error')
+            const filePath = result['file_path'] as string | undefined
+            return {success: true as const, ...(filePath !== undefined ? {file_path: filePath} : {})}
+        } catch (err: unknown) {
+            return {success: false, error: err instanceof Error ? err.message : 'Unknown error'}
+        }
+    })
+
+    onMessage('getChatHistory', async ({data}) => {
+        const res = await fetch(`${API}/chat/history/${data.thread_id}`, {
+            headers: authHeaders(data.user_token),
+        })
+        const result = (await res.json()) as Record<string, unknown>
+        if (!res.ok) throw new Error((result['detail'] as string | undefined) ?? 'History error')
+        return result as { messages: { type: 'human' | 'ai'; content: string }[]; thread_id: string }
+    })
+
+    onMessage('createNewChat', async ({data}) => {
+        const result = await postJson(`${API}/chat/new`, {user_token: data.user_token})
+        return result as { thread_id: string }
+    })
+
+    onMessage('navigateTo', async ({data}) => {
+        try {
+            const normalizedUrl = normalizeUuid(data.url)
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
+            if (!tab?.id) return {success: false, error: 'No active tab found'}
+
+            let origin = ''
             try {
-                const headers: Record<string, string> = {'Content-Type': 'application/json'}
-                if (userToken) headers['Authorization'] = `Bearer ${userToken}`
-                const res = await fetch(`${API}/api/settings`, {
-                    method: 'PATCH',
-                    headers,
-                    body: JSON.stringify(settings ?? {}),
-                })
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.detail ?? `Settings update error: ${res.status}`)
-                respond({success: true, data})
-            } catch (e: any) {
-                respond({success: false, error: e.message})
+                if (tab.url) origin = new URL(tab.url).origin
+            } catch { /* ignore */
+            }
+
+            const targetUrl = normalizedUrl.startsWith('http')
+                ? normalizedUrl
+                : `${origin}${normalizedUrl}`
+
+            if (data.newTab !== false) {
+                await chrome.tabs.create({url: targetUrl, active: true})
+            } else {
+                try {
+                    await chrome.scripting.executeScript({
+                        target: {tabId: tab.id},
+                        func: (url: string) => {
+                            window.location.href = url
+                        },
+                        args: [targetUrl],
+                    })
+                } catch {
+                    await chrome.tabs.update(tab.id, {url: targetUrl})
+                }
+            }
+            return {success: true}
+        } catch (err: unknown) {
+            return {success: false, error: err instanceof Error ? err.message : 'Navigation failed'}
+        }
+    })
+
+    onMessage('deleteCache', async ({data}) => {
+        try {
+            const parts = [
+                `${API}/summarize/cache/${encodeURIComponent(data.file_identifier ?? '')}`,
+            ]
+            if (data.summary_type) parts.push(encodeURIComponent(data.summary_type))
+            const res = await fetch(parts.join('/'), {method: 'DELETE'})
+            const result = (await res.json()) as Record<string, unknown>
+            if (!res.ok) throw new Error((result['detail'] as string | undefined) ?? `Cache error ${res.status}`)
+            return {success: true}
+        } catch (err: unknown) {
+            return {success: false, error: err instanceof Error ? err.message : 'Unknown error'}
+        }
+    })
+
+    onMessage('refreshDocument', async ({data}) => {
+        const urls = [
+            `${API}/document/${data.doc_id}?token=${data.user_token}`,
+        ]
+        for (const url of urls) {
+            try {
+                const res = await fetch(url, {headers: authHeaders(data.user_token)})
+                if (res.ok) {
+                    const result: unknown = await res.json()
+                    return {success: true, data: result}
+                }
+            } catch { /* try next */
             }
         }
-    },
-})
+        return {success: false, error: 'Document endpoint not found'}
+    })
+
+    onMessage('fetchSettingsMeta', async (_msg) => {
+        try {
+            const res = await fetch(`${API}/api/settings/meta`, {
+                headers: {'Content-Type': 'application/json'},
+            })
+            const data = (await res.json()) as Record<string, unknown>
+            if (!res.ok) return {show_technical: false}
+            return {show_technical: Boolean(data['show_technical'])}
+        } catch {
+            return {show_technical: false}
+        }
+    })
+
+    onMessage('fetchSettings', async ({data}) => {
+        const res = await fetch(`${API}/api/settings`, {
+            headers: authHeaders(data.user_token),
+        })
+        const result = (await res.json()) as Record<string, unknown>
+        if (!res.ok) throw new Error((result['detail'] as string | undefined) ?? 'Settings fetch error')
+        return result
+    })
+
+    onMessage('updateSettings', async ({data}) => {
+        const res = await fetch(`${API}/api/settings`, {
+            method: 'PATCH',
+            headers: authHeaders(data.user_token),
+            body: JSON.stringify(data.settings),
+        })
+        const result = (await res.json()) as Record<string, unknown>
+        if (!res.ok) throw new Error((result['detail'] as string | undefined) ?? 'Settings update error')
+        return result
+    })
+
+    onMessage('resetSettings', async ({data}) => {
+        const res = await fetch(`${API}/api/settings`, {
+            method: 'DELETE',
+            headers: authHeaders(data.user_token),
+        })
+        if (!res.ok) {
+            const result = (await res.json().catch(() => ({}))) as Record<string, unknown>
+            throw new Error((result['detail'] as string | undefined) ?? 'Settings reset error')
+        }
+    })
+
+    onMessage('reloadActiveTab', async (_msg) => {
+        const [tab] = await chrome.tabs.query({active: true, currentWindow: true})
+        if (tab?.id) await chrome.tabs.reload(tab.id)
+        return {success: true}
+    })
+}
+
+// 5

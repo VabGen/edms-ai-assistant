@@ -1,5 +1,5 @@
 import {useState, useEffect, useCallback, useRef} from 'react'
-import {sendMsg} from '../lib/messaging'
+import {sendMessage} from '../api/messaging'
 import {getAuthToken} from '../lib/auth'
 
 export type FontSize = 'small' | 'medium' | 'large'
@@ -47,9 +47,9 @@ export interface AgentSettings {
     maxIterations: number
     maxContextMessages: number
     timeout: number
-    maxRetries: number // <--- ИСПРАВЛЕНО: было maxRetries
+    maxRetries: number
     enableTracing: boolean
-    logLevel: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
+    logLevel: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
 }
 
 export interface RAGSettings {
@@ -85,28 +85,36 @@ export const DEFAULT_USER_PREFS: UserPreferences = {
     voice: {handsFreeEnabled: false, autoSendPauseMs: 1400, sttLanguage: 'ru-RU'},
     documents: {defaultSummaryFormat: 'ask', autoAnalyzeOnOpen: false, showQuickActionHints: true},
 }
-
 export const DEFAULT_TECH: TechSettings = {
     llm: {
-        generativeUrl: 'http://model-generative.shared.du.iba/v1',
-        generativeModel: 'generative-model',
-        embeddingUrl: 'http://model-embedding.shared.du.iba/v1',
-        embeddingModel: 'embedding-model',
-        temperature: 0.0,
-        maxTokens: 2048,
-        timeout: 120,
-        maxRetries: 3
+        generativeUrl: import.meta.env.VITE_LLM_GENERATIVE_URL,
+        generativeModel: import.meta.env.VITE_LLM_GENERATIVE_MODEL,
+        embeddingUrl: import.meta.env.VITE_LLM_EMBEDDING_URL,
+        embeddingModel: import.meta.env.VITE_LLM_EMBEDDING_MODEL,
+        temperature: Number(import.meta.env.VITE_LLM_TEMPERATURE),
+        maxTokens: Number(import.meta.env.VITE_LLM_MAX_TOKENS),
+        timeout: Number(import.meta.env.VITE_LLM_TIMEOUT),
+        maxRetries: Number(import.meta.env.VITE_LLM_MAX_RETRIES),
     },
     agent: {
-        maxIterations: 10,
-        maxContextMessages: 20,
-        timeout: 120,
-        maxRetries: 3, // <--- ИСПРАВЛЕНО
-        enableTracing: false,
-        logLevel: 'INFO'
+        maxIterations: Number(import.meta.env.VITE_AGENT_MAX_ITERATIONS),
+        maxContextMessages: Number(import.meta.env.VITE_AGENT_MAX_CONTEXT_MESSAGES),
+        timeout: Number(import.meta.env.VITE_AGENT_TIMEOUT),
+        maxRetries: Number(import.meta.env.VITE_AGENT_MAX_RETRIES),
+        enableTracing: import.meta.env.VITE_AGENT_ENABLE_TRACING === 'true',
+        logLevel: import.meta.env.VITE_AGENT_LOG_LEVEL as AgentSettings['logLevel'],
     },
-    rag: {chunkSize: 1200, chunkOverlap: 300, batchSize: 20, embeddingBatchSize: 10},
-    edms: {baseUrl: 'http://127.0.0.1:8098', timeout: 120, apiVersion: 'v1'},
+    rag: {
+        chunkSize: Number(import.meta.env.VITE_RAG_CHUNK_SIZE),
+        chunkOverlap: Number(import.meta.env.VITE_RAG_CHUNK_OVERLAP),
+        batchSize: Number(import.meta.env.VITE_RAG_BATCH_SIZE),
+        embeddingBatchSize: Number(import.meta.env.VITE_RAG_EMBEDDING_BATCH_SIZE),
+    },
+    edms: {
+        baseUrl: import.meta.env.VITE_EDMS_BASE_URL,
+        timeout: Number(import.meta.env.VITE_EDMS_TIMEOUT),
+        apiVersion: import.meta.env.VITE_EDMS_API_VERSION,
+    },
 }
 
 const USER_KEY = 'edmsUserPreferences'
@@ -133,7 +141,7 @@ function techFromBackend(d: Record<string, any>): TechSettings {
             maxIterations: a.max_iterations ?? D.agent.maxIterations,
             maxContextMessages: a.max_context_messages ?? D.agent.maxContextMessages,
             timeout: a.timeout ?? D.agent.timeout,
-            maxRetries: a.max_retries ?? D.agent.maxRetries, // <--- ИСПРАВЛЕНО
+            maxRetries: a.max_retries ?? D.agent.maxRetries,
             enableTracing: a.enable_tracing ?? D.agent.enableTracing,
             logLevel: a.log_level ?? D.agent.logLevel
         },
@@ -146,7 +154,7 @@ function techFromBackend(d: Record<string, any>): TechSettings {
         edms: {
             baseUrl: e.base_url ?? D.edms.baseUrl,
             timeout: e.timeout ?? D.edms.timeout,
-            apiVersion: D.edms.apiVersion
+            apiVersion: e.api_version ?? D.edms.apiVersion
         },
     }
 }
@@ -167,7 +175,7 @@ function techToBackend(s: TechSettings): Record<string, any> {
             max_iterations: s.agent.maxIterations,
             max_context_messages: s.agent.maxContextMessages,
             timeout: s.agent.timeout,
-            max_retries: s.agent.maxRetries, // <--- ИСПРАВЛЕНО
+            max_retries: s.agent.maxRetries,
             enable_tracing: s.agent.enableTracing,
             log_level: s.agent.logLevel
         },
@@ -177,10 +185,7 @@ function techToBackend(s: TechSettings): Record<string, any> {
             batch_size: s.rag.batchSize,
             embedding_batch_size: s.rag.embeddingBatchSize
         },
-        edms: {
-            base_url: s.edms.baseUrl,
-            timeout: s.edms.timeout
-        },
+        edms: {base_url: s.edms.baseUrl, timeout: s.edms.timeout, api_version: s.edms.apiVersion},
     }
 }
 
@@ -235,6 +240,7 @@ export interface UseSettingsStoreReturn {
     updateTech: <K extends keyof TechSettings>(group: K, patch: Partial<TechSettings[K]>) => void
     saveAll: () => Promise<void>
     resetAll: () => void
+    resetToDefaults: () => Promise<void>
     discardDraft: () => void
 }
 
@@ -264,8 +270,8 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             setDraft({user: userPrefs, tech: techInit})
 
             const [metaRes, techRes] = await Promise.allSettled([
-                sendMsg<{ show_technical: boolean }>('fetchSettingsMeta', {}),
-                sendMsg<Record<string, any>>('fetchSettings', {user_token: getAuthToken() ?? ''}),
+                sendMessage('fetchSettingsMeta', undefined),
+                sendMessage('fetchSettings', {user_token: getAuthToken() ?? ''}),
             ])
             if (!alive) return
 
@@ -282,17 +288,20 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             }
             setIsLoading(false)
         })()
-        return () => { alive = false }
+        return () => {
+            alive = false
+        }
     }, [])
 
-    useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+    useEffect(() => () => {
+        if (timerRef.current) clearTimeout(timerRef.current)
+    }, [])
 
     const updateUser = useCallback(
         <K extends keyof UserPreferences>(group: K, patch: Partial<UserPreferences[K]>) => {
             setDraft(prev => ({...prev, user: {...prev.user, [group]: {...prev.user[group], ...patch}}}))
         }, [],
     )
-
     const updateTech = useCallback(
         <K extends keyof TechSettings>(group: K, patch: Partial<TechSettings[K]>) => {
             setDraft(prev => ({...prev, tech: {...prev.tech, [group]: {...prev.tech[group], ...patch}}}))
@@ -305,7 +314,7 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             chromeSet(USER_KEY, draft.user)
             setSavedUser(draft.user)
             if (showTechnical) {
-                const updated = await sendMsg<Record<string, any>>('updateSettings', {
+                const updated = await sendMessage('updateSettings', {
                     user_token: getAuthToken() ?? '',
                     settings: techToBackend(draft.tech)
                 })
@@ -318,14 +327,36 @@ export function useSettingsStore(): UseSettingsStoreReturn {
             }
             setSaveStatus('saved')
             scheduleReset(2500)
-        } catch (error) {
-            console.error("Settings save failed:", error)
+        } catch {
             setSaveStatus('error')
             scheduleReset(3000)
         }
     }, [draft, showTechnical, scheduleReset])
 
     const resetAll = useCallback(() => setDraft({user: DEFAULT_USER_PREFS, tech: DEFAULT_TECH}), [])
+
+    const resetToDefaults = useCallback(async () => {
+        setSaveStatus('saving')
+        try {
+            await sendMessage('resetSettings', {user_token: getAuthToken() ?? ''})
+            const updated = await sendMessage('fetchSettings', {user_token: getAuthToken() ?? ''})
+            if (updated) {
+                const mapped = techFromBackend(updated)
+                setSavedTech(mapped)
+                setDraft(prev => ({...prev, user: DEFAULT_USER_PREFS, tech: mapped}))
+                chromeSet(USER_KEY, DEFAULT_USER_PREFS)
+                chromeSet(TECH_KEY, mapped)
+            } else {
+                setDraft({user: DEFAULT_USER_PREFS, tech: DEFAULT_TECH})
+            }
+            setSaveStatus('saved')
+            scheduleReset(2500)
+        } catch {
+            setSaveStatus('error')
+            scheduleReset(3000)
+        }
+    }, [scheduleReset])
+
     const discardDraft = useCallback(() => setDraft({user: savedUser, tech: savedTech}), [savedUser, savedTech])
 
     const isDirty =
@@ -333,7 +364,19 @@ export function useSettingsStore(): UseSettingsStoreReturn {
         JSON.stringify(draft.tech) !== JSON.stringify(savedTech)
 
     return {
-        draft, savedUser, savedTech, isDirty, saveStatus, showTechnical, isLoading, isTechOffline,
-        updateUser, updateTech, saveAll, resetAll, discardDraft
+        draft,
+        savedUser,
+        savedTech,
+        isDirty,
+        saveStatus,
+        showTechnical,
+        isLoading,
+        isTechOffline,
+        updateUser,
+        updateTech,
+        saveAll,
+        resetAll,
+        resetToDefaults,
+        discardDraft
     }
 }

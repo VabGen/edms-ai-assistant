@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Annotated
 
-from langchain_core.tools import tool
+from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.document_creator_client import DocumentCreatorClient
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
@@ -58,7 +60,6 @@ _CATEGORY_NAMES_RU: dict[str, str] = {
     "CUSTOM": "произвольный документ",
 }
 
-
 _CATEGORY_KEYWORDS: list[tuple[list[str], str]] = [
     (["обращени", "жалоб", "заявлени", "appeal"], "APPEAL"),
     (["входящ", "incoming"], "INCOMING"),
@@ -92,8 +93,9 @@ def _extract_category_from_message(message: str) -> str | None:
 class CreateDocumentFromFileInput(BaseModel):
     """Validated input schema for create_document_from_file tool.
 
+    Token убран из схемы, так как инжектируется автоматически через RunnableConfig.
+
     Attributes:
-        token: JWT bearer token (injected by orchestrator).
         file_path: Local filesystem path OR EDMS attachment UUID of the source file.
         doc_category: Target document category constant.
         file_name: Optional display name override for the uploaded attachment.
@@ -101,7 +103,6 @@ class CreateDocumentFromFileInput(BaseModel):
             Defaults to True — applies to supported categories (currently APPEAL).
     """
 
-    token: str = Field(..., description="JWT токен авторизации пользователя")
     file_path: str = Field(
         ...,
         description=(
@@ -181,11 +182,11 @@ class CreateDocumentFromFileInput(BaseModel):
 
 @tool("create_document_from_file", args_schema=CreateDocumentFromFileInput)
 async def create_document_from_file(
-    token: str,
-    file_path: str,
-    doc_category: str = "APPEAL",
-    file_name: str | None = None,
-    autofill: bool = True,
+        file_path: str,
+        doc_category: str = "APPEAL",
+        file_name: str | None = None,
+        autofill: bool = True,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """Create a new EDMS document from a local file and open it in the browser.
 
@@ -204,15 +205,16 @@ async def create_document_from_file(
     The frontend navigates to the new document automatically when
     ``navigate_url`` is present in the response.
 
-    IMPORTANT: file_path is injected automatically from the agent context.
-    Do NOT ask the user for the file path.
+    ВАЖНО: Токен авторизации передаётся системой АВТОМАТИЧЕСКИ через config.
+    НЕ запрашивай его у пользователя и НЕ передавай в аргументах.
 
     Args:
-        token: JWT bearer token (injected by orchestrator).
         file_path: Local file path or EDMS attachment UUID from context.
         doc_category: Target document category (e.g. APPEAL, INCOMING).
         file_name: Override display name for the attachment.
         autofill: Whether to auto-fill the document card after upload.
+        config: LangGraph RunnableConfig, инжектируется автоматически.
+            Содержит token авторизации.
 
     Returns:
         Dict with:
@@ -223,6 +225,12 @@ async def create_document_from_file(
         - autofill_status: "done" | "skipped" | "failed" | "not_supported"
         - warnings: Optional list of non-fatal issues.
     """
+    try:
+        token = get_token_from_config(config)
+    except Exception as e:
+        logger.error("Failed to get token from config: %s | config keys: %s", e,
+                     list((config or {}).get("configurable", {}).keys()) if config else "None")
+        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
     # ── Авто-определение категории из текста сообщения ───────────────────────
     _explicit_category = doc_category  # сохраняем для лога
     if doc_category == "APPEAL" and file_name:

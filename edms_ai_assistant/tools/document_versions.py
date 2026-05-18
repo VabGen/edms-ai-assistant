@@ -1,4 +1,3 @@
-# edms_ai_assistant/tools/document_versions.py
 """
 EDMS AI Assistant — Document Versions Tool.
 
@@ -9,11 +8,14 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from typing import Any, Annotated
 
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool, InjectedToolArg
+from pydantic import BaseModel
+
+from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
 from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
@@ -48,16 +50,6 @@ def _att_name(attachment: Any) -> str:
 
 
 def _compare_metadata(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str, Any]:
-    """
-    Compares metadata fields of two document versions.
-
-    Args:
-        doc1: First document metadata dict.
-        doc2: Second document metadata dict.
-
-    Returns:
-        Dict with changed fields: {field_label: {from: val1, to: val2}}.
-    """
     changes: dict[str, Any] = {}
     for field_key, field_label in _METADATA_FIELDS:
         v1 = doc1.get(field_key)
@@ -71,18 +63,6 @@ def _compare_metadata(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str, A
 
 
 def _compare_attachments(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str, Any]:
-    """
-    Compares attachment lists of two document versions.
-
-    Uses 'name' field (AttachmentDocumentDto) with fallback to 'originalName'.
-
-    Args:
-        doc1: First document metadata dict.
-        doc2: Second document metadata dict.
-
-    Returns:
-        Dict with added, removed, common attachment names and counts.
-    """
     att1: list[Any] = doc1.get("attachmentDocument") or []
     att2: list[Any] = doc2.get("attachmentDocument") or []
 
@@ -100,13 +80,13 @@ def _compare_attachments(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str
 
 class DocumentVersionsInput(BaseModel):
     """Схема входных данных для получения и сравнения всех версий документа."""
-
-    document_id: str = Field(..., description="UUID документа")
-    token: str = Field(..., description="Токен авторизации пользователя (JWT)")
+    pass
 
 
 @tool("doc_get_versions", args_schema=DocumentVersionsInput)
-async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
+async def doc_get_versions(
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
+) -> dict[str, Any]:
     """Retrieve all document versions and compare each consecutive pair automatically.
 
     BEHAVIOUR:
@@ -118,13 +98,22 @@ async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
     - If exactly 2 versions — compares them (1 pair).
     - If N > 2 versions — compares all N-1 consecutive pairs and presents full history.
 
+    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
+
     Args:
-        document_id: EDMS document UUID.
-        token: JWT bearer token.
+        config: LangGraph RunnableConfig (инжектируется автоматически, содержит token и document_id).
 
     Returns:
         Dict with all versions metadata and full pair-wise comparison results.
     """
+    try:
+        token = get_token_from_config(config)
+        document_id = get_document_id_from_config(config)
+    except RuntimeError as exc:
+        logger.error("Missing context in tool call: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
     try:
         async with DocumentClient() as client:
             versions = await client.get_document_versions(token, document_id)
@@ -164,8 +153,6 @@ async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
                 }
 
             # ── Последовательное сравнение всех соседних пар ────────────────
-            # Для N версий выполняем N-1 сравнений: (1,2), (2,3), ..., (N-1,N).
-            # Каждое сравнение — отдельный API-запрос за метаданными двух версий.
             comparisons: list[dict[str, Any]] = []
             errors: list[str] = []
 
@@ -205,15 +192,6 @@ async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
                         }
                     )
 
-                    logger.debug(
-                        "Compared v%s↔v%s: meta_changes=%d att_added=%d att_removed=%d",
-                        from_vnum,
-                        to_vnum,
-                        len(meta_diff),
-                        len(att_diff.get("добавлены_в_новой", [])),
-                        len(att_diff.get("удалены_из_старой", [])),
-                    )
-
                 except Exception as pair_exc:
                     err = f"Ошибка сравнения версий {from_vnum}↔{to_vnum}: {pair_exc}"
                     logger.error(err)
@@ -225,13 +203,7 @@ async def doc_get_versions(document_id: str, token: str) -> dict[str, Any]:
                 for c in comparisons
             )
 
-            logger.info(
-                "doc_get_versions completed: total=%d pairs=%d changes=%s errors=%d",
-                total,
-                len(comparisons),
-                has_any_changes,
-                len(errors),
-            )
+            logger.info("doc_get_versions completed: total=%d pairs=%d", total, len(comparisons))
 
             return {
                 "status": "success",
