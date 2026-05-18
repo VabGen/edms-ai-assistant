@@ -1,9 +1,13 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { storage } from 'wxt/storage'
 import { STORAGE_KEYS } from '@shared/storage/keys'
 
 const enabledStorage = storage.defineItem<boolean>(STORAGE_KEYS.assistantEnabled, {
   fallback: true,
+})
+
+const openStorage = storage.defineItem<boolean>('local:widgetOpen', {
+  fallback: false,
 })
 
 interface WidgetSize {
@@ -29,12 +33,28 @@ export interface UseWidgetStateReturn {
 }
 
 export function useWidgetState(): UseWidgetStateReturn {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpenState] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [widgetSize, setWidgetSize] = useState<WidgetSize>(DEFAULT_SIZE)
 
-  const toggleOpen = useCallback(() => setIsOpen((v) => !v), [])
+  useEffect(() => {
+    void openStorage.getValue().then(val => setIsOpenState(val ?? false))
+    return openStorage.watch(val => setIsOpenState(val ?? false))
+  }, [])
+
+  const setIsOpen = useCallback((v: boolean) => {
+    setIsOpenState(v)
+    void openStorage.setValue(v)
+  }, [])
+
+  const toggleOpen = useCallback(() => {
+    setIsOpenState((prev) => {
+      const next = !prev
+      void openStorage.setValue(next)
+      return next
+    })
+  }, [])
 
   const clampSize = useCallback((w: number, h: number): WidgetSize => ({
     width: Math.min(MAX_SIZE.width, Math.max(MIN_SIZE.width, w)),
