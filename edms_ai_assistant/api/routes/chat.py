@@ -267,6 +267,9 @@ async def _stream_graph_events(
             config=config,
             stream_mode=["updates", "custom"],
         ):
+            # Send keepalive to prevent timeouts during long tool execution (e.g. OCR)
+            yield SSE_KEEPALIVE.decode()
+
             # ── Custom channel: UIDirective ──────────────────────────────
             if mode == "custom":
                 if isinstance(chunk, dict) and "ui" in chunk:

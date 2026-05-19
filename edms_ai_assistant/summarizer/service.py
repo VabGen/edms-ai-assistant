@@ -193,7 +193,7 @@ def format_output_as_markdown(resp: SummarizationResponse) -> str:
             if bullet.strip():
                 lines.append(f"• {bullet}")
         if recommendation:
-            lines.extend(["", f"💡 **Рекомендация:** {recommendation}"])
+            lines.extend(["", f"**Рекомендация:** {recommendation}"])
         return "\n".join(lines) if lines else "Анализ завершён."
 
     elif resp.mode == SummaryMode.DETAILED_NOTES:
@@ -231,16 +231,16 @@ def format_output_as_markdown(resp: SummarizationResponse) -> str:
         lines = [f"**Найдено задач: {len(items)}**", ""]
         for i, item in enumerate(items, 1):
             priority = item.get("priority", "medium")
-            emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(priority, "⚪")
+            priority_label = {"high": "[!]", "medium": "[*]", "low": "[-]"}.get(priority, "•")
             task = item.get("task", "")
             owner = item.get("owner")
             deadline = item.get("deadline")
 
-            lines.append(f"{i}. {emoji} {task}")
+            lines.append(f"{i}. {priority_label} {task}")
             if owner:
-                lines.append(f"   👤 Ответственный: {owner}")
+                lines.append(f"   Ответственный: {owner}")
             if deadline:
-                lines.append(f"   📅 Срок: {deadline}")
+                lines.append(f"   Срок: {deadline}")
             lines.append("")
         return "\n".join(lines)
 
@@ -282,23 +282,8 @@ def format_output_as_markdown(resp: SummarizationResponse) -> str:
         for fact in facts:
             label = fact.get("label", "")
             value = fact.get("value", "")
-            category = fact.get("category", "")
-            cat_emoji = {
-                "ДАТА": "📅",
-                "DATE": "📅",
-                "ПЕРСОНА": "👤",
-                "PERSON": "👤",
-                "ОРГАНИЗАЦИЯ": "🏢",
-                "ORG": "🏢",
-                "СУММА": "💰",
-                "AMOUNT": "💰",
-                "ТРЕБОВАНИЕ": "⚠️",
-                "REQUIREMENT": "⚠️",
-                "СРОК": "⏰",
-                "DEADLINE": "⏰",
-            }.get(category.upper(), "•")
             if label and value:
-                lines.append(f"{cat_emoji} **{label}**: {value}")
+                lines.append(f"• **{label}**: {value}")
         return "\n".join(lines) if lines else "Факты не извлечены."
 
     elif resp.mode in (SummaryMode.ABSTRACTIVE, SummaryMode.MULTILINGUAL):

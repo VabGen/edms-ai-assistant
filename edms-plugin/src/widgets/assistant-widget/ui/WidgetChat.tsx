@@ -262,10 +262,11 @@ export function WidgetChat() {
                     },
                 }
             })
-            // Give the agent ~6s to call doc_update_field before reloading the page.
+            // Give the agent ~8s to call doc_update_field before reloading the page.
+            // This accommodates multi-field updates and heavy backend operations.
             window.setTimeout(() => {
                 void sendMessage('reloadActiveTab', undefined)
-            }, 6000)
+            }, 8000)
         },
         [updateMessage],
     )

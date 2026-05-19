@@ -16,9 +16,10 @@ const FONT_SIZE_MAP = {
 } as const satisfies Record<FontSize, string>
 
 function resolvePositionClass(pos: WidgetPosition): string {
+  const base = 'edms-assistant-root fixed bottom-5 z-[2147483647] flex flex-col pointer-events-none select-none font-sans'
   return pos === 'bottom-left'
-    ? 'fixed bottom-5 left-5 z-[2147483647] flex flex-col items-start pointer-events-none select-none font-sans'
-    : 'fixed bottom-5 right-5 z-[2147483647] flex flex-col items-end pointer-events-none select-none font-sans'
+    ? `${base} left-5 items-start`
+    : `${base} right-5 items-end`
 }
 
 function resolveStyle(prefs: UserPreferences): CSSProperties {
