@@ -84,7 +84,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
 
                                     <div className="flex-1 min-w-0">
                                         <CardTitle className={cn(
-                                            "text-[14px] font-bold truncate transition-colors",
+                                            "text-[14px] font-bold truncate transition-colors group-hover:text-indigo-600",
                                             isSelected && "text-indigo-700"
                                         )}>
                                             {card.label}
@@ -137,17 +137,20 @@ export function InterruptRenderer({payload, onReply}: Props) {
                             </Card>
 
                             {cardUrl && (
-                                <button
-                                    type="button"
+                                <a
+                                    href={cardUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     title="Открыть в новой вкладке"
                                     onClick={(e) => {
                                         e.stopPropagation()
+                                        e.preventDefault()
                                         void sendMessage('navigateTo', {url: cardUrl, newTab: true})
                                     }}
-                                    className="shrink-0 w-12 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 text-zinc-400 hover:text-blue-500 hover:border-blue-200 dark:hover:border-blue-900/50 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all flex items-center justify-center shadow-sm"
+                                    className="shrink-0 w-12 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 text-zinc-400 hover:text-indigo-500 hover:border-indigo-200 dark:hover:border-indigo-900/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all flex items-center justify-center shadow-sm"
                                 >
                                     <ExternalLink size={18}/>
-                                </button>
+                                </a>
                             )}
                         </div>
                     )

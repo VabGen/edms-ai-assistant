@@ -49,69 +49,91 @@ export function DocCard({ headers, row, index }: DocCardProps) {
 
     const config = category ? getCategoryConfig(category) : { variant: 'default' as const, icon: FileText, label: 'Документ' }
 
+    const cardContent = (
+        <CardHeader className="flex-row items-start gap-4 p-4 space-y-0">
+        <IconBox
+            icon={config.icon}
+            variant={config.variant}
+            size="md"
+            className="mt-0.5"
+        />
+        <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2 mb-1">
+                <CardTitle className="truncate group-hover:text-indigo-600 transition-colors">
+                    {regNum && regNum !== '—' ? regNum : `Документ #${num ?? index + 1}`}
+                </CardTitle>
+                {isClickable && (
+                    <ExternalLink size={14} className="text-zinc-400 transition-colors group-hover:text-indigo-500 shrink-0" />
+                )}
+            </div>
+            <CardDescription className="flex items-center gap-2 mb-2">
+                <span className={cn(
+                    "px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-widest",
+                    config.variant === 'primary' && "bg-indigo-50 text-indigo-600",
+                    config.variant === 'success' && "bg-emerald-50 text-emerald-600",
+                    config.variant === 'warning' && "bg-amber-50 text-amber-600",
+                    config.variant === 'error' && "bg-rose-50 text-rose-600",
+                    config.variant === 'zinc' && "bg-zinc-100 text-zinc-600",
+                    config.variant === 'default' && "bg-zinc-100 text-zinc-500",
+                )}>
+                    {config.label}
+                </span>
+                {date && date !== '—' && (
+                    <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+                        <FileClock size={12} />
+                        {date}
+                    </span>
+                )}
+            </CardDescription>
+
+            {summary && summary !== '—' && (
+                <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed line-clamp-2 m-0 mb-2">
+                    {summary}
+                </p>
+            )}
+
+            <div className="flex flex-wrap gap-2 items-center">
+                {author && author !== '—' && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500">
+                        <Users size={12} />
+                        {author}
+                    </div>
+                )}
+                {status && status !== '—' && (
+                    <div className="px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[10px] font-semibold text-zinc-500 uppercase tracking-tight">
+                        {status}
+                    </div>
+                )}
+            </div>
+        </div>
+    </CardHeader>
+    )
+
+    if (isClickable) {
+        return (
+            <a
+                href={`/document/${docId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block mb-3 no-underline"
+                onClick={(e) => {
+                    e.preventDefault();
+                    onDocumentClick!(docId);
+                }}
+            >
+                <Card
+                    isClickable={true}
+                    className="group border-zinc-100/50 hover:border-indigo-200 transition-all"
+                >
+                    {cardContent}
+                </Card>
+            </a>
+        )
+    }
+
     return (
-        <Card
-            isClickable={isClickable}
-            onClick={isClickable ? () => onDocumentClick!(docId) : undefined}
-            className="mb-3 group border-zinc-100/50 hover:border-indigo-200"
-        >
-            <CardHeader className="flex-row items-start gap-4 p-4 space-y-0">
-                <IconBox
-                    icon={config.icon}
-                    variant={config.variant}
-                    size="md"
-                    className="mt-0.5"
-                />
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                        <CardTitle className="truncate">
-                            {regNum && regNum !== '—' ? regNum : `Документ #${num ?? index + 1}`}
-                        </CardTitle>
-                        {isClickable && (
-                            <ExternalLink size={14} className="text-zinc-400 transition-colors group-hover:text-blue-500 shrink-0" />
-                        )}
-                    </div>
-                    <CardDescription className="flex items-center gap-2 mb-2">
-                        <span className={cn(
-                            "px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-widest",
-                            config.variant === 'primary' && "bg-indigo-50 text-indigo-600",
-                            config.variant === 'success' && "bg-emerald-50 text-emerald-600",
-                            config.variant === 'warning' && "bg-amber-50 text-amber-600",
-                            config.variant === 'error' && "bg-rose-50 text-rose-600",
-                            config.variant === 'zinc' && "bg-zinc-100 text-zinc-600",
-                            config.variant === 'default' && "bg-zinc-100 text-zinc-500",
-                        )}>
-                            {config.label}
-                        </span>
-                        {date && date !== '—' && (
-                            <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                                <FileClock size={12} />
-                                {date}
-                            </span>
-                        )}
-                    </CardDescription>
-
-                    {summary && summary !== '—' && (
-                        <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed line-clamp-2 m-0 mb-2">
-                            {summary}
-                        </p>
-                    )}
-
-                    <div className="flex flex-wrap gap-2 items-center">
-                        {author && author !== '—' && (
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500">
-                                <Users size={12} />
-                                {author}
-                            </div>
-                        )}
-                        {status && status !== '—' && (
-                            <div className="px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[10px] font-semibold text-zinc-500 uppercase tracking-tight">
-                                {status}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </CardHeader>
+        <Card className="mb-3 border-zinc-100/50">
+            {cardContent}
         </Card>
     )
 }
