@@ -324,6 +324,44 @@ export function WidgetChat() {
         [updateMessage, threadId],
     )
 
+    const handleDocumentClick = useCallback((docId: string) => {
+        void sendMessage('navigateTo', {url: `/document-form/${docId}`, newTab: true})
+    }, [])
+
+    const handleAttachmentClick = useCallback(
+        async (fileName: string) => {
+            // Remove loading check to allow switching attachments
+            const token = getAuthToken()
+            if (!token) {
+                toast.error('Войдите в систему', 'Авторизация')
+                return
+            }
+
+            let tid: string
+            try {
+                tid = await getOrCreateThreadId()
+            } catch {
+                return
+            }
+
+            // Enhanced prompt for attachment analysis, prioritizing facts if that's what's failing
+            const prefFormat = prefs.documents.defaultSummaryFormat
+            let prompt = `Проанализируй вложение: ${fileName}`
+            if (prefFormat === 'extractive') prompt = `Извлеки основные факты из вложения: ${fileName}`
+            if (prefFormat === 'thesis') prompt = `Подготовь тезисный план вложения: ${fileName}`
+
+            streamHandleRef.current = startStream({
+                message: prompt,
+                userToken: token,
+                threadId: tid,
+                contextUiId: extractDocIdFromUrl(),
+                filePath: null,
+                resumeValue: null,
+            })
+        },
+        [getOrCreateThreadId, startStream, prefs.documents.defaultSummaryFormat],
+    )
+
     const handleFieldFixed = useCallback(
         (messageId: string, fieldKey: string, newValue: string) => {
             applyOptimisticFix(messageId, [{fieldKey, newValue}])
