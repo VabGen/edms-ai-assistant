@@ -68,7 +68,7 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
   return (
     <div
-      className="pointer-events-auto relative flex flex-col overflow-hidden glass-premium animate-edms-fade-in"
+      className="pointer-events-auto relative flex flex-col overflow-hidden bg-white shadow-2xl border border-zinc-200 animate-edms-fade-in"
       style={{
         width: widgetSize.width,
         height: widgetSize.height,
@@ -92,7 +92,7 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
       <div className="flex flex-1 min-h-0">
         {isSidebarOpen && (
-          <div className="w-[280px] shrink-0 border-r border-zinc-100/50 animate-slide-in-left overflow-hidden">
+          <div className="w-[280px] shrink-0 border-r border-zinc-100/50 animate-slide-in-left overflow-hidden flex flex-col">
             {isSettingsOpen
               ? <SettingsPanelWrapper onClose={() => setIsSettingsOpen(false)} />
               : <WidgetSidebar onOpenSettings={() => setIsSettingsOpen(true)} />
@@ -114,14 +114,14 @@ interface WidgetHeaderProps {
 function WidgetHeader({ isSidebarOpen, onToggleSidebar, onClose }: WidgetHeaderProps) {
   return (
     <header
-      className="flex items-center justify-between shrink-0 px-6 h-20 border-b border-zinc-100/40 bg-white/20"
+      className="flex items-center justify-between shrink-0 px-6 h-20 border-b border-zinc-100/40 bg-zinc-50/50"
     >
       <button
         type="button"
         onClick={onToggleSidebar}
         title={isSidebarOpen ? 'Скрыть' : 'Меню'}
         className={cn(
-            "p-3 rounded-2xl transition-all duration-300 hover:bg-white/80 active:scale-90",
+            "p-3 rounded-2xl transition-all duration-300 hover:bg-zinc-100 active:scale-90",
             isSidebarOpen ? "bg-white text-indigo-600 shadow-sm border border-zinc-200" : "text-zinc-400"
         )}
       >
@@ -129,7 +129,7 @@ function WidgetHeader({ isSidebarOpen, onToggleSidebar, onClose }: WidgetHeaderP
       </button>
 
       <div
-        className="flex items-center gap-2 font-bold text-zinc-900 dark:text-zinc-100 tracking-tight"
+        className="flex items-center gap-2 font-bold text-zinc-900  tracking-tight"
       >
         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
         <span className="text-[14px]">EDMS Assistant</span>
@@ -139,7 +139,7 @@ function WidgetHeader({ isSidebarOpen, onToggleSidebar, onClose }: WidgetHeaderP
         type="button"
         onClick={onClose}
         title="Закрыть"
-        className="p-2 rounded-xl text-zinc-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all border border-transparent hover:border-rose-100 dark:hover:border-rose-900/50"
+        className="p-2 rounded-xl text-zinc-400 hover:text-rose-500 hover:bg-rose-50  transition-all border border-transparent hover:border-rose-100 "
       >
         <X size={18} />
       </button>

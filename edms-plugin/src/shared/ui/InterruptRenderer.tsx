@@ -24,7 +24,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
         return (
             <div className="flex flex-col gap-2">
                 {payload.prompt && (
-                    <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-1 ml-1 px-1">
+                    <p className="text-[13px] font-medium text-zinc-500  mb-1 ml-1 px-1">
                         {payload.prompt}
                     </p>
                 )}
@@ -112,7 +112,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                                 </div>
                                             )}
                                             {card.badges?.map(badge => (
-                                                <div key={badge} className="px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-[9px] font-bold uppercase tracking-wider">
+                                                <div key={badge} className="px-1.5 py-0.5 rounded-md bg-zinc-100  text-zinc-500 text-[9px] font-bold uppercase tracking-wider">
                                                     {badge}
                                                 </div>
                                             ))}
@@ -147,7 +147,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                         e.preventDefault()
                                         void sendMessage('navigateTo', {url: cardUrl, newTab: true})
                                     }}
-                                    className="shrink-0 w-12 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 text-zinc-400 hover:text-indigo-500 hover:border-indigo-200 dark:hover:border-indigo-900/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all flex items-center justify-center shadow-sm"
+                                    className="shrink-0 w-12 border border-zinc-200  rounded-xl bg-white  text-zinc-400 hover:text-indigo-500 hover:border-indigo-200  hover:bg-indigo-50  transition-all flex items-center justify-center shadow-sm"
                                 >
                                     <ExternalLink size={18}/>
                                 </a>
@@ -164,7 +164,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
         return (
             <div className="flex flex-col gap-2">
                 {payload.prompt && (
-                    <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-1 ml-1 px-1">
+                    <p className="text-[13px] font-medium text-zinc-500  mb-1 ml-1 px-1">
                         {payload.prompt}
                     </p>
                 )}
@@ -187,7 +187,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 <div className="flex-1 min-w-0">
                                     <CardTitle className={cn(
                                         "text-[14px] font-bold mb-1",
-                                        isSelected && "text-blue-700 dark:text-blue-300"
+                                        isSelected && "text-blue-700 "
                                     )}>
                                         {opt.label}
                                     </CardTitle>
@@ -216,13 +216,13 @@ export function InterruptRenderer({payload, onReply}: Props) {
         return (
             <Card className="overflow-hidden">
                 {payload.prompt && (
-                    <div className="p-3.5 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800">
-                        <p className="text-[13px] font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-tight">
+                    <div className="p-3.5 bg-zinc-50  border-b border-zinc-100 ">
+                        <p className="text-[13px] font-bold text-zinc-600  uppercase tracking-tight">
                             {payload.prompt}
                         </p>
                     </div>
                 )}
-                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <div className="divide-y divide-zinc-100 ">
                     {payload.options.map((opt) => {
                         const isSelected = selectedId === opt.id
                         return (
@@ -237,18 +237,18 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 }
                                 className={cn(
                                     "w-full px-4 py-3 text-left transition-all flex items-center justify-between group",
-                                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30"
+                                    isSelected ? "bg-blue-50 " : "hover:bg-zinc-50/50 "
                                 )}
                             >
                                 <div className="flex-1 min-w-0">
                                     <div className={cn(
                                         "text-[13px] font-bold transition-colors",
-                                        isSelected ? "text-blue-600 dark:text-blue-400" : "text-zinc-700 dark:text-zinc-200"
+                                        isSelected ? "text-blue-600 " : "text-zinc-700 "
                                     )}>
                                         {opt.label}
                                     </div>
                                     {opt.description && (
-                                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{opt.description}</div>
+                                        <div className="text-[11px] text-zinc-400  mt-0.5">{opt.description}</div>
                                     )}
                                 </div>
                                 <ChevronRight className={cn(
@@ -266,9 +266,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
     // ── confirmation ───────────────────────────────────────────────────────
     if (payload.kind === 'confirmation') {
         return (
-            <Card className="p-4 border-l-4 border-l-blue-500 dark:border-l-blue-600">
+            <Card className="p-4 border-l-4 border-l-blue-500 ">
                 {payload.prompt && (
-                    <p className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200 mb-4 leading-relaxed px-1">
+                    <p className="text-[14px] font-bold text-zinc-800  mb-4 leading-relaxed px-1">
                         {payload.prompt}
                     </p>
                 )}
@@ -282,8 +282,8 @@ export function InterruptRenderer({payload, onReply}: Props) {
                         className={cn(
                             "flex-1 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-all shadow-sm active:scale-95",
                             payload.danger
-                                ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200 dark:shadow-none"
-                                : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200 dark:shadow-none"
+                                ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200 "
+                                : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200 "
                         )}
                     >
                         {payload.confirm_label ?? 'Подтвердить'}
@@ -294,7 +294,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                             setSelectedId('cancel')
                             onReply({kind: 'confirmation', confirmed: false})
                         }}
-                        className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-zinc-600 dark:text-zinc-400 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all shadow-sm active:scale-95"
+                        className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-zinc-600  bg-white  border border-zinc-200  hover:bg-zinc-50  transition-all shadow-sm active:scale-95"
                     >
                         {payload.cancel_label ?? 'Отмена'}
                     </button>
@@ -329,7 +329,7 @@ function TextInputInterruptForm({
     return (
         <Card className="p-4 border-l-4 border-l-blue-500">
             {payload.prompt && (
-                <p className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200 mb-4 px-1">
+                <p className="text-[14px] font-bold text-zinc-800  mb-4 px-1">
                     {payload.prompt}
                 </p>
             )}
@@ -341,13 +341,13 @@ function TextInputInterruptForm({
                     onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
                     placeholder={payload.placeholder ?? 'Введите значение...'}
                     disabled={submitted}
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/50 text-[14px] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all disabled:opacity-50"
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200  bg-zinc-50/50  text-[14px] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all disabled:opacity-50"
                 />
                 <button
                     type="button"
                     onClick={handleSubmit}
                     disabled={!value.trim() || submitted}
-                    className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 text-white text-[13px] font-bold transition-all shadow-sm shadow-blue-200 dark:shadow-none active:scale-95"
+                    className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300  text-white text-[13px] font-bold transition-all shadow-sm shadow-blue-200  active:scale-95"
                 >
                     OK
                 </button>

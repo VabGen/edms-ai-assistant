@@ -10,9 +10,9 @@ import {
     Copy,
     Check,
     AlertCircle,
-    ExternalLink,
     Paperclip,
     Clock,
+    ChevronRight,
 } from 'lucide-react'
 import { DocCard } from './cards/DocCard'
 import { AttachmentCard } from './cards/AttachmentCard'
@@ -57,7 +57,7 @@ function CopyButton({text}: { text: string }) {
                 "absolute top-2 right-2 p-1.5 rounded-lg border transition-all duration-200",
                 copied
                   ? "bg-emerald-50 border-emerald-200 text-emerald-600"
-                  : "bg-white/80 border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:border-zinc-300 shadow-sm"
+                  : "bg-white border-zinc-200 text-zinc-400 hover:text-zinc-600 hover:border-zinc-300 shadow-sm"
             )}
         >
             {copied ? <Check size={14}/> : <Copy size={14}/>}
@@ -161,19 +161,6 @@ function sanitizeHtmlToMarkdown(raw: string): string {
         .trim()
 }
 
-// ─── UUID helpers ────────────────────────────────────────────────────────────
-
-function normalizeUuid(raw: string): string {
-    return raw
-        .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00AD\uFE58\uFE63\uFF0D]/g, '-')
-        .trim()
-}
-
-function isValidUuid(raw: string): boolean {
-    const normalized = normalizeUuid(raw)
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalized)
-}
-
 // ─── Table extraction ────────────────────────────────────────────────────────
 
 interface TableData {
@@ -239,13 +226,13 @@ function isKeyValueTable(headers: string[]): boolean {
 
 function KeyValueList({rows}: { rows: string[][] }) {
     return (
-        <div className="flex flex-col gap-1 my-3 bg-zinc-50 dark:bg-zinc-800/30 rounded-xl p-2 border border-zinc-100 dark:border-zinc-800">
+        <div className="flex flex-col gap-1 my-3 bg-zinc-50 rounded-xl p-2 border border-zinc-100">
             {rows.map(([key, value], i) => (
-                <div key={i} className="flex gap-4 p-2.5 rounded-lg hover:bg-white dark:hover:bg-zinc-800 transition-colors shadow-none hover:shadow-sm">
-                    <span className="text-[11px] font-bold text-zinc-400 dark:text-zinc-500 min-w-[120px] flex-shrink-0 uppercase tracking-wider mt-0.5">
+                <div key={i} className="flex gap-4 p-2.5 rounded-lg hover:bg-white transition-colors shadow-none hover:shadow-sm">
+                    <span className="text-[11px] font-bold text-zinc-400 min-w-[120px] flex-shrink-0 uppercase tracking-wider mt-0.5">
                         {key}
                     </span>
-                    <span className="text-[13px] text-zinc-800 dark:text-zinc-200 font-medium break-words leading-relaxed">
+                    <span className="text-[13px] text-zinc-800 font-medium break-words leading-relaxed">
                         {value || '—'}
                     </span>
                 </div>
@@ -260,8 +247,8 @@ function SmartTable({children}: { children: React.ReactNode }) {
 
     if (!headers.length || !rows.length) {
         return (
-            <div className="overflow-x-auto my-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-                <table className="w-full text-[13px] border-collapse bg-white dark:bg-zinc-900">{children}</table>
+            <div className="overflow-x-auto my-3 rounded-xl border border-zinc-200 shadow-sm">
+                <table className="w-full text-[13px] border-collapse bg-white">{children}</table>
             </div>
         )
     }
@@ -288,8 +275,8 @@ function SmartTable({children}: { children: React.ReactNode }) {
     }
 
     return (
-        <div className="overflow-x-auto my-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <table className="w-full text-[13px] border-collapse bg-white dark:bg-zinc-900">{children}</table>
+        <div className="overflow-x-auto my-3 rounded-xl border border-zinc-200 shadow-sm">
+            <table className="w-full text-[13px] border-collapse bg-white">{children}</table>
         </div>
     )
 }
@@ -299,15 +286,15 @@ function SmartTable({children}: { children: React.ReactNode }) {
 function ErrorMessage({raw, timeLabel}: { raw: string; timeLabel: string }) {
     const friendly = humanizeError(raw)
     return (
-        <div className="bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/20 rounded-xl p-4 max-w-[90%] animate-edms-slide-up">
+        <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 max-w-[90%] animate-edms-slide-up">
             <div className="flex items-center gap-2 mb-2">
                 <AlertCircle size={16} className="text-rose-500" />
-                <span className="text-[13px] font-bold text-rose-800 dark:text-rose-400 uppercase tracking-tight">Ошибка</span>
+                <span className="text-[13px] font-bold text-rose-800 uppercase tracking-tight">Ошибка</span>
             </div>
-            <p className="text-[14px] text-rose-700 dark:text-rose-300 leading-relaxed m-0">
+            <p className="text-[14px] text-rose-700 leading-relaxed m-0">
                 {friendly}
             </p>
-            <div className="mt-2.5 text-[11px] text-rose-400 dark:text-rose-500/60 font-medium flex items-center gap-1.5">
+            <div className="mt-2.5 text-[11px] text-rose-400 font-medium flex items-center gap-1.5">
                 <Clock size={11} />
                 {timeLabel}
             </div>
@@ -365,23 +352,23 @@ export function ChatMessage({
                                 remarkPlugins={[remarkGfm, remarkLazyList]}
                                 components={{
                                     table: ({children}) => <SmartTable>{children}</SmartTable>,
-                                    thead: ({children}) => <thead className="bg-zinc-50 dark:bg-zinc-800/50">{children}</thead>,
+                                    thead: ({children}) => <thead className="bg-zinc-50">{children}</thead>,
                                     tbody: ({children}) => <tbody>{children}</tbody>,
-                                    tr: ({children}) => <tr className="border-b border-zinc-100 dark:border-zinc-800 last:border-0">{children}</tr>,
+                                    tr: ({children}) => <tr className="border-b border-zinc-100 last:border-0">{children}</tr>,
                                     th: ({children}) => <th className="px-4 py-2.5 text-left text-[11px] font-bold text-zinc-500 uppercase tracking-wider">{children}</th>,
-                                    td: ({children}) => <td className="px-4 py-3 text-[13px] text-zinc-700 dark:text-zinc-300 leading-relaxed">{children}</td>,
+                                    td: ({children}) => <td className="px-4 py-3 text-[13px] text-zinc-700 leading-relaxed">{children}</td>,
                                     code({inline, className, children, ...props}: any) {
                                         const codeText = String(children).replace(/\n$/, '')
                                         if (!inline) {
                                             const lang = className?.replace(/^language-/, '') || ''
                                             return (
-                                                <div className="relative my-4 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                                                <div className="relative my-4 rounded-xl overflow-hidden border border-zinc-200 shadow-sm">
                                                     {lang && (
-                                                        <div className="bg-zinc-50 dark:bg-zinc-800 px-4 py-1.5 text-[10px] font-bold text-zinc-500 border-b border-zinc-200 dark:border-zinc-700 uppercase tracking-widest">
+                                                        <div className="bg-zinc-50 px-4 py-1.5 text-[10px] font-bold text-zinc-500 border-b border-zinc-200 uppercase tracking-widest">
                                                             {lang}
                                                         </div>
                                                     )}
-                                                    <pre className="p-4 bg-zinc-900 dark:bg-black overflow-x-auto">
+                                                    <pre className="p-4 bg-zinc-900 overflow-x-auto">
                                                         <code className={cn("font-mono text-[13px] leading-relaxed text-zinc-200", className)} {...props}>{children}</code>
                                                     </pre>
                                                     <CopyButton text={codeText}/>
@@ -390,7 +377,7 @@ export function ChatMessage({
                                         }
                                         return <code className={cn(
                                             "font-mono text-[0.9em] px-1.5 py-0.5 rounded-md",
-                                            isUser ? "bg-white/20 text-white" : "bg-zinc-100 dark:bg-zinc-800 text-blue-600 dark:text-blue-400"
+                                            isUser ? "bg-white/20 text-white" : "bg-zinc-100 text-blue-600"
                                         )} {...props}>{children}</code>
                                     },
                                     p: ({children}) => {
@@ -402,19 +389,23 @@ export function ChatMessage({
                                             const fileName = fileMatch[1].trim()
                                             const fileSize = rawText.match(/Размер:\s*([^\n]+)/)?.[1]?.trim() ?? ''
                                             return (
-                                                <div
-                                                  className="flex items-center gap-3 p-3 my-2 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 transition-all cursor-pointer group"
-                                                  onClick={() => onAttachmentClick(fileName)}
+                                                <a
+                                                  href="#"
+                                                  className="flex items-center gap-3 p-3 my-2 bg-zinc-50 border border-zinc-200 rounded-xl hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group no-underline"
+                                                  onClick={(e) => {
+                                                      e.preventDefault()
+                                                      onAttachmentClick(fileName)
+                                                  }}
                                                 >
-                                                    <div className="p-2 bg-white dark:bg-zinc-800 rounded-lg shadow-sm group-hover:text-blue-500">
+                                                    <div className="p-2 bg-white rounded-lg shadow-sm group-hover:text-blue-500">
                                                       <Paperclip size={16} />
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate">{fileName}</div>
+                                                        <div className="text-[13px] font-semibold text-zinc-900 truncate">{fileName}</div>
                                                         {fileSize && <div className="text-[11px] text-zinc-500 mt-0.5">{fileSize}</div>}
                                                     </div>
-                                                    <ExternalLink size={14} className="text-zinc-400 group-hover:text-blue-500" />
-                                                </div>
+                                                    <ChevronRight size={14} className="text-zinc-400 group-hover:text-blue-500" />
+                                                </a>
                                             )
                                         }
                                         return <p className="mb-2 last:mb-0 leading-relaxed text-[15px]">{children}</p>
@@ -427,27 +418,27 @@ export function ChatMessage({
                                     ),
                                     li: ({children, ordered, index}: any) => (
                                         <li className="relative pl-7 text-[15px] leading-relaxed">
-                                            <span className="absolute left-0 top-1.5 flex items-center justify-center w-4 h-4 text-[10px] font-bold text-blue-500 dark:text-blue-400">
+                                            <span className="absolute left-0 top-1.5 flex items-center justify-center w-4 h-4 text-[10px] font-bold text-blue-500">
                                                 {ordered ? `${(index ?? 0) + 1}.` : '•'}
                                             </span>
                                             {children}
                                         </li>
                                     ),
-                                    h1: ({children}) => <h1 className="text-xl font-bold mt-6 mb-3 text-zinc-900 dark:text-zinc-100 tracking-tight">{children}</h1>,
-                                    h2: ({children}) => <h2 className="text-lg font-bold mt-5 mb-2.5 text-zinc-900 dark:text-zinc-100 tracking-tight">{children}</h2>,
-                                    h3: ({children}) => <h3 className="text-base font-bold mt-4 mb-2 text-zinc-900 dark:text-zinc-100 tracking-tight">{children}</h3>,
-                                    h4: ({children}) => <h4 className="text-sm font-bold mt-3 mb-1.5 text-zinc-900 dark:text-zinc-100 tracking-tight uppercase tracking-wider">{children}</h4>,
-                                    strong: ({children}) => <strong className="font-bold text-zinc-900 dark:text-zinc-100">{children}</strong>,
-                                    em: ({children}) => <em className="italic text-zinc-700 dark:text-zinc-300">{children}</em>,
-                                    a: ({children, href}) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 font-medium underline underline-offset-4 decoration-blue-500/30 hover:decoration-blue-500 transition-all">{children}</a>,
+                                    h1: ({children}) => <h1 className="text-xl font-bold mt-6 mb-3 text-zinc-900 tracking-tight">{children}</h1>,
+                                    h2: ({children}) => <h2 className="text-lg font-bold mt-5 mb-2.5 text-zinc-900 tracking-tight">{children}</h2>,
+                                    h3: ({children}) => <h3 className="text-base font-bold mt-4 mb-2 text-zinc-900 tracking-tight">{children}</h3>,
+                                    h4: ({children}) => <h4 className="text-sm font-bold mt-3 mb-1.5 text-zinc-900 tracking-tight uppercase tracking-wider">{children}</h4>,
+                                    strong: ({children}) => <strong className="font-bold text-zinc-900">{children}</strong>,
+                                    em: ({children}) => <em className="italic text-zinc-700">{children}</em>,
+                                    a: ({children, href}) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-medium underline underline-offset-4 decoration-blue-500/30 hover:decoration-blue-500 transition-all">{children}</a>,
                                     blockquote: ({children}) => (
-                                        <blockquote className="border-l-4 border-zinc-200 dark:border-zinc-800 pl-4 my-4 italic text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                                        <blockquote className="border-l-4 border-zinc-200 pl-4 my-4 italic text-zinc-600 leading-relaxed">
                                             {children}
                                         </blockquote>
                                     ),
-                                    hr: () => <hr className="my-6 border-zinc-100 dark:border-zinc-800"/>,
+                                    hr: () => <hr className="my-6 border-zinc-100"/>,
                                     img: ({src, alt}) => (
-                                        <img src={src} alt={alt || ''} className="max-w-full rounded-xl my-4 border border-zinc-100 dark:border-zinc-800 shadow-md"/>
+                                        <img src={src} alt={alt || ''} className="max-w-full rounded-xl my-4 border border-zinc-100 shadow-md"/>
                                     ),
                                 }}
                             >

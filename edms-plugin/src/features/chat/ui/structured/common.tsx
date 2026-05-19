@@ -17,11 +17,11 @@ export const THEME_PALETTE = {
 
 export function CardFooter() {
     return (
-        <BaseCardFooter className="flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 border-t border-zinc-100 dark:border-zinc-800 py-2.5">
+        <BaseCardFooter className="flex justify-between items-center bg-zinc-50/50  border-t border-zinc-100  py-2.5">
             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Сгенерировано AI</span>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white  border border-zinc-200  shadow-sm">
                 <Sparkles size={10} className="text-blue-500"/>
-                <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-300">EDMS Assistant</span>
+                <span className="text-[10px] font-bold text-zinc-600 ">EDMS Assistant</span>
             </div>
         </BaseCardFooter>
     )
@@ -42,20 +42,20 @@ export function CollapsibleSection({
 }) {
     const [open, setOpen] = useState(defaultOpen)
     return (
-        <div className="mb-1 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+        <div className="mb-1 border-b border-zinc-100  last:border-0">
             <button
                 onClick={() => setOpen(v => !v)}
-                className="w-full flex items-center gap-3 py-3.5 px-1 text-left hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-all group"
+                className="w-full flex items-center gap-3 py-3.5 px-1 text-left hover:bg-zinc-50/50  transition-all group"
             >
                 <div className={cn(
-                    "flex items-center justify-center w-5 h-5 rounded-md border border-zinc-200 dark:border-zinc-700 transition-colors",
-                    open ? "bg-zinc-100 dark:bg-zinc-800" : "bg-white dark:bg-zinc-900"
+                    "flex items-center justify-center w-5 h-5 rounded-md border border-zinc-200  transition-colors",
+                    open ? "bg-zinc-100 " : "bg-white "
                 )}>
                    {open ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
                 </div>
 
                 {Icon && <Icon size={16} className="text-zinc-400 group-hover:text-zinc-600 transition-colors" />}
-                <span className="flex-1 text-[13px] font-bold text-zinc-700 dark:text-zinc-200 tracking-tight">{title}</span>
+                <span className="flex-1 text-[13px] font-bold text-zinc-700  tracking-tight">{title}</span>
                 {right}
             </button>
             <div className={cn(

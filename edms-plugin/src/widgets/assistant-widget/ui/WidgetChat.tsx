@@ -5,7 +5,7 @@ import {
     useCallback,
     type KeyboardEvent,
 } from 'react'
-import {Paperclip, X, Mic, Send, Square, MessageSquare, RefreshCw, Loader2, Sparkles} from 'lucide-react'
+import {Paperclip, X, Mic, Send, Square, MessageSquare, RefreshCw, Sparkles} from 'lucide-react'
 import {useChatStore} from '@features/chat/model/useChatStore'
 import {useStreamChat} from '@features/chat/model/useStreamChat'
 import {useSpeechRecognition} from '@features/voice/model/useSpeechRecognition'
@@ -20,38 +20,45 @@ import {ComplianceResult} from '@/shared/ui/ComplianceResult'
 import {cn} from '@shared/lib/cn'
 import type {ChatMessage as ChatMessageType} from '@entities/message/model/types'
 import type {InterruptPayload, ResumeValue} from '@entities/interrupt/model/types'
-import { Card, CardHeader, CardTitle, IconBox, Button } from '@/shared/ui/primitives'
 
 function SoundWave({active}: { active: boolean }) {
     return (
-        <div className="flex items-center gap-0.5 h-3.5 px-1">
+        <span style={{display: 'flex', alignItems: 'center', gap: 2, height: 14}}>
             {[0, 1, 2, 3, 4].map((i) => (
-                <div
+                <span
                     key={i}
-                    className={cn(
-                        "w-0.5 rounded-full transition-all duration-300 bg-blue-500",
-                        active ? "h-full" : "h-1"
-                    )}
                     style={{
-                        animation: active ? `edms-soundbar 0.7s ease-in-out ${i * 100}ms infinite` : 'none',
+                        display: 'block',
+                        width: 2.5,
+                        height: 8,
+                        borderRadius: 2,
+                        background: 'rgba(99,102,241,0.60)',
+                        transformOrigin: 'bottom',
+                        animation: active ? `edms-soundbar 0.7s ease-in-out ${i * 90}ms infinite` : 'none',
                     }}
                 />
             ))}
-        </div>
+        </span>
     )
 }
 
 function TypingDots() {
     return (
-        <div className="flex items-center gap-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-800 rounded-2xl w-fit">
+        <span style={{display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 4px'}}>
             {[0, 1, 2].map((i) => (
-                <div
+                <span
                     key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce"
-                    style={{ animationDelay: `${i * 150}ms` }}
+                    style={{
+                        display: 'block',
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: '#94a3b8',
+                        animation: `edms-wave 1.2s ease-in-out ${i * 0.18}s infinite`,
+                    }}
                 />
             ))}
-        </div>
+        </span>
     )
 }
 
@@ -126,12 +133,12 @@ export function WidgetChat() {
         return res.thread_id
     }, [threadId, setThreadId])
 
-    const send = useCallback(async (customText?: string) => {
-        const text = customText ?? input.trim()
+    const send = useCallback(async () => {
+        const text = input.trim()
         if ((!text && !attachedFile) || loading) return
 
         stopMic()
-        if (!customText) setInput('')
+        setInput('')
 
         const token = getAuthToken()
         if (!token) {
@@ -202,7 +209,8 @@ export function WidgetChat() {
 
     const handleInterruptReply = useCallback(
         async (resume: ResumeValue) => {
-            // Remove loading check to allow switching selection
+            if (loading) return
+
             const token = getAuthToken()
             if (!token) {
                 toast.error('Войдите в систему', 'Авторизация')
@@ -225,13 +233,11 @@ export function WidgetChat() {
                 resumeValue: resume,
             })
         },
-        [getOrCreateThreadId, startStream],
+        [loading, getOrCreateThreadId, startStream],
     )
 
     const applyOptimisticFix = useCallback(
         (messageId: string, fixed: Array<{ fieldKey: string; newValue: string }>) => {
-            void sendMessage('reloadActiveTab', undefined)
-
             updateMessage(messageId, (m) => {
                 if (!m.compliance) return m
                 const keys = new Set(fixed.map((f) => f.fieldKey))
@@ -256,6 +262,10 @@ export function WidgetChat() {
                     },
                 }
             })
+            // Give the agent ~3s to call doc_update_field before reloading the page.
+            window.setTimeout(() => {
+                void sendMessage('reloadActiveTab', undefined)
+            }, 3000)
         },
         [updateMessage],
     )
@@ -287,7 +297,7 @@ export function WidgetChat() {
                                 file_path: filePath,
                             })
                         } catch {
-                            // non-fatal
+                            // non-fatal: cache may not exist yet
                         }
                     }
                     const res = await sendMessage('summarizeDocument', {
@@ -439,16 +449,16 @@ export function WidgetChat() {
     )
 
     return (
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-white dark:bg-zinc-900">
+        <div className="flex flex-col flex-1 min-w-0 min-h-0">
             <div
                 className={cn(
-                    'flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 min-h-0 scrollbar-thin',
-                    messages.length === 0 ? 'flex flex-col' : 'space-y-4',
+                    'flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 min-h-0 scrollbar-none',
+                    messages.length === 0 ? 'flex flex-col' : 'space-y-3',
                 )}
             >
                 {messages.length === 0 && (
                     <EmptyState
-                        onAction={(text) => send(text)}
+                        onAction={(text) => setInput(text)}
                         showQuickActions={prefs.documents.showQuickActionHints}
                     />
                 )}
@@ -471,131 +481,165 @@ export function WidgetChat() {
                             onFieldFixed={handleFieldFixed}
                             onAllFixed={handleAllFixed}
                             onRefreshSummary={handleRefreshSummary}
-                            onDocumentClick={handleDocumentClick}
-                            onAttachmentClick={handleAttachmentClick}
-                            onSendMessage={(text) => send(text)}
                         />
                     )
                 })}
 
                 {loading && messages[messages.length - 1]?.content === '' && (
-                    <div className="flex justify-start px-2 animate-edms-fade-in">
+                    <div className="flex justify-start pl-2">
                         <TypingDots/>
                     </div>
                 )}
-                <div ref={bottomRef} className="h-4 shrink-0" />
+                <div ref={bottomRef}/>
             </div>
 
-            <div className="px-4 pb-4 shrink-0">
-                {attachedFile && (
-                    <div className="mb-2 p-2.5 rounded-xl flex items-center gap-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 animate-edms-slide-up shadow-sm">
-                        <div className="p-1.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-                            <Paperclip size={14} className="text-blue-500"/>
-                        </div>
-                        <span className="flex-1 text-[13px] font-bold text-zinc-700 dark:text-zinc-200 truncate">{attachedFile.name}</span>
-                        <button
-                            type="button"
-                            onClick={() => setAttachedFile(null)}
-                            className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 transition-colors"
-                        >
-                            <X size={14}/>
-                        </button>
-                    </div>
-                )}
-
-                <form onSubmit={handleSubmit}>
-                    <div
-                        className={cn(
-                            'flex items-end gap-2 rounded-[28px] p-2 transition-all duration-500 border bg-zinc-50/50',
-                            isFocused
-                                ? 'border-indigo-500 ring-4 ring-indigo-500/10 shadow-xl bg-white'
-                                : 'border-zinc-200 shadow-sm',
-                        )}
+            {attachedFile && (
+                <div
+                    className="mx-3 mb-1 px-3 py-1.5 rounded-xl flex items-center gap-2 text-[11px]"
+                    style={{
+                        background: 'rgba(99,102,241,0.06)',
+                        border: '1px solid rgba(99,102,241,0.12)',
+                    }}
+                >
+                    <Paperclip size={11} style={{color: '#6366f1', flexShrink: 0}}/>
+                    <span className="flex-1 text-indigo-700 truncate">{attachedFile.name}</span>
+                    <button
+                        type="button"
+                        onClick={() => setAttachedFile(null)}
+                        className="text-slate-400 hover:text-slate-600 transition-colors"
                     >
+                        <X size={12}/>
+                    </button>
+                </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="shrink-0 px-3 pb-2.5">
+                <div
+                    className={cn(
+                        'flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-all duration-200',
+                        isFocused
+                            ? 'shadow-[0_0_0_2px_rgba(99,102,241,0.15),0_2px_8px_rgba(0,0,0,0.05)]'
+                            : 'shadow-[0_2px_8px_rgba(0,0,0,0.05)]',
+                    )}
+                    style={{
+                        background: '#ffffff',
+                        border: `1px solid ${isFocused ? 'rgba(99,102,241,0.25)' : 'rgba(0,0,0,0.07)'}`,
+                    }}
+                >
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        title="Прикрепить файл"
+                        className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-all"
+                    >
+                        <Paperclip size={15}/>
+                    </button>
+
+                    <div className="w-px h-4 bg-zinc-200 mx-0.5 shrink-0" />
+
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={handleFileChange}
+                        accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
+                    />
+
+                    <textarea
+                        ref={textareaRef}
+                        rows={1}
+                        value={displayInput}
+                        onChange={(e) => !isListening && setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        onFocus={() => setIsFocused(true)}
+                        onBlur={() => setIsFocused(false)}
+                        placeholder={
+                            isListening
+                                ? 'Слушаю…'
+                                : attachedFile
+                                    ? 'Комментарий...'
+                                    : 'Спросите помощника...'
+                        }
+                        disabled={loading && !isListening}
+                        className={cn(
+                            'flex-1 resize-none bg-transparent text-slate-900 placeholder:text-slate-400',
+                            'focus:outline-none text-[13px] leading-snug py-1 min-h-[22px] max-h-[120px] overflow-y-auto text-center scrollbar-none',
+                            isListening && 'text-indigo-700 font-medium',
+                        )}
+                    />
+
+                    {isSpeechSupported && (
                         <button
                             type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="shrink-0 w-12 h-12 flex items-center justify-center rounded-full text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-300"
-                            title="Прикрепить"
-                        >
-                            <Paperclip size={20}/>
-                        </button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            className="hidden"
-                            onChange={handleFileChange}
-                            accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
-                        />
-
-                        <textarea
-                            ref={textareaRef}
-                            rows={1}
-                            value={displayInput}
-                            onChange={(e) => !isListening && setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            onFocus={() => setIsFocused(true)}
-                            onBlur={() => setIsFocused(false)}
-                            placeholder={
-                                isListening
-                                    ? 'Слушаю…'
-                                    : attachedFile
-                                        ? 'Добавьте комментарий...'
-                                        : 'Спросите помощника...'
-                            }
-                            disabled={loading && !isListening}
+                            onClick={toggleMic}
+                            title={isListening ? 'Остановить' : 'Голосовой ввод'}
                             className={cn(
-                                'flex-1 resize-none bg-transparent text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400',
-                                'focus:outline-none text-[15px] leading-relaxed py-2.5 min-h-[40px] max-h-[200px] overflow-y-auto scrollbar-none',
-                                isListening && 'text-blue-600 font-medium',
+                                'shrink-0 w-8 h-8 flex items-center justify-center rounded-lg transition-all',
+                                isListening
+                                    ? 'text-indigo-500 bg-indigo-50'
+                                    : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50',
                             )}
-                        />
+                        >
+                            {isListening ? <SoundWave active/> : <Mic size={16}/>}
+                        </button>
+                    )}
 
-                        <div className="flex items-center gap-1 shrink-0 pb-1">
-                            {isSpeechSupported && (
-                                <button
-                                    type="button"
-                                    onClick={toggleMic}
-                                    className={cn(
-                                        'w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300',
-                                        isListening
-                                            ? 'text-indigo-600 bg-indigo-50'
-                                            : 'text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50',
-                                    )}
-                                    title={isListening ? 'Остановить' : 'Голос'}
-                                >
-                                    {isListening ? <SoundWave active/> : <Mic size={20}/>}
-                                </button>
-                            )}
+                    {loading ? (
+                        <button
+                            type="button"
+                            onClick={handleStop}
+                            title="Остановить"
+                            style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: '50%',
+                                background: '#ef4444',
+                                border: 'none',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'white',
+                                flexShrink: 0,
+                            }}
+                        >
+                            <Square size={12} fill="white" strokeWidth={0}/>
+                        </button>
+                    ) : (
+                        <button
+                            type="submit"
+                            disabled={!displayInput.trim() && !attachedFile}
+                            title="Отправить"
+                            style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: '50%',
+                                background:
+                                    displayInput.trim() || attachedFile
+                                        ? '#6366f1'
+                                        : 'rgba(0,0,0,0.06)',
+                                border: 'none',
+                                cursor: displayInput.trim() || attachedFile ? 'pointer' : 'not-allowed',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: displayInput.trim() || attachedFile ? 'white' : '#cbd5e1',
+                                flexShrink: 0,
+                                transition: 'background 0.15s',
+                            }}
+                        >
+                            <Send size={13}/>
+                        </button>
+                    )}
+                </div>
+            </form>
 
-                            {loading ? (
-                                <button
-                                    type="button"
-                                    onClick={handleStop}
-                                    className="w-12 h-12 flex items-center justify-center rounded-full bg-rose-500 text-white shadow-lg shadow-rose-100 hover:bg-rose-600 active:scale-90 transition-all duration-300"
-                                    title="Остановить"
-                                >
-                                    <Square size={16} fill="currentColor" />
-                                </button>
-                            ) : (
-                                <button
-                                    type="submit"
-                                    disabled={!displayInput.trim() && !attachedFile}
-                                    className={cn(
-                                        'w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 shadow-lg active:scale-90',
-                                        displayInput.trim() || attachedFile
-                                            ? 'bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700'
-                                            : 'bg-zinc-100 text-zinc-300 shadow-none cursor-not-allowed',
-                                    )}
-                                    title="Отправить"
-                                >
-                                    <Send size={18} className={displayInput.trim() || attachedFile ? "ml-0.5" : ""} />
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </form>
-            </div>
+            <p
+                className="shrink-0 text-center px-3 pb-2"
+                style={{fontSize: 10, color: '#cbd5e1', lineHeight: 1.4}}
+            >
+                EDMS Assistant — ИИ. Может ошибаться и давать неверную информацию.
+            </p>
         </div>
     )
 }
@@ -613,9 +657,6 @@ interface MessageRowProps {
         messageId: string,
         meta: NonNullable<ChatMessageType['refreshMeta']>,
     ) => Promise<void>
-    onDocumentClick: (docId: string) => void
-    onAttachmentClick: (fileName: string) => void
-    onSendMessage: (text: string) => void
 }
 
 const SUMMARY_TYPE_LABELS: Record<string, string> = {
@@ -624,17 +665,7 @@ const SUMMARY_TYPE_LABELS: Record<string, string> = {
     thesis: 'Тезисы',
 }
 
-function MessageRow({
-                        msg,
-                        threadId,
-                        onInterruptReply,
-                        onFieldFixed,
-                        onAllFixed,
-                        onRefreshSummary,
-                        onDocumentClick,
-                        onAttachmentClick,
-                        onSendMessage,
-                    }: MessageRowProps) {
+function MessageRow({msg, threadId, onInterruptReply, onFieldFixed, onAllFixed, onRefreshSummary}: MessageRowProps) {
     const handleFieldFixed = useCallback(
         (fieldKey: string, newValue: string) => onFieldFixed(msg.id, fieldKey, newValue),
         [msg.id, onFieldFixed],
@@ -655,50 +686,50 @@ function MessageRow({
         : null
     return (
         <div className={cn('flex flex-col', msg.role === 'user' ? 'items-end' : 'items-start')}>
-            <div className={cn(msg.role === 'user' ? 'max-w-[85%]' : 'w-full max-w-[92%]')}>
+            <div className={cn(msg.role === 'user' ? 'max-w-[75%]' : 'w-full max-w-[85%]')}>
                 {msg.content && (
                     <ChatMessage
                         content={msg.content}
                         role={msg.role}
                         timestamp={msg.timestamp}
                         isError={msg.isError === true}
-                        onDocumentClick={onDocumentClick}
-                        onAttachmentClick={onAttachmentClick}
                     />
                 )}
 
                 {msg.compliance != null && msg.role === 'assistant' && (
-                    <ComplianceResult
-                        data={msg.compliance}
-                        threadId={threadId}
-                        refreshMeta={msg.refreshMeta}
-                        onFieldFixed={handleFieldFixed}
-                        onAllFixed={handleAllFixed}
-                        onSendMessage={(text) => onSendMessage(text)}
-                    />
+                    <div style={{marginTop: msg.content ? 8 : 0}}>
+                        <ComplianceResult
+                            data={msg.compliance}
+                            threadId={threadId}
+                            refreshMeta={msg.refreshMeta}
+                            onFieldFixed={handleFieldFixed}
+                            onAllFixed={handleAllFixed}
+                        />
+                    </div>
                 )}
 
                 {msg.refreshMeta != null && msg.compliance == null && msg.role === 'assistant' && refreshLabel && (
-                    <div className="mt-2 pl-2">
+                    <div style={{marginTop: msg.content ? 6 : 0}}>
                         <button
                             type="button"
                             onClick={handleRefreshClick}
                             disabled={isRefreshing}
+                            title={`Пересчитать анализ «${refreshLabel}»`}
                             className={cn(
-                                'inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-[11px] font-bold transition-all shadow-sm',
+                                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all',
                                 isRefreshing
-                                    ? 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-wait'
-                                    : 'bg-white border-zinc-200 text-blue-600 hover:bg-zinc-50 active:scale-95',
+                                    ? 'bg-indigo-100 border-indigo-200 text-indigo-700 cursor-wait'
+                                    : 'bg-indigo-50 border-indigo-100 text-indigo-600 hover:bg-indigo-100 active:scale-95',
                             )}
                         >
-                            {isRefreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                            <span>{isRefreshing ? `Обновляю ${refreshLabel}...` : `Обновить ${refreshLabel}`}</span>
+                            <RefreshCw size={11} className={isRefreshing ? 'animate-spin' : undefined}/>
+                            <span>{isRefreshing ? `Обновляю «${refreshLabel}»…` : `Обновить «${refreshLabel}»`}</span>
                         </button>
                     </div>
                 )}
 
                 {msg.interrupt != null && msg.role === 'assistant' && (
-                    <div className="mt-2">
+                    <div style={{marginTop: msg.content ? 8 : 0}}>
                         <InterruptRenderer
                             payload={msg.interrupt as InterruptPayload}
                             onReply={onInterruptReply}
@@ -710,11 +741,9 @@ function MessageRow({
     )
 }
 
-const QUICK_ACTIONS = [
-  { label: 'Суммаризация', icon: Sparkles },
-  { label: 'Поиск', icon: Paperclip },
-  { label: 'Тезисы', icon: MessageSquare }
-]
+// ── EmptyState ────────────────────────────────────────────────────────────
+
+const QUICK_ACTIONS = ['Суммаризация', 'Поиск', 'Тезисы'] as const
 
 function EmptyState({
                         onAction,
@@ -724,32 +753,56 @@ function EmptyState({
     showQuickActions: boolean
 }) {
     return (
-        <div className="flex flex-col items-center justify-center flex-1 gap-8 px-10 py-12">
-            <div className="w-24 h-24 rounded-[32px] bg-indigo-50 border border-indigo-100 flex items-center justify-center shadow-xl shadow-indigo-100/50 animate-edms-slide-up">
-                <Sparkles size={44} className="text-indigo-600" />
+        <div className="flex flex-col items-center justify-center flex-1 gap-4 px-6">
+            <div
+                style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 20,
+                    background: 'rgba(99,102,241,0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}
+            >
+                <Sparkles size={32} strokeWidth={1.5} color="#6366f1"/>
             </div>
-            <div className="text-center space-y-3 animate-edms-slide-up" style={{ animationDelay: '100ms' }}>
-                <h1 className="text-2xl font-bold text-zinc-900 tracking-tight">Чем я могу помочь?</h1>
-                <p className="text-[15px] text-zinc-500 font-medium leading-relaxed max-w-[280px] mx-auto">
-                    Задайте вопрос о документах или выберите действие ниже
+            <div className="text-center">
+                <p style={{fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 4}}>
+                    Чем могу помочь?
                 </p>
+                <p style={{fontSize: 13, color: '#94a3b8'}}>Задайте вопрос ...</p>
             </div>
             {showQuickActions && (
-                <div className="flex flex-wrap items-center gap-2.5 justify-center mt-2 animate-edms-slide-up" style={{ animationDelay: '200ms' }}>
-                    {QUICK_ACTIONS.map((action) => {
-                        const Icon = action.icon
-                        return (
-                            <button
-                                key={action.label}
-                                type="button"
-                                onClick={() => onAction(action.label)}
-                                className="flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-white border border-zinc-100 text-[13px] font-bold text-zinc-700 hover:border-indigo-200 hover:text-indigo-600 transition-all shadow-sm hover:shadow-md hover:translate-y-[-1px] active:scale-95"
-                            >
-                                <Icon size={16} className="text-zinc-400 group-hover:text-indigo-500" />
-                                {action.label}
-                            </button>
-                        )
-                    })}
+                <div className="flex items-center gap-2 flex-wrap justify-center">
+                    {QUICK_ACTIONS.map((action) => (
+                        <button
+                            key={action}
+                            type="button"
+                            onClick={() => onAction(action)}
+                            style={{
+                                padding: '6px 16px',
+                                borderRadius: 999,
+                                background: 'white',
+                                border: '1px solid rgba(0,0,0,0.10)',
+                                fontSize: 12,
+                                color: '#334155',
+                                cursor: 'pointer',
+                                fontWeight: 500,
+                                transition: 'border-color 0.15s, color 0.15s',
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.borderColor = 'rgba(99,102,241,0.4)'
+                                e.currentTarget.style.color = '#6366f1'
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.10)'
+                                e.currentTarget.style.color = '#334155'
+                            }}
+                        >
+                            {action}
+                        </button>
+                    ))}
                 </div>
             )}
         </div>

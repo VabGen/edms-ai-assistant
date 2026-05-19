@@ -153,7 +153,7 @@ function ThreadItem({ thread, isActive, onSelect, onDelete }: ThreadItemProps) {
         'group relative mx-3 my-1 px-4 py-3 rounded-[18px] cursor-pointer transition-all duration-300',
         isActive
           ? 'bg-white shadow-md border border-zinc-100 scale-[1.02]'
-          : 'hover:bg-white/80 hover:translate-x-1',
+          : 'hover:bg-zinc-100 hover:translate-x-1',
       )}
     >
       <p

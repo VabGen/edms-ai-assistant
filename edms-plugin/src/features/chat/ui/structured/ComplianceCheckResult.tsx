@@ -18,12 +18,12 @@ export function ComplianceCheckResult({data}: { data: ComplianceData }) {
     const naCount = data.fields.filter((f: ComplianceField) => f.status === 'not_found').length
 
     return (
-        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 ">
             <CardHeader className={cn(
                 "flex-row items-start gap-4 p-4 space-y-0 border-b",
-                isError && "bg-rose-50/50 dark:bg-rose-900/10 border-rose-100/50 dark:border-rose-900/20",
-                isWarning && "bg-amber-50/50 dark:bg-amber-900/10 border-amber-100/50 dark:border-amber-900/20",
-                !isError && !isWarning && "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-100/50 dark:border-emerald-900/20"
+                isError && "bg-rose-50/50  border-rose-100/50 ",
+                isWarning && "bg-amber-50/50  border-amber-100/50 ",
+                !isError && !isWarning && "bg-emerald-50/50  border-emerald-100/50 "
             )}>
                 <IconBox
                     icon={StatusIcon}
@@ -35,76 +35,76 @@ export function ComplianceCheckResult({data}: { data: ComplianceData }) {
                     <div className="flex items-center justify-between gap-2 mb-1">
                         <CardTitle className={cn(
                             "text-base font-bold flex items-center gap-2",
-                            isError && "text-rose-600 dark:text-rose-400",
-                            isWarning && "text-amber-600 dark:text-amber-400",
-                            !isError && !isWarning && "text-emerald-600 dark:text-emerald-400"
+                            isError && "text-rose-600 ",
+                            isWarning && "text-amber-600 ",
+                            !isError && !isWarning && "text-emerald-600 "
                         )}>
                             {statusText}
                         </CardTitle>
                     </div>
-                    <div className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed font-medium">
+                    <div className="text-[13px] text-zinc-600  leading-relaxed font-medium">
                         {data.summary}
                     </div>
                 </div>
             </CardHeader>
 
-            <div className="flex items-center gap-4 px-4 py-3 bg-zinc-50/50 dark:bg-zinc-800/30 border-b border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center gap-4 px-4 py-3 bg-zinc-50/50  border-b border-zinc-100 ">
                 {okCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-tight">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600  uppercase tracking-tight">
                         <CheckCircle size={12} /> {okCount} ок
                     </div>
                 )}
                 {errCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-tight">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-600  uppercase tracking-tight">
                         <XCircle size={12} /> {errCount} ошибка
                     </div>
                 )}
                 {naCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-tight">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400  uppercase tracking-tight">
                         <Info size={12} /> {naCount} не найдено
                     </div>
                 )}
             </div>
 
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            <div className="divide-y divide-zinc-100 ">
                 {data.fields.map((field: ComplianceField, idx: number) => {
                     const isFieldError = field.status === 'mismatch'
                     const isFieldOk = field.status === 'ok'
 
                     return (
-                        <div key={idx} className="p-4 hover:bg-zinc-50/30 dark:hover:bg-zinc-800/20 transition-all group">
+                        <div key={idx} className="p-4 hover:bg-zinc-50/30  transition-all group">
                             <div className="flex items-center justify-between gap-3 mb-3">
                                 <div className="flex items-center gap-2.5">
                                     <div className={cn(
                                         "w-1.5 h-1.5 rounded-full shrink-0",
                                         isFieldError ? "bg-rose-500" : (isFieldOk ? "bg-emerald-500" : "bg-zinc-300")
                                     )} />
-                                    <span className="text-[13px] font-bold text-zinc-800 dark:text-zinc-200 leading-none">{field.label}</span>
+                                    <span className="text-[13px] font-bold text-zinc-800  leading-none">{field.label}</span>
                                 </div>
                                 <span className={cn(
                                     "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
-                                    isFieldError ? "bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400" :
-                                    (isFieldOk ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                                    "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400")
+                                    isFieldError ? "bg-rose-50 text-rose-600  " :
+                                    (isFieldOk ? "bg-emerald-50 text-emerald-600  " :
+                                    "bg-zinc-100 text-zinc-500  ")
                                 )}>
                                     {isFieldError ? 'Ошибка' : (isFieldOk ? 'OK' : 'Пропуск')}
                                 </span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-zinc-50 dark:bg-zinc-800/40 p-2.5 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                                <div className="bg-zinc-50  p-2.5 rounded-lg border border-zinc-100 ">
                                     <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В карточке</div>
-                                    <div className="text-[12px] font-medium text-zinc-700 dark:text-zinc-300 break-words leading-relaxed">{field.card_value}</div>
+                                    <div className="text-[12px] font-medium text-zinc-700  break-words leading-relaxed">{field.card_value}</div>
                                 </div>
                                 <div className={cn(
                                     "p-2.5 rounded-lg border",
-                                    isFieldError ? "bg-rose-50/30 dark:bg-rose-900/10 border-rose-100/50 dark:border-rose-900/20" : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-100 dark:border-zinc-800"
+                                    isFieldError ? "bg-rose-50/30  border-rose-100/50 " : "bg-zinc-50  border-zinc-100 "
                                 )}>
                                     <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В файле</div>
                                     <div className={cn(
                                         "text-[12px] font-bold break-words leading-relaxed",
-                                        isFieldError ? "text-rose-600 dark:text-rose-400" : "text-zinc-700 dark:text-zinc-300",
-                                        !field.file_value && "text-zinc-300 dark:text-zinc-700 italic font-normal"
+                                        isFieldError ? "text-rose-600 " : "text-zinc-700 ",
+                                        !field.file_value && "text-zinc-300  italic font-normal"
                                     )}>
                                         {field.file_value || '—'}
                                     </div>
@@ -112,7 +112,7 @@ export function ComplianceCheckResult({data}: { data: ComplianceData }) {
                             </div>
 
                             {field.recommendation && (
-                                <div className="mt-3 p-3 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-xl text-[12px] text-amber-700 dark:text-amber-400 flex gap-2.5 items-start font-medium leading-relaxed">
+                                <div className="mt-3 p-3 bg-amber-50/50  border border-amber-100  rounded-xl text-[12px] text-amber-700  flex gap-2.5 items-start font-medium leading-relaxed">
                                     <Lightbulb size={14} className="shrink-0 mt-0.5 text-amber-500" />
                                     {field.recommendation}
                                 </div>
@@ -122,7 +122,7 @@ export function ComplianceCheckResult({data}: { data: ComplianceData }) {
                 })}
             </div>
 
-            <div className="p-3 bg-zinc-50/50 dark:bg-zinc-800/30 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-400 font-medium flex items-center gap-2">
+            <div className="p-3 bg-zinc-50/50  border-t border-zinc-100  text-[11px] text-zinc-400 font-medium flex items-center gap-2">
                 <Info size={12} className="text-zinc-300" />
                 Проверено AI. Результат добавлен в карточку.
             </div>
