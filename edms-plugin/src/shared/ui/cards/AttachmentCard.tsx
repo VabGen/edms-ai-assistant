@@ -31,25 +31,25 @@ export function AttachmentCard({ headers, row, index }: AttachmentCardProps) {
     const Icon = getFileIcon(fileName)
 
     const cardContent = (
-        <CardHeader className="flex-row items-center gap-3 p-3 space-y-0">
+        <CardHeader className="flex-row items-center gap-4 p-4 space-y-0">
         <IconBox
             icon={Icon}
             variant="zinc"
-            size="sm"
+            size="md"
         />
         <div className="flex-1 min-w-0">
-            <CardTitle className="text-sm truncate group-hover:text-indigo-600 transition-colors">
+            <CardTitle className="text-[14px] font-bold truncate group-hover:text-indigo-600 transition-colors">
                 {fileName || `Вложение ${index + 1}`}
             </CardTitle>
             {(fileSize || fileDate) && (
-                <CardDescription className="text-[11px] mt-0.5 flex items-center gap-2">
-                    {fileSize && <span>{fileSize}</span>}
+                <CardDescription className="text-[11px] mt-1 flex items-center gap-2">
+                    {fileSize && <span className="font-medium text-zinc-500">{fileSize}</span>}
                     {fileSize && fileDate && <span className="w-1 h-1 rounded-full bg-zinc-300" />}
-                    {fileDate && <span>{fileDate}</span>}
+                    {fileDate && <span className="text-zinc-400">{fileDate}</span>}
                 </CardDescription>
             )}
         </div>
-        <Download size={14} className="text-zinc-400 group-hover:text-indigo-500 transition-colors shrink-0" />
+        <Download size={16} className="text-zinc-400 group-hover:text-indigo-500 transition-colors shrink-0" />
     </CardHeader>
     )
 

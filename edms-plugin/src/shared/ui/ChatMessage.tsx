@@ -90,8 +90,8 @@ function StructuredOutputRenderer({output}: { output: StructuredOutput }) {
 
 function humanizeError(raw: string): string {
     const lower = raw.toLowerCase()
-    if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network'))
-        return 'Нет соединения с сервером. Проверьте подключение к интернету и доступность сервиса.'
+    if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network') || lower.includes('connection lost'))
+        return 'Соединение потеряно. Проверьте подключение к интернету или доступность сервиса.'
     if (lower.includes('timeout') || lower.includes('timed out'))
         return 'Сервер не ответил вовремя. Возможно, он перегружен — попробуйте чуть позже.'
     if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('unauthenticated'))
@@ -100,6 +100,8 @@ function humanizeError(raw: string): string {
         return 'Доступ запрещён. У вас нет прав на выполнение этого действия.'
     if (lower.includes('404') || lower.includes('not found'))
         return 'Запрашиваемый ресурс не найден. Возможно, он был удалён или перемещён.'
+    if (lower.includes('422') || lower.includes('unprocessable'))
+        return 'Не удалось обработать запрос. Проверьте корректность введённых данных или формат файла.'
     if (lower.includes('500') || lower.includes('internal server'))
         return 'Внутренняя ошибка сервера. Мы уже работаем над её устранением.'
     if (lower.includes('503') || lower.includes('service unavailable'))
