@@ -336,7 +336,7 @@ export function ChatMessage({
         <div className={cn("flex w-full mb-3 last:mb-0", isUser ? "justify-end" : "justify-start")}>
             <div
                 className={cn(
-                    "max-w-[88%] px-5 py-4 edms-chat-text transition-all duration-300 animate-edms-fade-in",
+                    "w-full px-5 py-4 edms-chat-text transition-all duration-300 animate-edms-fade-in",
                     isUser
                         ? "bg-indigo-600 text-white rounded-[20px] rounded-tr-[4px] shadow-sm"
                         : "bg-white text-zinc-900 border border-zinc-100/80 rounded-[20px] rounded-tl-[4px] shadow-sm"

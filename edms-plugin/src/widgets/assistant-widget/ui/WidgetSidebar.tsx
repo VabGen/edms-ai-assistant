@@ -52,6 +52,11 @@ export function WidgetSidebar({ onOpenSettings }: WidgetSidebarProps) {
   const handleSelectThread = useCallback(
     async (thread: Thread) => {
       if (thread.id === threadId) return
+
+      const token = getAuthToken()
+      if (!token) return
+
+      // Save current thread state before switching
       if (messages.length > 0 && threadId) {
         const preview = buildPreview(messages.filter((m) => m.role === 'user'))
         const updated = [
@@ -61,8 +66,25 @@ export function WidgetSidebar({ onOpenSettings }: WidgetSidebarProps) {
         setThreads(updated)
         await threadsStorage.setValue(updated)
       }
-      setMessages(thread.messages ?? [])
-      setThreadId(thread.id)
+
+      try {
+        const history = await sendMessage('getChatHistory', {
+          user_token: token,
+          thread_id: thread.id,
+        })
+
+        const mappedMessages = history.messages.map((m, i) => ({
+          id: `${thread.id}-${i}`,
+          role: m.type === 'human' ? 'user' : 'assistant',
+          content: m.content,
+          timestamp: Date.now(),
+        }))
+
+        setMessages(mappedMessages as any)
+        setThreadId(thread.id)
+      } catch (err) {
+        console.error('Failed to load thread history:', err)
+      }
     },
     [messages, threadId, threads, setThreads, setMessages, setThreadId],
   )

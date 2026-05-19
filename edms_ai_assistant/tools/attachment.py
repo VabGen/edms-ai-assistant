@@ -17,6 +17,12 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field, field_validator
 
+from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.interrupt_contract import (
+    CardSelectInterrupt,
+    InterruptCard,
+    CardSelectResume,
+)
 from edms_ai_assistant.agent.runnable_utils import (
     get_document_id_from_config,
     get_token_from_config,
@@ -330,19 +336,30 @@ async def doc_get_file_content(
     if attachment_id:
         target = _resolve_attachment(attachments, attachment_id)
         if target is None:
-            available = [
-                {"id": _get_attachment_id(a), "name": _get_attachment_name(a)}
-                for a in attachments
-            ]
-            names_str = ", ".join(f"«{item['name']}»" for item in available)
-            return {
-                "status": "requires_disambiguation",
-                "message": (
-                    f"Вложение «{attachment_id}» не найдено в документе. "
-                    f"Выберите вложение для анализа:"
-                ),
-                "available_attachments": available,
-            }
+            cards = []
+            for a in attachments:
+                meta = _build_attachment_meta(a)
+                cards.append(InterruptCard(
+                    id=meta["id"],
+                    label=meta["название"],
+                    description=f"{meta['тип_вложения'] or 'Файл'} • {meta['размер_кб']} КБ",
+                    primary_attrs={
+                        "Дата": meta["дата_загрузки"] or "—",
+                        "ЭЦП": "Да" if meta["есть_эцп"] else "Нет"
+                    },
+                    metadata={"url": f"/attachment/{meta['название']}"}
+                ))
+
+            resume = ask_human(CardSelectInterrupt(
+                prompt=f"Вложение «{attachment_id}» не найдено. Выберите вложение для анализа:",
+                cards=cards
+            ))
+            if isinstance(resume, CardSelectResume):
+                resolved_id = resume.selected_ids[0]
+                target = next((a for a in attachments if _get_attachment_id(a) == resolved_id), None)
+            else:
+                return {"status": "error", "message": "Выбор вложения отменён."}
+
         resolved_id = _get_attachment_id(target)
         logger.info("Attachment resolved: '%s' → %s...", attachment_id, resolved_id[:8])
     else:
@@ -351,26 +368,29 @@ async def doc_get_file_content(
             resolved_id = _get_attachment_id(target)
             logger.info("Single attachment auto-selected: %s...", resolved_id[:8])
         else:
-            available = [
-                {
-                    "id": _get_attachment_id(a),
-                    "name": _get_attachment_name(a) or "без имени",
-                }
-                for a in attachments
-                if _get_attachment_id(a)
-            ]
-            names_str = ", ".join(f"«{item['name']}»" for item in available)
-            logger.info(
-                "No attachment_id and multiple attachments — returning disambiguation"
-            )
-            return {
-                "status": "requires_disambiguation",
-                "message": (
-                    f"В документе несколько вложений. "
-                    f"Укажите, какое вложение открыть для анализа: {names_str}."
-                ),
-                "available_attachments": available,
-            }
+            cards = []
+            for a in attachments:
+                meta = _build_attachment_meta(a)
+                cards.append(InterruptCard(
+                    id=meta["id"],
+                    label=meta["название"],
+                    description=f"{meta['тип_вложения'] or 'Файл'} • {meta['размер_кб']} КБ",
+                    primary_attrs={
+                        "Дата": meta["дата_загрузки"] or "—",
+                        "ЭЦП": "Да" if meta["есть_эцп"] else "Нет"
+                    },
+                    metadata={"url": f"/attachment/{meta['название']}"}
+                ))
+
+            resume = ask_human(CardSelectInterrupt(
+                prompt="В документе несколько вложений. Какое из них проанализировать?",
+                cards=cards
+            ))
+            if isinstance(resume, CardSelectResume):
+                resolved_id = resume.selected_ids[0]
+                target = next((a for a in attachments if _get_attachment_id(a) == resolved_id), None)
+            else:
+                return {"status": "error", "message": "Выбор вложения отменён."}
 
     file_info = _build_attachment_meta(target)
     file_name: str = file_info["название"]

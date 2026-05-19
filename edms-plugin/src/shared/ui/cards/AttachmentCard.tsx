@@ -55,12 +55,17 @@ export function AttachmentCard({ headers, row, index }: AttachmentCardProps) {
 
     return (
         <a
-            href="#"
+            href={fileName ? `/attachment/${fileName}` : '#'}
+            target="_blank"
+            rel="noopener noreferrer"
             className="block mb-2 no-underline"
             onClick={(e) => {
-                e.preventDefault()
-                if (fileName && onAttachmentClick) {
-                    onAttachmentClick(fileName)
+                // Allow standard browser behavior for middle-click/ctrl-click
+                if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+                    e.preventDefault()
+                    if (fileName && onAttachmentClick) {
+                        onAttachmentClick(fileName)
+                    }
                 }
             }}
         >

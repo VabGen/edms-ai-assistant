@@ -262,10 +262,10 @@ export function WidgetChat() {
                     },
                 }
             })
-            // Give the agent ~3s to call doc_update_field before reloading the page.
+            // Give the agent ~6s to call doc_update_field before reloading the page.
             window.setTimeout(() => {
                 void sendMessage('reloadActiveTab', undefined)
-            }, 3000)
+            }, 6000)
         },
         [updateMessage],
     )
@@ -325,42 +325,12 @@ export function WidgetChat() {
     )
 
     const handleDocumentClick = useCallback((docId: string) => {
-        void sendMessage('navigateTo', {url: `/document-form/${docId}`, newTab: true})
+        void sendMessage('navigateTo', {url: `/document/${docId}`, newTab: true})
     }, [])
 
-    const handleAttachmentClick = useCallback(
-        async (fileName: string) => {
-            // Remove loading check to allow switching attachments
-            const token = getAuthToken()
-            if (!token) {
-                toast.error('Войдите в систему', 'Авторизация')
-                return
-            }
-
-            let tid: string
-            try {
-                tid = await getOrCreateThreadId()
-            } catch {
-                return
-            }
-
-            // Enhanced prompt for attachment analysis, prioritizing facts if that's what's failing
-            const prefFormat = prefs.documents.defaultSummaryFormat
-            let prompt = `Проанализируй вложение: ${fileName}`
-            if (prefFormat === 'extractive') prompt = `Извлеки основные факты из вложения: ${fileName}`
-            if (prefFormat === 'thesis') prompt = `Подготовь тезисный план вложения: ${fileName}`
-
-            streamHandleRef.current = startStream({
-                message: prompt,
-                userToken: token,
-                threadId: tid,
-                contextUiId: extractDocIdFromUrl(),
-                filePath: null,
-                resumeValue: null,
-            })
-        },
-        [getOrCreateThreadId, startStream, prefs.documents.defaultSummaryFormat],
-    )
+    const handleAttachmentClick = useCallback((fileName: string) => {
+        void sendMessage('navigateTo', {url: `/attachment/${fileName}`, newTab: true})
+    }, [])
 
     const handleFieldFixed = useCallback(
         (messageId: string, fieldKey: string, newValue: string) => {
@@ -481,6 +451,8 @@ export function WidgetChat() {
                             onFieldFixed={handleFieldFixed}
                             onAllFixed={handleAllFixed}
                             onRefreshSummary={handleRefreshSummary}
+                            onDocumentClick={handleDocumentClick}
+                            onAttachmentClick={handleAttachmentClick}
                         />
                     )
                 })}
@@ -657,6 +629,8 @@ interface MessageRowProps {
         messageId: string,
         meta: NonNullable<ChatMessageType['refreshMeta']>,
     ) => Promise<void>
+    onDocumentClick: (docId: string) => void
+    onAttachmentClick: (fileName: string) => void
 }
 
 const SUMMARY_TYPE_LABELS: Record<string, string> = {
@@ -665,7 +639,16 @@ const SUMMARY_TYPE_LABELS: Record<string, string> = {
     thesis: 'Тезисы',
 }
 
-function MessageRow({msg, threadId, onInterruptReply, onFieldFixed, onAllFixed, onRefreshSummary}: MessageRowProps) {
+function MessageRow({
+                        msg,
+                        threadId,
+                        onInterruptReply,
+                        onFieldFixed,
+                        onAllFixed,
+                        onRefreshSummary,
+                        onDocumentClick,
+                        onAttachmentClick,
+                    }: MessageRowProps) {
     const handleFieldFixed = useCallback(
         (fieldKey: string, newValue: string) => onFieldFixed(msg.id, fieldKey, newValue),
         [msg.id, onFieldFixed],
@@ -686,13 +669,15 @@ function MessageRow({msg, threadId, onInterruptReply, onFieldFixed, onAllFixed, 
         : null
     return (
         <div className={cn('flex flex-col', msg.role === 'user' ? 'items-end' : 'items-start')}>
-            <div className={cn(msg.role === 'user' ? 'max-w-[75%]' : 'w-full max-w-[85%]')}>
+            <div className={cn(msg.role === 'user' ? 'max-w-[60%]' : 'max-w-full')}>
                 {msg.content && (
                     <ChatMessage
                         content={msg.content}
                         role={msg.role}
                         timestamp={msg.timestamp}
                         isError={msg.isError === true}
+                        onDocumentClick={onDocumentClick}
+                        onAttachmentClick={onAttachmentClick}
                     />
                 )}
 
