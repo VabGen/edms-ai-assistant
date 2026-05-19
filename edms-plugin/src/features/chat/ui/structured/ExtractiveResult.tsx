@@ -53,8 +53,8 @@ export function ExtractiveResult({data}: { data: ExtractiveData }) {
     const categories = [...new Set(data.facts.map(f => f.category.toUpperCase()))]
 
     return (
-        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
-            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-900/10 dark:to-indigo-900/10 border-b border-zinc-100 dark:border-zinc-800">
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 ">
+            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50   border-b border-zinc-100 ">
                 <IconBox
                     icon={FileSearch}
                     variant="primary"
@@ -65,18 +65,18 @@ export function ExtractiveResult({data}: { data: ExtractiveData }) {
                         Извлечённые факты
                     </CardTitle>
                     {data.document_summary && (
-                        <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-1">
+                        <div className="text-[11px] font-medium text-zinc-500  mt-1 line-clamp-1">
                             {data.document_summary}
                         </div>
                     )}
                 </div>
-                <div className="px-2 py-1 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider border border-blue-200 dark:border-blue-800">
+                <div className="px-2 py-1 rounded-lg bg-blue-100  text-blue-600  text-[10px] font-bold uppercase tracking-wider border border-blue-200 ">
                     {data.facts.length} фактов
                 </div>
             </CardHeader>
 
             {categories.length > 1 && (
-                <div className="flex flex-wrap gap-2 p-4 bg-zinc-50/50 dark:bg-zinc-800/30 border-b border-zinc-100 dark:border-zinc-800">
+                <div className="flex flex-wrap gap-2 p-4 bg-zinc-50/50  border-b border-zinc-100 ">
                     {categories.map(cat => {
                         const cfg = getFactConfig(cat)
                         const count = data.facts.filter(f => f.category.toUpperCase() === cat).length
@@ -121,11 +121,11 @@ export function ExtractiveResult({data}: { data: ExtractiveData }) {
                                 )}>
                                     <Icon size={12} /> {fact.label}
                                 </div>
-                                <div className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest opacity-60">
+                                <div className="text-[9px] font-bold text-zinc-400  uppercase tracking-widest opacity-60">
                                     {fact.category}
                                 </div>
                             </div>
-                            <div className="text-[13px] font-bold text-zinc-900 dark:text-zinc-100 break-words leading-relaxed">
+                            <div className="text-[13px] font-bold text-zinc-900  break-words leading-relaxed">
                                 {fact.value}
                             </div>
                         </div>

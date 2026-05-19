@@ -87,20 +87,20 @@ export function DocCard({ headers, row, index }: DocCardProps) {
             </CardDescription>
 
             {summary && summary !== '—' && (
-                <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed line-clamp-2 m-0 mb-2">
+                <p className="text-[13px] text-zinc-600  leading-relaxed line-clamp-2 m-0 mb-2">
                     {summary}
                 </p>
             )}
 
             <div className="flex flex-wrap gap-2 items-center">
                 {author && author !== '—' && (
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500">
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50  border border-zinc-100  text-[11px] text-zinc-500">
                         <Users size={12} />
                         {author}
                     </div>
                 )}
                 {status && status !== '—' && (
-                    <div className="px-2 py-1 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-[10px] font-semibold text-zinc-500 uppercase tracking-tight">
+                    <div className="px-2 py-1 rounded-lg bg-zinc-50  border border-zinc-100  text-[10px] font-semibold text-zinc-500 uppercase tracking-tight">
                         {status}
                     </div>
                 )}
@@ -117,8 +117,11 @@ export function DocCard({ headers, row, index }: DocCardProps) {
                 rel="noopener noreferrer"
                 className="block mb-3 no-underline"
                 onClick={(e) => {
-                    e.preventDefault();
-                    onDocumentClick!(docId);
+                    // Allow standard browser behavior for middle-click/ctrl-click
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+                        e.preventDefault();
+                        onDocumentClick!(docId);
+                    }
                 }}
             >
                 <Card

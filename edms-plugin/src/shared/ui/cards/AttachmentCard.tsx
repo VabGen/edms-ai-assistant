@@ -54,12 +54,22 @@ export function AttachmentCard({ headers, row, index }: AttachmentCardProps) {
     )
 
     return (
-        <Card
-            isClickable={!!onAttachmentClick}
-            onClick={() => fileName && onAttachmentClick?.(fileName)}
-            className="mb-2 group hover:border-indigo-200 transition-all"
+        <a
+            href="#"
+            className="block mb-2 no-underline"
+            onClick={(e) => {
+                e.preventDefault()
+                if (fileName && onAttachmentClick) {
+                    onAttachmentClick(fileName)
+                }
+            }}
         >
-            {cardContent}
-        </Card>
+            <Card
+                isClickable={!!onAttachmentClick}
+                className="group hover:border-indigo-200 transition-all"
+            >
+                {cardContent}
+            </Card>
+        </a>
     )
 }

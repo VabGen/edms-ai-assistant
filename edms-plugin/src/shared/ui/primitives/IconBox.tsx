@@ -28,12 +28,12 @@ export const IconBox = ({
   }
 
   const variants = {
-    default: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
-    primary: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
-    success: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400',
-    warning: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
-    error: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400',
-    zinc: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300',
+    default: 'bg-zinc-100 text-zinc-500',
+    primary: 'bg-blue-50 text-blue-600',
+    success: 'bg-emerald-50 text-emerald-600',
+    warning: 'bg-amber-50 text-amber-600',
+    error: 'bg-rose-50 text-rose-600',
+    zinc: 'bg-zinc-100 text-zinc-600',
   }
 
   return (

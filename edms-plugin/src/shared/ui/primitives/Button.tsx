@@ -10,15 +10,15 @@ export const buttonVariants = cva(
         primary:
           'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 hover:border-indigo-700 shadow-sm hover:shadow-indigo-100',
         ghost:
-          'bg-white/40 text-indigo-600 border-indigo-100 hover:bg-indigo-600 hover:text-white hover:border-indigo-600',
+          'bg-zinc-50 text-indigo-600 border-indigo-100 hover:bg-indigo-600 hover:text-white hover:border-indigo-600',
         danger:
           'bg-white text-red-500 border-red-200/50 hover:bg-red-500 hover:text-white hover:border-red-500',
         muted:
-          'bg-transparent text-slate-400 border-transparent hover:bg-white/70 hover:text-slate-700',
+          'bg-transparent text-slate-400 border-transparent hover:bg-zinc-50 hover:text-slate-700',
         stop:
           'bg-red-50 text-red-400 border-red-200/50 hover:bg-red-500 hover:text-white hover:border-red-500',
         icon:
-          'bg-transparent text-slate-400 border-transparent hover:bg-white/70 hover:text-slate-600 rounded-lg',
+          'bg-transparent text-slate-400 border-transparent hover:bg-zinc-50 hover:text-slate-600 rounded-lg',
       },
       size: {
         xs: 'px-2 py-1 text-[9px]',

@@ -5,8 +5,8 @@ import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
 
 export function ExecutiveSummaryResult({data}: { data: ExecutiveSummaryData }) {
     return (
-        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800">
-            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-violet-50/50 to-indigo-50/50 dark:from-violet-900/10 dark:to-indigo-900/10 border-b border-zinc-100 dark:border-zinc-800">
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 ">
+            <CardHeader className="flex-row items-center gap-4 p-4 space-y-0 bg-gradient-to-br from-violet-50/50 to-indigo-50/50   border-b border-zinc-100 ">
                 <IconBox
                     icon={Sparkles}
                     variant="primary"
@@ -26,10 +26,10 @@ export function ExecutiveSummaryResult({data}: { data: ExecutiveSummaryData }) {
                 <div className="p-4 space-y-3">
                     {data.bullets.map((bullet, i) => (
                         <div key={i} className="flex items-start gap-3 group">
-                            <div className="w-5 h-5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5 border border-violet-100 dark:border-violet-800/50">
+                            <div className="w-5 h-5 rounded-md bg-violet-50  text-violet-600  text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5 border border-violet-100 ">
                                 {i + 1}
                             </div>
-                            <span className="text-[14px] text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                            <span className="text-[14px] text-zinc-700  leading-relaxed">
                                 {bullet}
                             </span>
                         </div>
@@ -38,11 +38,11 @@ export function ExecutiveSummaryResult({data}: { data: ExecutiveSummaryData }) {
             )}
 
             {data.recommendation && (
-                <div className="mx-4 mb-4 p-4 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-xl flex gap-3 items-start shadow-sm">
-                    <IconBox icon={Lightbulb} variant="warning" size="sm" className="bg-white dark:bg-zinc-800 shadow-sm mt-0.5" />
+                <div className="mx-4 mb-4 p-4 bg-amber-50/50  border border-amber-100  rounded-xl flex gap-3 items-start shadow-sm">
+                    <IconBox icon={Lightbulb} variant="warning" size="sm" className="bg-white  shadow-sm mt-0.5" />
                     <div>
-                        <div className="text-[11px] font-bold text-amber-700 dark:text-amber-500 uppercase tracking-tight mb-1">Рекомендация</div>
-                        <div className="text-[13px] text-zinc-800 dark:text-zinc-200 leading-relaxed font-medium">
+                        <div className="text-[11px] font-bold text-amber-700  uppercase tracking-tight mb-1">Рекомендация</div>
+                        <div className="text-[13px] text-zinc-800  leading-relaxed font-medium">
                             {data.recommendation}
                         </div>
                     </div>

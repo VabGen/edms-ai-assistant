@@ -304,7 +304,16 @@ export function useSettingsStore(): UseSettingsStoreReturn {
     )
     const updateTech = useCallback(
         <K extends keyof TechSettings>(group: K, patch: Partial<TechSettings[K]>) => {
-            setDraft(prev => ({...prev, tech: {...prev.tech, [group]: {...prev.tech[group], ...patch}}}))
+            setDraft(prev => {
+                const next = {
+                    ...prev,
+                    tech: {
+                        ...prev.tech,
+                        [group]: {...prev.tech[group], ...patch}
+                    }
+                }
+                return next
+            })
         }, [],
     )
 

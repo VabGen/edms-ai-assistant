@@ -63,13 +63,13 @@ const FieldCard = memo(({field, onFixed, disabled}: FieldCardProps) => {
           onClick={handleClick}
           className={cn(
             "p-4 transition-all group relative",
-            canFix ? "cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/30" : "cursor-default"
+            canFix ? "cursor-pointer hover:bg-zinc-50 " : "cursor-default"
           )}
         >
             <div className="flex items-center justify-between gap-3 mb-3">
                 <div className="flex items-center gap-2.5">
                     <IconBox icon={Icon} variant={cfg.variant} size="sm" />
-                    <span className="text-[13px] font-bold text-zinc-800 dark:text-zinc-200 leading-none">{field.label}</span>
+                    <span className="text-[13px] font-bold text-zinc-800  leading-none">{field.label}</span>
                 </div>
                 <span className={cn(
                     "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
@@ -83,18 +83,18 @@ const FieldCard = memo(({field, onFixed, disabled}: FieldCardProps) => {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-                <div className="bg-zinc-50 dark:bg-zinc-800/40 p-2.5 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                <div className="bg-zinc-50  p-2.5 rounded-lg border border-zinc-100 ">
                     <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В карточке</div>
-                    <div className="text-[12px] font-medium text-zinc-700 dark:text-zinc-300 break-words leading-relaxed">{field.card_value}</div>
+                    <div className="text-[12px] font-medium text-zinc-700  break-words leading-relaxed">{field.card_value}</div>
                 </div>
                 <div className={cn(
                     "p-2.5 rounded-lg border",
-                    field.status === 'mismatch' ? "bg-rose-50/30 border-rose-100/50" : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-100 dark:border-zinc-800"
+                    field.status === 'mismatch' ? "bg-rose-50/30 border-rose-100/50" : "bg-zinc-50  border-zinc-100 "
                 )}>
                     <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В файле</div>
                     <div className={cn(
                         "text-[12px] font-bold break-words leading-relaxed",
-                        field.status === 'mismatch' ? "text-rose-600" : "text-zinc-700 dark:text-zinc-300",
+                        field.status === 'mismatch' ? "text-rose-600" : "text-zinc-700 ",
                         !field.correct_value && "text-zinc-300 italic font-normal"
                     )}>
                         {field.correct_value || '—'}
@@ -151,7 +151,7 @@ export const ComplianceResult = memo(({
     }, [onRefreshDocument, onSendMessage])
 
     return (
-        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 dark:border-zinc-800 mt-2">
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60  mt-2">
             <CardHeader className={cn(
                 "flex-row items-start gap-4 p-4 space-y-0 border-b transition-colors",
                 isError ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100"
