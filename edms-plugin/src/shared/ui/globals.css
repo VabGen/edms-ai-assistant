@@ -144,6 +144,16 @@
     animation: edms-slide-in-left 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
+@keyframes edms-wave {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+    30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes edms-soundbar {
+    0%, 100% { transform: scaleY(1); opacity: 0.5; }
+    50% { transform: scaleY(2); opacity: 1; }
+}
+
 /* ─── Burger Animation ───────────────────────────────────────────────────── */
 .burger-icon {
     width: 18px;
