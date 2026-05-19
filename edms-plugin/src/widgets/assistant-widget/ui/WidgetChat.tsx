@@ -325,7 +325,7 @@ export function WidgetChat() {
     )
 
     const handleDocumentClick = useCallback((docId: string) => {
-        void sendMessage('navigateTo', {url: `/document/${docId}`, newTab: true})
+        void sendMessage('navigateTo', {url: `/document-form/${docId}`, newTab: true})
     }, [])
 
     const handleAttachmentClick = useCallback((fileName: string) => {

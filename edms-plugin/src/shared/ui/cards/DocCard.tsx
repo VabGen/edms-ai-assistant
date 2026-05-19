@@ -112,7 +112,7 @@ export function DocCard({ headers, row, index }: DocCardProps) {
     if (isClickable) {
         return (
             <a
-                href={`/document/${docId}`}
+                href={`/document-form/${docId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block mb-3 no-underline"

@@ -288,16 +288,12 @@ function SmartTable({children}: { children: React.ReactNode }) {
 function ErrorMessage({raw, timeLabel}: { raw: string; timeLabel: string }) {
     const friendly = humanizeError(raw)
     return (
-        <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 max-w-[90%] animate-edms-slide-up">
-            <div className="flex items-center gap-2 mb-2">
-                <AlertCircle size={16} className="text-rose-500" />
-                <span className="text-[13px] font-bold text-rose-800 uppercase tracking-tight">Ошибка</span>
-            </div>
-            <p className="text-[14px] text-rose-700 leading-relaxed m-0">
+        <div className="bg-white text-zinc-900 border border-zinc-100/80 rounded-[20px] rounded-tl-[4px] px-5 py-4 shadow-sm animate-edms-fade-in max-w-[90%]">
+            <p className="text-[15px] leading-relaxed m-0">
                 {friendly}
             </p>
-            <div className="mt-2.5 text-[11px] text-rose-400 font-medium flex items-center gap-1.5">
-                <Clock size={11} />
+            <div className="mt-2 text-[10px] font-medium flex items-center gap-1 opacity-50 text-zinc-500">
+                <Clock size={10} />
                 {timeLabel}
             </div>
         </div>
