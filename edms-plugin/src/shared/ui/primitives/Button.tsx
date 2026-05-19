@@ -8,9 +8,9 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 hover:border-indigo-700',
+          'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 hover:border-indigo-700 shadow-sm hover:shadow-indigo-100',
         ghost:
-          'bg-white text-indigo-600 border-indigo-200/50 hover:bg-indigo-600 hover:text-white hover:border-indigo-600',
+          'bg-white/40 text-indigo-600 border-indigo-100 hover:bg-indigo-600 hover:text-white hover:border-indigo-600',
         danger:
           'bg-white text-red-500 border-red-200/50 hover:bg-red-500 hover:text-white hover:border-red-500',
         muted:

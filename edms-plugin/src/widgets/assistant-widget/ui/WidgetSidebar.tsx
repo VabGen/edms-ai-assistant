@@ -84,24 +84,22 @@ export function WidgetSidebar({ onOpenSettings }: WidgetSidebarProps) {
 
   return (
     <aside
-      className="flex flex-col shrink-0 border-r overflow-hidden"
+      className="flex flex-col shrink-0 border-r border-zinc-100/50 overflow-hidden bg-zinc-50/20"
       style={{
-        width: 200,
-        borderColor: 'rgba(0,0,0,0.05)',
-        background: 'rgba(248,250,252,0.7)',
+        width: 280,
       }}
     >
-      <div className="flex items-center justify-between px-3 py-2.5 shrink-0" style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">
+      <div className="flex items-center justify-between px-5 py-4 shrink-0 border-b border-zinc-100/50">
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
           История
         </span>
         <button
           type="button"
           onClick={handleNewChat}
           title="Новый диалог"
-          className="w-6 h-6 flex items-center justify-center rounded-lg text-indigo-500 hover:bg-indigo-50 transition-colors"
+          className="p-2 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-all active:scale-90"
         >
-          <PenSquare size={13} />
+          <PenSquare size={16} />
         </button>
       </div>
 
@@ -123,14 +121,14 @@ export function WidgetSidebar({ onOpenSettings }: WidgetSidebarProps) {
         )}
       </div>
 
-      <div className="shrink-0 p-2" style={{ borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+      <div className="shrink-0 p-4 border-t border-zinc-100/50">
         <button
           type="button"
           onClick={onOpenSettings}
-          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-slate-500 hover:bg-white/80 hover:text-slate-700 transition-all duration-150"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-[16px] text-zinc-500 hover:bg-white hover:text-zinc-900 transition-all duration-300 shadow-none hover:shadow-sm border border-transparent hover:border-zinc-100"
         >
-          <Settings size={13} />
-          <span className="text-[11px] font-medium">Настройки</span>
+          <Settings size={16} />
+          <span className="text-[13px] font-bold">Настройки</span>
         </button>
       </div>
     </aside>
@@ -152,21 +150,21 @@ function ThreadItem({ thread, isActive, onSelect, onDelete }: ThreadItemProps) {
       onClick={() => onSelect(thread)}
       onKeyDown={(e) => e.key === 'Enter' && onSelect(thread)}
       className={cn(
-        'group relative mx-1.5 my-0.5 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-150',
+        'group relative mx-3 my-1 px-4 py-3 rounded-[18px] cursor-pointer transition-all duration-300',
         isActive
-          ? 'bg-white shadow-sm'
-          : 'hover:bg-white/60',
+          ? 'bg-white shadow-md border border-zinc-100 scale-[1.02]'
+          : 'hover:bg-white/80 hover:translate-x-1',
       )}
     >
       <p
         className={cn(
-          'text-[11px] leading-snug line-clamp-2 pr-5',
-          isActive ? 'text-slate-800 font-semibold' : 'text-slate-600',
+          'text-[13px] leading-snug line-clamp-2 pr-6',
+          isActive ? 'text-zinc-900 font-bold' : 'text-zinc-600 font-medium',
         )}
       >
         {thread.preview || 'Диалог'}
       </p>
-      <span className="text-[9px] text-slate-400 mt-0.5 block">{thread.date}</span>
+      <span className="text-[10px] font-bold text-zinc-400 mt-1.5 block tracking-tight">{thread.date}</span>
       <button
         type="button"
         onClick={(e) => onDelete(e, thread.id)}

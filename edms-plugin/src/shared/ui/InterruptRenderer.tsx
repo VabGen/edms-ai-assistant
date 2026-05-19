@@ -50,9 +50,9 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 }
                                 className={cn(
                                     "flex-1 min-w-0 transition-all duration-300",
-                                    isSelected && "border-blue-500 bg-blue-50/30 dark:bg-blue-900/10",
+                                    isSelected && "border-indigo-500 bg-indigo-50/30",
                                     !isSelected && docConfig && (
-                                        docConfig.variant === 'primary' ? "hover:border-blue-200" :
+                                        docConfig.variant === 'primary' ? "hover:border-indigo-200" :
                                         docConfig.variant === 'success' ? "hover:border-emerald-200" :
                                         docConfig.variant === 'warning' ? "hover:border-amber-200" :
                                         docConfig.variant === 'error' ? "hover:border-rose-200" :
@@ -64,7 +64,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     <div className={cn(
                                         "w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold border transition-all",
                                         isSelected
-                                          ? "bg-blue-500 border-blue-400 text-white"
+                                          ? "bg-indigo-600 border-indigo-400 text-white"
                                           : "bg-zinc-100 border-zinc-200 text-zinc-500 group-hover/row:bg-zinc-200"
                                     )}>
                                         {idx + 1}
@@ -85,14 +85,14 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                     <div className="flex-1 min-w-0">
                                         <CardTitle className={cn(
                                             "text-[14px] font-bold truncate transition-colors",
-                                            isSelected && "text-blue-700 dark:text-blue-300"
+                                            isSelected && "text-indigo-700"
                                         )}>
                                             {card.label}
                                         </CardTitle>
                                         {card.description && (
                                             <CardDescription className={cn(
                                                 "text-[12px] line-clamp-2 mt-0.5",
-                                                isSelected && "text-blue-600/70 dark:text-blue-400/70"
+                                                isSelected && "text-indigo-600/70"
                                             )}>
                                                 {card.description}
                                             </CardDescription>
@@ -101,7 +101,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                             {docConfig && (
                                                 <div className={cn(
                                                     "px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider",
-                                                    docConfig.variant === 'primary' && "bg-blue-50 text-blue-600",
+                                                    docConfig.variant === 'primary' && "bg-indigo-50 text-indigo-600",
                                                     docConfig.variant === 'success' && "bg-emerald-50 text-emerald-600",
                                                     docConfig.variant === 'warning' && "bg-amber-50 text-amber-600",
                                                     docConfig.variant === 'error' && "bg-rose-50 text-rose-600",

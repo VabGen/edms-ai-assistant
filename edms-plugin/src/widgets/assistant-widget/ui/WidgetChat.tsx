@@ -506,19 +506,19 @@ export function WidgetChat() {
                 <form onSubmit={handleSubmit}>
                     <div
                         className={cn(
-                            'flex items-end gap-2 rounded-[24px] p-2 transition-all duration-300 border bg-zinc-50 dark:bg-zinc-800/50',
+                            'flex items-end gap-2 rounded-[28px] p-2 transition-all duration-500 border bg-zinc-50/50',
                             isFocused
-                                ? 'border-blue-500 ring-4 ring-blue-500/10 shadow-lg bg-white dark:bg-zinc-900'
-                                : 'border-zinc-200 dark:border-zinc-800 shadow-sm',
+                                ? 'border-indigo-500 ring-4 ring-indigo-500/10 shadow-xl bg-white'
+                                : 'border-zinc-200 shadow-sm',
                         )}
                     >
                         <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
-                            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all"
+                            className="shrink-0 w-12 h-12 flex items-center justify-center rounded-full text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-300"
                             title="Прикрепить"
                         >
-                            <Paperclip size={18}/>
+                            <Paperclip size={20}/>
                         </button>
                         <input
                             ref={fileInputRef}
@@ -557,14 +557,14 @@ export function WidgetChat() {
                                     type="button"
                                     onClick={toggleMic}
                                     className={cn(
-                                        'w-10 h-10 flex items-center justify-center rounded-full transition-all',
+                                        'w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300',
                                         isListening
-                                            ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/30'
-                                            : 'text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20',
+                                            ? 'text-indigo-600 bg-indigo-50'
+                                            : 'text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50',
                                     )}
                                     title={isListening ? 'Остановить' : 'Голос'}
                                 >
-                                    {isListening ? <SoundWave active/> : <Mic size={18}/>}
+                                    {isListening ? <SoundWave active/> : <Mic size={20}/>}
                                 </button>
                             )}
 
@@ -572,24 +572,24 @@ export function WidgetChat() {
                                 <button
                                     type="button"
                                     onClick={handleStop}
-                                    className="w-10 h-10 flex items-center justify-center rounded-full bg-rose-500 text-white shadow-md shadow-rose-200 dark:shadow-none hover:bg-rose-600 active:scale-95 transition-all"
+                                    className="w-12 h-12 flex items-center justify-center rounded-full bg-rose-500 text-white shadow-lg shadow-rose-100 hover:bg-rose-600 active:scale-90 transition-all duration-300"
                                     title="Остановить"
                                 >
-                                    <Square size={14} fill="currentColor" />
+                                    <Square size={16} fill="currentColor" />
                                 </button>
                             ) : (
                                 <button
                                     type="submit"
                                     disabled={!displayInput.trim() && !attachedFile}
                                     className={cn(
-                                        'w-10 h-10 flex items-center justify-center rounded-full transition-all shadow-md active:scale-95',
+                                        'w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 shadow-lg active:scale-90',
                                         displayInput.trim() || attachedFile
-                                            ? 'bg-blue-600 text-white shadow-blue-200 dark:shadow-none hover:bg-blue-700'
-                                            : 'bg-zinc-200 text-zinc-400 shadow-none cursor-not-allowed',
+                                            ? 'bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700'
+                                            : 'bg-zinc-100 text-zinc-300 shadow-none cursor-not-allowed',
                                     )}
                                     title="Отправить"
                                 >
-                                    <Send size={16} className={displayInput.trim() || attachedFile ? "ml-0.5" : ""} />
+                                    <Send size={18} className={displayInput.trim() || attachedFile ? "ml-0.5" : ""} />
                                 </button>
                             )}
                         </div>
@@ -724,13 +724,13 @@ function EmptyState({
     showQuickActions: boolean
 }) {
     return (
-        <div className="flex flex-col items-center justify-center flex-1 gap-6 px-8 py-10">
-            <div className="w-20 h-20 rounded-3xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 flex items-center justify-center shadow-lg shadow-blue-500/5 animate-edms-slide-up">
-                <Sparkles size={36} className="text-blue-600" />
+        <div className="flex flex-col items-center justify-center flex-1 gap-8 px-10 py-12">
+            <div className="w-24 h-24 rounded-[32px] bg-indigo-50 border border-indigo-100 flex items-center justify-center shadow-xl shadow-indigo-100/50 animate-edms-slide-up">
+                <Sparkles size={44} className="text-indigo-600" />
             </div>
-            <div className="text-center space-y-2 animate-edms-slide-up" style={{ animationDelay: '100ms' }}>
-                <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">Чем я могу помочь?</h1>
-                <p className="text-[14px] text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed">
+            <div className="text-center space-y-3 animate-edms-slide-up" style={{ animationDelay: '100ms' }}>
+                <h1 className="text-2xl font-bold text-zinc-900 tracking-tight">Чем я могу помочь?</h1>
+                <p className="text-[15px] text-zinc-500 font-medium leading-relaxed max-w-[280px] mx-auto">
                     Задайте вопрос о документах или выберите действие ниже
                 </p>
             </div>
@@ -743,9 +743,9 @@ function EmptyState({
                                 key={action.label}
                                 type="button"
                                 onClick={() => onAction(action.label)}
-                                className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[13px] font-bold text-zinc-700 dark:text-zinc-200 hover:border-blue-400 dark:hover:border-blue-500 hover:text-blue-600 transition-all shadow-sm hover:shadow-md active:scale-95"
+                                className="flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-white border border-zinc-100 text-[13px] font-bold text-zinc-700 hover:border-indigo-200 hover:text-indigo-600 transition-all shadow-sm hover:shadow-md hover:translate-y-[-1px] active:scale-95"
                             >
-                                <Icon size={14} className="text-zinc-400" />
+                                <Icon size={16} className="text-zinc-400 group-hover:text-indigo-500" />
                                 {action.label}
                             </button>
                         )

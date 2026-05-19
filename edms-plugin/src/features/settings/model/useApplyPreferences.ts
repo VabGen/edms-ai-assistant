@@ -23,11 +23,14 @@ function resolvePositionClass(pos: WidgetPosition): string {
 
 function resolveStyle(prefs: UserPreferences): CSSProperties {
   const { glassOpacity, fontSize } = prefs.appearance
-  const alpha = Math.min(1, Math.round((0.82 + glassOpacity * 0.36) * 100) / 100)
+  // Base opacity is 0.85, setting adds up to 0.15 (total 1.0) or reduces it.
+  // Actually, let's make the setting 0.0 to 1.0 for more control in the future,
+  // but for now we follow the schema which is 0 to 0.5.
+  // We'll map the schema's 0-0.5 to a nice glass range.
+  const alpha = 1.0 - glassOpacity;
+
   return {
-    ['--glass-bg' as string]: `rgba(255,255,255,${alpha})`,
-    ['--glass-border' as string]: 'rgba(255,255,255,0.50)',
-    ['--glass-shadow' as string]: 'rgba(31,38,135,0.12)',
+    ['--glass-opacity' as string]: alpha.toString(),
     ['--edms-font-size' as string]: FONT_SIZE_MAP[fontSize],
   }
 }

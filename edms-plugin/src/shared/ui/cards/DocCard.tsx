@@ -53,7 +53,7 @@ export function DocCard({ headers, row, index }: DocCardProps) {
         <Card
             isClickable={isClickable}
             onClick={isClickable ? () => onDocumentClick!(docId) : undefined}
-            className="mb-3 group"
+            className="mb-3 group border-zinc-100/50 hover:border-indigo-200"
         >
             <CardHeader className="flex-row items-start gap-4 p-4 space-y-0">
                 <IconBox
@@ -73,8 +73,8 @@ export function DocCard({ headers, row, index }: DocCardProps) {
                     </div>
                     <CardDescription className="flex items-center gap-2 mb-2">
                         <span className={cn(
-                            "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
-                            config.variant === 'primary' && "bg-blue-50 text-blue-600",
+                            "px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-widest",
+                            config.variant === 'primary' && "bg-indigo-50 text-indigo-600",
                             config.variant === 'success' && "bg-emerald-50 text-emerald-600",
                             config.variant === 'warning' && "bg-amber-50 text-amber-600",
                             config.variant === 'error' && "bg-rose-50 text-rose-600",
