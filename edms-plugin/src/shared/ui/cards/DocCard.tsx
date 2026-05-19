@@ -58,15 +58,15 @@ export function DocCard({ headers, row, index }: DocCardProps) {
             className="mt-0.5"
         />
         <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2 mb-1">
-                <CardTitle className="truncate group-hover:text-indigo-600 transition-colors">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+                <CardTitle className="text-[14px] font-bold truncate group-hover:text-indigo-600 transition-colors">
                     {regNum && regNum !== '—' ? regNum : `Документ #${num ?? index + 1}`}
                 </CardTitle>
                 {isClickable && (
                     <ExternalLink size={14} className="text-zinc-400 transition-colors group-hover:text-indigo-500 shrink-0" />
                 )}
             </div>
-            <CardDescription className="flex items-center gap-2 mb-2">
+            <CardDescription className="flex items-center gap-2 mb-2.5">
                 <span className={cn(
                     "px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-widest",
                     config.variant === 'primary' && "bg-indigo-50 text-indigo-600",
@@ -92,15 +92,15 @@ export function DocCard({ headers, row, index }: DocCardProps) {
                 </p>
             )}
 
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center mt-auto">
                 {author && author !== '—' && (
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50  border border-zinc-100  text-[11px] text-zinc-500">
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-100 text-[11px] text-zinc-500">
                         <Users size={12} />
                         {author}
                     </div>
                 )}
                 {status && status !== '—' && (
-                    <div className="px-2 py-1 rounded-lg bg-zinc-50  border border-zinc-100  text-[10px] font-semibold text-zinc-500 uppercase tracking-tight">
+                    <div className="px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-100 text-[10px] font-bold text-zinc-500 uppercase tracking-tight">
                         {status}
                     </div>
                 )}

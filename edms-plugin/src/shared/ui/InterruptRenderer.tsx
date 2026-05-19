@@ -13,9 +13,12 @@ interface Props {
 
 export function InterruptRenderer({payload, onReply}: Props) {
     const [selectedId, setSelectedId] = useState<string | null>(null)
+    const [isFinalized, setIsFinalized] = useState(false)
 
     const handleSelect = (id: string, resume: ResumeValue) => {
+        if (isFinalized) return
         setSelectedId(id)
+        setIsFinalized(true)
         onReply(resume)
     }
 
@@ -24,7 +27,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
         return (
             <div className="flex flex-col gap-2">
                 {payload.prompt && (
-                    <p className="text-[13px] font-medium text-zinc-500  mb-1 ml-1 px-1">
+                    <p className="text-[11px] font-bold text-zinc-400 mb-1 ml-1 px-1 uppercase tracking-wider">
                         {payload.prompt}
                     </p>
                 )}
@@ -51,7 +54,8 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 className={cn(
                                     "flex-1 min-w-0 transition-all duration-300",
                                     isSelected && "border-indigo-500 bg-indigo-50/30",
-                                    !isSelected && docConfig && (
+                                    isFinalized && !isSelected && "opacity-60 grayscale-[0.5]",
+                                    !isSelected && !isFinalized && docConfig && (
                                         docConfig.variant === 'primary' ? "hover:border-indigo-200" :
                                         docConfig.variant === 'success' ? "hover:border-emerald-200" :
                                         docConfig.variant === 'warning' ? "hover:border-amber-200" :
@@ -164,7 +168,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
         return (
             <div className="flex flex-col gap-2">
                 {payload.prompt && (
-                    <p className="text-[13px] font-medium text-zinc-500  mb-1 ml-1 px-1">
+                    <p className="text-[11px] font-bold text-zinc-400 mb-1 ml-1 px-1 uppercase tracking-wider">
                         {payload.prompt}
                     </p>
                 )}
@@ -229,6 +233,7 @@ export function InterruptRenderer({payload, onReply}: Props) {
                             <button
                                 key={opt.id}
                                 type="button"
+                                disabled={isFinalized}
                                 onClick={() =>
                                     handleSelect(opt.id, {
                                         kind: 'select',
@@ -237,7 +242,8 @@ export function InterruptRenderer({payload, onReply}: Props) {
                                 }
                                 className={cn(
                                     "w-full px-4 py-3 text-left transition-all flex items-center justify-between group",
-                                    isSelected ? "bg-blue-50 " : "hover:bg-zinc-50/50 "
+                                    isSelected ? "bg-blue-50 " : "hover:bg-zinc-50/50 ",
+                                    isFinalized && !isSelected && "opacity-60"
                                 )}
                             >
                                 <div className="flex-1 min-w-0">
