@@ -36,6 +36,7 @@
         --edms-shadow-lg: 0 20px 40px -12px rgba(0, 0, 0, 0.12);
 
         --edms-glass-blur: 32px;
+        --glass-opacity: 0.85
     }
 
     /* Force Light Theme by default for this task */
@@ -64,7 +65,7 @@
 
 @layer components {
     .glass-premium {
-        background: rgba(var(--edms-bg), var(--glass-opacity, 0.85)) !important;
+        background: rgba(var(--edms-bg), var(--glass-opacity)) !important;
         backdrop-filter: blur(var(--edms-glass-blur)) saturate(1.8);
         -webkit-backdrop-filter: blur(var(--edms-glass-blur)) saturate(1.8);
         border: 1px solid rgba(var(--zinc-200), 0.4);
