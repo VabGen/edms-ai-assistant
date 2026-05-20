@@ -68,7 +68,7 @@ export function WidgetPanel({ onClose }: WidgetPanelProps) {
 
   return (
     <div
-      className="pointer-events-auto relative flex flex-col overflow-hidden bg-white shadow-2xl border border-zinc-200 animate-edms-fade-in"
+      className="pointer-events-auto relative flex flex-col overflow-hidden glass-premium shadow-2xl animate-edms-fade-in"
       style={{
         width: widgetSize.width,
         height: widgetSize.height,

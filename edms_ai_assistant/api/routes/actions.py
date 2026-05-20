@@ -352,7 +352,8 @@ async def api_direct_summarize(
                 )
 
                 resp = await service.summarize(req)
-                output_text = format_output_as_markdown(resp)
+                # Return raw JSON for the frontend to render structured UI
+                output_text = json.dumps(resp.output, ensure_ascii=False)
 
                 if current_path and not is_uuid and Path(current_path).exists():
                     background_tasks.add_task(cleanup_file, current_path)
@@ -539,6 +540,9 @@ async def api_direct_summarize_stream(
 
     async def event_gen() -> AsyncIterator[str]:
         try:
+            from edms_ai_assistant.api.sse import SSE_KEEPALIVE
+            yield SSE_KEEPALIVE.decode()
+
             file_bytes, file_name = await _resolve_file_bytes(
                 current_path=current_path,
                 is_uuid=is_uuid_input,
@@ -563,6 +567,7 @@ async def api_direct_summarize_stream(
 
             final: SummarizationResponse | None = None
             async for event in service.summarize_stream(req):
+                yield SSE_KEEPALIVE.decode()
                 if isinstance(event, StreamEvent):
                     if event.kind == "delta" and event.text:
                         yield _sse({"event": "delta", "text": event.text})
@@ -582,11 +587,12 @@ async def api_direct_summarize_stream(
                 yield "data: [DONE]\n\n"
                 return
 
-            response_text = format_output_as_markdown(final)
+            # Return raw JSON for the frontend to render structured UI
+            response_text = json.dumps(final.output, ensure_ascii=False)
             yield _sse({
                 "event": "result",
                 "status": "success",
-                "response": response_text or "Анализ завершён.",
+                "response": response_text or "{}",
                 "thread_id": new_thread_id,
                 "metadata": {
                     "cache_file_identifier": file_identifier or final.file_hash,
