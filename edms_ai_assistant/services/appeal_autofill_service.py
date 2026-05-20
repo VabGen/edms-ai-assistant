@@ -26,7 +26,6 @@ from edms_ai_assistant.domain.enums import DeclarantType
 from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
 from edms_ai_assistant.utils.file_utils import extract_text_from_bytes
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
-from edms_ai_assistant.utils.edms_formatter import EdmsFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +125,7 @@ class AttachmentSelector:
     @classmethod
     def select(cls, document: DocumentDto, attachment_id: str | None) -> tuple[Any, list[str]]:
         warnings = []
+        # attachments в DocumentDto нет явно, но может прийти от Enricher или getattr
         attachments = getattr(document, "attachment_document", None) or []
 
         if not attachments:
@@ -199,7 +199,7 @@ class GeographyResolver:
 
     @staticmethod
     def _get_field(document: DocumentDto, fields: AppealFields, snake_attr: str, camel_attr: str) -> str | None:
-        d = getattr(document, "document_appeal", None)
+        d = document.document_appeal
         db_val = getattr(d, snake_attr, None) if d else None
         if not ValueSanitizer.is_empty(db_val):
             return str(db_val)
@@ -210,11 +210,11 @@ class GeographyResolver:
         return None
 
     async def _resolve_country(self, document: DocumentDto, fields: AppealFields, geo_data: dict[str, Any]) -> None:
-        d = getattr(document, "document_appeal", None)
+        d = document.document_appeal
         country_name: str | None = None
 
-        if d and not ValueSanitizer.is_empty(getattr(d, "country_appeal_name", None)):
-            country_name = str(getattr(d, "country_appeal_name", ""))
+        if d and not ValueSanitizer.is_empty(d.country_appeal_name):
+            country_name = str(d.country_appeal_name)
         elif not ValueSanitizer.is_empty(fields.country):
             country_name = fields.country
 
@@ -226,8 +226,8 @@ class GeographyResolver:
                     geo_data["countryAppealName"] = data.name
             except Exception:
                 logger.error("Country resolution error", exc_info=True)
-        elif d and getattr(d, "country_appeal_id", None):
-            geo_data["countryAppealId"] = str(getattr(d, "country_appeal_id", ""))
+        elif d and d.country_appeal_id:
+            geo_data["countryAppealId"] = str(d.country_appeal_id)
 
     async def _lookup(self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict[str, Any]) -> None:
         try:
@@ -240,7 +240,7 @@ class GeographyResolver:
             logger.error("%s lookup error", endpoint, exc_info=True)
 
     async def _resolve_city(self, city_name: str | None, document: DocumentDto, geo_data: dict[str, Any]) -> None:
-        d = getattr(document, "document_appeal", None)
+        d = document.document_appeal
         if city_name:
             try:
                 data = await self.ref_client.find_city_with_hierarchy(self.token, city_name)
@@ -258,8 +258,8 @@ class GeographyResolver:
                         geo_data["regionName"] = data.region_name
             except Exception:
                 logger.error("City resolution error", exc_info=True)
-        elif d and getattr(d, "city_id", None):
-            geo_data["cityId"] = str(getattr(d, "city_id", ""))
+        elif d and d.city_id:
+            geo_data["cityId"] = str(d.city_id)
 
 
 class AppealFieldsBuilder:
@@ -271,7 +271,7 @@ class AppealFieldsBuilder:
     async def build(
             self, document: DocumentDto, fields: AppealFields, extracted_text: str, geo_data: dict[str, Any],
     ) -> dict[str, Any]:
-        d = getattr(document, "document_appeal", None) or DocumentAppealDto()
+        d = document.document_appeal or DocumentAppealDto()
         payload: dict[str, Any] = {}
 
         geo_keys = ["countryAppealId", "countryAppealName", "regionId", "regionName",
@@ -290,14 +290,14 @@ class AppealFieldsBuilder:
 
         return self._filter_payload(payload)
 
-    async def _add_correspondent(self, d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
-        if getattr(d, "correspondent_appeal_id", None):
+    async def _add_correspondent(self, d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
+        if d.correspondent_appeal_id:
             payload["correspondentAppealId"] = str(d.correspondent_appeal_id)
-            payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(getattr(d, "correspondent_appeal", None))
+            payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(d.correspondent_appeal)
             return
 
         corr_name: str | None = None
-        if not ValueSanitizer.is_empty(getattr(d, "correspondent_appeal", None)):
+        if not ValueSanitizer.is_empty(d.correspondent_appeal):
             corr_name = str(d.correspondent_appeal)
         elif not ValueSanitizer.is_empty(fields.correspondentAppeal):
             corr_name = fields.correspondentAppeal
@@ -313,47 +313,47 @@ class AppealFieldsBuilder:
                 payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(corr_name)
 
     @staticmethod
-    def _add_personal_data(d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
-        if not ValueSanitizer.is_empty(getattr(d, "fio_applicant", None)):
+    def _add_personal_data(d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
+        if not ValueSanitizer.is_empty(d.fio_applicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fio_applicant)
         elif not ValueSanitizer.is_empty(fields.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(fields.fioApplicant)
 
-        if getattr(d, "date_doc_correspondent_org", None):
+        if d.date_doc_correspondent_org:
             payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(d.date_doc_correspondent_org)
         elif not ValueSanitizer.is_empty(fields.dateDocCorrespondentOrg):
             payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(fields.dateDocCorrespondentOrg)
 
-    async def _add_classification(self, d: Any, fields: AppealFields, extracted_text: str, payload: dict[str, Any]) -> None:
-        if getattr(d, "citizen_type_id", None):
+    async def _add_classification(self, d: DocumentAppealDto, fields: AppealFields, extracted_text: str, payload: dict[str, Any]) -> None:
+        if d.citizen_type_id:
             payload["citizenTypeId"] = str(d.citizen_type_id)
         elif not ValueSanitizer.is_empty(fields.citizenType):
             citizen_type_id = await self.ref_client.find_citizen_type(self.token, fields.citizenType)
             if citizen_type_id:
                 payload["citizenTypeId"] = citizen_type_id
 
-        if getattr(d, "subject_id", None):
+        if d.subject_id:
             payload["subjectId"] = str(d.subject_id)
         else:
             subject_id = await self.ref_client.find_best_subject(self.token, extracted_text)
             if subject_id:
                 payload["subjectId"] = subject_id
 
-    async def _add_declarant_type(self, d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
+    async def _add_declarant_type(self, d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
         if fields.declarantType:
             try:
                 payload["declarantType"] = DeclarantType(fields.declarantType.upper())
             except (ValueError, AttributeError):
                 payload["declarantType"] = DeclarantType.INDIVIDUAL
-        elif getattr(d, "declarant_type", None):
+        elif d.declarant_type:
             payload["declarantType"] = d.declarant_type
         else:
             payload["declarantType"] = DeclarantType.INDIVIDUAL
 
-    async def _add_conditional_fields(self, d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
+    async def _add_conditional_fields(self, d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
         if payload.get("declarantType") == DeclarantType.ENTITY:
             raw_org: str | None = (
-                str(d.organization_name) if not ValueSanitizer.is_empty(getattr(d, "organization_name", None)) else fields.organizationName
+                str(d.organization_name) if not ValueSanitizer.is_empty(d.organization_name) else fields.organizationName
             )
             if not ValueSanitizer.is_empty(raw_org):
                 corr_data = await self.ref_client._find_entity_with_name(self.token, "correspondent", str(raw_org), "Организация")
@@ -362,35 +362,38 @@ class AppealFieldsBuilder:
                 else:
                     payload["organizationName"] = ValueSanitizer.sanitize_string(raw_org)
 
-            payload["signed"] = ValueSanitizer.sanitize_string(getattr(d, "signed", None) or fields.signed)
-            payload["correspondentOrgNumber"] = ValueSanitizer.sanitize_string(getattr(d, "correspondent_org_number", None) or fields.correspondentOrgNumber)
+            payload["signed"] = ValueSanitizer.sanitize_string(d.signed or fields.signed)
+            payload["correspondentOrgNumber"] = ValueSanitizer.sanitize_string(d.correspondent_org_number or fields.correspondentOrgNumber)
         elif payload.get("declarantType") == DeclarantType.INDIVIDUAL:
             payload["organizationName"] = None
             payload["signed"] = None
             payload["correspondentOrgNumber"] = None
 
     @staticmethod
-    def _add_common_fields(d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
-        payload["collective"] = fields.collective if fields.collective is not None else getattr(d, "collective", False)
-        payload["anonymous"] = fields.anonymous if fields.anonymous is not None else getattr(d, "anonymous", False)
-        payload["reasonably"] = fields.reasonably if fields.reasonably is not None else getattr(d, "reasonably", False)
+    def _add_common_fields(d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
+        payload["collective"] = fields.collective if fields.collective is not None else (d.collective or False)
+        payload["anonymous"] = fields.anonymous if fields.anonymous is not None else (d.anonymous or False)
+        payload["reasonably"] = fields.reasonably if fields.reasonably is not None else (d.reasonably or False)
 
-        raw_receipt = getattr(d, "receipt_date", None) or fields.receiptDate
+        raw_receipt = d.receipt_date or fields.receiptDate
         payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt) or datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")
 
-        payload["fullAddress"] = ValueSanitizer.sanitize_string(getattr(d, "full_address", None) or fields.fullAddress)
-        payload["phone"] = ValueSanitizer.sanitize_string(getattr(d, "phone", None) or fields.phone)
-        payload["email"] = ValueSanitizer.sanitize_string(getattr(d, "email", None) or fields.email)
-        payload["index"] = ValueSanitizer.sanitize_string(getattr(d, "index", None) or fields.index)
+        payload["fullAddress"] = ValueSanitizer.sanitize_string(d.full_address or fields.fullAddress)
+        payload["phone"] = ValueSanitizer.sanitize_string(d.phone or fields.phone)
+        payload["email"] = ValueSanitizer.sanitize_string(d.email or fields.email)
+        payload["index"] = ValueSanitizer.sanitize_string(d.index or fields.index)
 
-        sub_form = getattr(d, "submission_form", None) or fields.submissionForm
+        sub_form = d.submission_form or fields.submissionForm
         payload["submissionForm"] = sub_form if sub_form else SubmissionFormAppeal.WRITTEN
 
     @staticmethod
-    def _add_db_only_fields(d: Any, payload: dict[str, Any]) -> None:
-        for field, snake in [("subjectId", "subject_id"), ("solutionResultId", "solution_result_id"), ("nomenclatureAffairId", "nomenclature_affair_id")]:
-            if getattr(d, snake, None):
-                payload[field] = str(getattr(d, snake))
+    def _add_db_only_fields(d: DocumentAppealDto, payload: dict[str, Any]) -> None:
+        if d.subject_id:
+            payload["subjectId"] = str(d.subject_id)
+        if d.solution_result_id:
+            payload["solutionResultId"] = str(d.solution_result_id)
+        if d.nomenclature_affair_id:
+            payload["nomenclatureAffairId"] = str(d.nomenclature_affair_id)
 
     def _filter_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         _ALLOW_NULL = {
@@ -473,7 +476,7 @@ class AppealAutofillService:
         await DocumentOperationExecutor.execute(self.doc_client, token, document_id, "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE", appeal_payload)
 
     async def _execute_main_fields_update(self, token: str, document_id: str, document: DocumentDto, fields: AppealFields) -> None:
-        delivery_id = getattr(document, "delivery_method_id", None)
+        delivery_id = document.delivery_method_id
         if not delivery_id:
             name = fields.deliveryMethod or "Электронно"
             delivery_id = await self.ref_client.find_delivery_method(token, name)

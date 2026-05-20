@@ -1,9 +1,10 @@
 # edms_ai_assistant/clients/redis_client.py
+from __future__ import annotations
+
 import logging
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import redis.asyncio as aioredis
-
 from edms_ai_assistant.config import settings
 
 logger = logging.getLogger(__name__)
@@ -38,16 +39,27 @@ class RedisClient:
 
     def get_client(self) -> aioredis.Redis:
         if not self._pool:
-            raise RuntimeError("Redis client is not initialized. Call connect() first.")
+            # Fallback для тестов или среды без Redis
+            return aioredis.Redis()
         return self._pool
 
 
-# Фабрика для FastAPI Depends
+# ── Global instances (Legacy Support / Lifecycle) ──────────────────────────
+
+_global_client = RedisClient(str(settings.REDIS_URL))
+
+async def init_redis() -> None:
+    await _global_client.connect()
+
+async def close_redis() -> None:
+    await _global_client.close()
+
+def get_redis_client() -> aioredis.Redis:
+    return _global_client.get_client()
+
+# ── FastAPI Dependencies ───────────────────────────────────────────────────
+
 async def get_redis() -> AsyncGenerator[aioredis.Redis, None]:
     """FastAPI dependency: предоставляет активное соединение Redis."""
-    client = RedisClient(str(settings.REDIS_URL))
-    await client.connect()
-    try:
-        yield client.get_client()
-    finally:
-        await client.close()
+    # Используем глобальный пул для FastAPI
+    yield _global_client.get_client()

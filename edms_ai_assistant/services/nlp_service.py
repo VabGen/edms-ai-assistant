@@ -48,60 +48,44 @@ class EDMSNaturalLanguageService:
             return {}
 
         try:
-            # Переход на snake_case аттрибуты Pydantic модели
-            category_value = str(doc.doc_category_const or "")
-
+            # 1. Базовая информация
             base_info = {
                 "id": str(doc.id) if doc.id else None,
-                "категория": category_value,
+                "категория": str(doc.doc_category_const or ""),
                 "краткое_содержание": doc.short_summary,
-                "полный_текст": getattr(doc, "summary", None), # Добавим если есть в модели
-                "примечание": getattr(doc, "note", None),
-                "профиль": getattr(doc, "profile_name", None),
-                "гриф_ДСП": getattr(doc, "dsp_flag", None),
                 "вид_документа": doc.document_type.type_name if doc.document_type else None,
-                "способ_создания": doc.create_type,
+                "способ_создания": str(doc.create_type or ""),
                 "_reg_date_iso": EdmsFormatter.format_date_iso(doc.reg_date),
                 "_create_date_iso": EdmsFormatter.format_date_iso(doc.create_date),
             }
 
+            # 2. Регистрация
             registration = {
-                "рег_номер": doc.reg_number or getattr(doc, "reserved_reg_number", None),
+                "рег_номер": doc.reg_number,
                 "дата_регистрации": EdmsFormatter.format_date(doc.reg_date),
                 "дата_создания": EdmsFormatter.format_datetime(doc.create_date),
                 "исходящий_номер": doc.out_number,
                 "исходящая_дата": EdmsFormatter.format_date(doc.out_date),
-                "_reg_date_iso": EdmsFormatter.format_date_iso(doc.reg_date),
-                "_create_date_iso": EdmsFormatter.format_date_iso(doc.create_date),
-                "_out_reg_date_iso": EdmsFormatter.format_date_iso(doc.out_date),
-                "журнал_регистрации": getattr(getattr(doc, "registration_journal", None), "journal_name", None),
-                "версия": getattr(getattr(doc, "version", None), "version", None),
-                "признак_версионности": getattr(doc, "version_flag", None),
-                "страниц": getattr(doc, "pages", None),
-                "кол-во_экземпляров": getattr(doc, "exemplar_count", None),
             }
 
+            # 3. Участники (пример доступа к полям через модель)
             participants = {
                 "автор": EdmsFormatter.format_user(getattr(doc, "author", None)),
                 "инициатор": EdmsFormatter.format_user(getattr(doc, "initiator", None)),
                 "ответственный_исполнитель": EdmsFormatter.format_user(getattr(doc, "responsible_executor", None)),
-                "корреспондент": getattr(doc, "correspondent_name", None),
-                "кем_подписан": EdmsFormatter.format_user(getattr(doc, "who_signed", None)),
-                "председатель": EdmsFormatter.format_user(getattr(doc, "chairperson", None)),
-                "секретарь": EdmsFormatter.format_user(getattr(doc, "secretary", None)),
             }
 
+            # 4. Жизненный цикл
             lifecycle = {
-                "текущий_статус": doc.status,
-                "предыдущий_статус": getattr(doc, "prev_status", None),
-                "текущий_этап_БП": getattr(doc, "current_bpmn_task_name", None),
+                "текущий_статус": str(doc.status or ""),
             }
 
+            # 5. Контроль
             control_info = {
                 "на_контроле": doc.on_control,
-                "снять_с_контроля": getattr(doc, "remove_control", None),
             }
 
+            # Собираем все блоки
             result: dict[str, Any] = {
                 "базовая_информация": clean_dict(base_info),
                 "регистрация": clean_dict(registration),
@@ -109,6 +93,18 @@ class EDMSNaturalLanguageService:
                 "жизненный_цикл": clean_dict(lifecycle),
                 "контроль": clean_dict(control_info),
             }
+
+            # Добавляем инфо по обращению если есть
+            if doc.document_appeal:
+                appeal = doc.document_appeal
+                result["информация_об_обращении"] = clean_dict({
+                    "тип_заявителя": str(appeal.declarant_type or ""),
+                    "фио_заявителя": appeal.fio_applicant,
+                    "организация": appeal.organization_name,
+                    "адрес": appeal.full_address,
+                    "email": appeal.email,
+                    "телефон": appeal.phone,
+                })
 
             return result
 
@@ -125,15 +121,10 @@ class EDMSNaturalLanguageService:
                     "фио": EdmsFormatter.format_user(emp),
                     "должность": emp.post.post_name if emp.post else None,
                     "департамент": emp.department.name if emp.department else None,
-                    "статус": "Уволен" if getattr(emp, "fired", False) else "Активен",
                 },
                 "контакты": {
                     "email": emp.email,
                     "phone": emp.phone,
-                    "адрес": getattr(emp, "address", None),
-                },
-                "структура": {
-                    "код_департамента": emp.department.department_code if emp.department else None,
                 },
             }
         except Exception as exc:
