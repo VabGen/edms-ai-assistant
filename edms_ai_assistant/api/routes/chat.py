@@ -42,7 +42,7 @@ from edms_ai_assistant.agent.interrupt_contract import (
 )
 from edms_ai_assistant.api.deps import get_agent
 from edms_ai_assistant.api.helpers import resolve_user_context
-from edms_ai_assistant.api.sse import format_sse
+from edms_ai_assistant.api.sse import SSE_KEEPALIVE, format_sse
 from edms_ai_assistant.api.sse_events import (
     build_compliance_sse_event,
     build_navigate_sse_event,

@@ -388,11 +388,16 @@ export function ChatMessage({
                                             const fileSize = rawText.match(/Размер:\s*([^\n]+)/)?.[1]?.trim() ?? ''
                                             return (
                                                 <a
-                                                  href="#"
+                                                  href={`/attachment/${fileName}`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
                                                   className="flex items-center gap-3 p-3 my-2 bg-zinc-50 border border-zinc-200 rounded-xl hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group no-underline"
                                                   onClick={(e) => {
-                                                      e.preventDefault()
-                                                      onAttachmentClick(fileName)
+                                                      // Allow standard browser behavior for middle-click/ctrl-click
+                                                      if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+                                                          e.preventDefault()
+                                                          onAttachmentClick(fileName)
+                                                      }
                                                   }}
                                                 >
                                                     <div className="p-2 bg-white rounded-lg shadow-sm group-hover:text-blue-500">

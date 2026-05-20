@@ -63,32 +63,76 @@ function registerSsePort(): void {
             if (port.name === 'streamChatMessage' && quickFormat) {
                 try {
                     const format = quickFormat
-                    const resJson = await postJson(`${API}/actions/summarize`, {
-                        message: p.message,
-                        user_token: p.user_token,
-                        context_ui_id: p.context_ui_id,
-                        preferred_summary_format: format,
-                        file_path: p.file_path,
-                    }, ctrl.signal)
+                    const res = await fetch(`${API}/actions/summarize/stream`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            message: p.message,
+                            user_token: p.user_token,
+                            context_ui_id: p.context_ui_id,
+                            preferred_summary_format: format,
+                            file_path: p.file_path,
+                        }),
+                        signal: ctrl.signal,
+                    })
 
-                    const result = resJson as Record<string, any>
-
-                    if (result.response) {
-                        port.postMessage({
-                            type: 'sse_event',
-                            data: {
-                                kind: 'message',
-                                data: {role: 'assistant', content: result.response}
-                            }
-                        })
-                    } else {
+                    if (!res.ok) {
+                        const errBody = (await res.json().catch(() => ({}))) as Record<string, unknown>
                         port.postMessage({
                             type: 'sse_error',
-                            error: 'Суммаризация вернула пустой результат'
+                            error: (errBody['detail'] as string) ?? `HTTP ${res.status}`,
                         })
+                        port.disconnect()
+                        return
                     }
 
-                    port.postMessage({type: 'sse_done'})
+                    const reader = res.body?.getReader()
+                    if (!reader) throw new Error('No response body')
+
+                    const decoder = new TextDecoder()
+                    let buffer = ''
+
+                    while (true) {
+                        const {done, value} = await reader.read()
+                        if (done) break
+
+                        buffer += decoder.decode(value, {stream: true})
+                        const parts = buffer.split('\n\n')
+                        buffer = parts.pop() ?? ''
+
+                        for (const part of parts) {
+                            if (!part.trim()) continue
+                            let dataStr = ''
+                            for (const line of part.split('\n')) {
+                                if (line.startsWith('data: ')) {
+                                    dataStr = line.slice(6)
+                                }
+                            }
+                            if (!dataStr) continue
+
+                            try {
+                                if (dataStr === '[DONE]') {
+                                    port.postMessage({type: 'sse_done'})
+                                    continue
+                                }
+                                const payload = JSON.parse(dataStr)
+                                if (payload.event === 'delta' && payload.text) {
+                                    port.postMessage({
+                                        type: 'sse_event',
+                                        data: {kind: 'message', data: {role: 'assistant', content: payload.text}}
+                                    })
+                                } else if (payload.event === 'result') {
+                                    // Overwrite content with the final complete text (raw JSON for structural render)
+                                    port.postMessage({
+                                        type: 'sse_event',
+                                        data: {kind: 'message', data: {role: 'assistant', content: payload.response}}
+                                    })
+                                } else if (payload.event === 'error') {
+                                    port.postMessage({type: 'sse_error', error: payload.message})
+                                }
+                            } catch { /* ignore malformed */ }
+                        }
+                    }
                 } catch (err: any) {
                     port.postMessage({type: 'sse_error', error: err.message || 'Summarization failed'})
                 } finally {
