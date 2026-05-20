@@ -2,39 +2,27 @@
 from __future__ import annotations
 
 import logging
-from abc import abstractmethod
 
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.task_models import CreateTaskRequest
-
-from .base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 
 
-class BaseTaskClient(EdmsBaseClient):
-    """Abstract interface for task API clients."""
+class TaskClient:
+    """Concrete async HTTP client for EDMS Task API.
+    """
 
-    @abstractmethod
-    async def create_tasks_batch(
-        self, token: str, document_id: str, tasks: list[CreateTaskRequest]
-    ) -> bool:
-        raise NotImplementedError
-
-
-class TaskClient(BaseTaskClient, EdmsBaseClient):
-    """Concrete async HTTP client for EDMS task API."""
+    def __init__(self, base_client: EdmsBaseClient):
+        self._client = base_client
 
     async def create_tasks_batch(
-        self,
-        token: str,
-        document_id: str,
-        tasks: list[CreateTaskRequest],
+            self,
+            token: str,
+            document_id: str,
+            tasks: list[CreateTaskRequest],
     ) -> bool:
         """Create a batch of tasks for a document.
-
-        Raises:
-            httpx.HTTPStatusError: On 4xx/5xx responses (NOT caught here —
-                caller is responsible for handling permission errors etc.).
 
         Args:
             token: Bearer token.
@@ -42,16 +30,21 @@ class TaskClient(BaseTaskClient, EdmsBaseClient):
             tasks: List of task request objects.
 
         Returns:
-            True on success.
+            True on success, False if tasks list is empty.
+
+        Raises:
+            EdmsClientError: On 4xx responses (e.g., validation/permission errors).
+            EdmsServerError: On 5xx responses from EDMS.
         """
         if not tasks:
-            logger.warning("[TASK-CLIENT] Empty tasks list — skipping API call")
+            logger.warning("Empty tasks list — skipping API call")
             return False
 
         endpoint = f"api/document/{document_id}/task/batch"
-        payload = [task.model_dump(mode="json") for task in tasks]
 
-        await self._make_request(
+        payload = [task.model_dump(mode="json", by_alias=True) for task in tasks]
+
+        await self._client._make_request(
             "POST",
             endpoint,
             token=token,
@@ -60,7 +53,7 @@ class TaskClient(BaseTaskClient, EdmsBaseClient):
         )
 
         logger.info(
-            "[TASK-CLIENT] Successfully created %d task(s) for document %s",
+            "Successfully created %d task(s) for document %s",
             len(tasks),
             document_id,
         )

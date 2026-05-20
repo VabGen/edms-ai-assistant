@@ -1,10 +1,11 @@
+# edms_ai_assistant/tools/employee_search.py
 from __future__ import annotations
 
 import logging
 from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -15,7 +16,9 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
+from edms_ai_assistant.clients.department_client import DepartmentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
+from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.generated.resources_openapi import EmployeeDto
 from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 from edms_ai_assistant.services.search_utils import (
@@ -117,183 +120,49 @@ class EmployeeSearchInput(BaseModel):
         return self
 
 
-@tool("employee_search_tool", args_schema=EmployeeSearchInput)
-async def employee_search_tool(
-        query: str | None = None,
-        employee_id: str | None = None,
-        last_name: str | None = None,
-        first_name: str | None = None,
-        middle_name: str | None = None,
-        full_post_name: str | None = None,
-        post_id: int | None = None,
-        active_only: bool | None = None,
-        fired_only: bool | None = None,
-        department_names: list[str] | None = None,
-        department_ids: list[str] | None = None,
-        child_departments: bool | None = None,
-        leader_department_name: str | None = None,
-        leader_department_id: str | None = None,
-        include_child_leaders: bool | None = None,
-        leader_department_all_name: str | None = None,
-        leader_department_all_id: str | None = None,
-        only_leaders: bool | None = None,
-        org_id: str | None = None,
-        employee_ids: list[str] | None = None,
-        exclude_ids: list[str] | None = None,
-        exclude_role_id: str | None = None,
-        exclude_group_id: str | None = None,
-        exclude_personal_group_id: str | None = None,
-        exclude_grief_id: str | None = None,
-        includes: list[str] | None = None,
-        fetch_all: bool | None = None,
-        page: int | None = None,
-        page_size: int | None = None,
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """Searches for employees in the EDMS directory by ANY criteria."""
+# ══════════════════════════════════════════════════════════════════════════════
+# Pure Helper Functions (No DI needed)
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # Безопасное извлечение токена с обработкой ошибок
-    try:
-        token = get_token_from_config(config)
-    except Exception as e:
-        logger.error("Failed to get token from config: %s | config keys: %s", e,
-                     list((config or {}).get("configurable", {}).keys()) if config else "None")
-        return {"status": "error", "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}"}
 
-    _ = query
-    nlp = EDMSNaturalLanguageService()
-
-    if employee_id:
-        return await _get_employee_card(token, employee_id, nlp)
-
-    merged = get_merged_name_parts(name_query=None, last_name=last_name, first_name=first_name, middle_name=middle_name)
-    employee_filter = build_employee_filter(last_name=last_name, first_name=first_name, middle_name=middle_name,
-                                            full_post_name=full_post_name, post_id=post_id, active=active_only,
-                                            fired=fired_only, includes=includes)
-
-    if merged.first_name and "lastName" in employee_filter:
-        logger.info("Search: API filter lastName='%s' only, scoring will also match firstName='%s'",
-                    employee_filter.get("lastName"), merged.first_name)
-
-    resolved_dept_ids: list[str] = list(department_ids or [])
-    unresolved_all: list[str] = []
-
-    if department_names:
-        newly_resolved, unresolved = await _resolve_department_names(token, department_names)
-        resolved_dept_ids.extend(newly_resolved)
-        unresolved_all.extend(unresolved)
-
-    if resolved_dept_ids: employee_filter["departmentId"] = resolved_dept_ids
-    if child_departments: employee_filter["childDepartments"] = True
-
-    resolved_leader_id = leader_department_id
-    if leader_department_name and not leader_department_id:
-        resolved, unresolved = await _resolve_department_names(token, [leader_department_name])
-        if resolved:
-            resolved_leader_id = resolved[0]
-        else:
-            unresolved_all.extend(unresolved)
-
-    if resolved_leader_id: employee_filter["employeeLeaderDepartmentId"] = resolved_leader_id
-    if include_child_leaders: employee_filter["includeChildLeadersEmployeeLeaderDepartmentId"] = True
-
-    resolved_leader_all_id = leader_department_all_id
-    if leader_department_all_name and not leader_department_all_id:
-        resolved, unresolved = await _resolve_department_names(token, [leader_department_all_name])
-        if resolved:
-            resolved_leader_all_id = resolved[0]
-        else:
-            unresolved_all.extend(unresolved)
-
-    if resolved_leader_all_id: employee_filter["employeeLeaderDepartmentAllId"] = resolved_leader_all_id
-    if only_leaders: employee_filter["onlyLeadersEmployeeLeaderDepartmentAll"] = True
-
-    if org_id: employee_filter["orgId"] = org_id
-    if employee_ids: employee_filter["ids"] = employee_ids
-    if exclude_ids: employee_filter["excludeIds"] = exclude_ids
-    if exclude_role_id: employee_filter["excludeRoleId"] = exclude_role_id
-    if exclude_group_id: employee_filter["excludeGroupId"] = exclude_group_id
-    if exclude_personal_group_id: employee_filter["excludePersonalGroupId"] = exclude_personal_group_id
-    if exclude_grief_id: employee_filter["excludeGriefId"] = exclude_grief_id
-    if fetch_all: employee_filter["all"] = True
-
-    if unresolved_all:
-        logger.warning("Departments not resolved", extra={"unresolved": unresolved_all})
-        has_other = any((last_name, first_name, middle_name, full_post_name, post_id, employee_ids, resolved_leader_id,
-                         resolved_leader_all_id, org_id))
-        if not resolved_dept_ids and not has_other:
-            return {"status": "not_found", "message": f"Отдел(ы) не найдены: {', '.join(unresolved_all)}."}
-
-    effective_page = page or 0
-    effective_size = min(page_size or DEFAULT_PAGEABLE["size"], _MAX_PAGE_SIZE)
-    pageable = {"page": effective_page, "size": effective_size, "sort": DEFAULT_PAGEABLE["sort"]}
-
-    logger.info("Employee search requested",
-                extra={"filter_keys": list(employee_filter.keys()), "last_name": last_name})
-
-    try:
-        async with EmployeeClient() as client:
-            results = await client.search_employees_post(token=token, employee_filter=employee_filter,
-                                                         pageable=pageable)
-
-        if not results:
-            return {"status": "not_found", "message": "Сотрудники по данным критериям не найдены."}
-        if len(results) == 1:
-            return {"status": "found", "total": 1, "employee_card": await _build_enriched_card(token, results[0], nlp)}
-
-        best = _find_best_match(results, last_name=merged.last_name, first_name=merged.first_name,
-                                middle_name=merged.middle_name, full_post_name=full_post_name)
-        if best:
-            logger.info("Best match found via scoring", extra={"id": str(best.get("id", ""))[:8]})
-            return {"status": "found", "total": 1, "employee_card": await _build_enriched_card(token, best, nlp)}
-
-        display_results = results
-        if full_post_name:
-            display_results = _filter_by_post(results, full_post_name)
-            if len(display_results) == 1:
-                return {"status": "found", "total": 1,
-                        "employee_card": await _build_enriched_card(token, display_results[0], nlp)}
-
-        choices = [_serialize_employee_raw(r) for r in display_results[:effective_size]]
-        logger.info("Multiple employees found", extra={"count": len(choices)})
-        return await _resolve_via_ask_human(token=token, results=display_results, choices=choices,
-                                            merged_last_name=merged.last_name, nlp=nlp)
-
-    except ToolAborted as aborted:
-        logger.info("Employee disambiguation aborted: %s", aborted.reason)
-        return {"status": "cancelled", "message": "Выбор сотрудника отменён пользователем."}
-    except GraphInterrupt:
-        raise
-    except Exception as exc:
-        logger.error("Employee search failed", exc_info=True)
-        return {"status": "error", "message": f"Ошибка поиска: {exc}"}
-
-def _score_result(result: dict[str, Any], last_name: str | None, first_name: str | None, middle_name: str | None, full_post_name: str | None) -> int:
+def _score_result(result: dict[str, Any], last_name: str | None, first_name: str | None, middle_name: str | None,
+                  full_post_name: str | None) -> int:
     score = 0
     if last_name:
         val = (result.get("lastName") or "").lower()
         term = last_name.lower()
-        if val == term: score += 10
-        elif val.startswith(term): score += 5
+        if val == term:
+            score += 10
+        elif val.startswith(term):
+            score += 5
     if first_name:
         val = (result.get("firstName") or "").lower()
         term = first_name.lower()
-        if val == term: score += 10
-        elif val.startswith(term): score += 5
+        if val == term:
+            score += 10
+        elif val.startswith(term):
+            score += 5
     if middle_name:
         val = (result.get("middleName") or "").lower()
         term = middle_name.lower()
-        if val == term: score += 10
-        elif val.startswith(term): score += 5
+        if val == term:
+            score += 10
+        elif val.startswith(term):
+            score += 5
     if full_post_name:
         post_name = ((result.get("post") or {}).get("postName") or "").lower()
         term = full_post_name.lower()
-        if post_name == term: score += 10
-        elif post_name.startswith(term): score += 7
-        elif term in post_name: score += 3
+        if post_name == term:
+            score += 10
+        elif post_name.startswith(term):
+            score += 7
+        elif term in post_name:
+            score += 3
     return score
 
-def _find_best_match(results: list[dict[str, Any]], last_name: str | None, first_name: str | None, middle_name: str | None, full_post_name: str | None) -> dict[str, Any] | None:
+
+def _find_best_match(results: list[dict[str, Any]], last_name: str | None, first_name: str | None,
+                     middle_name: str | None, full_post_name: str | None) -> dict[str, Any] | None:
     has_criteria = any((last_name, first_name, middle_name, full_post_name))
     if not has_criteria: return None
     scored = [(r, _score_result(r, last_name, first_name, middle_name, full_post_name)) for r in results]
@@ -308,6 +177,7 @@ def _find_best_match(results: list[dict[str, Any]], last_name: str | None, first
         return top_result
     return None
 
+
 def _filter_by_post(results: list[dict[str, Any]], full_post_name: str) -> list[dict[str, Any]]:
     term = full_post_name.lower()
     filtered = []
@@ -317,17 +187,114 @@ def _filter_by_post(results: list[dict[str, Any]], full_post_name: str) -> list[
     return filtered if filtered else results
 
 
+def _serialize_employee_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    post = raw.get("post") or {}
+    department = raw.get("department") or {}
+    parts = [raw.get("lastName") or "", raw.get("firstName") or "", raw.get("middleName") or ""]
+    full_name = " ".join(p for p in parts if p).strip() or "—"
+    return {
+        "id": str(raw.get("id", "")), "full_name": full_name,
+        "post": post.get("postName") or "—", "department": department.get("name") or "—",
+        "active": raw.get("active"), "fired": raw.get("fired"),
+        "email": raw.get("email") or "—", "phone": raw.get("phone") or "—", "room": raw.get("room") or "—",
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Async Helper Functions (Receive clients as args)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+async def _resolve_department_names(token: str, names: list[str], dept_client: DepartmentClient) -> tuple[
+    list[str], list[str]]:
+    resolved: list[str] = []
+    unresolved: list[str] = []
+    for name in names:
+        ns = name.strip()
+        if not ns: continue
+        try:
+            dept = await dept_client.find_by_name(token, ns)
+            if dept and dept.get("id"):
+                resolved.append(str(dept["id"]))
+            else:
+                unresolved.append(ns)
+        except Exception:
+            logger.warning("Failed to resolve department '%s'", ns, exc_info=True)
+            unresolved.append(ns)
+    return resolved, unresolved
+
+
+# ИСПРАВЛЕНИЕ: Убрано дублирование кода. Добавлена функция для единичного резолва.
+async def _resolve_single_department(
+        token: str,
+        dept_name: str | None,
+        existing_id: str | None,
+        dept_client: DepartmentClient,
+        unresolved_all: list[str]
+) -> str | None:
+    """Разрешает имя отдела в UUID. Если existing_id уже задан, пропускает."""
+    if not dept_name or existing_id:
+        return existing_id
+
+    resolved, unresolved = await _resolve_department_names(token, [dept_name], dept_client)
+    unresolved_all.extend(unresolved)
+    return resolved[0] if resolved else None
+
+
+async def _build_enriched_card(token: str, raw: dict[str, Any], nlp_service: EDMSNaturalLanguageService,
+                               employee_client: EmployeeClient) -> dict[str, Any]:
+    emp_id = str(raw.get("id", ""))
+    try:
+        emp = EmployeeDto.model_validate(raw)
+        card = nlp_service.process_employee_info(emp)
+    except Exception:
+        logger.warning("NLP formatting failed", exc_info=True)
+        card = _serialize_employee_raw(raw)
+
+    try:
+        roles_raw = await employee_client.get_employee_roles(token, emp_id)
+        card["roles"] = [{"id": r.id, "name": r.name or "—"} for r in (roles_raw or [])]
+    except Exception:
+        card["roles"] = []
+
+    try:
+        griefs_raw = await employee_client.get_employee_griefs(token, emp_id)
+        # ИСПРАВЛЕНИЕ: Типизация словаря для линтера (устраняет Expected type...got...instead)
+        access_griefs = []
+        for g in (griefs_raw or []):
+            grief_obj = g.grief if isinstance(g.grief, dict) else g
+            if isinstance(grief_obj, dict):
+                access_griefs.append({"id": str(grief_obj.get("id", "")), "name": grief_obj.get("name") or "—"})
+        card["access_griefs"] = access_griefs
+    except Exception:
+        card["access_griefs"] = []
+
+    return card
+
+
+async def _get_employee_card(token: str, employee_id: str, nlp_service: EDMSNaturalLanguageService,
+                             employee_client: EmployeeClient) -> dict[str, Any]:
+    try:
+        raw = await employee_client.get_employee(token, employee_id)
+        if not raw: return {"status": "not_found", "message": "Сотрудник не найден."}
+        card = await _build_enriched_card(token, raw, nlp_service, employee_client)
+        return {"status": "found", "total": 1, "employee_card": card}
+    except Exception as exc:
+        logger.error("Failed to fetch employee", exc_info=True)
+        return {"status": "error", "message": f"Ошибка получения сотрудника: {exc}"}
+
+
 async def _resolve_via_ask_human(
         token: str,
         results: list[dict[str, Any]],
         choices: list[dict[str, Any]],
         merged_last_name: str | None,
-        nlp: EDMSNaturalLanguageService,
+        nlp_service: EDMSNaturalLanguageService,
+        employee_client: EmployeeClient,
 ) -> dict[str, Any]:
     """Disambiguate over native ``ask_human`` and return the picked card."""
     index: dict[str, dict[str, Any]] = {str(r.get("id", "")): r for r in results}
 
-    # Возвращаем CardSelectInterrupt для красивых карточек
     resume = ask_human(CardSelectInterrupt(
         prompt=(
             f"Уточните «{merged_last_name}»"
@@ -339,7 +306,7 @@ async def _resolve_via_ask_human(
                 id=brief["id"],
                 label=brief["full_name"],
                 description=brief.get("post") or "Сотрудник",
-                badges=["Сотрудник"] + ([ "Активен" ] if brief.get("active") else []),
+                badges=["Сотрудник"] + (["Активен"] if brief.get("active") else []),
                 primary_attrs={
                     "Подразделение": brief.get("department") or "—",
                     "Email": brief.get("email") or "—",
@@ -367,64 +334,175 @@ async def _resolve_via_ask_human(
             "Resume value referenced unknown employee id=%s — fetching by id",
             selected_id,
         )
-        return await _get_employee_card(token, selected_id, nlp)
+        return await _get_employee_card(token, selected_id, nlp_service, employee_client)
 
-    card = await _build_enriched_card(token, selected_raw, nlp)
+    card = await _build_enriched_card(token, selected_raw, nlp_service, employee_client)
     return {"status": "found", "total": 1, "employee_card": card}
 
-async def _build_enriched_card(token: str, raw: dict[str, Any], nlp: EDMSNaturalLanguageService) -> dict[str, Any]:
-    emp_id = str(raw.get("id", ""))
-    try:
-        emp = EmployeeDto.model_validate(raw)
-        card = nlp.process_employee_info(emp)
-    except Exception:
-        logger.warning("NLP formatting failed", exc_info=True)
-        card = _serialize_employee_raw(raw)
-    try:
-        async with EmployeeClient() as client: roles_raw = await client.get_employee_roles(token, emp_id)
-        card["roles"] = [{"id": str(r.get("id", "")), "name": r.get("name") or "—"} for r in (roles_raw or [])]
-    except Exception: card["roles"] = []
-    try:
-        async with EmployeeClient() as client: griefs_raw = await client.get_employee_griefs(token, emp_id)
-        card["access_griefs"] = [{"id": str((g.get("grief") or g).get("id", "")), "name": (g.get("grief") or g).get("name") or "—"} for g in (griefs_raw or [])]
-    except Exception: card["access_griefs"] = []
-    return card
 
-async def _resolve_department_names(token: str, names: list[str]) -> tuple[list[str], list[str]]:
-    from edms_ai_assistant.clients.department_client import DepartmentClient
-    resolved: list[str] = []
-    unresolved: list[str] = []
-    async with DepartmentClient() as dept_client:
-        for name in names:
-            ns = name.strip()
-            if not ns: continue
-            try:
-                dept = await dept_client.find_by_name(token, ns)
-                if dept and dept.get("id"): resolved.append(str(dept["id"]))
-                else: unresolved.append(ns)
-            except Exception:
-                logger.warning("Failed to resolve department '%s'", ns, exc_info=True)
-                unresolved.append(ns)
-    return resolved, unresolved
+# ══════════════════════════════════════════════════════════════════════════════
+# Tool Factory
+# ══════════════════════════════════════════════════════════════════════════════
 
-async def _get_employee_card(token: str, employee_id: str, nlp: EDMSNaturalLanguageService) -> dict[str, Any]:
-    try:
-        async with EmployeeClient() as client: raw = await client.get_employee(token, employee_id)
-        if not raw: return {"status": "not_found", "message": "Сотрудник не найден."}
-        card = await _build_enriched_card(token, raw, nlp)
-        return {"status": "found", "total": 1, "employee_card": card}
-    except Exception as exc:
-        logger.error("Failed to fetch employee", exc_info=True)
-        return {"status": "error", "message": f"Ошибка получения сотрудника: {exc}"}
 
-def _serialize_employee_raw(raw: dict[str, Any]) -> dict[str, Any]:
-    post = raw.get("post") or {}
-    department = raw.get("department") or {}
-    parts = [raw.get("lastName") or "", raw.get("firstName") or "", raw.get("middleName") or ""]
-    full_name = " ".join(p for p in parts if p).strip() or "—"
-    return {
-        "id": str(raw.get("id", "")), "full_name": full_name,
-        "post": post.get("postName") or "—", "department": department.get("name") or "—",
-        "active": raw.get("active"), "fired": raw.get("fired"),
-        "email": raw.get("email") or "—", "phone": raw.get("phone") or "—", "room": raw.get("room") or "—",
-    }
+def create_employee_search_tool(deps: AppDeps) -> StructuredTool:
+    """Фабрика инструмента поиска сотрудников с DI."""
+
+    employee_client = deps.employee_client
+    nlp_service = deps.nlp_service
+    # ИСПРАВЛЕНИЕ: Добавлен department_client. Убедитесь, что он добавлен в AppDeps!
+    department_client = deps.department_client
+
+    async def employee_search_tool(
+            query: str | None = None,
+            employee_id: str | None = None,
+            last_name: str | None = None,
+            first_name: str | None = None,
+            middle_name: str | None = None,
+            full_post_name: str | None = None,
+            post_id: int | None = None,
+            active_only: bool | None = None,
+            fired_only: bool | None = None,
+            department_names: list[str] | None = None,
+            department_ids: list[str] | None = None,
+            child_departments: bool | None = None,
+            leader_department_name: str | None = None,
+            leader_department_id: str | None = None,
+            include_child_leaders: bool | None = None,
+            leader_department_all_name: str | None = None,
+            leader_department_all_id: str | None = None,
+            only_leaders: bool | None = None,
+            org_id: str | None = None,
+            employee_ids: list[str] | None = None,
+            exclude_ids: list[str] | None = None,
+            exclude_role_id: str | None = None,
+            exclude_group_id: str | None = None,
+            exclude_personal_group_id: str | None = None,
+            exclude_grief_id: str | None = None,
+            includes: list[str] | None = None,
+            fetch_all: bool | None = None,
+            page: int | None = None,
+            page_size: int | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Searches for employees in the EDMS directory by ANY criteria.
+
+        ВАЖНО: Токен авторизации передается системой АВТОМАТИЧЕСКИ.
+        НЕ запрашивай его у пользователя.
+        """
+        try:
+            token = get_token_from_config(config)
+        except Exception as e:
+            logger.error("Failed to get token from config: %s | config keys: %s", e,
+                         list((config or {}).get("configurable", {}).keys()) if config else "None")
+            return {"status": "error", "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}"}
+
+        _ = query  # Supress unused warning, processed by Pydantic model_validator
+
+        if employee_id:
+            return await _get_employee_card(token, employee_id, nlp_service, employee_client)
+
+        merged = get_merged_name_parts(name_query=None, last_name=last_name, first_name=first_name,
+                                       middle_name=middle_name)
+        employee_filter = build_employee_filter(last_name=last_name, first_name=first_name, middle_name=middle_name,
+                                                full_post_name=full_post_name, post_id=post_id, active=active_only,
+                                                fired=fired_only, includes=includes)
+
+        if merged.first_name and "lastName" in employee_filter:
+            logger.info("Search: API filter lastName='%s' only, scoring will also match firstName='%s'",
+                        employee_filter.get("lastName"), merged.first_name)
+
+        resolved_dept_ids: list[str] = list(department_ids or [])
+        unresolved_all: list[str] = []
+
+        if department_names:
+            newly_resolved, unresolved = await _resolve_department_names(token, department_names, department_client)
+            resolved_dept_ids.extend(newly_resolved)
+            unresolved_all.extend(unresolved)
+
+        if resolved_dept_ids: employee_filter["departmentId"] = resolved_dept_ids
+        if child_departments: employee_filter["childDepartments"] = True
+
+        # ИСПРАВЛЕНИЕ: Устранено дублирование кода разрешения отделов
+        resolved_leader_id = await _resolve_single_department(
+            token, leader_department_name, leader_department_id, department_client, unresolved_all
+        )
+        if resolved_leader_id: employee_filter["employeeLeaderDepartmentId"] = resolved_leader_id
+        if include_child_leaders: employee_filter["includeChildLeadersEmployeeLeaderDepartmentId"] = True
+
+        resolved_leader_all_id = await _resolve_single_department(
+            token, leader_department_all_name, leader_department_all_id, department_client, unresolved_all
+        )
+        if resolved_leader_all_id: employee_filter["employeeLeaderDepartmentAllId"] = resolved_leader_all_id
+        if only_leaders: employee_filter["onlyLeadersEmployeeLeaderDepartmentAll"] = True
+
+        if org_id: employee_filter["orgId"] = org_id
+        if employee_ids: employee_filter["ids"] = employee_ids
+        if exclude_ids: employee_filter["excludeIds"] = exclude_ids
+        if exclude_role_id: employee_filter["excludeRoleId"] = exclude_role_id
+        if exclude_group_id: employee_filter["excludeGroupId"] = exclude_group_id
+        if exclude_personal_group_id: employee_filter["excludePersonalGroupId"] = exclude_personal_group_id
+        if exclude_grief_id: employee_filter["excludeGriefId"] = exclude_grief_id
+        if fetch_all: employee_filter["all"] = True
+
+        if unresolved_all:
+            logger.warning("Departments not resolved", extra={"unresolved": unresolved_all})
+            has_other = any(
+                (last_name, first_name, middle_name, full_post_name, post_id, employee_ids, resolved_leader_id,
+                 resolved_leader_all_id, org_id))
+            if not resolved_dept_ids and not has_other:
+                return {"status": "not_found", "message": f"Отдел(ы) не найдены: {', '.join(unresolved_all)}."}
+
+        effective_page = page or 0
+        effective_size = min(page_size or DEFAULT_PAGEABLE["size"], _MAX_PAGE_SIZE)
+        pageable = {"page": effective_page, "size": effective_size, "sort": DEFAULT_PAGEABLE["sort"]}
+
+        logger.info("Employee search requested",
+                    extra={"filter_keys": list(employee_filter.keys()), "last_name": last_name})
+
+        try:
+            results = await employee_client.search_employees_post(token=token, employee_filter=employee_filter,
+                                                                  pageable=pageable)
+
+            if not results:
+                return {"status": "not_found", "message": "Сотрудники по данным критериям не найдены."}
+            if len(results) == 1:
+                return {"status": "found", "total": 1,
+                        "employee_card": await _build_enriched_card(token, results[0], nlp_service, employee_client)}
+
+            best = _find_best_match(results, last_name=merged.last_name, first_name=merged.first_name,
+                                    middle_name=merged.middle_name, full_post_name=full_post_name)
+            if best:
+                logger.info("Best match found via scoring", extra={"id": str(best.get("id", ""))[:8]})
+                return {"status": "found", "total": 1,
+                        "employee_card": await _build_enriched_card(token, best, nlp_service, employee_client)}
+
+            display_results = results
+            if full_post_name:
+                display_results = _filter_by_post(results, full_post_name)
+                if len(display_results) == 1:
+                    return {"status": "found", "total": 1,
+                            "employee_card": await _build_enriched_card(token, display_results[0], nlp_service,
+                                                                        employee_client)}
+
+            choices = [_serialize_employee_raw(r) for r in display_results[:effective_size]]
+            logger.info("Multiple employees found", extra={"count": len(choices)})
+            return await _resolve_via_ask_human(token=token, results=display_results, choices=choices,
+                                                merged_last_name=merged.last_name, nlp_service=nlp_service,
+                                                employee_client=employee_client)
+
+        except ToolAborted as aborted:
+            logger.info("Employee disambiguation aborted: %s", aborted.reason)
+            return {"status": "cancelled", "message": "Выбор сотрудника отменён пользователем."}
+        except GraphInterrupt:
+            raise
+        except Exception as exc:  # noqa: B902 - Broad exception required to prevent agent crash
+            logger.error("Employee search failed", exc_info=True)
+            return {"status": "error", "message": f"Ошибка поиска: {exc}"}
+
+    return StructuredTool.from_function(
+        func=employee_search_tool,
+        name="employee_search_tool",
+        description="Searches for employees in the EDMS directory by ANY criteria. Токен авторизации передается системой АВТОМАТИЧЕСКИ.",
+        args_schema=EmployeeSearchInput,
+    )

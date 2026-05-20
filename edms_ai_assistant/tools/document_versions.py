@@ -1,3 +1,4 @@
+# edms_ai_assistant/tools/doc_versions_tool.py
 """
 EDMS AI Assistant — Document Versions Tool.
 
@@ -8,11 +9,10 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-
 from typing import Any, Annotated
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel
 
 from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
@@ -44,6 +44,7 @@ def _att_name(attachment: Any) -> str:
         )
     return (
         getattr(attachment, "name", None)
+        or getattr(attachment, "original_name", None) # Поддержка snake_case из DTO
         or getattr(attachment, "originalName", None)
         or ""
     )
@@ -83,40 +84,51 @@ class DocumentVersionsInput(BaseModel):
     pass
 
 
-@tool("doc_get_versions", args_schema=DocumentVersionsInput)
-async def doc_get_versions(
-    config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """Retrieve all document versions and compare each consecutive pair automatically.
+# ─── Tool Factory ─────────────────────────────────────────────────────────────
 
-    BEHAVIOUR:
-    - Fetches ALL versions of the document (N versions).
-    - Compares every consecutive pair: v1↔v2, v2↔v3, ..., v(N-1)↔vN.
-    - Returns full aggregated comparison results for ALL pairs.
-    - Agent MUST NOT ask the user which versions to compare — all pairs are compared.
-    - If only 1 version exists — informs user, no comparison possible.
-    - If exactly 2 versions — compares them (1 pair).
-    - If N > 2 versions — compares all N-1 consecutive pairs and presents full history.
 
-    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-    Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
+def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredTool:
+    """Фабрика для создания инструмента сравнения версий документа.
 
     Args:
-        config: LangGraph RunnableConfig (инжектируется автоматически, содержит token и document_id).
+        document_client: Клиент для работы с документами EDMS.
 
     Returns:
-        Dict with all versions metadata and full pair-wise comparison results.
+        Настроенный StructuredTool, готовый к регистрации в агенте.
     """
-    try:
-        token = get_token_from_config(config)
-        document_id = get_document_id_from_config(config)
-    except RuntimeError as exc:
-        logger.error("Missing context in tool call: %s", exc)
-        return {"status": "error", "message": str(exc)}
 
-    try:
-        async with DocumentClient() as client:
-            versions = await client.get_document_versions(token, document_id)
+    async def doc_get_versions(
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Retrieve all document versions and compare each consecutive pair automatically.
+
+        BEHAVIOUR:
+        - Fetches ALL versions of the document (N versions).
+        - Compares every consecutive pair: v1↔v2, v2↔v3, ..., v(N-1)↔vN.
+        - Returns full aggregated comparison results for ALL pairs.
+        - Agent MUST NOT ask the user which versions to compare — all pairs are compared.
+        - If only 1 version exists — informs user, no comparison possible.
+        - If exactly 2 versions — compares them (1 pair).
+        - If N > 2 versions — compares all N-1 consecutive pairs and presents full history.
+
+        ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+        Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
+
+        Args:
+            config: LangGraph RunnableConfig (инжектируется автоматически).
+
+        Returns:
+            Dict with all versions metadata and full pair-wise comparison results.
+        """
+        try:
+            token = get_token_from_config(config)
+            document_id = get_document_id_from_config(config)
+        except RuntimeError as exc:
+            logger.error("Missing context in tool call: %s", exc)
+            return {"status": "error", "message": str(exc)}
+
+        try:
+            versions = await document_client.get_document_versions(token, document_id)
 
             if not versions:
                 return {
@@ -125,7 +137,8 @@ async def doc_get_versions(
                     "message": "У документа только одна версия — сравнивать не с чем.",
                 }
 
-            sorted_versions = sorted(versions, key=lambda v: v.get("version", 0))
+            # Сортируем по номеру версии (атрибут DocumentVersionDto)
+            sorted_versions = sorted(versions, key=lambda v: v.version or 0)
             total = len(sorted_versions)
 
             # ── Сбор метаданных всех версий ─────────────────────────────────
@@ -133,14 +146,14 @@ async def doc_get_versions(
             version_ids: dict[str, str] = {}  # "1" → doc_uuid
 
             for v in sorted_versions:
-                vnum = v.get("version") or (len(versions_info) + 1)
-                doc_id = str(v.get("documentId") or "")
-                if doc_id:
-                    version_ids[str(vnum)] = doc_id
+                vnum = v.version or (len(versions_info) + 1)
+                doc_uuid = v.document_id
+                if doc_uuid:
+                    version_ids[str(vnum)] = str(doc_uuid)
                 versions_info.append(
                     {
                         "version_number": vnum,
-                        "created_date": str(v.get("createDate") or ""),
+                        "created_date": str(v.create_date or ""),
                     }
                 )
 
@@ -165,17 +178,22 @@ async def doc_get_versions(
                 to_id = version_ids[to_vnum]
 
                 try:
-                    doc_from = await client.get_document_metadata(token, from_id)
-                    doc_to = await client.get_document_metadata(token, to_id)
+                    doc_from_dto = await document_client.get_document_metadata(token, from_id)
+                    doc_to_dto = await document_client.get_document_metadata(token, to_id)
 
-                    if not doc_from or not doc_to:
+                    if not doc_from_dto or not doc_to_dto:
                         errors.append(
                             f"Версия {from_vnum} или {to_vnum}: метаданные недоступны"
                         )
                         continue
 
-                    meta_diff = _compare_metadata(doc_from, doc_to)
-                    att_diff = _compare_attachments(doc_from, doc_to)
+                    # Конвертируем DTO в dict с camelCase ключами для переиспользования 
+                    # логики сравнения, которая опирается на ключи API СЭД
+                    dict_from = doc_from_dto.model_dump(by_alias=True, exclude_none=True)
+                    dict_to = doc_to_dto.model_dump(by_alias=True, exclude_none=True)
+
+                    meta_diff = _compare_metadata(dict_from, dict_to)
+                    att_diff = _compare_attachments(dict_from, dict_to)
 
                     comparisons.append(
                         {
@@ -230,6 +248,13 @@ async def doc_get_versions(
                 ),
             }
 
-    except Exception as e:
-        logger.error("[DOC-VERSIONS-TOOL] Error: %s", e, exc_info=True)
-        return {"status": "error", "message": f"Ошибка получения версий: {e!s}"}
+        except Exception as e:
+            logger.error("[DOC-VERSIONS-TOOL] Error: %s", e, exc_info=True)
+            return {"status": "error", "message": f"Ошибка получения версий: {e!s}"}
+
+    return StructuredTool.from_function(
+        coroutine=doc_get_versions,
+        name="doc_get_versions",
+        description="Retrieve all document versions and compare each consecutive pair automatically.",
+        args_schema=DocumentVersionsInput,
+    )

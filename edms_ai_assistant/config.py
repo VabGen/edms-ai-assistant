@@ -17,6 +17,29 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class EdmsSettings(BaseSettings):
+    """Настройки для интеграции с EDMS (СЭД)."""
+    model_config = SettingsConfigDict(
+        env_prefix="EDMS_",
+        env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    base_url: HttpUrl = Field(default="http://127.0.0.1:8098")
+    timeout: int = Field(default=30, ge=10, le=600)
+    long_timeout: int = Field(default=120, ge=10, le=600)
+    api_version: str = "v1"
+
+    # Реквизиты для авторизации (если токен получается по client_credentials)
+    client_id: SecretStr | None = None
+    client_secret: SecretStr | None = None
+
+    # MCP & Vector DB
+    mcp_url: HttpUrl | None = Field(default=None, description="FastMCP HTTP transport URL")
+    mcp_port: int = 9000
+
+
 class Settings(BaseSettings):
     """
     Application configuration with strict validation.
@@ -83,19 +106,36 @@ class Settings(BaseSettings):
     EMBEDDING_MAX_RETRIES_PER_REQUEST: int = 6
     EMBEDDING_DIM: int = Field(default=1536, description="Vector dimensions for Qdrant")
 
-    # ── EDMS Configuration ───────────────────────────────────────────────────
-    EDMS_BASE_URL: HttpUrl = Field(default="http://127.0.0.1:8098")
-    EDMS_TIMEOUT: int = Field(default=120, ge=10, le=600)
-    EDMS_API_VERSION: str = "v1"
+    # ── EDMS Configuration (Aliases for backward compatibility) ───────────────
+    # Оригинальные поля EDMS вынесены в EdmsSettings, здесь оставлены свойства
+    # для совместимости со старым кодом, где используется settings.EDMS_BASE_URL
+
+    @property
+    def EDMS_BASE_URL(self) -> str:
+        return str(edms_settings.base_url)
+
+    @property
+    def EDMS_TIMEOUT(self) -> int:
+        return edms_settings.timeout
+
+    @property
+    def EDMS_API_VERSION(self) -> str:
+        return edms_settings.api_version
 
     @property
     def CHANCELLOR_NEXT_BASE_URL(self) -> str:
         """Alias for backward compatibility with existing clients."""
-        return str(self.EDMS_BASE_URL)
+        return str(edms_settings.base_url)
 
-    # ── MCP & Vector DB ──────────────────────────────────────────────────────
-    EDMS_MCP_URL: HttpUrl | None = Field(default=None, description="FastMCP HTTP transport URL")
-    EDMS_MCP_PORT: int = 9000
+    @property
+    def EDMS_MCP_URL(self) -> HttpUrl | None:
+        return edms_settings.mcp_url
+
+    @property
+    def EDMS_MCP_PORT(self) -> int:
+        return edms_settings.mcp_port
+
+    # ── Vector DB ────────────────────────────────────────────────────────────
     QDRANT_URL: HttpUrl = Field(default="http://qdrant:6333")
 
     # ── Database Configuration ───────────────────────────────────────────────
@@ -213,5 +253,6 @@ class Settings(BaseSettings):
         return self
 
 
-# ── Global settings instance ────────────────────────────────────────────────
+# ── Global settings instances ────────────────────────────────────────────────
+edms_settings = EdmsSettings()
 settings = Settings()

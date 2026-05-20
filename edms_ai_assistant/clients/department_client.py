@@ -1,64 +1,83 @@
 # edms_ai_assistant/clients/department_client.py
 import logging
-from abc import abstractmethod
-from typing import Any
 from uuid import UUID
 
-from .base_client import EdmsBaseClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
+from edms_ai_assistant.core.exceptions import EdmsNotFoundError
+from edms_ai_assistant.domain.employee import DepartmentDto, EmployeeDto
 
 logger = logging.getLogger(__name__)
 
 
-class BaseDepartmentClient(EdmsBaseClient):
+class DepartmentClient:
+    """HTTP client for EDMS Department API.
 
-    @abstractmethod
-    async def find_by_name(
-        self, token: str, department_name: str
-    ) -> dict[str, Any] | None:
-        raise NotImplementedError
+    Использует композицию: делегирует HTTP-логику базовому клиенту.
+    Возвращает строгие Pydantic DTO.
+    """
 
-    @abstractmethod
-    async def get_employees_by_department_id(
-        self, token: str, department_id: UUID
-    ) -> list[dict[str, Any]]:
-        raise NotImplementedError
-
-
-class DepartmentClient(BaseDepartmentClient, EdmsBaseClient):
+    def __init__(self, base_client: EdmsBaseClient):
+        self._client = base_client
 
     async def find_by_name(
-        self, token: str, department_name: str
-    ) -> dict[str, Any] | None:
-        endpoint = "api/department/fts-name"
-        params = {"fts": department_name}
+            self, token: str, department_name: str
+    ) -> DepartmentDto | None:
+        """Ищет отдел по названию через FTS.
 
+        Args:
+            token: JWT authorization token.
+            department_name: Название отдела для поиска.
+
+        Returns:
+            DepartmentDto или None, если не найден.
+        """
         try:
-            result = await self._make_request(
-                "GET", endpoint, token=token, params=params
+            result = await self._client._make_request(
+                "GET",
+                "api/department/fts-name",
+                token=token,
+                params={"fts": department_name}
             )
-            if result and isinstance(result, dict):
-                logger.info(f"Found department: {result.get('name', 'Unknown')}")
-                return result
-            return None
-        except Exception as e:
-            logger.error(f"Error searching department '{department_name}': {e}")
-            return None
-
-    async def get_employees_by_department_id(
-        self, token: str, department_id: UUID
-    ) -> list[dict[str, Any]]:
-        endpoint = f"api/department/{department_id}/employees/all"
-
-        try:
-            result = await self._make_request("GET", endpoint, token=token)
-            if isinstance(result, list):
+            if isinstance(result, dict) and result:
+                dept = DepartmentDto.model_validate(result)
                 logger.info(
-                    f"Found {len(result)} employees in department {department_id}"
+                    "Department found: %s (id=%s)",
+                    dept.name,
+                    str(dept.id)[:8] if dept.id else "Unknown"
                 )
-                return result
-            return []
-        except Exception as e:
-            logger.error(
-                f"Error fetching employees for department {department_id}: {e}"
+                return dept
+        except EdmsNotFoundError:
+            logger.info("Department not found: '%s'", department_name)
+
+        return None
+
+    async def get_employees_by_department_id(
+            self, token: str, department_id: UUID
+    ) -> list[EmployeeDto]:
+        """Получает список сотрудников отдела по его UUID.
+
+        Args:
+            token: JWT authorization token.
+            department_id: UUID отдела.
+
+        Returns:
+            Список EmployeeDto или пустой список, если отдел не найден.
+        """
+        try:
+            result = await self._client._make_request(
+                "GET",
+                f"api/department/{department_id}/employees/all",
+                token=token
             )
-            return []
+            if isinstance(result, list):
+                employees = [EmployeeDto.model_validate(e) for e in result]
+                logger.info(
+                    "Found %d employees in department %s",
+                    len(employees),
+                    str(department_id)[:8]
+                )
+                return employees
+        except EdmsNotFoundError:
+            pass
+
+        return []

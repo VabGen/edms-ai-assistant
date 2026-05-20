@@ -1,14 +1,15 @@
 # edms_ai_assistant/tools/task.py
-"""Task Creation Tool with Native HITL Disambiguation."""
+"""Task Creation Tool with Native HITL Disambiguation (DI Factory)."""
+
+from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
-
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field
 
@@ -19,8 +20,8 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
+from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.domain.task_models import TaskType
-from edms_ai_assistant.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,6 @@ class TaskCreateInput(BaseModel):
     """Схема входных данных инструмента создания поручения."""
     task_text: str = Field(..., description="Текст поручения (обязательно)")
 
-    # ── Исполнители: индивидуальные ────────────────────────────────────
     executor_last_names: list[str] | None = Field(
         None,
         description=(
@@ -40,8 +40,6 @@ class TaskCreateInput(BaseModel):
     responsible_last_name: str | None = Field(
         None, description="Фамилия ответственного исполнителя"
     )
-
-    # ── Исполнители: массовые ──────────────────────────────────────────
     department_names: list[str] | None = Field(
         None,
         description=(
@@ -75,8 +73,6 @@ class TaskCreateInput(BaseModel):
             "Подчинённые — сотрудники подразделения, которым руководит пользователь."
         ),
     )
-
-    # ── Прочее ─────────────────────────────────────────────────────────
     planed_date_end: str | None = Field(
         None, description="Плановая дата окончания в ISO 8601"
     )
@@ -93,75 +89,63 @@ class TaskCreateInput(BaseModel):
     )
 
 
-@tool("task_create_tool", args_schema=TaskCreateInput)
-async def task_create_tool(
-        task_text: str,
-        executor_last_names: list[str] | None = None,
-        responsible_last_name: str | None = None,
-        department_names: list[str] | None = None,
-        group_names: list[str] | None = None,
-        personal_group_names: list[str] | None = None,
-        include_subordinates: bool | None = None,
-        planed_date_end: str | None = None,
-        task_type: TaskType | None = None,
-        selected_employee_ids: list[str] | None = None,
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """
-    Создает поручение с поддержкой различных типов исполнителей.
+def create_task_tool(deps: AppDeps) -> StructuredTool:
+    """Фабрика инструмента создания поручений с DI."""
 
-    Типы исполнителей:
-    1. Индивидуальные: по фамилии/ФИО (executor_last_names)
-    2. Подразделения: все сотрудники отдела (department_names)
-    3. Группы: все сотрудники группы (group_names)
-    4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)
-    5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)
+    task_service = deps.task_service
 
-    Можно комбинировать:
-    "Создай поручение для Петрова, отдела ИТ, группы Бухгалтеры и моей команды"
+    async def task_create_tool(
+            task_text: str,
+            executor_last_names: list[str] | None = None,
+            responsible_last_name: str | None = None,
+            department_names: list[str] | None = None,
+            group_names: list[str] | None = None,
+            personal_group_names: list[str] | None = None,
+            include_subordinates: bool | None = None,
+            planed_date_end: str | None = None,
+            task_type: TaskType | None = None,
+            selected_employee_ids: list[str] | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Создает поручение с поддержкой различных типов исполнителей.
 
-    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-    Если найдено несколько сотрудников с одинаковыми фамилиями, система
-    АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
+        Типы исполнителей:
+        1. Индивидуальные: по фамилии/ФИО (executor_last_names)
+        2. Подразделения: все сотрудники отдела (department_names)
+        3. Группы: все сотрудники группы (group_names)
+        4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)
+        5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)
 
-    Args:
-        task_text: Текст поручения.
-        executor_last_names: Фамилии исполнителей.
-        responsible_last_name: Фамилия ответственного.
-        department_names: Подразделения.
-        group_names: Группы.
-        personal_group_names: Личные группы.
-        include_subordinates: Включить подчинённых.
-        planed_date_end: Плановая дата окончания.
-        task_type: Тип поручения.
-        selected_employee_ids: UUID выбранных сотрудников (если уже известны).
-        config: Конфигурация LangGraph (инжектируется автоматически).
-    """
-    try:
-        token = get_token_from_config(config)
-        document_id = get_document_id_from_config(config)
-    except RuntimeError as exc:
-        logger.error("Missing context in tool call: %s", exc)
-        return {"status": "error", "message": str(exc)}
+        Можно комбинировать:
+        "Создай поручение для Петрова, отдела ИТ, группы Бухгалтеры и моей команды"
 
-    if not task_text or not task_text.strip():
-        return {"status": "error", "message": "Текст поручения не может быть пустым."}
-
-    deadline = None
-    if planed_date_end:
+        ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+        Если найдено несколько сотрудников с одинаковыми фамилиями, система
+        АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
+        """
         try:
-            deadline = datetime.fromisoformat(planed_date_end.replace("Z", "+00:00"))
-            if deadline.tzinfo is None:
-                deadline = deadline.replace(tzinfo=UTC)
-        except ValueError as e:
-            return {"status": "error", "message": f"Неверный формат даты: {e}"}
+            token = get_token_from_config(config)
+            document_id = get_document_id_from_config(config)
+        except RuntimeError as exc:
+            logger.error("Missing context in tool call: %s", exc)
+            return {"status": "error", "message": str(exc)}
 
-    effective_task_type = task_type if task_type is not None else TaskType.GENERAL
-    preselected_ids: list[str] = list(selected_employee_ids or [])
+        if not task_text or not task_text.strip():
+            return {"status": "error", "message": "Текст поручения не может быть пустым."}
 
-    try:
-        async with TaskService() as service:
+        deadline = None
+        if planed_date_end:
+            try:
+                deadline = datetime.fromisoformat(planed_date_end.replace("Z", "+00:00"))
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=UTC)
+            except ValueError as e:
+                return {"status": "error", "message": f"Неверный формат даты: {e}"}
 
+        effective_task_type = task_type if task_type is not None else TaskType.GENERAL
+        preselected_ids: list[str] = list(selected_employee_ids or [])
+
+        try:
             # ================================================================
             # Шаг 1: Резолвинг массовых исполнителей
             # ================================================================
@@ -175,7 +159,7 @@ async def task_create_tool(
                 or include_subordinates
             )
             if has_bulk:
-                bulk_result = await service.resolve_bulk_executors(
+                bulk_result = await task_service.resolve_bulk_executors(
                     token=token,
                     department_names=department_names,
                     group_names=group_names,
@@ -192,7 +176,7 @@ async def task_create_tool(
             all_uuids.extend(bulk_ids)
 
             if executor_last_names:
-                executors, not_found, ambiguous = await service.collect_executors(
+                executors, not_found, ambiguous = await task_service.collect_executors(
                     token, executor_last_names, responsible_last_name
                 )
 
@@ -260,7 +244,7 @@ async def task_create_tool(
             # ================================================================
             # Шаг 3: Создание поручения
             # ================================================================
-            result = await service.create_task_by_employee_ids(
+            result = await task_service.create_task_by_employee_ids(
                 token=token,
                 document_id=document_id,
                 task_text=task_text,
@@ -289,9 +273,24 @@ async def task_create_tool(
                 "not_found_employees": result.not_found_employees,
             }
 
-    except GraphInterrupt:
-        raise
+        except GraphInterrupt:
+            raise
+        except Exception as e:
+            logger.error("[TASK-TOOL] Error: %s", e, exc_info=True)
+            return {"status": "error", "message": f"Произошла ошибка: {e!s}"}
 
-    except Exception as e:
-        logger.error("[TASK-TOOL] Error: %s", e, exc_info=True)
-        return {"status": "error", "message": f"Произошла ошибка: {e!s}"}
+    return StructuredTool.from_function(
+        func=task_create_tool,
+        name="task_create_tool",
+        description=(
+            "Создает поручение с поддержкой различных типов исполнителей.\n"
+            "Типы исполнителей:\n"
+            "1. Индивидуальные: по фамилии/ФИО (executor_last_names)\n"
+            "2. Подразделения: все сотрудники отдела (department_names)\n"
+            "3. Группы: все сотрудники группы (group_names)\n"
+            "4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)\n"
+            "5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)\n\n"
+            "ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ."
+        ),
+        args_schema=TaskCreateInput,
+    )

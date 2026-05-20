@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from edms_ai_assistant.agent.hitl_primitives import ask_human
@@ -41,6 +41,7 @@ from edms_ai_assistant.agent.interrupt_contract import (
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.document_client import DocumentClient
+from edms_ai_assistant.domain.document import DocumentDto
 
 logger = logging.getLogger(__name__)
 
@@ -125,146 +126,157 @@ class DocSearchInput(BaseModel):
         return self
 
 
-@tool("doc_search_tool", args_schema=DocSearchInput)
-async def doc_search_tool(
-        short_summary: str | None = None,
-        reg_number: str | None = None,
-        out_reg_number: str | None = None,
-        doc_category: str | None = None,
-        status: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        date_control_start: str | None = None,
-        date_control_end: str | None = None,
-        author_last_name: str | None = None,
-        correspondent_name: str | None = None,
-        recipient_name: str | None = None,
-        task_executor_last_name: str | None = None,
-        author_current_user: bool | None = None,
-        process_executor_current_user: bool | None = None,
-        task_executor_current_user: bool | None = None,
-        control_user_current_user: bool | None = None,
-        introduction_current_user: bool | None = None,
-        display_mode: str | None = None,
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """Searches documents in EDMS by a wide range of filter criteria."""
+# ─── Tool Factory ─────────────────────────────────────────────────────────────
 
-    try:
-        token = get_token_from_config(config)
-    except Exception as e:
-        logger.error("Failed to get token from config: %s | config keys: %s", e,
-                     list((config or {}).get("configurable", {}).keys()) if config else "None")
-        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
 
-    doc_filter: dict[str, Any] = {}
-    if short_summary: doc_filter["shortSummary"] = short_summary
-    if reg_number: doc_filter["regNumber"] = reg_number
-    if out_reg_number: doc_filter["outRegNumber"] = out_reg_number
-    if doc_category: doc_filter["categoryConstants"] = [doc_category]
-    if date_from: doc_filter["dateRegStart"] = _to_iso_start(date_from)
-    if date_to: doc_filter["dateRegEnd"] = _to_iso_end(date_to)
-    if date_control_start: doc_filter["dateControlStart"] = _to_iso_start(date_control_start)
-    if date_control_end: doc_filter["dateControlEnd"] = _to_iso_end(date_control_end)
-    if author_last_name: doc_filter["authorLastName"] = author_last_name
-    if correspondent_name: doc_filter["correspondentName"] = correspondent_name
-    if recipient_name: doc_filter["recipientName"] = recipient_name
-    if task_executor_last_name: doc_filter["taskExecutorLastName"] = task_executor_last_name
-    if author_current_user: doc_filter["authorCurrentUser"] = True
-    if process_executor_current_user: doc_filter["processExecutorCurrentUser"] = True
-    if task_executor_current_user: doc_filter["taskExecutorCurrentUser"] = True
-    if control_user_current_user: doc_filter["controlUserCurrentUser"] = True
-    if introduction_current_user: doc_filter["introductionCurrentUser"] = True
+def create_doc_search_tool(document_client: DocumentClient) -> StructuredTool:
+    """Фабрика для создания инструмента поиска документов.
 
-    pageable: dict[str, Any] = {"page": 0, "size": _MAX_RESULTS}
-    includes = ["DOCUMENT_TYPE", "CORRESPONDENT", "REGISTRATION_JOURNAL"]
+    Args:
+        document_client: Клиент для работы с документами EDMS.
 
-    logger.info("Document search requested",
-                extra={"filter_keys": list(doc_filter.keys()), "status_filter": status, "display_mode": display_mode})
-    params_list = _build_params_list(doc_filter, pageable, includes)
+    Returns:
+        Настроенный StructuredTool, готовый к регистрации в агенте.
+    """
 
-    content: list[dict[str, Any]] = []
-    try:
-        async with DocumentClient() as client:
-            result = await client._make_request("GET", "api/document", token=token, params=params_list)
-            if isinstance(result, dict):
-                content = result.get("content") or []
-            elif isinstance(result, list):
-                content = result
-    except Exception as exc:
-        logger.error("Document search failed: %s", exc, exc_info=True)
-        return {"status": "error", "message": f"Ошибка поиска документов: {exc}"}
+    async def doc_search_tool(
+            short_summary: str | None = None,
+            reg_number: str | None = None,
+            out_reg_number: str | None = None,
+            doc_category: str | None = None,
+            status: str | None = None,
+            date_from: str | None = None,
+            date_to: str | None = None,
+            date_control_start: str | None = None,
+            date_control_end: str | None = None,
+            author_last_name: str | None = None,
+            correspondent_name: str | None = None,
+            recipient_name: str | None = None,
+            task_executor_last_name: str | None = None,
+            author_current_user: bool | None = None,
+            process_executor_current_user: bool | None = None,
+            task_executor_current_user: bool | None = None,
+            control_user_current_user: bool | None = None,
+            introduction_current_user: bool | None = None,
+            display_mode: str | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Searches documents in EDMS by a wide range of filter criteria."""
 
-    if status and content:
-        status_upper = status.strip().upper()
-        content = [d for d in content if str(d.get("status", "")).upper() == status_upper]
+        try:
+            token = get_token_from_config(config)
+        except Exception as e:
+            logger.error("Failed to get token from config: %s", e)
+            return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
 
-    if not content:
-        return {"status": "success", "message": "Документы не найдены.", "documents": [], "total": 0}
+        doc_filter: dict[str, Any] = {}
+        if short_summary: doc_filter["shortSummary"] = short_summary
+        if reg_number: doc_filter["regNumber"] = reg_number
+        if out_reg_number: doc_filter["outRegNumber"] = out_reg_number
+        if doc_category: doc_filter["categoryConstants"] = [doc_category]
+        if date_from: doc_filter["dateRegStart"] = _to_iso_start(date_from)
+        if date_to: doc_filter["dateRegEnd"] = _to_iso_end(date_to)
+        if date_control_start: doc_filter["dateControlStart"] = _to_iso_start(date_control_start)
+        if date_control_end: doc_filter["dateControlEnd"] = _to_iso_end(date_control_end)
+        if author_last_name: doc_filter["authorLastName"] = author_last_name
+        if correspondent_name: doc_filter["correspondentName"] = correspondent_name
+        if recipient_name: doc_filter["recipientName"] = recipient_name
+        if task_executor_last_name: doc_filter["taskExecutorLastName"] = task_executor_last_name
 
-    documents = [_serialize_document(d) for d in content[:10]]
+        # Spring обычно ожидает строку "true"/"false" для Boolean параметров query
+        if author_current_user: doc_filter["authorCurrentUser"] = "true"
+        if process_executor_current_user: doc_filter["processExecutorCurrentUser"] = "true"
+        if task_executor_current_user: doc_filter["taskExecutorCurrentUser"] = "true"
+        if control_user_current_user: doc_filter["controlUserCurrentUser"] = "true"
+        if introduction_current_user: doc_filter["introductionCurrentUser"] = "true"
 
-    # ── Если LLM запросила формат "cards" для UI ──────────────────────
-    if display_mode == "cards":
-        cards = [
-            InterruptCard(
-                id=doc["id"],
-                label=doc["reg_number"],
-                description=doc["short_summary"],
-                badges=[doc["category"], doc["status"]],
-                primary_attrs={
-                    "Дата": doc["reg_date"],
-                    "Автор": doc["author"],
-                },
-                metadata={
-                    "url": f"/document/{doc['id']}",
-                    "category": doc["category"],
-                    "status": doc["status"],
-                }
+        pageable: dict[str, Any] = {"page": 0, "size": _MAX_RESULTS}
+        includes = ["DOCUMENT_TYPE", "CORRESPONDENT", "REGISTRATION_JOURNAL"]
+
+        logger.info("Document search requested",
+                    extra={"filter_keys": list(doc_filter.keys()), "status_filter": status,
+                           "display_mode": display_mode})
+
+        try:
+            documents = await document_client.search_documents(
+                token=token,
+                doc_filter=doc_filter,
+                pageable=pageable,
+                includes=includes,
             )
-            for doc in documents
-        ]
+        except Exception as exc:
+            logger.error("Document search failed: %s", exc, exc_info=True)
+            return {"status": "error", "message": f"Ошибка поиска документов: {exc}"}
 
-        # Выбрасываем Interrupt — это остановит граф и отправит JSON на фронтенд
-        resume = ask_human(CardSelectInterrupt(
-            prompt=f"Найдено документов: {len(content)}",
-            cards=cards,
-            multiple=False,
-        ))
+        # Client-side фильтрация по статусу (если API не поддерживает напрямую)
+        if status and documents:
+            status_upper = status.strip().upper()
+            documents = [d for d in documents if str(getattr(d, "status", "")).upper() == status_upper]
 
-        # Граф возобновлен. Инструмент возвращает ID выбранного документа,
-        # чтобы LLM могла продолжить работу (например, ответить "Открываю документ...")
-        if isinstance(resume, CardSelectResume) and resume.selected_ids:
-            selected_id = resume.selected_ids[0]
-            return {
-                "status": "selected",
-                "selected_document_id": selected_id,
-                "message": "Пользователь выбрал документ из списка для просмотра."
-            }
+        if not documents:
+            return {"status": "success", "message": "Документы не найдены.", "documents": [], "total": 0}
 
-        # Если пользователь прервал выбор (закрыл виджет и т.п.)
-        return {"status": "cancelled", "message": "Пользователь отменил выбор документа."}
+        serialized_docs = [_serialize_document(d) for d in documents[:10]]
 
-    # ── Стандартный возврат JSON для аналитики ──────────────────────
-    return {"status": "success", "total": len(content), "shown": len(documents), "documents": documents,
-            "message": f"Найдено {len(content)} документ(ов)."}
+        # ── Если LLM запросила формат "cards" для UI ──────────────────────
+        if display_mode == "cards":
+            cards = [
+                InterruptCard(
+                    id=doc["id"],
+                    label=doc["reg_number"],
+                    description=doc["short_summary"],
+                    badges=[doc["category"], doc["status"]],
+                    primary_attrs={
+                        "Дата": doc["reg_date"],
+                        "Автор": doc["author"],
+                    },
+                    metadata={
+                        "url": f"/document/{doc['id']}",
+                        "category": doc["category"],
+                        "status": doc["status"],
+                    }
+                )
+                for doc in serialized_docs
+            ]
+
+            # Выбрасываем Interrupt — это остановит граф и отправит JSON на фронтенд
+            resume = ask_human(CardSelectInterrupt(
+                prompt=f"Найдено документов: {len(documents)}",
+                cards=cards,
+                multiple=False,
+            ))
+
+            # Граф возобновлен. Инструмент возвращает ID выбранного документа,
+            # чтобы LLM могла продолжить работу (например, ответить "Открываю документ...")
+            if isinstance(resume, CardSelectResume) and resume.selected_ids:
+                selected_id = resume.selected_ids[0]
+                return {
+                    "status": "selected",
+                    "selected_document_id": selected_id,
+                    "message": "Пользователь выбрал документ из списка для просмотра."
+                }
+
+            # Если пользователь прервал выбор (закрыл виджет и т.п.)
+            return {"status": "cancelled", "message": "Пользователь отменил выбор документа."}
+
+        # ── Стандартный возврат JSON для аналитики ──────────────────────
+        return {
+            "status": "success",
+            "total": len(documents),
+            "shown": len(serialized_docs),
+            "documents": serialized_docs,
+            "message": f"Найдено {len(documents)} документ(ов)."
+        }
+
+    return StructuredTool.from_function(
+        coroutine=doc_search_tool,
+        name="doc_search_tool",
+        description="Searches documents in EDMS by a wide range of filter criteria.",
+        args_schema=DocSearchInput,
+    )
 
 
-def _build_params_list(doc_filter: dict[str, Any], pageable: dict[str, Any], includes: list[str]) -> list[
-    tuple[str, Any]]:
-    params: list[tuple[str, Any]] = []
-    for key, val in doc_filter.items():
-        if val is None: continue
-        if isinstance(val, list):
-            for item in val: params.append((key, str(item)))
-        elif isinstance(val, bool):
-            params.append((key, str(val).lower()))
-        else:
-            params.append((key, val))
-    for key, val in pageable.items():
-        if val is not None: params.append((key, val))
-    for inc in includes: params.append(("includes", inc))
-    return params
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
 def _to_iso_start(date_str: str) -> str:
@@ -277,13 +289,28 @@ def _to_iso_end(date_str: str) -> str:
         "%Y-%m-%dT%H:%M:%S.999Z")
 
 
-def _serialize_document(d: dict[str, Any]) -> dict[str, Any]:
+def _serialize_document(d: DocumentDto) -> dict[str, Any]:
+    """
+    Сериализует DocumentDto в плоский словарь для возврата инструментом.
+    Использует getattr для безопасного доступа к полям, так как модель
+    использует extra="allow", и некоторые поля могут не быть явно аннотированы.
+    """
+    author_obj = getattr(d, "author", None)
+    author_name = "—"
+    if author_obj:
+        parts = [
+            getattr(author_obj, "last_name", "") or "",
+            getattr(author_obj, "first_name", "") or "",
+            getattr(author_obj, "middle_name", "") or "",
+        ]
+        author_name = " ".join(p for p in parts if p).strip() or "—"
+
     return {
-        "id": str(d.get("id", "")), "reg_number": d.get("regNumber") or d.get("reservedRegNumber") or "—",
-        "reg_date": (str(d.get("regDate"))[:10] if d.get("regDate") else "—"),
-        "category": str(d.get("docCategoryConstant", "—")), "short_summary": (d.get("shortSummary") or "")[:200],
-        "author": " ".join(p for p in
-                           [(d.get("author") or {}).get("lastName", ""), (d.get("author") or {}).get("firstName", ""),
-                            (d.get("author") or {}).get("middleName", "")] if p).strip() or "—",
-        "status": str(d.get("status", "—")),
+        "id": str(d.id) if d.id else "",
+        "reg_number": d.reg_number or getattr(d, "reserved_reg_number", None) or "—",
+        "reg_date": (str(d.reg_date)[:10] if d.reg_date else "—"),
+        "category": str(getattr(d, "doc_category_constant", "—")),
+        "short_summary": (d.short_summary or "")[:200],
+        "author": author_name,
+        "status": str(d.status or "—"),
     }

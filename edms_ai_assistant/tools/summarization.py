@@ -1,3 +1,4 @@
+# edms_ai_assistant/tools/summarization.py
 """
 EDMS AI Assistant — Document Summarisation Tool.
 """
@@ -11,16 +12,16 @@ import uuid
 from enum import StrEnum
 from typing import Any
 
-from langchain_core.tools import tool
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.hitl_primitives import ask_human
+from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
 from edms_ai_assistant.agent.interrupt_contract import (
     InterruptOption,
     SelectInterrupt,
     SelectResume,
 )
-from edms_ai_assistant.agent.hitl_primitives import ToolAborted
 
 logger = logging.getLogger(__name__)
 
@@ -113,229 +114,224 @@ def _heuristic_recommendation(text: str) -> dict[str, str]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Глобальный синглтон сервиса (без import cycle)
-# ---------------------------------------------------------------------------
-
-_service_instance: Any | None = None
+# ─── Tool Factory ─────────────────────────────────────────────────────────────
 
 
-def set_summarization_service(service: Any) -> None:
-    """Вызывается из lifespan при инициализации приложения."""
-    global _service_instance
-    _service_instance = service
-    logger.info("SummarizationService зарегистрирован в tool")
-
-
-def get_summarization_service() -> Any | None:
-    return _service_instance
-
-
-# ---------------------------------------------------------------------------
-# Tool
-# ---------------------------------------------------------------------------
-
-
-@tool("doc_summarize_text", args_schema=SummarizeInput)
-async def doc_summarize_text(
-        text: str,
-        summary_type: SummarizeType | None = None,
-) -> dict[str, Any]:
-    """Анализирует текст документа через LLM-пайплайн суммаризации.
-
-    Используй ТОЛЬКО когда пользователь явно просит:
-    - суммаризировать / кратко изложить / пересказать документ
-    - извлечь ключевые факты
-    - составить тезисный план
-
-    НЕ используй для простых вопросов о документе (кто автор, какая дата и т.д.).
-
-    Human-in-the-Loop:
-        Когда summary_type = None — возвращает requires_choice с тремя вариантами.
-        Агент показывает выбор пользователю и ждёт ответа перед повторным вызовом.
+def create_doc_summarize_text_tool(
+        summarization_service: Any,
+        chat_model: BaseChatModel,
+) -> StructuredTool:
+    """Фабрика для создания инструмента суммаризации документа.
 
     Args:
-        text: Текст документа (plain или JSON-обёртка от doc_get_file_content).
-        summary_type: Формат или None для запроса у пользователя.
+        summarization_service: Экземпляр сервиса суммаризации (SummarizationService).
+        chat_model: Языковая модель для fallback суммаризации.
 
     Returns:
-        Dict со статусом:
-        - requires_choice: нужно выбрать формат
-        - success: анализ выполнен, поле content содержит Markdown
-        - error: ошибка выполнения
+        Настроенный StructuredTool, готовый к регистрации в агенте.
     """
-    logger.info(
-        "doc_summarize_text: text_length=%d type=%s",
-        len(text),
-        summary_type.value if summary_type else None,
-    )
 
-    clean_text = _unwrap_json_envelope(text)
-
-    _MIN_USEFUL_CHARS: int = 120
-    if len(clean_text) < _MIN_USEFUL_CHARS:
-        logger.warning(
-            "doc_summarize_text rejected: input too short (%d < %d chars)",
-            len(clean_text),
-            _MIN_USEFUL_CHARS,
-        )
-        return {
-            "status": "error",
-            "message": (
-                f"Передан слишком короткий текст ({len(clean_text)} симв.) — "
-                "вероятно, это заголовок или метаданные, а не содержимое файла. "
-                "Сначала вызови `doc_get_file_content(attachment_id=...)` "
-                "(или `read_local_file_content(file_path=...)` для локального файла), "
-                "затем повторно вызови `doc_summarize_text` с полученным "
-                "содержимым в параметре `text`."
+    async def _llm_fallback(text: str, summary_type: SummarizeType) -> dict[str, Any]:
+        """
+        Простой LLM fallback без пайплайна суммаризации.
+        Используется когда сервис недоступен или упал пайплайн.
+        """
+        _prompts = {
+            SummarizeType.EXTRACTIVE: (
+                "Извлеки ключевые факты из документа. "
+                "Формат: список фактов с категориями (ДАТА, ПЕРСОНА, ОРГАНИЗАЦИЯ, СУММА, ТРЕБОВАНИЕ). "
+                "Язык ответа: русский."
+            ),
+            SummarizeType.ABSTRACTIVE: (
+                "Напиши краткое изложение документа своими словами. "
+                "2-4 абзаца, профессиональный стиль. "
+                "Язык ответа: русский."
+            ),
+            SummarizeType.THESIS: (
+                "Составь тезисный план документа. "
+                "Формат: пронумерованные разделы с подпунктами. "
+                "Язык ответа: русский."
             ),
         }
 
-    if summary_type is None:
-        hint = _heuristic_recommendation(clean_text)
-        resume = ask_human(
-            SelectInterrupt(
-                prompt="Выберите формат анализа документа:",
-                options=[
-                    InterruptOption(
-                        id="extractive",
-                        label="Ключевые факты",
-                        description=(
-                            "Конкретные данные, даты, суммы, имена — "
-                            "нумерованным списком."
-                        ),
-                    ),
-                    InterruptOption(
-                        id="abstractive",
-                        label="Краткий пересказ",
-                        description="Суть документа своими словами в 1–2 абзацах.",
-                    ),
-                    InterruptOption(
-                        id="thesis",
-                        label="Тезисный план",
-                        description="Структурированный план с разделами и подпунктами.",
-                    ),
-                ],
-                default=hint["recommended"],
-            )
-        )
+        prompt = _prompts.get(summary_type, _prompts[SummarizeType.ABSTRACTIVE])
 
-        if not isinstance(resume, SelectResume):
-            raise ToolAborted(
-                f"Contract mismatch: expected SelectResume, "
-                f"got {type(resume).__name__}"
-            )
-        summary_type = _normalise_summary_type(resume.selected_id)
+        from langchain_core.messages import HumanMessage, SystemMessage
 
-    normalised = _normalise_summary_type(summary_type)
+        messages = [
+            SystemMessage(content=f"{prompt}\n\nОтвечай ТОЛЬКО на русском языке."),
+            HumanMessage(content=f"Документ:\n\n{text[:8000]}"),
+        ]
 
-    service = get_summarization_service()
-    if service is None:
-        return await _llm_fallback(clean_text, normalised)
-
-    try:
-        from edms_ai_assistant.summarizer.service import (
-            SummarizationRequest,
-            format_output_as_markdown,
-        )
-        from edms_ai_assistant.summarizer.structured.models import SummaryMode
-
-        _mode_map = {
-            SummarizeType.EXTRACTIVE: SummaryMode.EXTRACTIVE,
-            SummarizeType.ABSTRACTIVE: SummaryMode.ABSTRACTIVE,
-            SummarizeType.THESIS: SummaryMode.THESIS,
-        }
-        mode = _mode_map.get(normalised, SummaryMode.ABSTRACTIVE)
-
-        file_bytes = clean_text.encode("utf-8")
-
-        req = SummarizationRequest(
-            file_content=file_bytes,
-            file_name="agent_tool_input.txt",
-            mode=mode,
-            language="ru",
-            request_id=str(uuid.uuid4()),
-            force_refresh=False,
-        )
-
-        resp = await service.summarize(req)
-        content = format_output_as_markdown(resp)
+        response = await chat_model.ainvoke(messages)
+        content = str(response.content).strip()
 
         return {
             "status": "success",
             "content": content,
             "meta": {
-                "format_used": resp.mode.value,
-                "text_length": len(clean_text),
-                "pipeline": resp.chunking_strategy,
-                "chunks_processed": resp.chunk_count,
-                "processing_time_ms": resp.latency_ms,
-                "cost_usd": resp.cost_usd,
-                "from_cache": resp.cache_hit,
-                "model": resp.model,
+                "format_used": summary_type.value,
+                "text_length": len(text),
+                "pipeline": "llm_fallback",
+                "chunks_processed": 1,
+                "from_cache": False,
             },
         }
 
-    except ValueError as exc:
-        logger.warning("Validation error in doc_summarize_text: %s", exc)
-        return {"status": "error", "message": f"Ошибка валидации: {exc}"}
-    except Exception as exc:
-        logger.error("doc_summarize_text failed: %s", exc, exc_info=True)
-        try:
-            return await _llm_fallback(clean_text, normalised)
-        except Exception:
+    async def doc_summarize_text(
+            text: str,
+            summary_type: SummarizeType | None = None,
+    ) -> dict[str, Any]:
+        """Анализирует текст документа через LLM-пайплайн суммаризации.
+
+        Используй ТОЛЬКО когда пользователь явно просит:
+        - суммаризировать / кратко изложить / пересказать документ
+        - извлечь ключевые факты
+        - составить тезисный план
+
+        НЕ используй для простых вопросов о документе (кто автор, какая дата и т.д.).
+
+        Human-in-the-Loop:
+            Когда summary_type = None — возвращает requires_choice с тремя вариантами.
+            Агент показывает выбор пользователю и ждёт ответа перед повторным вызовом.
+
+        Args:
+            text: Текст документа (plain или JSON-обёртка от doc_get_file_content).
+            summary_type: Формат или None для запроса у пользователя.
+
+        Returns:
+            Dict со статусом:
+            - requires_choice: нужно выбрать формат
+            - success: анализ выполнен, поле content содержит Markdown
+            - error: ошибка выполнения
+        """
+        logger.info(
+            "doc_summarize_text: text_length=%d type=%s",
+            len(text),
+            summary_type.value if summary_type else None,
+        )
+
+        clean_text = _unwrap_json_envelope(text)
+
+        _MIN_USEFUL_CHARS: int = 120
+        if len(clean_text) < _MIN_USEFUL_CHARS:
+            logger.warning(
+                "doc_summarize_text rejected: input too short (%d < %d chars)",
+                len(clean_text),
+                _MIN_USEFUL_CHARS,
+            )
             return {
                 "status": "error",
-                "message": f"Не удалось проанализировать документ: {exc}",
+                "message": (
+                    f"Передан слишком короткий текст ({len(clean_text)} симв.) — "
+                    "вероятно, это заголовок или метаданные, а не содержимое файла. "
+                    "Сначала вызови `doc_get_file_content(attachment_id=...)` "
+                    "(или `read_local_file_content(file_path=...)` для локального файла), "
+                    "затем повторно вызови `doc_summarize_text` с полученным "
+                    "содержимым в параметре `text`."
+                ),
             }
 
+        if summary_type is None:
+            hint = _heuristic_recommendation(clean_text)
+            resume = ask_human(
+                SelectInterrupt(
+                    prompt="Выберите формат анализа документа:",
+                    options=[
+                        InterruptOption(
+                            id="extractive",
+                            label="Ключевые факты",
+                            description=(
+                                "Конкретные данные, даты, суммы, имена — "
+                                "нумерованным списком."
+                            ),
+                        ),
+                        InterruptOption(
+                            id="abstractive",
+                            label="Краткий пересказ",
+                            description="Суть документа своими словами в 1–2 абзацах.",
+                        ),
+                        InterruptOption(
+                            id="thesis",
+                            label="Тезисный план",
+                            description="Структурированный план с разделами и подпунктами.",
+                        ),
+                    ],
+                    default=hint["recommended"],
+                )
+            )
 
-async def _llm_fallback(text: str, summary_type: SummarizeType) -> dict[str, Any]:
-    """
-    Простой LLM fallback без пайплайна суммаризации.
-    Используется когда сервис недоступен или упал пайплайн.
-    """
-    from edms_ai_assistant.llm import get_chat_model
+            if not isinstance(resume, SelectResume):
+                raise ToolAborted(
+                    f"Contract mismatch: expected SelectResume, "
+                    f"got {type(resume).__name__}"
+                )
+            summary_type = _normalise_summary_type(resume.selected_id)
 
-    _prompts = {
-        SummarizeType.EXTRACTIVE: (
-            "Извлеки ключевые факты из документа. "
-            "Формат: список фактов с категориями (ДАТА, ПЕРСОНА, ОРГАНИЗАЦИЯ, СУММА, ТРЕБОВАНИЕ). "
-            "Язык ответа: русский."
-        ),
-        SummarizeType.ABSTRACTIVE: (
-            "Напиши краткое изложение документа своими словами. "
-            "2-4 абзаца, профессиональный стиль. "
-            "Язык ответа: русский."
-        ),
-        SummarizeType.THESIS: (
-            "Составь тезисный план документа. "
-            "Формат: пронумерованные разделы с подпунктами. "
-            "Язык ответа: русский."
-        ),
-    }
+        normalised = _normalise_summary_type(summary_type)
 
-    prompt = _prompts.get(summary_type, _prompts[SummarizeType.ABSTRACTIVE])
-    llm = get_chat_model()
+        if summarization_service is None:
+            return await _llm_fallback(clean_text, normalised)
 
-    from langchain_core.messages import HumanMessage, SystemMessage
+        try:
+            from edms_ai_assistant.summarizer.service import (
+                SummarizationRequest,
+                format_output_as_markdown,
+            )
+            from edms_ai_assistant.summarizer.structured.models import SummaryMode
 
-    messages = [
-        SystemMessage(content=f"{prompt}\n\nОтвечай ТОЛЬКО на русском языке."),
-        HumanMessage(content=f"Документ:\n\n{text[:8000]}"),
-    ]
+            _mode_map = {
+                SummarizeType.EXTRACTIVE: SummaryMode.EXTRACTIVE,
+                SummarizeType.ABSTRACTIVE: SummaryMode.ABSTRACTIVE,
+                SummarizeType.THESIS: SummaryMode.THESIS,
+            }
+            mode = _mode_map.get(normalised, SummaryMode.ABSTRACTIVE)
 
-    response = await llm.ainvoke(messages)
-    content = str(response.content).strip()
+            file_bytes = clean_text.encode("utf-8")
 
-    return {
-        "status": "success",
-        "content": content,
-        "meta": {
-            "format_used": summary_type.value,
-            "text_length": len(text),
-            "pipeline": "llm_fallback",
-            "chunks_processed": 1,
-            "from_cache": False,
-        },
-    }
+            req = SummarizationRequest(
+                file_content=file_bytes,
+                file_name="agent_tool_input.txt",
+                mode=mode,
+                language="ru",
+                request_id=str(uuid.uuid4()),
+                force_refresh=False,
+            )
+
+            resp = await summarization_service.summarize(req)
+            content = format_output_as_markdown(resp)
+
+            return {
+                "status": "success",
+                "content": content,
+                "meta": {
+                    "format_used": resp.mode.value,
+                    "text_length": len(clean_text),
+                    "pipeline": resp.chunking_strategy,
+                    "chunks_processed": resp.chunk_count,
+                    "processing_time_ms": resp.latency_ms,
+                    "cost_usd": resp.cost_usd,
+                    "from_cache": resp.cache_hit,
+                    "model": resp.model,
+                },
+            }
+
+        except ValueError as exc:
+            logger.warning("Validation error in doc_summarize_text: %s", exc)
+            return {"status": "error", "message": f"Ошибка валидации: {exc}"}
+        except Exception as exc:
+            logger.error("doc_summarize_text failed: %s", exc, exc_info=True)
+            try:
+                return await _llm_fallback(clean_text, normalised)
+            except Exception:
+                return {
+                    "status": "error",
+                    "message": f"Не удалось проанализировать документ: {exc}",
+                }
+
+    return StructuredTool.from_function(
+        coroutine=doc_summarize_text,
+        name="doc_summarize_text",
+        description="Анализирует текст документа через LLM-пайплайн суммаризации.",
+        args_schema=SummarizeInput,
+    )

@@ -1,6 +1,6 @@
 # edms_ai_assistant/tools/doc_control.py
 """
-EDMS AI Assistant — Document Control Tool.
+EDMS AI Assistant — Document Control Tool (DI Factory).
 
 Управление контролем документа: поставить, отредактировать, снять, удалить, получить.
 
@@ -33,26 +33,29 @@ API endpoints (из Java DocumentController + ControlTypeController):
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime, timedelta
-from typing import Any
-
-from typing import Annotated
+from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
-from edms_ai_assistant.clients.base_client import EdmsBaseClient
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
+from edms_ai_assistant.clients.control_client import ControlClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
+from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONTROL_DAYS: int = 14
 
 
-# ─── Date format helpers (Java Instant with ms + Z suffix) ────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Date format helpers (Java Instant with ms + Z suffix)
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _to_iso_start(date_str: str) -> str:
@@ -89,95 +92,9 @@ def _has_control_data(data: dict[str, Any]) -> bool:
     return bool(data.get("id") or data.get("controlTypeId"))
 
 
-# ─── HTTP client ──────────────────────────────────────────────────────────────
-
-
-class _ControlClient(EdmsBaseClient):
-    """Thin HTTP client for document control endpoints."""
-
-    # ── Control types ─────────────────────────────────────────────────────────
-
-    async def get_control_types(self, token: str) -> list[dict[str, Any]]:
-        """GET /api/control-type — paginated list of control types.
-
-        API returns ``SliceDto<ControlTypeDto>`` with a ``content`` array.
-        We request page 0 with a large size to get all types at once.
-        """
-        result = await self._make_request(
-            "GET",
-            "api/control-type",
-            token=token,
-            params={"page": "0", "size": "100"},
-        )
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict):
-            return result.get("content") or []
-        return []
-
-    # ── Document control CRUD ─────────────────────────────────────────────────
-
-    async def get_control(self, token: str, document_id: str) -> dict[str, Any] | None:
-        """GET /api/document/{documentId}/control
-
-        API always returns 200: ``ControlDto`` (populated) or empty
-        ``new ControlDto()`` with null fields when no control is set.
-        Returns ``None`` when the DTO has no meaningful data.
-        """
-        result = await self._make_request(
-            "GET",
-            f"api/document/{document_id}/control",
-            token=token,
-        )
-        if isinstance(result, dict) and _has_control_data(result):
-            return result
-        return None
-
-    async def set_control(
-        self, token: str, document_id: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        """POST /api/document/{docId}/control — create control."""
-        result = await self._make_request(
-            "POST",
-            f"api/document/{document_id}/control",
-            token=token,
-            json=payload,
-        )
-        return result if isinstance(result, dict) else {}
-
-    async def edit_control(
-        self, token: str, document_id: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        """PUT /api/document/{docId}/control — edit existing control."""
-        result = await self._make_request(
-            "PUT",
-            f"api/document/{document_id}/control",
-            token=token,
-            json=payload,
-        )
-        return result if isinstance(result, dict) else {}
-
-    async def remove_control(self, token: str, document_id: str) -> None:
-        """PUT /api/document/control — снять с контроля (body: {id: UUID})."""
-        await self._make_request(
-            "PUT",
-            "api/document/control",
-            token=token,
-            json={"id": document_id},
-            is_json_response=False,
-        )
-
-    async def delete_control(self, token: str, document_id: str) -> None:
-        """DELETE /api/document/{docId}/control — удалить контроль."""
-        await self._make_request(
-            "DELETE",
-            f"api/document/{document_id}/control",
-            token=token,
-            is_json_response=False,
-        )
-
-
-# ─── Input schema ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Input schema
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 class DocControlInput(BaseModel):
@@ -189,6 +106,7 @@ class DocControlInput(BaseModel):
 
     Для action='edit' указываются только изменяемые поля.
     """
+
     action: str = Field(
         "set",
         description=(
@@ -276,13 +194,15 @@ class DocControlInput(BaseModel):
         else:
             self.control_term_days = _DEFAULT_CONTROL_DAYS
             self.date_control_end = (
-                today + timedelta(days=_DEFAULT_CONTROL_DAYS)
+                    today + timedelta(days=_DEFAULT_CONTROL_DAYS)
             ).strftime("%Y-%m-%d")
 
         return self
 
 
-# ─── Pre-validation helpers ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Pre-validation helpers
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _format_control_types(types: list[dict[str, Any]]) -> str:
@@ -296,8 +216,8 @@ def _format_control_types(types: list[dict[str, Any]]) -> str:
 
 
 def _need_input(
-    message: str,
-    missing_fields: list[dict[str, Any]] | None = None,
+        message: str,
+        missing_fields: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a standard 'need_input' response so the agent asks the user.
 
@@ -318,9 +238,9 @@ def _need_input(
 
 
 async def _resolve_control_type(
-    client: _ControlClient,
-    token: str,
-    control_type_name: str | None,
+        control_client: ControlClient,
+        token: str,
+        control_type_name: str | None,
 ) -> tuple[str | None, str | None, dict[str, Any] | None]:
     """Resolve control type with pre-validation.
 
@@ -328,7 +248,7 @@ async def _resolve_control_type(
         (type_id, type_name, need_input_response)
         If need_input_response is not None — caller must return it immediately.
     """
-    ctrl_types = await client.get_control_types(token)
+    ctrl_types = await control_client.get_control_types(token)
 
     if not ctrl_types:
         return (
@@ -348,14 +268,13 @@ async def _resolve_control_type(
             if name_lower in ct_name or ct_name in name_lower:
                 return str(ct["id"]), str(ct.get("name", "")), None
 
-        # Not found — show available types
         return (
             None,
             None,
             _need_input(
                 message=(
-                    f"Тип контроля «{control_type_name}» не найден. "
-                    f"Доступные типы контроля:\n" + _format_control_types(ctrl_types)
+                        f"Тип контроля «{control_type_name}» не найден. "
+                        f"Доступные типы контроля:\n" + _format_control_types(ctrl_types)
                 ),
                 missing_fields=[
                     {
@@ -375,18 +294,19 @@ async def _resolve_control_type(
         ct = ctrl_types[0]
         ct_id, ct_name = str(ct["id"]), str(ct.get("name", ""))
         logger.info(
-            "Control type auto-selected (single): id=%s... name=%s", ct_id[:8], ct_name
+            "Control type auto-selected (single): id=%s... name=%s",
+            ct_id[:8],
+            ct_name,
         )
         return ct_id, ct_name, None
 
-    # Multiple types — need user choice
     return (
         None,
         None,
         _need_input(
             message=(
-                "Укажите тип контроля. Доступные типы:\n"
-                + _format_control_types(ctrl_types)
+                    "Укажите тип контроля. Доступные типы:\n"
+                    + _format_control_types(ctrl_types)
             ),
             missing_fields=[
                 {
@@ -402,16 +322,40 @@ async def _resolve_control_type(
     )
 
 
+def _is_uuid(value: str) -> bool:
+    return bool(UUID_RE.match(str(value).strip()))
+
+
+async def _find_employee(
+        employee_client: EmployeeClient,
+        token: str,
+        last_name: str,
+) -> str | None:
+    """Resolve employee UUID by last name via FTS (top-1 result).
+
+    Returns None if not found or ambiguous — let agent handle disambiguation.
+    """
+    try:
+        emp = await employee_client.find_by_last_name_fts(token, last_name)
+        if emp and emp.get("id"):
+            return str(emp["id"])
+    except Exception as exc:
+        logger.debug("Employee FTS failed for '%s': %s", last_name, exc)
+    return None
+
+
 async def _resolve_employee(
-    token: str,
-    control_employee_id: str | None,
-    *,
-    required: bool = True,
-    current_employee_id: str | None = None,
+        employee_client: EmployeeClient,
+        token: str,
+        control_employee_id: str | None,
+        *,
+        required: bool = True,
+        current_employee_id: str | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Resolve controller employee with pre-validation.
 
     Args:
+        employee_client: Injected employee client.
         token: JWT bearer token.
         control_employee_id: Provided value (UUID string or last name).
         required: If True and no value → return need_input.
@@ -426,8 +370,7 @@ async def _resolve_employee(
         if _is_uuid(control_employee_id):
             return control_employee_id, None
 
-        # Try to resolve by name
-        found = await _find_employee(token, control_employee_id)
+        found = await _find_employee(employee_client, token, control_employee_id)
         if found:
             return found, None
 
@@ -446,7 +389,6 @@ async def _resolve_employee(
 
     # ── No value provided ──────────────────────────────────────────────────
     if current_employee_id:
-        # Edit mode — keep existing controller
         return current_employee_id, None
 
     if required:
@@ -468,69 +410,107 @@ async def _resolve_employee(
     return None, None
 
 
-# ─── Tool ─────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Error handling helper
+# ══════════════════════════════════════════════════════════════════════════════
 
 
-@tool("doc_control", args_schema=DocControlInput)
-async def doc_control(
-    action: str = "set",
-    date_control_end: str | None = None,
-    control_term_days: int | None = None,
-    control_type_name: str | None = None,
-    control_employee_id: str | None = None,
-    comment: str | None = None,
-    config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """Управляет контролем документа.
+def _handle_control_error(exc: Exception) -> dict[str, Any]:
+    """Map common API errors to user-friendly messages."""
+    error_str = str(exc)
 
-    Действия:
-    - set    — поставить на контроль
-    - edit   — отредактировать существующий контроль
-    - remove — снять с контроля
-    - delete — удалить запись контроля
-    - get    — получить текущий контроль
+    if "403" in error_str or "NO_ACCESS" in error_str:
+        hint = (
+            "У пользователя нет прав DOCUMENT_CONTROL_CREATE. "
+            "Обратитесь к администратору EDMS для назначения прав."
+        )
+    elif "controlTermDays" in error_str:
+        hint = "API требует поле controlTermDays. Укажите дату или количество дней."
+    elif "controlEmployeeId" in error_str:
+        hint = (
+            "API требует поле controlEmployeeId (контролёр). "
+            "Укажите ФИО или UUID сотрудника в параметре control_employee_id."
+        )
+    elif "400" in error_str:
+        hint = f"Ошибка валидации от API: {error_str[:300]}"
+    else:
+        hint = error_str[:300]
 
-    ОБЯЗАТЕЛЬНЫЕ параметры для set:
-    - control_employee_id — ФИО или UUID контролёра
-    - control_type_name   — тип контроля (авто-выбор если единственный)
+    return {"status": "error", "message": f"❌ Ошибка контроля: {hint}"}
 
-    Если обязательный параметр не указан, инструмент вернёт status='need_input'
-    со списком доступных вариантов — уточните у пользователя и вызовите повторно.
 
-    При ошибке 403 проверьте права DOCUMENT_CONTROL_CREATE.
-    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-        Тебе НЕ НУЖНО запрашивать их у пользователя.
+# ══════════════════════════════════════════════════════════════════════════════
+# Factory — DI via closure
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def create_doc_control_tool(
+        control_client: ControlClient,
+        employee_client: EmployeeClient,
+) -> StructuredTool:
+    """Фабрика инструмента управления контролем с внедрением зависимостей.
 
     Args:
-        action: set | edit | remove | delete | get.
-        date_control_end: Дата окончания контроля (YYYY-MM-DD).
-        control_term_days: Срок в днях (приоритет над датой).
-        control_type_name: Название типа контроля.
-        control_employee_id: ФИО или UUID контролёра.
-        comment: Комментарий.
-        document_id: UUID документа (инжектируется автоматически).
-        token: JWT токен авторизации (инжектируется автоматически).
-        config: Конфиг Runnable (инжектируется автоматически).
+        control_client: Клиент для работы с API контроля документов.
+        employee_client: Клиент для поиска сотрудников (разрешение ФИО → UUID).
 
     Returns:
-        Dict со статусом, сообщением и данными контроля.
+        StructuredTool, готовый к регистрации в агенте.
     """
-    try:
-        document_id = get_document_id_from_config(config)
-        token = get_token_from_config(config)
-    except Exception as e:
-        logger.error("Failed to get token from config: %s | config keys: %s", e,
-                     list((config or {}).get("configurable", {}).keys()) if config else "None")
-        return {"status": "error", "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}"}
 
-    logger.info("doc_control: action=%s doc=%s...", action, document_id[:8] if document_id else "N/A")
+    async def doc_control(
+            action: str = "set",
+            date_control_end: str | None = None,
+            control_term_days: int | None = None,
+            control_type_name: str | None = None,
+            control_employee_id: str | None = None,
+            comment: str | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Управляет контролем документа.
 
-    try:
-        async with _ControlClient() as client:
+        Действия:
+        - set    — поставить на контроль
+        - edit   — отредактировать существующий контроль
+        - remove — снять с контроля
+        - delete — удалить запись контроля
+        - get    — получить текущий контроль
 
+        ОБЯЗАТЕЛЬНЫЕ параметры для set:
+        - control_employee_id — ФИО или UUID контролёра
+        - control_type_name   — тип контроля (авто-выбор если единственный)
+
+        Если обязательный параметр не указан, инструмент вернёт status='need_input'
+        со списком доступных вариантов — уточните у пользователя и вызовите повторно.
+
+        При ошибке 403 проверьте права DOCUMENT_CONTROL_CREATE.
+        ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+            Тебе НЕ НУЖНО запрашивать их у пользователя.
+        """
+        try:
+            document_id = get_document_id_from_config(config)
+            token = get_token_from_config(config)
+        except Exception as e:
+            logger.error(
+                "Failed to get token from config: %s | config keys: %s",
+                e,
+                list((config or {}).get("configurable", {}).keys()) if config else "None",
+            )
+            return {
+                "status": "error",
+                "message": f"Ошибка авторизации: токен не найден в конфигурации запроса. {e}",
+            }
+
+        logger.info(
+            "doc_control: action=%s doc=%s...",
+            action,
+            document_id[:8] if document_id else "N/A",
+        )
+
+        try:
             # ── GET ────────────────────────────────────────────────────────────
             if action == "get":
-                data = await client.get_control(token, document_id)
+                data = await control_client.get_control(token, document_id)
                 if data:
                     return {
                         "status": "success",
@@ -545,7 +525,7 @@ async def doc_control(
 
             # ── REMOVE ─────────────────────────────────────────────────────────
             if action == "remove":
-                await client.remove_control(token, document_id)
+                await control_client.remove_control(token, document_id)
                 return {
                     "status": "success",
                     "message": "✅ Документ снят с контроля.",
@@ -554,7 +534,7 @@ async def doc_control(
 
             # ── DELETE ─────────────────────────────────────────────────────────
             if action == "delete":
-                await client.delete_control(token, document_id)
+                await control_client.delete_control(token, document_id)
                 return {
                     "status": "success",
                     "message": "✅ Контроль удалён.",
@@ -563,7 +543,7 @@ async def doc_control(
 
             # ── EDIT ───────────────────────────────────────────────────────────
             if action == "edit":
-                current = await client.get_control(token, document_id)
+                current = await control_client.get_control(token, document_id)
                 if not current:
                     return {
                         "status": "error",
@@ -581,7 +561,7 @@ async def doc_control(
                 # ── Тип контроля ───────────────────────────────────────────────
                 if control_type_name:
                     ct_id, ct_name, need_input = await _resolve_control_type(
-                        client, token, control_type_name
+                        control_client, token, control_type_name
                     )
                     if need_input:
                         return need_input
@@ -592,6 +572,7 @@ async def doc_control(
 
                 # ── Контролёр ──────────────────────────────────────────────────
                 emp_id, need_input = await _resolve_employee(
+                    employee_client,
                     token,
                     control_employee_id,
                     required=False,
@@ -618,7 +599,7 @@ async def doc_control(
                 elif control_term_days and control_term_days >= 1:
                     payload["controlTermDays"] = control_term_days
                     end_date_only = (
-                        today + timedelta(days=control_term_days)
+                            today + timedelta(days=control_term_days)
                     ).strftime("%Y-%m-%d")
                     payload["controlPlanDateEnd"] = _to_iso_end(end_date_only)
                 else:
@@ -647,7 +628,7 @@ async def doc_control(
                     list(payload.keys()),
                 )
 
-                result = await client.edit_control(token, document_id, payload)
+                result = await control_client.edit_control(token, document_id, payload)
 
                 return {
                     "status": "success",
@@ -660,13 +641,14 @@ async def doc_control(
 
             # Step 1: Resolve control type
             ctrl_type_id, ctrl_type_name_resolved, need_input = (
-                await _resolve_control_type(client, token, control_type_name)
+                await _resolve_control_type(control_client, token, control_type_name)
             )
             if need_input:
                 return need_input
 
-            # Step 2: Resolve controller — ОБЯЗАТЕЛЬНО
+            # Step 2: Resolve controller
             resolved_employee_id, need_input = await _resolve_employee(
+                employee_client,
                 token,
                 control_employee_id,
                 required=True,
@@ -692,7 +674,7 @@ async def doc_control(
                 except ValueError:
                     term_days = _DEFAULT_CONTROL_DAYS
 
-            # Step 4: Build payload — controlEmployeeId ОБЯЗАТЕЛЬНО
+            # Step 4: Build payload — controlEmployeeId
             payload: dict[str, Any] = {
                 "controlTypeId": ctrl_type_id,
                 "controlDateStart": _to_iso_start(today.strftime("%Y-%m-%d")),
@@ -714,7 +696,7 @@ async def doc_control(
                 payload["controlPlanDateEnd"],
             )
 
-            result = await client.set_control(token, document_id, payload)
+            result = await control_client.set_control(token, document_id, payload)
 
             return {
                 "status": "success",
@@ -727,54 +709,29 @@ async def doc_control(
                 "requires_reload": True,
             }
 
-    except Exception as exc:
-        logger.error("doc_control error: %s", exc, exc_info=True)
-        error_str = str(exc)
+        except Exception as exc:
+            logger.error("doc_control error: %s", exc, exc_info=True)
+            return _handle_control_error(exc)
 
-        if "403" in error_str or "NO_ACCESS" in error_str:
-            hint = (
-                "У пользователя нет прав DOCUMENT_CONTROL_CREATE. "
-                "Обратитесь к администратору EDMS для назначения прав."
-            )
-        elif "controlTermDays" in error_str:
-            hint = "API требует поле controlTermDays. Укажите дату или количество дней."
-        elif "controlEmployeeId" in error_str:
-            hint = (
-                "API требует поле controlEmployeeId (контролёр). "
-                "Укажите ФИО или UUID сотрудника в параметре control_employee_id."
-            )
-        elif "400" in error_str:
-            hint = f"Ошибка валидации от API: {error_str[:300]}"
-        else:
-            hint = error_str[:300]
-
-        return {"status": "error", "message": f"❌ Ошибка контроля: {hint}"}
-
-
-# ─── Private helpers ──────────────────────────────────────────────────────────
-
-
-def _is_uuid(value: str) -> bool:
-    """Return True if value is a valid UUID string."""
-    return bool(
-        re.match(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            value.strip(),
-            re.IGNORECASE,
-        )
+    return StructuredTool.from_function(
+        func=doc_control,
+        name="doc_control",
+        description=(
+            "Управляет контролем документа.\n"
+            "Действия:\n"
+            "- set    — поставить на контроль\n"
+            "- edit   — отредактировать существующий контроль\n"
+            "- remove — снять с контроля\n"
+            "- delete — удалить запись контроля\n"
+            "- get    — получить текущий контроль\n\n"
+            "ОБЯЗАТЕЛЬНЫЕ параметры для set:\n"
+            "- control_employee_id — ФИО или UUID контролёра\n"
+            "- control_type_name   — тип контроля (авто-выбор если единственный)\n\n"
+            "Если обязательный параметр не указан, инструмент вернёт status='need_input' "
+            "со списком доступных вариантов — уточните у пользователя и вызовите повторно.\n"
+            "При ошибке 403 проверьте права DOCUMENT_CONTROL_CREATE.\n"
+            "ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ. "
+            "Тебе НЕ НУЖНО запрашивать их у пользователя."
+        ),
+        args_schema=DocControlInput,
     )
-
-
-async def _find_employee(token: str, last_name: str) -> str | None:
-    """Resolve employee UUID by last name via FTS (top-1 result).
-
-    Returns None if not found or ambiguous — let agent handle disambiguation.
-    """
-    try:
-        async with EmployeeClient() as emp_client:
-            emp = await emp_client.find_by_last_name_fts(token, last_name)
-            if emp and emp.get("id"):
-                return str(emp["id"])
-    except Exception as exc:
-        logger.debug("Employee FTS failed for '%s': %s", last_name, exc)
-    return None

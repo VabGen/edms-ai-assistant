@@ -1,9 +1,6 @@
 # edms_ai_assistant/clients/redis_client.py
-"""
-RedisClient — клиент для работы с Redis.
-"""
-
 import logging
+from typing import AsyncGenerator
 
 import redis.asyncio as aioredis
 
@@ -13,48 +10,44 @@ logger = logging.getLogger(__name__)
 
 
 class RedisClient:
-    def __init__(self):
-        self.redis: aioredis.Redis | None = None
+    """Управление соединением с Redis."""
 
-    async def connect(self):
-        try:
-            self.redis = aioredis.from_url(
-                settings.REDIS_URL,
-                encoding="utf-8",
-                decode_responses=True,
-            )
-            await self.redis.ping()
-            logger.info("Successfully connected to Redis at %s", settings.REDIS_URL)
-        except Exception as e:
-            logger.warning("Redis unavailable at startup — caching disabled: %s", e)
-            self.redis = None
+    def __init__(self, url: str):
+        self._url = url
+        self._pool: aioredis.Redis | None = None
 
-    async def close(self):
-        if self.redis:
-            await self.redis.aclose()
-            self.redis = None
-            logger.info("Redis connection closed.")
+    async def connect(self) -> None:
+        if self._pool is None:
+            try:
+                self._pool = aioredis.from_url(
+                    self._url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                )
+                await self._pool.ping()
+                logger.info("Successfully connected to Redis")
+            except Exception as e:
+                logger.warning("Redis unavailable at startup — caching disabled: %s", e)
+                self._pool = None
+
+    async def close(self) -> None:
+        if self._pool:
+            await self._pool.aclose()
+            self._pool = None
+            logger.info("Redis connection closed")
 
     def get_client(self) -> aioredis.Redis:
-        if not self.redis:
+        if not self._pool:
             raise RuntimeError("Redis client is not initialized. Call connect() first.")
-        return self.redis
+        return self._pool
 
 
-redis_client = RedisClient()
-
-
-async def init_redis() -> aioredis.Redis:
-    """Initialize the shared Redis client. Call from lifespan startup."""
-    await redis_client.connect()
-    return redis_client.get_client()
-
-
-async def close_redis() -> None:
-    """Close the shared Redis client. Call from lifespan shutdown."""
-    await redis_client.close()
-
-
-def get_redis() -> aioredis.Redis:
-    """FastAPI dependency / helper: provides the shared Redis client."""
-    return redis_client.get_client()
+# Фабрика для FastAPI Depends
+async def get_redis() -> AsyncGenerator[aioredis.Redis, None]:
+    """FastAPI dependency: предоставляет активное соединение Redis."""
+    client = RedisClient(str(settings.REDIS_URL))
+    await client.connect()
+    try:
+        yield client.get_client()
+    finally:
+        await client.close()

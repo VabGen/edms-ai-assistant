@@ -1,3 +1,4 @@
+# edms_ai_assistant/tools/doc_next_process.py
 """
 EDMS AI Assistant — Document Next Process Tool.
 
@@ -6,12 +7,6 @@ EDMS AI Assistant — Document Next Process Tool.
 API:
   POST /api/document/process/next
   Body: {id: UUID, nextId: UUID, employees: [UUID]}
-
-  id        = documentId — UUID документа
-  nextId    = DocumentProcessDto.currentId — UUID текущего этапа
-              (optimistic lock: сервер проверяет, что текущий этап
-               не изменился с момента загрузки данных)
-  employees = список UUID исполнителей (обязателен для многих этапов)
 
 Логика:
   1. GET /{id}/bpmn              → порядок и названия этапов
@@ -27,12 +22,10 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
-
 from typing import Any, Annotated
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import StructuredTool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
@@ -172,71 +165,6 @@ def _resolve_step_selection(
     return None
 
 
-# ─── HTTP client ──────────────────────────────────────────────────────────────
-
-
-class _ProcessClient(EdmsBaseClient):
-
-    async def get_bpmn_activity(
-            self, token: str, document_id: str
-    ) -> dict[str, Any] | None:
-        """GET /api/document/{id}/bpmn — BPMN-схема и активности."""
-        result = await self._make_request(
-            "GET",
-            f"api/document/{document_id}/bpmn",
-            token=token,
-        )
-        return result if isinstance(result, dict) and result else None
-
-    async def get_document(self, token: str, document_id: str) -> dict[str, Any] | None:
-        """GET /api/document/{id} — данные документа."""
-        result = await self._make_request(
-            "GET",
-            f"api/document/{document_id}",
-            token=token,
-        )
-        return result if isinstance(result, dict) and result else None
-
-    async def get_process(self, token: str, document_id: str) -> dict[str, Any] | None:
-        """GET /api/document/{documentId}/process — данные процесса."""
-        result = await self._make_request(
-            "GET",
-            f"api/document/{document_id}/process",
-            token=token,
-        )
-        return result if isinstance(result, dict) and result else None
-
-    async def next_process(
-            self,
-            token: str,
-            document_id: str,
-            next_id: str,
-            employees: list[str] | None = None,
-    ) -> None:
-        """POST /api/document/process/next — переход на следующий этап.
-
-        Args:
-            document_id: UUID документа (поле "id" в body).
-            next_id: DocumentProcessDto.currentId — UUID текущего этапа
-                     (поле "nextId" в body, optimistic lock).
-            employees: Список UUID исполнителей (опционально, но может
-                       быть обязателен для некоторых этапов).
-        """
-        payload: dict[str, Any] = {
-            "id": document_id,
-            "nextId": next_id,
-        }
-        if employees:
-            payload["employees"] = employees
-        await self._make_request(
-            "POST",
-            "api/document/process/next",
-            token=token,
-            json=payload,
-            is_json_response=False,
-        )
-
-
 # ─── Input schema ─────────────────────────────────────────────────────────────
 
 
@@ -268,39 +196,6 @@ class DocNextProcessInput(BaseModel):
         return None
 
 
-# ─── Employee resolution ──────────────────────────────────────────────────────
-
-
-async def _resolve_employees(
-        token: str, employees: list[str]
-) -> tuple[list[str], list[str]]:
-    """Разрешает список сотрудников: UUID → как есть, ФИО → поиск."""
-    resolved: list[str] = []
-    unresolved: list[str] = []
-    for emp in employees:
-        emp = emp.strip()
-        if _is_uuid(emp):
-            resolved.append(emp)
-        else:
-            found = await _find_employee(token, emp)
-            if found:
-                resolved.append(found)
-            else:
-                unresolved.append(emp)
-    return resolved, unresolved
-
-
-async def _find_employee(token: str, last_name: str) -> str | None:
-    try:
-        async with EmployeeClient() as emp_client:
-            emp = await emp_client.find_by_last_name_fts(token, last_name)
-            if emp and emp.get("id"):
-                return str(emp["id"])
-    except Exception as exc:
-        logger.debug("Employee FTS failed for '%s': %s", last_name, exc)
-    return None
-
-
 # ─── nextId resolution ────────────────────────────────────────────────────────
 
 
@@ -308,20 +203,14 @@ def _resolve_next_id(
         process_data: dict[str, Any] | None,
         doc_data: dict[str, Any] | None,
 ) -> str | None:
-    """Определяет nextId для POST /process/next.
-
-    nextId = DocumentProcessDto.currentId — UUID текущего этапа процесса.
-    Сервер использует его как optimistic lock.
-    """
+    """Определяет nextId для POST /process/next."""
     if process_data:
-        # ── Вариант 1: currentId ───────────────────────────────────────
         current_id = process_data.get("currentId")
         if current_id and _is_uuid(str(current_id)):
             cid = str(current_id)
             logger.info("nextId from DocumentProcessDto.currentId: %s", cid[:8])
             return cid
 
-        # ── Вариант 2: ID текущего/завершённого item ──────────────────
         items = (
                 process_data.get("items")
                 or process_data.get("processItems")
@@ -334,10 +223,6 @@ def _resolve_next_id(
             if item.get("started") and not item.get("completed"):
                 item_id = str(item.get("id", "")).strip()
                 if item_id and _is_uuid(item_id):
-                    logger.info(
-                        "nextId from active item: %s",
-                        item_id[:8],
-                    )
                     return item_id
 
         for item in items:
@@ -346,10 +231,6 @@ def _resolve_next_id(
             if item.get("started") and item.get("completed"):
                 item_id = str(item.get("id", "")).strip()
                 if item_id and _is_uuid(item_id):
-                    logger.info(
-                        "nextId from completed current item: %s",
-                        item_id[:8],
-                    )
                     return item_id
 
         for item in items:
@@ -357,19 +238,12 @@ def _resolve_next_id(
                 continue
             item_id = str(item.get("id", "")).strip()
             if item_id and _is_uuid(item_id):
-                logger.info("nextId from first item: %s", item_id[:8])
                 return item_id
 
-    # ── Вариант 3: processId (LAST RESORT) ────────────────────────────
     if doc_data:
         pid = doc_data.get("processId")
         if pid and _is_uuid(str(pid)):
-            process_id = str(pid)
-            logger.warning(
-                "nextId LAST RESORT from DocumentDto.processId: %s",
-                process_id[:8],
-            )
-            return process_id
+            return str(pid)
 
     return None
 
@@ -391,7 +265,6 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
     }
 
     try:
-        # httpx оборачивает ошибку, пробуем найти JSON в сообщении
         if "employee.empty" in error_str:
             result["is_employee_empty"] = True
         if "process.changed" in error_str:
@@ -402,7 +275,6 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
             result["is_bad_request"] = True
 
         if result["is_employee_empty"]:
-            # Ищем кириллицу (название этапа) и uppercase (тип этапа)
             parts = re.findall(r"'([^']*)'", error_str)
             for part in parts:
                 if re.search(r"[а-яА-Я]", part):
@@ -415,62 +287,103 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
     return result
 
 
-# ─── Tool ─────────────────────────────────────────────────────────────────────
+# ─── Tool Factory ─────────────────────────────────────────────────────────────
 
 
-@tool("doc_next_process", args_schema=DocNextProcessInput)
-async def doc_next_process(
-        next_step: str | None = None,
-        employees: list[str] | None = None,
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """Переводит документ на следующий этап бизнес-процесса.
-
-    Пользователь выбирает этап по названию или номеру.
-    Если next_step не указан — показывает список этапов.
-
-    Многие этапы (Регистрация, Рассмотрение, Исполнение и др.)
-    требуют указания исполнителей. Если исполнители не указаны,
-    инструмент запросит их у пользователя.
-
-    Примеры: next_step="1", next_step="Регистрация", next_step="REVIEW"
-
-    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-        Тебе НЕ НУЖНО запрашивать их у пользователя.
+def create_doc_next_process_tool(
+        base_client: EdmsBaseClient,
+        employee_client: EmployeeClient,
+) -> StructuredTool:
+    """Фабрика для создания инструмента перевода документа на следующий этап.
 
     Args:
-        next_step: Название или номер этапа.
-        employees: Список ФИО или UUID исполнителей.
-        document_id: UUID документа (инжектируется автоматически).
-        token: JWT токен авторизации (инжектируется автоматически).
-        config: Конфиг Runnable (инжектируется автоматически).
+        base_client: Базовый HTTP-клиент для запросов к СЭД.
+        employee_client: Клиент для поиска сотрудников.
 
     Returns:
-        Dict со статусом и результатом.
+        Настроенный StructuredTool, готовый к регистрации в агенте.
     """
-    try:
-        document_id = get_document_id_from_config(config)
-        token = get_token_from_config(config)
-    except Exception as e:
-        logger.error("Failed to get token from config: %s | config keys: %s", e,
-                     list((config or {}).get("configurable", {}).keys()) if config else "None")
-        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
-    logger.info(
-        "doc_next_process: doc=%s next_step=%s employees=%s",
-        document_id[:8] if document_id else "N/A",
-        next_step,
-        employees if employees else "none",
-    )
 
-    try:
-        async with _ProcessClient() as client:
+    async def _find_employee(token: str, last_name: str) -> str | None:
+        try:
+            emp_dto = await employee_client.find_by_last_name_fts(token, last_name)
+            if emp_dto and emp_dto.id:
+                return str(emp_dto.id)
+        except Exception as exc:
+            logger.debug("Employee FTS failed for '%s': %s", last_name, exc)
+        return None
 
+    async def _resolve_employees(
+            token: str, employees: list[str]
+    ) -> tuple[list[str], list[str]]:
+        """Разрешает список сотрудников: UUID → как есть, ФИО → поиск."""
+        resolved: list[str] = []
+        unresolved: list[str] = []
+        for emp in employees:
+            emp = emp.strip()
+            if _is_uuid(emp):
+                resolved.append(emp)
+            else:
+                found = await _find_employee(token, emp)
+                if found:
+                    resolved.append(found)
+                else:
+                    unresolved.append(emp)
+        return resolved, unresolved
+
+    async def doc_next_process(
+            next_step: str | None = None,
+            employees: list[str] | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Переводит документ на следующий этап бизнес-процесса.
+
+        Пользователь выбирает этап по названию или номеру.
+        Если next_step не указан — показывает список этапов.
+
+        Многие этапы (Регистрация, Рассмотрение, Исполнение и др.)
+        требуют указания исполнителей. Если исполнители не указаны,
+        инструмент запросит их у пользователя.
+
+        Примеры: next_step="1", next_step="Регистрация", next_step="REVIEW"
+
+        ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+            Тебе НЕ НУЖНО запрашивать их у пользователя.
+
+        Args:
+            next_step: Название или номер этапа.
+            employees: Список ФИО или UUID исполнителей.
+            config: Конфиг Runnable (инжектируется автоматически).
+
+        Returns:
+            Dict со статусом и результатом.
+        """
+        try:
+            document_id = get_document_id_from_config(config)
+            token = get_token_from_config(config)
+        except Exception as e:
+            logger.error("Failed to get token from config: %s", e)
+            return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
+
+        logger.info(
+            "doc_next_process: doc=%s next_step=%s employees=%s",
+            document_id[:8] if document_id else "N/A",
+            next_step,
+            employees if employees else "none",
+        )
+
+        try:
             # ── Шаг 1: Получить BPMN, документ и процесс параллельно ─────
             bpmn_data, doc_data, process_data = await asyncio.gather(
-                client.get_bpmn_activity(token, document_id),
-                client.get_document(token, document_id),
-                client.get_process(token, document_id),
+                base_client._make_request("GET", f"api/document/{document_id}/bpmn", token=token),
+                base_client._make_request("GET", f"api/document/{document_id}", token=token),
+                base_client._make_request("GET", f"api/document/{document_id}/process", token=token),
             )
+
+            # Приводим к dict | None для унификации логики парсинга
+            bpmn_data = bpmn_data if isinstance(bpmn_data, dict) and bpmn_data else None
+            doc_data = doc_data if isinstance(doc_data, dict) and doc_data else None
+            process_data = process_data if isinstance(process_data, dict) and process_data else None
 
             if not bpmn_data:
                 return {
@@ -512,18 +425,6 @@ async def doc_next_process(
                     str(next_id_dto)[:8] if next_id_dto else None,
                     len(items),
                 )
-                for item in items:
-                    if isinstance(item, dict):
-                        logger.info(
-                            "  Item: id=%s type=%s started=%s completed=%s "
-                            "processId=%s taskDefKey=%s",
-                            str(item.get("id", ""))[:8],
-                            item.get("type"),
-                            item.get("started"),
-                            item.get("completed"),
-                            str(item.get("processId", ""))[:8],
-                            item.get("taskDefinitionKey"),
-                        )
             else:
                 logger.warning(
                     "GET /process returned no data for document %s",
@@ -536,12 +437,6 @@ async def doc_next_process(
                 None,
             )
             next_available = _get_next_available(bpmn_steps)
-
-            logger.info(
-                "Current='%s', next_available=%s",
-                current_step.name if current_step else "?",
-                [(s.name, s.process_type) for s in next_available],
-            )
 
             # ── Шаг 5: Показать список (если шаг не выбран) ──────────────
             if not next_step:
@@ -650,6 +545,13 @@ async def doc_next_process(
                 resolved_employees = resolved
 
             # ── Шаг 9: Выполнить переход ──────────────────────────────────
+            payload: dict[str, Any] = {
+                "id": document_id,
+                "nextId": next_id,
+            }
+            if resolved_employees:
+                payload["employees"] = resolved_employees
+
             logger.info(
                 "POST /process/next: doc=%s nextId=%s target='%s' type=%s employees=%d",
                 document_id[:8],
@@ -660,11 +562,12 @@ async def doc_next_process(
             )
 
             try:
-                await client.next_process(
-                    token,
-                    document_id,
-                    next_id,
-                    resolved_employees,
+                await base_client._make_request(
+                    "POST",
+                    "api/document/process/next",
+                    token=token,
+                    json=payload,
+                    is_json_response=False,
                 )
             except Exception as post_exc:
                 post_error = _parse_api_error(post_exc)
@@ -674,12 +577,6 @@ async def doc_next_process(
                     step_label = post_error["target_step_name"] or selected.name
                     step_type = (
                             post_error["target_step_type"] or selected.process_type or ""
-                    )
-
-                    logger.info(
-                        "Employee required for step '%s' (%s), " "requesting from user",
-                        step_label,
-                        step_type,
                     )
 
                     return {
@@ -736,35 +633,40 @@ async def doc_next_process(
                 "requires_reload": True,
             }
 
-    except Exception as exc:
-        logger.error("doc_next_process error: %s", exc, exc_info=True)
+        except Exception as exc:
+            logger.error("doc_next_process error: %s", exc, exc_info=True)
 
-        error_info = _parse_api_error(exc)
-        if error_info["is_employee_empty"]:
-            step_label = error_info["target_step_name"] or "следующий"
-            return {
-                "status": "need_input",
-                "message": (
-                    f"⚠ Для перехода на этап «{step_label}» "
-                    f"необходимо указать исполнителя.\n\n"
-                    "Напишите ФИО сотрудника, которого нужно "
-                    "назначить исполнителем на этом этапе."
-                ),
-            }
-        if error_info["is_process_changed"]:
+            error_info = _parse_api_error(exc)
+            if error_info["is_employee_empty"]:
+                step_label = error_info["target_step_name"] or "следующий"
+                return {
+                    "status": "need_input",
+                    "message": (
+                        f"⚠ Для перехода на этап «{step_label}» "
+                        f"необходимо указать исполнителя.\n\n"
+                        "Напишите ФИО сотрудника, которого нужно "
+                        "назначить исполнителем на этом этапе."
+                    ),
+                }
+            if error_info["is_process_changed"]:
+                return {
+                    "status": "error",
+                    "message": ("Процесс документа был изменён. " "Попробуйте ещё раз."),
+                }
+            if error_info["is_forbidden"]:
+                return {
+                    "status": "error",
+                    "message": "У вас нет прав для перехода на следующий этап.",
+                }
+
             return {
                 "status": "error",
-                "message": ("Процесс документа был изменён. " "Попробуйте ещё раз."),
-            }
-        if error_info["is_forbidden"]:
-            return {
-                "status": "error",
-                "message": "У вас нет прав для перехода на следующий этап.",
+                "message": "❌ Произошла неожиданная ошибка при переходе.",
             }
 
-        return {
-            "status": "error",
-            "message": "❌ Произошла неожиданная ошибка при переходе.",
-        }
-
-    # 5
+    return StructuredTool.from_function(
+        coroutine=doc_next_process,
+        name="doc_next_process",
+        description="Переводит документ на следующий этап бизнес-процесса.",
+        args_schema=DocNextProcessInput,
+    )

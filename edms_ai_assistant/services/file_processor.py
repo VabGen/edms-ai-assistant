@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -22,55 +23,45 @@ from langchain_community.document_loaders import TextLoader
 
 logger = logging.getLogger(__name__)
 
-_executor = ThreadPoolExecutor(max_workers=4)
-
 _MIN_AVG_CHARS_PER_PAGE = 20
 _CACHE_SUFFIX = ".ocr_cache.txt"
 
 
-# ── Utility: Tesseract Binary Discovery ─────────────────────────────────
+# ── Lazy Tesseract Discovery ─────────────────────────────────
 
 
-def _find_tesseract_binary() -> str | None:
-    """Динамически ищет бинарник Tesseract в системе (Windows/Linux/macOS)."""
-    # 1. Проверка переменной окружения (приоритет — удобно для Docker)
+@lru_cache(maxsize=1)
+def _get_tesseract_cmd() -> str:
+    """Ищет бинарник Tesseract один раз и кэширует результат."""
     env_path = os.getenv("TESSERACT_CMD")
-    if env_path:
-        if Path(env_path).exists():
-            logger.info("Tesseract found via TESSERACT_CMD=%s", env_path)
-            return env_path
-        logger.warning(
-            "TESSERACT_CMD=%s set but file does not exist", env_path
-        )
+    if env_path and Path(env_path).exists():
+        return env_path
 
-    # 2. Проверка в PATH системы
     path = shutil.which("tesseract")
     if path:
-        logger.info("Tesseract found in PATH: %s", path)
         return path
 
-    # 3. Поиск по стандартным путям Windows
     win_paths = [
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
     ]
     for p in win_paths:
         if Path(p).exists():
-            logger.info("Tesseract found at Windows default path: %s", p)
             return p
 
-    logger.warning("Tesseract binary not found anywhere")
-    return None
+    raise RuntimeError(
+        "Tesseract OCR binary not found. "
+        "Install tesseract-ocr or set TESSERACT_CMD env var."
+    )
 
 
-def _find_tessdata_prefix() -> str | None:
-    """Определяет путь к tessdata для Tesseract OCR."""
-    # 1. Явная переменная окружения
+@lru_cache(maxsize=1)
+def _get_tessdata_prefix() -> str | None:
+    """Определяет путь к tessdata для Tesseract OCR (лениво)."""
     env_prefix = os.getenv("TESSDATA_PREFIX")
     if env_prefix and Path(env_prefix).is_dir():
         return env_prefix
 
-    # 2. Автопоиск по стандартным Linux-путям
     linux_paths = [
         "/usr/share/tesseract-ocr/5/tessdata",
         "/usr/share/tesseract-ocr/4.00/tessdata",
@@ -78,18 +69,9 @@ def _find_tessdata_prefix() -> str | None:
         "/usr/local/share/tessdata",
     ]
     for p in linux_paths:
-        if Path(p).is_dir():
-            # Проверяем, что там реально есть языковые файлы
-            traineddata = list(Path(p).glob("*.traineddata"))
-            if traineddata:
-                logger.info(
-                    "tessdata found at %s (%d languages)",
-                    p,
-                    len(traineddata),
-                )
-                return p
+        if Path(p).is_dir() and list(Path(p).glob("*.traineddata")):
+            return p
 
-    # 3. Windows стандартный путь
     win_path = r"C:\Program Files\Tesseract-OCR\tessdata"
     if Path(win_path).is_dir():
         return win_path
@@ -97,112 +79,19 @@ def _find_tessdata_prefix() -> str | None:
     return None
 
 
-def _validate_tesseract() -> dict[str, Any]:
-    """Полная диагностика Tesseract OCR при старте. Возвращает отчёт."""
-    result: dict[str, Any] = {
-        "binary_found": False,
-        "binary_path": None,
-        "tessdata_found": False,
-        "tessdata_path": None,
-        "languages": [],
-        "version": None,
-        "errors": [],
-    }
+@lru_cache(maxsize=1)
+def _get_available_ocr_langs() -> list[str]:
+    """Проверяет доступные языки для Tesseract OCR."""
+    prefix = _get_tessdata_prefix()
+    if not prefix:
+        return []
 
-    binary = _find_tesseract_binary()
-    result["binary_found"] = binary is not None
-    result["binary_path"] = binary
-
-    if not binary:
-        result["errors"].append(
-            "Tesseract binary not found. "
-            "Install tesseract-ocr or set TESSERACT_CMD env var."
-        )
-        return result
-
-    # Попробуем запустить tesseract --version
-    try:
-        proc = subprocess.run(
-            [binary, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        version_line = (proc.stdout or proc.stderr or "").strip().split("\n")[0]
-        result["version"] = version_line
-    except Exception as e:
-        result["errors"].append(f"Failed to run tesseract --version: {e}")
-
-    # Поиск tessdata
-    tessdata = _find_tessdata_prefix()
-    result["tessdata_found"] = tessdata is not None
-    result["tessdata_path"] = tessdata
-
-    if not tessdata:
-        result["errors"].append(
-            "tessdata directory not found. "
-            "Install tesseract-ocr-rus and tesseract-ocr-eng "
-            "or set TESSDATA_PREFIX env var."
-        )
-        return result
-
-    # Проверка конкретных языков
-    tessdata_path = Path(tessdata)
+    path = Path(prefix)
+    langs = []
     for lang in ["rus", "eng"]:
-        lang_file = tessdata_path / f"{lang}.traineddata"
-        if lang_file.exists():
-            result["languages"].append(lang)
-        else:
-            result["errors"].append(
-                f"Language '{lang}' not found: {lang_file} does not exist"
-            )
-
-    return result
-
-
-# ── Run diagnostic once at module load ──────────────────────────────────
-_TESSERACT_DIAGNOSTIC = _validate_tesseract()
-
-
-def _get_tesseract_cmd() -> str:
-    """Возвращает путь к tesseract, поднимая RuntimeError если не найден."""
-    cmd = _TESSERACT_DIAGNOSTIC["binary_path"]
-    if cmd:
-        return cmd
-    # Повторная попытка (env мог появиться после первого вызова)
-    cmd = _find_tesseract_binary()
-    if cmd:
-        return cmd
-    raise RuntimeError(
-        "Tesseract OCR binary not found. "
-        "Install tesseract-ocr or set TESSERACT_CMD env var. "
-        f"Diagnostic: {_TESSERACT_DIAGNOSTIC}"
-    )
-
-
-def _ensure_tessdata_env() -> None:
-    """Гарантирует, что TESSDATA_PREFIX установлена для pytesseract."""
-    if os.getenv("TESSDATA_PREFIX"):
-        return
-    prefix = _TESSERACT_DIAGNOSTIC.get("tessdata_path")
-    if prefix:
-        os.environ["TESSDATA_PREFIX"] = prefix
-        logger.info("TESSDATA_PREFIX auto-set to %s", prefix)
-
-
-# ── Log diagnostic summary ──────────────────────────────────────────────
-if _TESSERACT_DIAGNOSTIC["errors"]:
-    logger.warning(
-        "⚠️  Tesseract OCR issues detected:\n%s",
-        "\n".join(f"  • {e}" for e in _TESSERACT_DIAGNOSTIC["errors"]),
-    )
-else:
-    logger.info(
-        "✅ Tesseract OCR ready: %s, languages: %s, tessdata: %s",
-        _TESSERACT_DIAGNOSTIC["version"],
-        ", ".join(_TESSERACT_DIAGNOSTIC["languages"]),
-        _TESSERACT_DIAGNOSTIC["tessdata_path"],
-    )
+        if (path / f"{lang}.traineddata").exists():
+            langs.append(lang)
+    return langs
 
 
 # ── Utility: OCR Disk Cache ─────────────────────────────────────────────
@@ -220,7 +109,6 @@ def _get_cached_ocr(file_path: str) -> str | None:
         src_stat = src_path.stat()
         cache_stat = Path(cache_path).stat()
 
-        # Инвалидируем кэш, если исходный файл новее или размер изменился
         if src_stat.st_mtime > cache_stat.st_mtime or src_stat.st_size == 0:
             return None
 
@@ -335,107 +223,7 @@ def _convert_doc_to_docx(doc_path: str) -> str:
         raise RuntimeError(f"Conversion failed: {e.stderr or e}")
 
 
-# ── OCR for scanned PDFs ────────────────────────────────────────────────
-
-
-def _extract_pdf_via_ocr(file_path: str) -> str:
-    """Extract text from scanned (image-only) PDF using PyMuPDF + Tesseract OCR.
-    Внедряет маркеры страниц и строго контролирует потребление памяти.
-    """
-    import fitz  # type: ignore[import]
-    import pytesseract  # type: ignore[import]
-    from PIL import Image  # type: ignore[import]
-
-    # ── Настройка pytesseract ────────────────────────────────────────────
-    tesseract_cmd = _get_tesseract_cmd()
-    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-
-    # Гарантируем, что TESSDATA_PREFIX установлена
-    _ensure_tessdata_env()
-
-    # Определяем доступные языки
-    available_langs = _TESSERACT_DIAGNOSTIC.get("languages", [])
-    if "rus" in available_langs and "eng" in available_langs:
-        ocr_lang = "rus+eng"
-    elif "eng" in available_langs:
-        logger.warning("Russian OCR language not available, using eng only")
-        ocr_lang = "eng"
-    elif "rus" in available_langs:
-        logger.warning("English OCR language not available, using rus only")
-        ocr_lang = "rus"
-    else:
-        raise RuntimeError(
-            f"No OCR languages available. "
-            f"Install tesseract-ocr-rus and tesseract-ocr-eng. "
-            f"Diagnostic: {_TESSERACT_DIAGNOSTIC}"
-        )
-
-    logger.info(
-        "Starting PDF OCR: lang=%s, tesseract=%s, tessdata=%s",
-        ocr_lang,
-        tesseract_cmd,
-        os.getenv("TESSDATA_PREFIX", "default"),
-    )
-
-    # ── Извлечение текста постранично ────────────────────────────────────
-    pages_text: list[str] = []
-
-    with fitz.open(file_path) as doc:
-        total_pages = len(doc)
-        for page_num in range(total_pages):
-            page = doc[page_num]
-
-            # Render at 300 DPI for good OCR quality
-            zoom = 300 / 72
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-
-            img = None
-            try:
-                img_bytes = pix.tobytes("png")
-                img = Image.open(io.BytesIO(img_bytes))
-
-                try:
-                    text = pytesseract.image_to_string(img, lang=ocr_lang)
-                except pytesseract.TesseractError as te:
-                    logger.warning(
-                        "Tesseract failed on page %d with lang=%s: %s — trying 'eng' only",
-                        page_num + 1,
-                        ocr_lang,
-                        te,
-                    )
-                    # Fallback на eng-only если rus+eng не сработал
-                    if ocr_lang != "eng":
-                        try:
-                            text = pytesseract.image_to_string(img, lang="eng")
-                        except pytesseract.TesseractError as te2:
-                            logger.error(
-                                "Tesseract eng-only also failed on page %d: %s",
-                                page_num + 1,
-                                te2,
-                            )
-                            text = ""
-                    else:
-                        text = ""
-
-                if text and text.strip():
-                    pages_text.append(
-                        f"--- Страница {page_num + 1} ---\n{text.strip()}"
-                    )
-            finally:
-                if img:
-                    img.close()
-                pix = None
-
-    logger.info(
-        "PDF OCR completed: %d pages, %d with text",
-        total_pages,
-        len(pages_text),
-    )
-    return "\n\n".join(pages_text)
-
-
-# ── Main Service ────────────────────────────────────────────────────────
+# ── Main Service ────────────────────────────────────────────────
 
 
 class FileProcessorService:
@@ -459,11 +247,24 @@ class FileProcessorService:
         ".xls",
     }
 
+    _default_instance: FileProcessorService | None = None
+
+    def __init__(self, max_workers: int = 4):
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+
     @classmethod
-    async def extract_text_async(cls, file_path: str) -> str:
+    def _get_default_instance(cls) -> FileProcessorService:
+        """Ленивая инициализация синглтона для обратной совместимости с @classmethod."""
+        if cls._default_instance is None:
+            cls._default_instance = cls()
+        return cls._default_instance
+
+    @classmethod
+    async def extract_text_async(cls, file_path: str, executor: ThreadPoolExecutor | None = None) -> str:
         """Async text extraction delegating CPU work to thread pool."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_executor, cls.extract_text, file_path)
+        exec_pool = executor or cls._get_default_instance()._executor
+        return await loop.run_in_executor(exec_pool, cls.extract_text, file_path)
 
     @classmethod
     def extract_text(cls, file_path: str) -> str:
@@ -512,10 +313,7 @@ class FileProcessorService:
 
     @classmethod
     def _extract_pdf(cls, file_path: str) -> str:
-        """Unified PDF pipeline: Cache -> Text Layer (fitz) -> OCR.
-        Извлекает текст с маркерами страниц. При пустом слое переключается на OCR.
-        """
-        # 1. Проверка дискового кэша
+        """Unified PDF pipeline: Cache -> Text Layer (fitz) -> OCR."""
         cached = _get_cached_ocr(file_path)
         if cached:
             return cached
@@ -550,9 +348,9 @@ class FileProcessorService:
             avg_chars,
         )
 
-        # 2. Fallback на OCR
+        # Fallback на OCR
         try:
-            ocr_text = _extract_pdf_via_ocr(file_path)
+            ocr_text = cls._extract_pdf_via_ocr(file_path)
             if ocr_text and ocr_text.strip():
                 _save_ocr_cache(file_path, ocr_text)
                 return ocr_text
@@ -568,6 +366,98 @@ class FileProcessorService:
             "Документ содержит только изображения без текстового слоя.\n\n"
             "Для распознавания сканов установите Tesseract OCR или переменную TESSERACT_CMD."
         )
+
+    @classmethod
+    def _extract_pdf_via_ocr(cls, file_path: str) -> str:
+        """Extract text from scanned (image-only) PDF using PyMuPDF + Tesseract OCR."""
+        import fitz  # type: ignore[import]
+        import pytesseract  # type: ignore[import]
+        from PIL import Image  # type: ignore[import]
+
+        # ── Настройка pytesseract (ленивая) ──────────────────────────────
+        tesseract_cmd = _get_tesseract_cmd()
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+        if not os.getenv("TESSDATA_PREFIX"):
+            prefix = _get_tessdata_prefix()
+            if prefix:
+                os.environ["TESSDATA_PREFIX"] = prefix
+
+        # Определяем доступные языки
+        available_langs = _get_available_ocr_langs()
+        if "rus" in available_langs and "eng" in available_langs:
+            ocr_lang = "rus+eng"
+        elif "eng" in available_langs:
+            logger.warning("Russian OCR language not available, using eng only")
+            ocr_lang = "eng"
+        elif "rus" in available_langs:
+            logger.warning("English OCR language not available, using rus only")
+            ocr_lang = "rus"
+        else:
+            raise RuntimeError(
+                f"No OCR languages available. Install tesseract-ocr-rus and tesseract-ocr-eng."
+            )
+
+        logger.info(
+            "Starting PDF OCR: lang=%s, tesseract=%s",
+            ocr_lang,
+            tesseract_cmd,
+        )
+
+        # ── Извлечение текста постранично ────────────────────────────────
+        pages_text: list[str] = []
+
+        with fitz.open(file_path) as doc:
+            total_pages = len(doc)
+            for page_num in range(total_pages):
+                page = doc[page_num]
+
+                zoom = 300 / 72
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+
+                img = None
+                try:
+                    img_bytes = pix.tobytes("png")
+                    img = Image.open(io.BytesIO(img_bytes))
+
+                    try:
+                        text = pytesseract.image_to_string(img, lang=ocr_lang)
+                    except pytesseract.TesseractError as te:
+                        logger.warning(
+                            "Tesseract failed on page %d with lang=%s: %s — trying 'eng' only",
+                            page_num + 1,
+                            ocr_lang,
+                            te,
+                        )
+                        if ocr_lang != "eng":
+                            try:
+                                text = pytesseract.image_to_string(img, lang="eng")
+                            except pytesseract.TesseractError as te2:
+                                logger.error(
+                                    "Tesseract eng-only also failed on page %d: %s",
+                                    page_num + 1,
+                                    te2,
+                                )
+                                text = ""
+                        else:
+                            text = ""
+
+                    if text and text.strip():
+                        pages_text.append(
+                            f"--- Страница {page_num + 1} ---\n{text.strip()}"
+                        )
+                finally:
+                    if img:
+                        img.close()
+                    pix = None
+
+        logger.info(
+            "PDF OCR completed: %d pages, %d with text",
+            total_pages,
+            len(pages_text),
+        )
+        return "\n\n".join(pages_text)
 
     @classmethod
     def _extract_doc(cls, file_path: str) -> str:
@@ -778,11 +668,11 @@ class FileProcessorService:
 
     @classmethod
     async def _extract_excel_tables(
-        cls, file_path: str, ext: str
+            cls, file_path: str, ext: str
     ) -> list[dict[str, Any]]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            _executor, cls._extract_tables_sync, file_path, ext
+            cls._get_default_instance()._executor, cls._extract_tables_sync, file_path, ext
         )
 
     @classmethod
@@ -873,4 +763,43 @@ class FileProcessorService:
     @classmethod
     def get_ocr_diagnostic(cls) -> dict[str, Any]:
         """Возвращает диагностику Tesseract OCR для API /health и отладки."""
-        return _TESSERACT_DIAGNOSTIC
+        result: dict[str, Any] = {
+            "binary_found": False,
+            "binary_path": None,
+            "tessdata_found": False,
+            "tessdata_path": None,
+            "languages": [],
+            "version": None,
+            "errors": [],
+        }
+
+        try:
+            cmd = _get_tesseract_cmd()
+            result["binary_found"] = True
+            result["binary_path"] = cmd
+
+            proc = subprocess.run(
+                [cmd, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            version_line = (proc.stdout or proc.stderr or "").strip().split("\n")[0]
+            result["version"] = version_line
+        except RuntimeError as e:
+            result["errors"].append(str(e))
+        except Exception as e:
+            result["errors"].append(f"Failed to run tesseract --version: {e}")
+
+        prefix = _get_tessdata_prefix()
+        result["tessdata_found"] = prefix is not None
+        result["tessdata_path"] = prefix
+
+        if not prefix:
+            result["errors"].append(
+                "tessdata directory not found. Install languages or set TESSDATA_PREFIX env var."
+            )
+        else:
+            result["languages"] = _get_available_ocr_langs()
+
+        return result

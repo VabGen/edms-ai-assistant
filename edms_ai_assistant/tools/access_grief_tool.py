@@ -1,5 +1,6 @@
+# edms_ai_assistant/tools/access_grief.py
 """
-EDMS AI Assistant — Access Grief Search Tool.
+EDMS AI Assistant — Access Grief Search Tool (DI Factory).
 
 Поиск грифов доступа и сотрудников с конкретными грифами.
 
@@ -22,7 +23,7 @@ from typing import Annotated, Any
 
 import httpx
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, model_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
@@ -92,283 +93,8 @@ class AccessGriefSearchInput(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Tool
+# Formatters
 # ══════════════════════════════════════════════════════════════════════════════
-
-
-@tool("access_grief_tool", args_schema=AccessGriefSearchInput)
-async def access_grief_tool(
-    grief_name: str | None = None,
-    grief_id: str | None = None,
-    employee_id: str | None = None,
-    list_all: bool | None = None,
-    config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """Searches for access griefs and employees with specific griefs.
-
-    Use when the user asks:
-    - «Покажи сотрудников с грифом Секретно»   → grief_name='Секретно'
-    - «У кого гриф ДСП?»                       → grief_name='ДСП'
-    - «Какие грифы у сотрудника {uuid}»        → employee_id=uuid
-    - «Список всех грифов доступа»             → list_all=True
-    - «Сотрудники с грифом {uuid}»             → grief_id=uuid
-
-    Returns:
-    - status='found' with employees[] — сотрудники с указанным грифом
-    - status='found' with access_griefs[] — грифы сотрудника
-    - status='found' with griefs[] — список всех грифов
-    - status='not_found' — ничего не найдено
-    """
-
-    # Безопасное извлечение токена
-    try:
-        token = get_token_from_config(config)
-    except Exception as e:
-        logger.error("Failed to get token from config: %s", e)
-        return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
-
-    # ── Грифы конкретного сотрудника ──────────────────────────────────────
-    if employee_id:
-        return await _get_employee_griefs(token, employee_id)
-
-    # ── Список всех грифов ────────────────────────────────────────────────
-    if list_all is True:
-        return await _list_all_griefs(token)
-
-    # ── Сотрудники с конкретным грифом ────────────────────────────────────
-    resolved_grief_id = grief_id
-
-    if grief_name and not grief_id:
-        resolved_grief_id = await _resolve_grief_name(token, grief_name)
-        if not resolved_grief_id:
-            return {
-                "status": "not_found",
-                "message": (
-                    f"Гриф доступа «{grief_name}» не найден. "
-                    "Проверьте название. Доступные грифы можно посмотреть "
-                    "через list_all=True."
-                ),
-            }
-
-    if resolved_grief_id:
-        return await _get_grief_employees(token, resolved_grief_id, grief_name)
-
-    return {
-        "status": "error",
-        "message": "Не указан параметр для поиска.",
-    }
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Private helpers
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-async def _resolve_grief_name(token: str, name: str) -> str | None:
-    """Ищет UUID грифа по названию через GET /api/access-grief?name=..."""
-    try:
-        async with AccessGriefClient() as client:
-            griefs = await client.search_griefs(token, name=name.strip())
-
-        if griefs:
-            # Точное совпадение приоритетнее
-            name_lower = name.strip().lower()
-            for g in griefs:
-                g_name = (g.get("name") or "").lower()
-                if g_name == name_lower:
-                    return str(g["id"])
-            return str(griefs[0]["id"])
-
-        return None
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 403:
-            logger.warning("User lacks ReadAccessGrief permission")
-            raise PermissionError("У вас нет прав для просмотра грифов доступа (403 Forbidden).") from exc
-        logger.error("Failed to resolve grief name '%s'", name, exc_info=True)
-        return None
-    except Exception:
-        logger.error("Failed to resolve grief name '%s'", name, exc_info=True)
-        return None
-
-
-async def _get_grief_employees(
-    token: str,
-    grief_id: str,
-    grief_name: str | None = None,
-) -> dict[str, Any]:
-    """Получает сотрудников с указанным грифом."""
-    try:
-        pageable = {
-            "page": 0,
-            "size": _MAX_EMPLOYEES,
-            "sort": "employee.lastName,ASC",
-        }
-
-        async with AccessGriefClient() as client:
-            grief_info = await client.get_grief(token, grief_id)
-            raw_employees = await client.get_grief_employees(
-                token, grief_id, pageable=pageable
-            )
-
-        employees = [_format_grief_employee(e) for e in raw_employees]
-        grief_label = grief_name or (
-            grief_info.get("name") if grief_info else grief_id[:8]
-        )
-
-        if not employees:
-            return {
-                "status": "not_found",
-                "message": f"Нет сотрудников с грифом «{grief_label}».",
-                "grief": (
-                    _format_grief_info(grief_info, grief_id) if grief_info else None
-                ),
-                "employees": [],
-                "total": 0,
-            }
-
-        return {
-            "status": "found",
-            "grief": (
-                _format_grief_info(grief_info, grief_id)
-                if grief_info
-                else {"id": grief_id}
-            ),
-            "total": len(employees),
-            "employees": employees,
-        }
-    except PermissionError as exc:
-        return {"status": "error", "message": str(exc)}
-    except Exception as exc:
-        logger.error("Failed to get grief employees", exc_info=True)
-        return {
-            "status": "error",
-            "message": f"Ошибка получения сотрудников с грифом: {exc}",
-        }
-
-
-async def _get_employee_griefs(token: str, employee_id: str) -> dict[str, Any]:
-    """Получает грифы доступа конкретного сотрудника."""
-    try:
-        async with EmployeeClient() as client:
-            griefs_raw = await client.get_employee_griefs(token, employee_id)
-
-        if not griefs_raw:
-            return {
-                "status": "not_found",
-                "message": f"У сотрудника {employee_id[:8]}... нет грифов доступа.",
-                "access_griefs": [],
-            }
-
-        griefs = [_format_employee_grief(g) for g in griefs_raw]
-        return {
-            "status": "found",
-            "employee_id": employee_id,
-            "access_griefs": griefs,
-        }
-    except PermissionError as exc:
-        return {"status": "error", "message": str(exc)}
-    except Exception as exc:
-        logger.error(
-            "Failed to get employee griefs",
-            exc_info=True,
-            extra={"employee_id": employee_id},
-        )
-        return {
-            "status": "error",
-            "message": f"Ошибка получения грифов сотрудника: {exc}",
-        }
-
-
-async def _list_all_griefs(token: str) -> dict[str, Any]:
-    """Возвращает список всех грифов доступа в системе."""
-    try:
-        async with AccessGriefClient() as client:
-            griefs = await client.search_griefs(
-                token, pageable={"page": 0, "size": 100, "sort": "name,ASC"}
-            )
-
-        if not griefs:
-            return {
-                "status": "not_found",
-                "message": "Грифы доступа не найдены.",
-                "griefs": [],
-            }
-
-        return {
-            "status": "found",
-            "total": len(griefs),
-            "griefs": [_format_grief_brief(g) for g in griefs],
-        }
-    except PermissionError as exc:
-        return {"status": "error", "message": str(exc)}
-    except Exception as exc:
-        logger.error("Failed to list griefs", exc_info=True)
-        return {
-            "status": "error",
-            "message": f"Ошибка получения списка грифов: {exc}",
-        }
-
-
-async def _get_employee_griefs(token: str, employee_id: str) -> dict[str, Any]:
-    """Получает грифы доступа конкретного сотрудника."""
-    try:
-        async with EmployeeClient() as client:
-            griefs_raw = await client.get_employee_griefs(token, employee_id)
-
-        if not griefs_raw:
-            return {
-                "status": "not_found",
-                "message": f"У сотрудника {employee_id[:8]}... нет грифов доступа.",
-                "access_griefs": [],
-            }
-
-        griefs = [_format_employee_grief(g) for g in griefs_raw]
-        return {
-            "status": "found",
-            "employee_id": employee_id,
-            "access_griefs": griefs,
-        }
-    except Exception as exc:
-        logger.error(
-            "Failed to get employee griefs",
-            exc_info=True,
-            extra={"employee_id": employee_id},
-        )
-        return {
-            "status": "error",
-            "message": f"Ошибка получения грифов сотрудника: {exc}",
-        }
-
-
-async def _list_all_griefs(token: str) -> dict[str, Any]:
-    """Возвращает список всех грифов доступа в системе."""
-    try:
-        async with AccessGriefClient() as client:
-            griefs = await client.search_griefs(
-                token, pageable={"page": 0, "size": 100, "sort": "name,ASC"}
-            )
-
-        if not griefs:
-            return {
-                "status": "not_found",
-                "message": "Грифы доступа не найдены.",
-                "griefs": [],
-            }
-
-        return {
-            "status": "found",
-            "total": len(griefs),
-            "griefs": [_format_grief_brief(g) for g in griefs],
-        }
-    except Exception as exc:
-        logger.error("Failed to list griefs", exc_info=True)
-        return {
-            "status": "error",
-            "message": f"Ошибка получения списка грифов: {exc}",
-        }
-
-
-# ── Форматирование ────────────────────────────────────────────────────────
 
 
 def _format_grief_info(grief: dict[str, Any], grief_id: str) -> dict[str, Any]:
@@ -415,3 +141,257 @@ def _format_grief_employee(raw: dict[str, Any]) -> dict[str, Any]:
         "active": emp.get("active"),
         "fired": emp.get("fired"),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Private helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+async def _resolve_grief_name(
+        grief_client: AccessGriefClient, token: str, name: str
+) -> str | None:
+    """Ищет UUID грифа по названию через GET /api/access-grief?name=..."""
+    try:
+        griefs = await grief_client.search_griefs(token, name=name.strip())
+
+        if griefs:
+            name_lower = name.strip().lower()
+            for g in griefs:
+                g_name = (g.get("name") or "").lower()
+                if g_name == name_lower:
+                    return str(g["id"])
+            return str(griefs[0]["id"])
+
+        return None
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            logger.warning("User lacks ReadAccessGrief permission")
+            raise PermissionError(
+                "У вас нет прав для просмотра грифов доступа (403 Forbidden)."
+            ) from exc
+        logger.error("Failed to resolve grief name '%s'", name, exc_info=True)
+        return None
+    except Exception:
+        logger.error("Failed to resolve grief name '%s'", name, exc_info=True)
+        return None
+
+
+async def _get_grief_employees(
+        grief_client: AccessGriefClient,
+        token: str,
+        grief_id: str,
+        grief_name: str | None = None,
+) -> dict[str, Any]:
+    """Получает сотрудников с указанным грифом."""
+    try:
+        pageable = {
+            "page": 0,
+            "size": _MAX_EMPLOYEES,
+            "sort": "employee.lastName,ASC",
+        }
+
+        grief_info = await grief_client.get_grief(token, grief_id)
+        raw_employees = await grief_client.get_grief_employees(
+            token, grief_id, pageable=pageable
+        )
+
+        employees = [_format_grief_employee(e) for e in raw_employees]
+        grief_label = grief_name or (
+            grief_info.get("name") if grief_info else grief_id[:8]
+        )
+
+        if not employees:
+            return {
+                "status": "not_found",
+                "message": f"Нет сотрудников с грифом «{grief_label}».",
+                "grief": (
+                    _format_grief_info(grief_info, grief_id) if grief_info else None
+                ),
+                "employees": [],
+                "total": 0,
+            }
+
+        return {
+            "status": "found",
+            "grief": (
+                _format_grief_info(grief_info, grief_id)
+                if grief_info
+                else {"id": grief_id}
+            ),
+            "total": len(employees),
+            "employees": employees,
+        }
+    except PermissionError as exc:
+        return {"status": "error", "message": str(exc)}
+    except Exception as exc:
+        logger.error("Failed to get grief employees", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Ошибка получения сотрудников с грифом: {exc}",
+        }
+
+
+async def _get_employee_griefs(
+        employee_client: EmployeeClient, token: str, employee_id: str
+) -> dict[str, Any]:
+    """Получает грифы доступа конкретного сотрудника."""
+    try:
+        griefs_raw = await employee_client.get_employee_griefs(token, employee_id)
+
+        if not griefs_raw:
+            return {
+                "status": "not_found",
+                "message": f"У сотрудника {employee_id[:8]}... нет грифов доступа.",
+                "access_griefs": [],
+            }
+
+        griefs = [_format_employee_grief(g) for g in griefs_raw]
+        return {
+            "status": "found",
+            "employee_id": employee_id,
+            "access_griefs": griefs,
+        }
+    except Exception as exc:
+        logger.error(
+            "Failed to get employee griefs",
+            exc_info=True,
+            extra={"employee_id": employee_id},
+        )
+        return {
+            "status": "error",
+            "message": f"Ошибка получения грифов сотрудника: {exc}",
+        }
+
+
+async def _list_all_griefs(
+        grief_client: AccessGriefClient, token: str
+) -> dict[str, Any]:
+    """Возвращает список всех грифов доступа в системе."""
+    try:
+        griefs = await grief_client.search_griefs(
+            token, pageable={"page": 0, "size": 100, "sort": "name,ASC"}
+        )
+
+        if not griefs:
+            return {
+                "status": "not_found",
+                "message": "Грифы доступа не найдены.",
+                "griefs": [],
+            }
+
+        return {
+            "status": "found",
+            "total": len(griefs),
+            "griefs": [_format_grief_brief(g) for g in griefs],
+        }
+    except Exception as exc:
+        logger.error("Failed to list griefs", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Ошибка получения списка грифов: {exc}",
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Factory — DI via closure
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def create_access_grief_tool(
+        grief_client: AccessGriefClient,
+        employee_client: EmployeeClient,
+) -> StructuredTool:
+    """Фабрика инструмента поиска грифов с внедрением зависимостей.
+
+    Args:
+        grief_client: Клиент для работы с API грифов доступа.
+        employee_client: Клиент для работы с API сотрудников.
+
+    Returns:
+        StructuredTool, готовый к регистрации в агенте.
+    """
+
+    async def access_grief_tool(
+            grief_name: str | None = None,
+            grief_id: str | None = None,
+            employee_id: str | None = None,
+            list_all: bool | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Searches for access griefs and employees with specific griefs.
+
+        Use when the user asks:
+        - «Покажи сотрудников с грифом Секретно»   → grief_name='Секретно'
+        - «У кого гриф ДСП?»                       → grief_name='ДСП'
+        - «Какие грифы у сотрудника {uuid}»        → employee_id=uuid
+        - «Список всех грифов доступа»             → list_all=True
+        - «Сотрудники с грифом {uuid}»             → grief_id=uuid
+
+        ВАЖНО: Токен авторизации передается системой АВТОМАТИЧЕСКИ.
+        Тебе НЕ НУЖНО запрашивать его у пользователя.
+        """
+        try:
+            token = get_token_from_config(config)
+        except Exception as e:
+            logger.error("Failed to get token from config: %s", e)
+            return {
+                "status": "error",
+                "message": f"Ошибка авторизации: токен не найден. {e}",
+            }
+
+        # ── Грифы конкретного сотрудника ──────────────────────────────────
+        if employee_id:
+            return await _get_employee_griefs(employee_client, token, employee_id)
+
+        # ── Список всех грифов ────────────────────────────────────────────
+        if list_all is True:
+            return await _list_all_griefs(grief_client, token)
+
+        # ── Сотрудники с конкретным грифом ────────────────────────────────
+        resolved_grief_id = grief_id
+
+        if grief_name and not grief_id:
+            try:
+                resolved_grief_id = await _resolve_grief_name(
+                    grief_client, token, grief_name
+                )
+            except PermissionError as exc:
+                return {"status": "error", "message": str(exc)}
+
+            if not resolved_grief_id:
+                return {
+                    "status": "not_found",
+                    "message": (
+                        f"Гриф доступа «{grief_name}» не найден. "
+                        "Проверьте название. Доступные грифы можно посмотреть "
+                        "через list_all=True."
+                    ),
+                }
+
+        if resolved_grief_id:
+            return await _get_grief_employees(
+                grief_client, token, resolved_grief_id, grief_name
+            )
+
+        return {
+            "status": "error",
+            "message": "Не указан параметр для поиска.",
+        }
+
+    return StructuredTool.from_function(
+        func=access_grief_tool,
+        name="access_grief_tool",
+        description=(
+            "Searches for access griefs and employees with specific griefs.\n"
+            "Use when the user asks:\n"
+            "- «Покажи сотрудников с грифом Секретно»   → grief_name='Секретно'\n"
+            "- «У кого гриф ДСП?»                       → grief_name='ДСП'\n"
+            "- «Какие грифы у сотрудника {uuid}»        → employee_id=uuid\n"
+            "- «Список всех грифов доступа»             → list_all=True\n"
+            "- «Сотрудники с грифом {uuid}»             → grief_id=uuid\n\n"
+            "ВАЖНО: Токен авторизации передается системой АВТОМАТИЧЕСКИ. "
+            "Тебе НЕ НУЖНО запрашивать его у пользователя."
+        ),
+        args_schema=AccessGriefSearchInput,
+    )

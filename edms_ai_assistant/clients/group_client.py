@@ -14,45 +14,25 @@ EDMS AI Assistant — Group HTTP Client.
 """
 
 import logging
-from abc import abstractmethod
 from typing import Any
 from uuid import UUID
 
-from .base_client import EdmsBaseClient
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
+from edms_ai_assistant.core.exceptions import EdmsNotFoundError
+from edms_ai_assistant.domain.employee import EmployeeDto
 
 logger = logging.getLogger(__name__)
 
 
-class BaseGroupClient(EdmsBaseClient):
-    """Abstract interface for EDMS Group API clients."""
+class GroupClient:
+    """Concrete async HTTP client for EDMS Group API.
 
-    @abstractmethod
-    async def find_by_name(self, token: str, group_name: str) -> dict[str, Any] | None:
-        raise NotImplementedError
+    Использует композицию: делегирует HTTP-логику базовому клиенту.
+    Возвращает строгие Pydantic DTO для сотрудников.
+    """
 
-    @abstractmethod
-    async def find_personal_by_name(
-        self, token: str, group_name: str
-    ) -> dict[str, Any] | None:
-        """Находит личную группу по названию (через BasicSearchRequest)."""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def get_employees_by_group_ids(
-        self, token: str, group_ids: list[UUID]
-    ) -> list[dict[str, Any]]:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def get_employees_by_personal_group_ids(
-        self, token: str, group_ids: list[UUID]
-    ) -> list[dict[str, Any]]:
-        """Получает сотрудников из личных групп."""
-        raise NotImplementedError
-
-
-class GroupClient(BaseGroupClient, EdmsBaseClient):
-    """Concrete async HTTP client for EDMS Group API."""
+    def __init__(self, base_client: EdmsBaseClient):
+        self._client = base_client
 
     # ── Общие группы ───────────────────────────────────────────────────
 
@@ -62,72 +42,62 @@ class GroupClient(BaseGroupClient, EdmsBaseClient):
         Endpoint: GET /api/group/fts-name?fts={group_name}
         Response: GroupDto (один объект)
         """
-        endpoint = "api/group/fts-name"
-        params = {"fts": group_name}
-
         try:
-            result = await self._make_request(
-                "GET", endpoint, token=token, params=params
+            result = await self._client._make_request(
+                "GET", "api/group/fts-name", token=token, params={"fts": group_name}
             )
-            if result and isinstance(result, dict):
-                logger.info(f"Found group: {result.get('name', 'Unknown')}")
+            if isinstance(result, dict) and result:
+                logger.info("Found group: %s", result.get("name", "Unknown"))
                 return result
-            return None
-        except Exception as e:
-            logger.error(f"Error searching group '{group_name}': {e}")
-            return None
+        except EdmsNotFoundError:
+            logger.info("Group not found: '%s'", group_name)
+
+        return None
 
     async def get_employees_by_group_ids(
-        self, token: str, group_ids: list[UUID]
-    ) -> list[dict[str, Any]]:
+            self, token: str, group_ids: list[UUID]
+    ) -> list[EmployeeDto]:
         """Получает сотрудников из общих групп.
 
         Endpoint: GET /api/group/employee/all?ids={id1}&ids={id2}
-        Response: List<GroupEmployeeDto>
-        GroupEmployeeDto = { "employee": {...}, "group": {...}, ... }
+        Response: List<GroupEmployeeDto> (внутри лежит {"employee": {...}})
         """
         if not group_ids:
             return []
 
-        endpoint = f"api/group/employee/all?ids={group_ids[0]}"
-        for group_id in group_ids[1:]:
-            endpoint += f"&ids={group_id}"
-
         try:
-            result = await self._make_request("GET", endpoint, token=token)
-
+            result = await self._client._make_request(
+                "GET",
+                "api/group/employee/all",
+                token=token,
+                params={"ids": [str(gid) for gid in group_ids]}
+            )
             if isinstance(result, list):
                 employees = []
                 for item in result:
-                    if isinstance(item, dict) and "employee" in item:
-                        employees.append(item["employee"])
-
-                logger.info(
-                    f"Found {len(employees)} employees in {len(group_ids)} groups"
-                )
+                    if isinstance(item, dict):
+                        emp_data = item.get("employee")
+                        if isinstance(emp_data, dict):
+                            employees.append(EmployeeDto.model_validate(emp_data))
                 return employees
-            return []
-        except Exception as e:
-            logger.error(f"Error fetching employees for groups {group_ids}: {e}")
-            return []
+        except EdmsNotFoundError:
+            pass
+
+        return []
 
     # ── Личные группы ──────────────────────────────────────────────────
 
     async def find_personal_by_name(
-        self, token: str, group_name: str
+            self, token: str, group_name: str
     ) -> dict[str, Any] | None:
         """Поиск личной группы по названию.
 
         PersonalGroupController НЕ имеет /fts-name.
         Вместо этого используем GET /api/personal-group с BasicSearchRequest.
 
-        BasicSearchRequest имеет поле 'query' для текстового поиска.
-        Возвращает SliceDto<PersonalGroupDto> с пагинацией.
-
         Endpoint: GET /api/personal-group?query={name}&page=0&size=20
         Response: SliceDto { "content": [PersonalGroupDto, ...], ... }
         """
-        endpoint = "api/personal-group"
         params = {
             "query": group_name,
             "page": 0,
@@ -135,82 +105,67 @@ class GroupClient(BaseGroupClient, EdmsBaseClient):
         }
 
         try:
-            result = await self._make_request(
-                "GET", endpoint, token=token, params=params
+            result = await self._client._make_request(
+                "GET", "api/personal-group", token=token, params=params
             )
 
-            if not result:
-                return None
-
-            # SliceDto: { "content": [...], "hasNext": bool }
+            items = []
             if isinstance(result, dict):
                 content = result.get("content")
-                if isinstance(content, list) and content:
-                    best = _find_best_personal_group_match(content, group_name)
-                    if best:
-                        logger.info(
-                            "Found personal group: %s (id=%s)",
-                            best.get("name", "Unknown"),
-                            str(best.get("id", ""))[:8],
-                        )
-                        return best
+                if isinstance(content, list):
+                    items = content
+            elif isinstance(result, list):
+                items = result
 
-            if isinstance(result, list) and result:
-                best = _find_best_personal_group_match(result, group_name)
+            if items:
+                best = _find_best_personal_group_match(items, group_name)
                 if best:
-                    logger.info("Found personal group: %s", best.get("name", "Unknown"))
+                    logger.info(
+                        "Found personal group: %s (id=%s)",
+                        best.get("name", "Unknown"),
+                        str(best.get("id", ""))[:8],
+                    )
                     return best
 
-            logger.warning("Personal group not found: %s", group_name)
-            return None
-        except Exception as e:
-            logger.error("Error searching personal group '%s': %s", group_name, e)
-            return None
+            logger.warning("Personal group not found: '%s'", group_name)
+        except EdmsNotFoundError:
+            logger.info("Personal group not found: '%s'", group_name)
+
+        return None
 
     async def get_employees_by_personal_group_ids(
-        self, token: str, group_ids: list[UUID]
-    ) -> list[dict[str, Any]]:
+            self, token: str, group_ids: list[UUID]
+    ) -> list[EmployeeDto]:
         """Получает сотрудников из личных групп.
 
         Endpoint: GET /api/personal-group/employee/all?ids={id1}&ids={id2}
         Response: List<PersonalGroupEmployeeDto>
-        PersonalGroupEmployeeDto = { "employee": {...}, ... }  (аналогично GroupEmployeeDto)
         """
         if not group_ids:
             return []
 
-        endpoint = f"api/personal-group/employee/all?ids={group_ids[0]}"
-        for group_id in group_ids[1:]:
-            endpoint += f"&ids={group_id}"
-
         try:
-            result = await self._make_request("GET", endpoint, token=token)
+            result = await self._client._make_request(
+                "GET",
+                "api/personal-group/employee/all",
+                token=token,
+                params={"ids": [str(gid) for gid in group_ids]}
+            )
 
             if isinstance(result, list):
                 employees = []
                 for item in result:
                     if isinstance(item, dict):
-                        emp = item.get("employee")
-                        if emp and isinstance(emp, dict):
-                            employees.append(emp)
+                        emp_data = item.get("employee")
+                        if isinstance(emp_data, dict):
+                            employees.append(EmployeeDto.model_validate(emp_data))
                         elif "id" in item and "lastName" in item:
-                            # Нет обёртки — сам объект сотрудника
-                            employees.append(item)
-
-                logger.info(
-                    "Found %d employees in %d personal groups",
-                    len(employees),
-                    len(group_ids),
-                )
+                            employees.append(EmployeeDto.model_validate(item))
                 return employees
-            return []
-        except Exception as e:
-            logger.error(
-                "Error fetching employees for personal groups %s: %s",
-                group_ids,
-                e,
-            )
-            return []
+        except EdmsNotFoundError:
+            pass
+
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +174,8 @@ class GroupClient(BaseGroupClient, EdmsBaseClient):
 
 
 def _find_best_personal_group_match(
-    groups: list[dict[str, Any]],
-    search_name: str,
+        groups: list[dict[str, Any]],
+        search_name: str,
 ) -> dict[str, Any] | None:
     """Находит лучшее совпадение личной группы по названию.
 

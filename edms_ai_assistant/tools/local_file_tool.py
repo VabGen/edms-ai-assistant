@@ -1,3 +1,4 @@
+# edms_ai_assistant/tools/local_file_reader.py
 from __future__ import annotations
 
 import logging
@@ -5,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.services.file_processor import FileProcessorService
@@ -70,167 +71,191 @@ def _split_text_to_pages(text: str) -> dict[int, str]:
     return pages
 
 
-@tool("read_local_file_content", args_schema=LocalFileInput)
-async def read_local_file_content(
-    file_path: str,
-    target_pages: list[int] | None = None,
-    search_keywords: list[str] | None = None,
-) -> dict[str, Any]:
-    """Extract text and metadata from a local file on disk.
+# ─── Tool Factory ─────────────────────────────────────────────────────────────
 
-    Supports Smart Truncation (Head + Mini-Index + Tail) for large docs,
-    Targeted Page Extraction, and Keyword Search.
+
+def create_local_file_reader_tool(
+        file_processor_service: FileProcessorService,
+) -> StructuredTool:
+    """Фабрика для создания инструмента чтения локальных файлов.
+
+    Args:
+        file_processor_service: Сервис для извлечения текста из файлов.
+
+    Returns:
+        Настроенный StructuredTool, готовый к регистрации в агенте.
     """
-    logger.info(
-        "read_local_file_content called",
-        extra={
-            "file_path": file_path,
-            "target_pages": target_pages,
-            "search_keywords": search_keywords,
-        },
-    )
 
-    path = Path(file_path)
-    if not path.exists():
-        return {"status": "error", "message": f"Файл не найден: '{file_path}'."}
+    async def read_local_file_content(
+            file_path: str,
+            target_pages: list[int] | None = None,
+            search_keywords: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Extract text and metadata from a local file on disk.
 
-    suffix = path.suffix.lower()
-    size_mb = round(path.stat().st_size / (1024 * 1024), 2)
-    meta = {
-        "имя_файла": path.name,
-        "расширение": suffix,
-        "размер_мб": size_mb,
-        "путь": str(path),
-    }
+        Supports Smart Truncation (Head + Mini-Index + Tail) for large docs,
+        Targeted Page Extraction, and Keyword Search.
+        """
+        logger.info(
+            "read_local_file_content called",
+            extra={
+                "file_path": file_path,
+                "target_pages": target_pages,
+                "search_keywords": search_keywords,
+            },
+        )
 
-    if suffix not in _ALLOWED_EXTENSIONS:
-        return {
-            "status": "error",
-            "message": f"Формат '{suffix}' не поддерживается.",
-            "meta": meta,
+        path = Path(file_path)
+        if not path.exists():
+            return {"status": "error", "message": f"Файл не найден: '{file_path}'."}
+
+        suffix = path.suffix.lower()
+        size_mb = round(path.stat().st_size / (1024 * 1024), 2)
+        meta = {
+            "имя_файла": path.name,
+            "расширение": suffix,
+            "размер_мб": size_mb,
+            "путь": str(path),
         }
 
-    full_text = await FileProcessorService.extract_text_async(str(path))
+        if suffix not in _ALLOWED_EXTENSIONS:
+            return {
+                "status": "error",
+                "message": f"Формат '{suffix}' не поддерживается.",
+                "meta": meta,
+            }
 
-    if (
-        not full_text
-        or full_text.startswith("Ошибка:")
-        or full_text.startswith("Формат файла")
-    ):
-        return {
-            "status": "error",
-            "message": f"Не удалось извлечь текст: {full_text[:300]}",
-            "meta": meta,
-        }
+        # Используем внедренный сервис вместо прямого вызова статического метода
+        full_text = await file_processor_service.extract_text_async(str(path))
 
-    total_chars = len(full_text)
+        if (
+                not full_text
+                or full_text.startswith("Ошибка:")
+                or full_text.startswith("Формат файла")
+        ):
+            return {
+                "status": "error",
+                "message": f"Не удалось извлечь текст: {full_text[:300]}",
+                "meta": meta,
+            }
 
-    # ── Режим 1: Поиск по ключевым словам ────────────────────────────────
-    if search_keywords:
-        pages_dict = _split_text_to_pages(full_text)
-        matched_pages = set()
+        total_chars = len(full_text)
 
-        for page_num, page_text in pages_dict.items():
-            for kw in search_keywords:
-                if kw.lower() in page_text.lower():
-                    matched_pages.add(page_num)
+        # ── Режим 1: Поиск по ключевым словам ────────────────────────────────
+        if search_keywords:
+            pages_dict = _split_text_to_pages(full_text)
+            matched_pages = set()
 
-        if not matched_pages:
+            for page_num, page_text in pages_dict.items():
+                for kw in search_keywords:
+                    if kw.lower() in page_text.lower():
+                        matched_pages.add(page_num)
+
+            if not matched_pages:
+                return {
+                    "status": "success",
+                    "meta": meta,
+                    "content": "Ключевые слова не найдены в документе.",
+                    "is_truncated": False,
+                    "total_chars": total_chars,
+                    "matched_pages": [],
+                }
+
+            result_text = "\n\n".join(pages_dict[p] for p in sorted(matched_pages))
             return {
                 "status": "success",
                 "meta": meta,
-                "content": "Ключевые слова не найдены в документе.",
+                "content": result_text,
                 "is_truncated": False,
                 "total_chars": total_chars,
-                "matched_pages": [],
+                "matched_pages": sorted(matched_pages),
             }
 
-        result_text = "\n\n".join(pages_dict[p] for p in sorted(matched_pages))
-        return {
-            "status": "success",
-            "meta": meta,
-            "content": result_text,
-            "is_truncated": False,
-            "total_chars": total_chars,
-            "matched_pages": sorted(matched_pages),
-        }
-
-    # ── Режим 2: Извлечение конкретных страниц ───────────────────────────
-    if target_pages:
-        pages_dict = _split_text_to_pages(full_text)
-        result_text = "\n\n".join(
-            pages_dict.get(p, f"[Страница {p} не найдена]") for p in target_pages
-        )
-        return {
-            "status": "success",
-            "meta": meta,
-            "content": result_text,
-            "is_truncated": False,
-            "total_chars": total_chars,
-        }
-
-    # ── Режим 3: Умная обрезка (Начало + Мини-Индекс + Конец) ───────────
-    is_truncated = total_chars > _MAX_CONTENT_CHARS
-    content = full_text
-
-    if is_truncated:
-        pages_dict = _split_text_to_pages(full_text)
-        all_page_nums = sorted(pages_dict.keys())
-
-        if not all_page_nums:
-            content = full_text[:_MAX_CONTENT_CHARS] + "\n\n... [ТЕКСТ ОБРЕЗАН]"
-        else:
-            head_size = int(_MAX_CONTENT_CHARS * 0.5)  # 50% под начало
-            tail_size = int(_MAX_CONTENT_CHARS * 0.4)  # 40% под конец
-            # 10% резервируем под Мини-Индекс
-
-            head_text = ""
-            head_pages = []
-            for p in all_page_nums:
-                if len(head_text) + len(pages_dict[p]) > head_size:
-                    break
-                head_text += pages_dict[p] + "\n\n"
-                head_pages.append(p)
-
-            tail_text = ""
-            tail_pages = []
-            for p in reversed(all_page_nums):
-                if p in head_pages:
-                    break
-                if len(tail_text) + len(pages_dict[p]) > tail_size:
-                    break
-                tail_text = pages_dict[p] + "\n\n" + tail_text
-                tail_pages.insert(0, p)
-
-            # Формируем Мини-Индекс для пропущенных страниц
-            middle_pages = [
-                p for p in all_page_nums if p not in head_pages and p not in tail_pages
-            ]
-            index_text = "... [ПРОПУЩЕННЫЕ СТРАНИЦЫ. Краткое содержание пропущенных частей для навигации]:\n"
-
-            for p in middle_pages:
-                # Берем первые 100 символов текста страницы как аннотацию
-                page_content_clean = (
-                    pages_dict[p].replace(f"--- Страница {p} ---", "").strip()
-                )
-                snippet = page_content_clean[:100].replace("\n", " ")
-                index_text += f"  Стр. {p}: {snippet}...\n"
-
-            index_text += "\nДля чтения полных пропущенных страниц используй параметры target_pages или search_keywords.\n\n"
-
-            content = head_text + index_text + tail_text
-            logger.info(
-                "Smart truncation with Mini-Index applied to %s. Head: %s, Tail: %s, Indexed: %s",
-                path.name,
-                len(head_pages),
-                len(tail_pages),
-                len(middle_pages),
+        # ── Режим 2: Извлечение конкретных страниц ───────────────────────────
+        if target_pages:
+            pages_dict = _split_text_to_pages(full_text)
+            result_text = "\n\n".join(
+                pages_dict.get(p, f"[Страница {p} не найдена]") for p in target_pages
             )
+            return {
+                "status": "success",
+                "meta": meta,
+                "content": result_text,
+                "is_truncated": False,
+                "total_chars": total_chars,
+            }
 
-    return {
-        "status": "success",
-        "meta": meta,
-        "content": content,
-        "is_truncated": is_truncated,
-        "total_chars": total_chars,
-    }
+        # ── Режим 3: Умная обрезка (Начало + Мини-Индекс + Конец) ───────────
+        is_truncated = total_chars > _MAX_CONTENT_CHARS
+        content = full_text
+
+        if is_truncated:
+            pages_dict = _split_text_to_pages(full_text)
+            all_page_nums = sorted(pages_dict.keys())
+
+            if not all_page_nums:
+                content = full_text[:_MAX_CONTENT_CHARS] + "\n\n... [ТЕКСТ ОБРЕЗАН]"
+            else:
+                head_size = int(_MAX_CONTENT_CHARS * 0.5)  # 50% под начало
+                tail_size = int(_MAX_CONTENT_CHARS * 0.4)  # 40% под конец
+                # 10% резервируем под Мини-Индекс
+
+                head_text = ""
+                head_pages = []
+                for p in all_page_nums:
+                    if len(head_text) + len(pages_dict[p]) > head_size:
+                        break
+                    head_text += pages_dict[p] + "\n\n"
+                    head_pages.append(p)
+
+                tail_text = ""
+                tail_pages = []
+                for p in reversed(all_page_nums):
+                    if p in head_pages:
+                        break
+                    if len(tail_text) + len(pages_dict[p]) > tail_size:
+                        break
+                    tail_text = pages_dict[p] + "\n\n" + tail_text
+                    tail_pages.insert(0, p)
+
+                # Формируем Мини-Индекс для пропущенных страниц
+                middle_pages = [
+                    p for p in all_page_nums if p not in head_pages and p not in tail_pages
+                ]
+                index_text = "... [ПРОПУЩЕННЫЕ СТРАНИЦЫ. Краткое содержание пропущенных частей для навигации]:\n"
+
+                for p in middle_pages:
+                    # Берем первые 100 символов текста страницы как аннотацию
+                    page_content_clean = (
+                        pages_dict[p].replace(f"--- Страница {p} ---", "").strip()
+                    )
+                    snippet = page_content_clean[:100].replace("\n", " ")
+                    index_text += f"  Стр. {p}: {snippet}...\n"
+
+                index_text += "\nДля чтения полных пропущенных страниц используй параметры target_pages или search_keywords.\n\n"
+
+                content = head_text + index_text + tail_text
+                logger.info(
+                    "Smart truncation with Mini-Index applied to %s. Head: %s, Tail: %s, Indexed: %s",
+                    path.name,
+                    len(head_pages),
+                    len(tail_pages),
+                    len(middle_pages),
+                )
+
+        return {
+            "status": "success",
+            "meta": meta,
+            "content": content,
+            "is_truncated": is_truncated,
+            "total_chars": total_chars,
+        }
+
+    return StructuredTool.from_function(
+        coroutine=read_local_file_content,
+        name="read_local_file_content",
+        description="Extract text and metadata from a local file on disk. "
+                    "Supports Smart Truncation (Head + Mini-Index + Tail) for large docs, "
+                    "Targeted Page Extraction, and Keyword Search.",
+        args_schema=LocalFileInput,
+    )

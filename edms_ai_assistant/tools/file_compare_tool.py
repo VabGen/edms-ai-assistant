@@ -7,7 +7,19 @@ EDMS AI Assistant — File Comparison Tool.
 
 from __future__ import annotations
 
+import difflib
+import logging
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Any, Annotated
+
 from langgraph.errors import GraphInterrupt
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, StructuredTool
+from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
 from edms_ai_assistant.agent.interrupt_contract import (
@@ -15,24 +27,9 @@ from edms_ai_assistant.agent.interrupt_contract import (
     CardSelectResume,
     InterruptCard,
 )
-
-import difflib
-import logging
-import os
-import re
-import tempfile
-from pathlib import Path
-
-from typing import Any, Annotated
-
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool, InjectedToolArg
-from pydantic import BaseModel, Field, field_validator
-
 from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
-from edms_ai_assistant.clients.attachment_client import EdmsAttachmentClient
+from edms_ai_assistant.clients.attachment_client import AttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
-from edms_ai_assistant.generated.resources_openapi import DocumentDto
 from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
@@ -95,12 +92,15 @@ class FileCompareInput(BaseModel):
 
 
 def _att_name(attachment: Any) -> str:
-    return (
-            getattr(attachment, "name", None) or getattr(attachment, "fileName", None) or ""
-    )
+    # Поддержка как dict, так и Pydantic объектов с extra='allow'
+    if isinstance(attachment, dict):
+        return attachment.get("name") or attachment.get("fileName") or ""
+    return getattr(attachment, "name", None) or getattr(attachment, "fileName", None) or ""
 
 
 def _att_id(attachment: Any) -> str:
+    if isinstance(attachment, dict):
+        return str(attachment.get("id", ""))
     return str(getattr(attachment, "id", "") or "")
 
 
@@ -145,31 +145,6 @@ def _resolve_attachment(attachments: list[Any], hint: str) -> Any | None:
     )
 
     return None
-
-
-def _disambiguation_response(
-        attachments: list[Any],
-        local_filename: str,
-        hint: str | None = None,
-) -> dict[str, Any]:
-    """Build requires_disambiguation response consumed by _detect_interactive_status."""
-    available = [
-        {"id": _att_id(a), "name": _att_name(a) or "без имени"}
-        for a in attachments
-        if _att_id(a)
-    ]
-    message = (
-        f"Вложение «{hint}» не найдено в документе. "
-        f"Выберите вложение для сравнения с «{local_filename}»:"
-        if hint
-        else f"Не удалось автоматически определить вложение для сравнения "
-             f"с «{local_filename}». Выберите из списка:"
-    )
-    return {
-        "status": "requires_disambiguation",
-        "message": message,
-        "available_attachments": available,
-    }
 
 
 def _normalise(text: str) -> str:
@@ -232,281 +207,302 @@ def _build_summary(
     )
 
 
-@tool("doc_compare_attachment_with_local", args_schema=FileCompareInput)
-async def doc_compare_attachment_with_local(
-        local_file_path: str,
-        attachment_id: str | None = None,
-        original_filename: str | None = None,
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """СРАВНИТЬ локальный файл с вложением документа в СЭД.
+# ─── Tool Factory ─────────────────────────────────────────────────────────────
 
-    ИСПОЛЬЗУЙ ЭТОТ ИНСТРУМЕНТ, КОГДА:
-    • Пользователь загрузил файл и просит сравнить его с вложением
-    • Нужно найти различия между файлом на компьютере и файлом в СЭД
 
-    НЕ ИСПОЛЬЗУЙ этот инструмент для:
-    • Сравнения двух документов СЭД → используй `doc_compare`
-    • Сравнения версий документа → используй `doc_get_versions`
-
-    ПАРАМЕТРЫ:
-    • attachment_id: UUID вложения ИЛИ имя файла. Если не указан — ищем по имени загруженного файла.
-    • local_file_path: БЕРЁТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
-    • document_id и token: БЕРУТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
-
-    ПОСЛЕ DISAMBIGUATION:
-    Если пользователь выбрал UUID из списка вложений — передай этот UUID в `attachment_id`
-    и вызови этот инструмент снова. НЕ вызывай `doc_compare`!
-
-    Возвращает: {"status": "success" | "requires_disambiguation" | "error",
-                    "similarity_percent": float, # % схожести
-                    "differences": [...] # список изменений}
+def create_file_compare_tool(
+        document_client: DocumentClient,
+        attachment_client: AttachmentClient,
+) -> StructuredTool:
+    """Фабрика для создания инструмента сравнения файлов.
 
     Args:
-        local_file_path: Путь к локальному файлу.
-        attachment_id: UUID или имя вложения.
-        original_filename: Оригинальное имя файла.
-        config: LangGraph RunnableConfig (инжектируется автоматически).
+        document_client: Клиент для работы с документами EDMS.
+        attachment_client: Клиент для скачивания вложений EDMS.
+
+    Returns:
+        Настроенный StructuredTool.
     """
-    try:
-        token = get_token_from_config(config)
-        document_id = get_document_id_from_config(config)
-    except RuntimeError as exc:
-        logger.error("Missing context in tool call: %s", exc)
-        return {"status": "error", "message": str(exc)}
 
-    local_path = Path(local_file_path)
-    display_name: str = (
-        original_filename.strip()
-        if original_filename and original_filename.strip()
-        else local_path.name
-    )
+    async def doc_compare_attachment_with_local(
+            local_file_path: str,
+            attachment_id: str | None = None,
+            original_filename: str | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """СРАВНИТЬ локальный файл с вложением документа в СЭД.
 
-    logger.info(
-        "doc_compare_attachment_with_local called",
-        extra={
-            "document_id": document_id[:8] + "…",
-            "local_file": local_file_path,
-            "display_name": display_name,
-            "attachment_id": attachment_id,
-        },
-    )
+        ИСПОЛЬЗУЙ ЭТОТ ИНСТРУМЕНТ, КОГДА:
+        • Пользователь загрузил файл и просит сравнить его с вложением
+        • Нужно найти различия между файлом на компьютере и файлом в СЭД
 
-    # ── 1. Валидация локального файла ─────────────────────────────────────────
-    if not local_path.exists():
-        logger.error("Local file not found: %s", local_file_path)
-        return {
-            "status": "error",
-            "message": (
-                f"Загруженный файл «{display_name}» не найден на сервере. "
-                "Возможно, файл был удалён — загрузите его заново."
-            ),
-        }
+        НЕ ИСПОЛЬЗУЙ этот инструмент для:
+        • Сравнения двух документов СЭД → используй `doc_compare`
+        • Сравнения версий документа → используй `doc_get_versions`
 
-    # ── 2. Получение метаданных документа и списка вложений ───────────────────
-    try:
-        async with DocumentClient() as doc_client:
-            raw_data = await doc_client.get_document_metadata(token, document_id)
-            doc = DocumentDto.model_validate(raw_data)
-            attachments: list[Any] = doc.attachmentDocument or []
-    except Exception as exc:
-        logger.error("Document metadata fetch failed: %s", exc, exc_info=True)
-        return {
-            "status": "error",
-            "message": f"Не удалось получить метаданные документа: {exc}",
-        }
+        ПАРАМЕТРЫ:
+        • attachment_id: UUID вложения ИЛИ имя файла. Если не указан — ищем по имени загруженного файла.
+        • local_file_path: БЕРЁТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
+        • document_id и token: БЕРУТСЯ АВТОМАТИЧЕСКИ из контекста — НЕ указывай вручную!
 
-    if not attachments:
-        return {
-            "status": "error",
-            "message": "В документе нет вложений для сравнения.",
-        }
+        ПОСЛЕ DISAMBIGUATION:
+        Если пользователь выбрал UUID из списка вложений — передай этот UUID в `attachment_id`
+        и вызови этот инструмент снова. НЕ вызывай `doc_compare`!
 
-    # ── 3. Разрешение целевого вложения (с HITL Disambiguation) ──────────────
-    target = None
-    if attachment_id:
-        target = _resolve_attachment(attachments, attachment_id)
-    else:
-        target = _resolve_attachment(attachments, display_name)
-        if target is None and display_name != local_path.name:
-            target = _resolve_attachment(attachments, local_path.name)
-
-    if target is None:
-        logger.info("Attachment resolution failed → HITL disambiguation")
-
-        # Формируем карточки для выбора
-        cards = [
-            InterruptCard(
-                id=_att_id(a),
-                label=_att_name(a) or "без имени",
-                description="Вложение документа",
-                badges=["Документ"],
-                metadata={"id": _att_id(a), "name": _att_name(a)}
-            )
-            for a in attachments if _att_id(a)
-        ]
-
-        hint = attachment_id or display_name
-        prompt_msg = (
-            f"Вложение «{hint}» не найдено в документе. "
-            f"Уточните, какое вложение сравнить с «{display_name}»:"
-            if attachment_id
-            else f"Не удалось автоматически определить вложение для сравнения "
-                 f"с «{display_name}». Выберите нужное:"
-        )
-
+        Args:
+            local_file_path: Путь к локальному файлу.
+            attachment_id: UUID или имя вложения.
+            original_filename: Оригинальное имя файла.
+            config: LangGraph RunnableConfig (инжектируется автоматически).
+        """
         try:
-            resume = ask_human(CardSelectInterrupt(
-                prompt=prompt_msg,
-                cards=cards,
-                multiple=False,
-            ))
-            if not isinstance(resume, CardSelectResume):
-                raise ToolAborted("Expected CardSelectResume")
+            token = get_token_from_config(config)
+            document_id = get_document_id_from_config(config)
+        except RuntimeError as exc:
+            logger.error("Missing context in tool call: %s", exc)
+            return {"status": "error", "message": str(exc)}
 
-            selected_id = resume.selected_ids[0]
-            target = next((a for a in attachments if _att_id(a) == selected_id), None)
-
-        except ToolAborted:
-            return {"status": "cancelled", "message": "Выбор вложения отменён."}
-
-        except GraphInterrupt:
-            raise
-
-        except Exception as exc:
-            logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
-            return {"status": "error", "message": f"Ошибка выбора вложения: {exc}"}
-
-    resolved_id = _att_id(target)
-    resolved_name = _att_name(target) or "attachment"
-    resolved_suffix = Path(resolved_name).suffix.lower() or ".tmp"
-
-    att_doc_id: str = str(getattr(target, "documentId", None) or document_id)
-    if att_doc_id and att_doc_id != document_id:
-        logger.debug(
-            "Attachment belongs to version document_id=%s…, context=%s…",
-            att_doc_id[:8],
-            document_id[:8],
+        local_path = Path(local_file_path)
+        display_name: str = (
+            original_filename.strip()
+            if original_filename and original_filename.strip()
+            else local_path.name
         )
 
-    logger.info("Attachment resolved: '%s' (%s…)", resolved_name, resolved_id[:8])
-    # ── 4. Скачивание вложения ────────────────────────────────────────────────
-    try:
-        async with EdmsAttachmentClient() as att_client:
-            att_bytes: bytes = await att_client.get_attachment_content(
+        logger.info(
+            "doc_compare_attachment_with_local called",
+            extra={
+                "document_id": document_id[:8] + "…",
+                "local_file": local_file_path,
+                "display_name": display_name,
+                "attachment_id": attachment_id,
+            },
+        )
+
+        # ── 1. Валидация локального файла ─────────────────────────────────────────
+        if not local_path.exists():
+            logger.error("Local file not found: %s", local_file_path)
+            return {
+                "status": "error",
+                "message": (
+                    f"Загруженный файл «{display_name}» не найден на сервере. "
+                    "Возможно, файл был удалён — загрузите его заново."
+                ),
+            }
+
+        # ── 2. Получение метаданных документа и списка вложений ───────────────────
+        try:
+            doc = await document_client.get_document_metadata(token, document_id)
+            if not doc:
+                return {"status": "error", "message": "Документ не найден."}
+
+            # DocumentDto использует extra='allow', поэтому поля, не описанные явно,
+            # доступны через getattr с ключом в том же формате, что пришел из API (camelCase)
+            attachments: list[Any] = getattr(doc, "attachmentDocument", []) or []
+        except Exception as exc:
+            logger.error("Document metadata fetch failed: %s", exc, exc_info=True)
+            return {
+                "status": "error",
+                "message": f"Не удалось получить метаданные документа: {exc}",
+            }
+
+        if not attachments:
+            return {
+                "status": "error",
+                "message": "В документе нет вложений для сравнения.",
+            }
+
+        # ── 3. Разрешение целевого вложения (с HITL Disambiguation) ──────────────
+        target = None
+        if attachment_id:
+            target = _resolve_attachment(attachments, attachment_id)
+        else:
+            target = _resolve_attachment(attachments, display_name)
+            if target is None and display_name != local_path.name:
+                target = _resolve_attachment(attachments, local_path.name)
+
+        if target is None:
+            logger.info("Attachment resolution failed → HITL disambiguation")
+
+            cards = [
+                InterruptCard(
+                    id=_att_id(a),
+                    label=_att_name(a) or "без имени",
+                    description="Вложение документа",
+                    badges=["Документ"],
+                    metadata={"id": _att_id(a), "name": _att_name(a)}
+                )
+                for a in attachments if _att_id(a)
+            ]
+
+            hint = attachment_id or display_name
+            prompt_msg = (
+                f"Вложение «{hint}» не найдено в документе. "
+                f"Уточните, какое вложение сравнить с «{display_name}»:"
+                if attachment_id
+                else f"Не удалось автоматически определить вложение для сравнения "
+                     f"с «{display_name}». Выберите нужное:"
+            )
+
+            try:
+                resume = ask_human(CardSelectInterrupt(
+                    prompt=prompt_msg,
+                    cards=cards,
+                    multiple=False,
+                ))
+                if not isinstance(resume, CardSelectResume):
+                    raise ToolAborted("Expected CardSelectResume")
+
+                selected_id = resume.selected_ids[0]
+                target = next((a for a in attachments if _att_id(a) == selected_id), None)
+
+            except ToolAborted:
+                return {"status": "cancelled", "message": "Выбор вложения отменён."}
+
+            except GraphInterrupt:
+                raise
+
+            except Exception as exc:
+                logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
+                return {"status": "error", "message": f"Ошибка выбора вложения: {exc}"}
+
+        resolved_id = _att_id(target)
+        resolved_name = _att_name(target) or "attachment"
+        resolved_suffix = Path(resolved_name).suffix.lower() or ".tmp"
+
+        att_doc_id: str = str(getattr(target, "documentId", None) or document_id)
+        if att_doc_id and att_doc_id != document_id:
+            logger.debug(
+                "Attachment belongs to version document_id=%s…, context=%s…",
+                att_doc_id[:8],
+                document_id[:8],
+            )
+
+        logger.info("Attachment resolved: '%s' (%s…)", resolved_name, resolved_id[:8])
+
+        # ── 4. Скачивание вложения ────────────────────────────────────────────────
+        try:
+            att_bytes: bytes = await attachment_client.get_attachment_content(
                 token, att_doc_id, resolved_id
             )
-    except Exception as exc:
-        logger.error("Attachment download failed '%s': %s", resolved_name, exc)
-        return {
-            "status": "error",
-            "message": f"Ошибка скачивания вложения «{resolved_name}»: {exc}",
-        }
+        except Exception as exc:
+            logger.error("Attachment download failed '%s': %s", resolved_name, exc)
+            return {
+                "status": "error",
+                "message": f"Ошибка скачивания вложения «{resolved_name}»: {exc}",
+            }
 
-    if not att_bytes:
-        return {
-            "status": "error",
-            "message": (
-                f"Вложение «{resolved_name}» вернуло пустой ответ — "
-                "файл недоступен или удалён."
-            ),
-        }
+        if not att_bytes:
+            return {
+                "status": "error",
+                "message": (
+                    f"Вложение «{resolved_name}» вернуло пустой ответ — "
+                    "файл недоступен или удалён."
+                ),
+            }
 
-    # ── 5. Извлечение текста локального файла ────────────────────────────────
-    local_text_raw: str = await FileProcessorService.extract_text_async(str(local_path))
-    if not local_text_raw or local_text_raw.startswith(("Ошибка:", "Формат файла")):
-        return {
-            "status": "error",
-            "message": f"Не удалось извлечь текст из «{display_name}»: {local_text_raw}",
-        }
+        # ── 5. Извлечение текста локального файла ────────────────────────────────
+        local_text_raw: str = await FileProcessorService.extract_text_async(str(local_path))
+        if not local_text_raw or local_text_raw.startswith(("Ошибка:", "Формат файла")):
+            return {
+                "status": "error",
+                "message": f"Не удалось извлечь текст из «{display_name}»: {local_text_raw}",
+            }
 
-    # ── 6. Извлечение текста вложения через temp-файл ─────────────────────────
-    att_text_raw: str = ""
-    tmp_path: str | None = None
-
-    try:
-        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=resolved_suffix)
-        tmp_path = tmp_file.name
+        # ── 6. Извлечение текста вложения через temp-файл ─────────────────────────
+        att_text_raw: str = ""
+        tmp_path: str | None = None
 
         try:
-            tmp_file.write(att_bytes)
-            tmp_file.flush()
-            tmp_file.close()
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=resolved_suffix)
+            tmp_path = tmp_file.name
 
-            att_text_raw = await FileProcessorService.extract_text_async(tmp_path)
+            try:
+                tmp_file.write(att_bytes)
+                tmp_file.flush()
+                tmp_file.close()
 
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                except PermissionError:
-                    logger.warning(
-                        "Could not delete temp file %s, it will be cleaned up later",
-                        tmp_path,
-                    )
+                att_text_raw = await FileProcessorService.extract_text_async(tmp_path)
 
-    except Exception as exc:
-        logger.error(
-            "Text extraction from attachment '%s' failed: %s",
-            resolved_name,
-            exc,
-            exc_info=True,
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except PermissionError:
+                        logger.warning(
+                            "Could not delete temp file %s, it will be cleaned up later",
+                            tmp_path,
+                        )
+
+        except Exception as exc:
+            logger.error(
+                "Text extraction from attachment '%s' failed: %s",
+                resolved_name,
+                exc,
+                exc_info=True,
+            )
+            return {
+                "status": "error",
+                "message": f"Ошибка извлечения текста из «{resolved_name}»: {exc}",
+            }
+
+        # ── 7. Нормализация → сравнение → diff ───────────────────────────────────
+        local_text = _normalise(local_text_raw[:_MAX_TEXT_CHARS])
+        att_text = _normalise(att_text_raw[:_MAX_TEXT_CHARS])
+
+        are_identical = local_text == att_text
+        similarity = round(
+            difflib.SequenceMatcher(None, local_text, att_text, autojunk=False).ratio()
+            * 100,
+            1,
         )
+
+        diff_result: list[dict[str, str]] = []
+        if not are_identical:
+            diff_result = _compute_diff(
+                local_text,
+                att_text,
+                local_label=f"Загруженный файл: {display_name}",
+                att_label=f"Вложение СЭД: {resolved_name}",
+            )
+
+        local_stats = {"chars": len(local_text), "lines": local_text.count("\n") + 1}
+        att_stats = {"chars": len(att_text), "lines": att_text.count("\n") + 1}
+
+        summary = _build_summary(
+            are_identical,
+            similarity,
+            display_name,
+            resolved_name,
+            local_stats,
+            att_stats,
+            diff_result,
+        )
+
+        logger.info(
+            "doc_compare_attachment_with_local completed",
+            extra={
+                "are_identical": are_identical,
+                "similarity": similarity,
+                "diff_lines": len(diff_result),
+            },
+        )
+
         return {
-            "status": "error",
-            "message": f"Ошибка извлечения текста из «{resolved_name}»: {exc}",
+            "status": "success",
+            "are_identical": are_identical,
+            "similarity_percent": similarity,
+            "local_file": display_name,
+            "attachment_name": resolved_name,
+            "local_stats": local_stats,
+            "attachment_stats": att_stats,
+            "differences": diff_result,
+            "summary": summary,
         }
 
-    # ── 7. Нормализация → сравнение → diff ───────────────────────────────────
-    local_text = _normalise(local_text_raw[:_MAX_TEXT_CHARS])
-    att_text = _normalise(att_text_raw[:_MAX_TEXT_CHARS])
-
-    are_identical = local_text == att_text
-    similarity = round(
-        difflib.SequenceMatcher(None, local_text, att_text, autojunk=False).ratio()
-        * 100,
-        1,
+    return StructuredTool.from_function(
+        coroutine=doc_compare_attachment_with_local,
+        name="doc_compare_attachment_with_local",
+        description="СРАВНИТЬ локальный файл с вложением документа в СЭД.",
+        args_schema=FileCompareInput,
     )
-
-    diff_result: list[dict[str, str]] = []
-    if not are_identical:
-        diff_result = _compute_diff(
-            local_text,
-            att_text,
-            local_label=f"Загруженный файл: {display_name}",
-            att_label=f"Вложение СЭД: {resolved_name}",
-        )
-
-    local_stats = {"chars": len(local_text), "lines": local_text.count("\n") + 1}
-    att_stats = {"chars": len(att_text), "lines": att_text.count("\n") + 1}
-
-    summary = _build_summary(
-        are_identical,
-        similarity,
-        display_name,
-        resolved_name,
-        local_stats,
-        att_stats,
-        diff_result,
-    )
-
-    logger.info(
-        "doc_compare_attachment_with_local completed",
-        extra={
-            "are_identical": are_identical,
-            "similarity": similarity,
-            "diff_lines": len(diff_result),
-        },
-    )
-
-    return {
-        "status": "success",
-        "are_identical": are_identical,
-        "similarity_percent": similarity,
-        "local_file": display_name,
-        "attachment_name": resolved_name,
-        "local_stats": local_stats,
-        "attachment_stats": att_stats,
-        "differences": diff_result,
-        "summary": summary,
-    }

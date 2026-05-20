@@ -1,18 +1,14 @@
-"""
-EDMS AI Assistant - Introduction Tool.
-
-Инструмент для создания списков ознакомления с документами.
-"""
+# edms_ai_assistant/tools/introduction.py
+"""Introduction Creation Tool with Native HITL Disambiguation (DI Factory)."""
 
 from __future__ import annotations
 
 import logging
 from uuid import UUID
-
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,6 +19,7 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
+from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.services.introduction_service import IntroductionService
 
 logger = logging.getLogger(__name__)
@@ -96,114 +93,24 @@ class IntroductionInput(BaseModel):
                 UUID(emp_id)
                 validated.append(emp_id)
             except ValueError:
-                logger.warning(f"Invalid UUID in selected_employee_ids: {emp_id}")
+                logger.warning("Invalid UUID in selected_employee_ids: %s", emp_id)
         return validated if validated else None
 
 
-@tool("introduction_create_tool", args_schema=IntroductionInput)
-async def introduction_create_tool(
-        last_names: list[str] | None = None,
-        department_names: list[str] | None = None,
-        group_names: list[str] | None = None,
-        personal_group_names: list[str] | None = None,
-        include_subordinates: bool | None = None,
-        comment: str | None = None,
-        selected_employee_ids: list[str] | None = None,
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
-) -> dict[str, Any]:
-    """
-    Создает список ознакомления с документом.
-
-    Типы исполнителей:
-    1. Индивидуальные: по фамилии/ФИО (last_names)
-    2. Подразделения: все сотрудники отдела (department_names)
-    3. Группы: все сотрудники группы (group_names)
-    4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)
-    5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)
-
-    Можно комбинировать:
-    "Добавь ознакомление для Петрова, отдела ИТ и моей команды"
-
-    ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-    Если найдено несколько сотрудников с одинаковыми фамилиями, система
-    АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
-
-    Args:
-        last_names: Фамилии сотрудников.
-        department_names: Подразделения.
-        group_names: Группы.
-        personal_group_names: Личные группы.
-        include_subordinates: Включить подчинённых.
-        comment: Комментарий.
-        selected_employee_ids: UUID выбранных сотрудников (если уже известны).
-        config: LangGraph RunnableConfig (инжектируется автоматически).
-    """
-    try:
-        token = get_token_from_config(config)
-        document_id = get_document_id_from_config(config)
-    except RuntimeError as exc:
-        logger.error("Missing context in tool call: %s", exc)
-        return {"status": "error", "message": str(exc)}
-
-    logger.info(
-        "Creating introduction",
-        extra={
-            "document_id": document_id,
-            "last_names": last_names,
-            "departments": department_names,
-            "groups": group_names,
-            "personal_groups": personal_group_names,
-            "subordinates": include_subordinates,
-            "has_selected_ids": bool(selected_employee_ids),
-        },
-    )
-
-    try:
-        async with IntroductionService() as service:
-            if selected_employee_ids:
-                return await _handle_direct_addition(
-                    service=service,
-                    token=token,
-                    document_id=document_id,
-                    employee_ids=selected_employee_ids,
-                    comment=comment,
-                )
-
-            return await _handle_search_and_create(
-                service=service,
-                token=token,
-                document_id=document_id,
-                last_names=last_names,
-                department_names=department_names,
-                group_names=group_names,
-                personal_group_names=personal_group_names,
-                include_subordinates=bool(include_subordinates),
-                comment=comment,
-            )
-
-    except GraphInterrupt:
-        raise
-    except Exception as e:
-        logger.error(
-            f"Introduction creation failed: {e}",
-            exc_info=True,
-            extra={"document_id": document_id},
-        )
-        return {
-            "status": "error",
-            "message": f"❌ Произошла ошибка при создании ознакомления: {e!s}",
-        }
+# ══════════════════════════════════════════════════════════════════════════════
+# Helper Functions
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 async def _handle_direct_addition(
-    service: IntroductionService,
-    token: str,
-    document_id: str,
-    employee_ids: list[str],
-    comment: str | None,
+        service: IntroductionService,
+        token: str,
+        document_id: str,
+        employee_ids: list[str],
+        comment: str | None,
 ) -> dict[str, Any]:
     """Обработка прямого добавления сотрудников по UUID."""
-    logger.info(f"Direct addition of {len(employee_ids)} employees")
+    logger.info("Direct addition of %d employees", len(employee_ids))
 
     if not employee_ids:
         return {
@@ -231,23 +138,23 @@ async def _handle_direct_addition(
     return {
         "status": "error",
         "message": (
-            result.error_message
-            or "❌ Не удалось создать ознакомление. "
-            "Проверьте права доступа или корректность данных."
+                result.error_message
+                or "❌ Не удалось создать ознакомление. "
+                   "Проверьте права доступа или корректность данных."
         ),
     }
 
 
 async def _handle_search_and_create(
-    service: IntroductionService,
-    token: str,
-    document_id: str,
-    last_names: list[str] | None,
-    department_names: list[str] | None,
-    group_names: list[str] | None,
-    personal_group_names: list[str] | None,
-    include_subordinates: bool,
-    comment: str | None,
+        service: IntroductionService,
+        token: str,
+        document_id: str,
+        last_names: list[str] | None,
+        department_names: list[str] | None,
+        group_names: list[str] | None,
+        personal_group_names: list[str] | None,
+        include_subordinates: bool,
+        comment: str | None,
 ) -> dict[str, Any]:
     """Обработка поиска сотрудников с native HITL disambiguation."""
     resolution_result = await service.resolve_employees(
@@ -264,7 +171,7 @@ async def _handle_search_and_create(
     ambiguous_results = resolution_result.ambiguous
 
     if ambiguous_results:
-        logger.info(f"Found {len(ambiguous_results)} ambiguous search terms")
+        logger.info("Found %d ambiguous search terms", len(ambiguous_results))
 
         for amb in ambiguous_results:
             search_term = amb.get("search_query", "Неизвестно")
@@ -292,7 +199,6 @@ async def _handle_search_and_create(
                     cards=cards,
                     multiple=False,
                 ))
-                # Граф возобновится после клика пользователя
                 if not isinstance(resume, CardSelectResume):
                     raise ToolAborted("Expected CardSelectResume")
                 selected_id = resume.selected_ids[0]
@@ -315,7 +221,7 @@ async def _handle_search_and_create(
             "not_found": not_found,
         }
 
-    logger.info(f"Creating introduction with {len(employee_ids)} employees")
+    logger.info("Creating introduction with %d employees", len(employee_ids))
 
     result = await service.create_introduction(
         token=token,
@@ -345,3 +251,111 @@ async def _handle_search_and_create(
         "status": "error",
         "message": result.error_message or "❌ Не удалось создать ознакомление.",
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tool Factory
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def create_introduction_tool(deps: AppDeps) -> StructuredTool:
+    """Фабрика инструмента ознакомления с DI."""
+
+    introduction_service = deps.introduction_service
+
+    async def introduction_create_tool(
+            last_names: list[str] | None = None,
+            department_names: list[str] | None = None,
+            group_names: list[str] | None = None,
+            personal_group_names: list[str] | None = None,
+            include_subordinates: bool | None = None,
+            comment: str | None = None,
+            selected_employee_ids: list[str] | None = None,
+            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Создает список ознакомления с документом.
+
+        Типы исполнителей:
+        1. Индивидуальные: по фамилии/ФИО (last_names)
+        2. Подразделения: все сотрудники отдела (department_names)
+        3. Группы: все сотрудники группы (group_names)
+        4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)
+        5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)
+
+        Можно комбинировать:
+        "Добавь ознакомление для Петрова, отдела ИТ и моей команды"
+
+        ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
+        Если найдено несколько сотрудников с одинаковыми фамилиями, система
+        АВТОМАТИЧЕСКИ покажет карточки для выбора — не нужно спрашивать пользователя текстом.
+        """
+        try:
+            token = get_token_from_config(config)
+            document_id = get_document_id_from_config(config)
+        except RuntimeError as exc:
+            logger.error("Missing context in tool call: %s", exc)
+            return {"status": "error", "message": str(exc)}
+
+        logger.info(
+            "Creating introduction",
+            extra={
+                "document_id": document_id,
+                "last_names": last_names,
+                "departments": department_names,
+                "groups": group_names,
+                "personal_groups": personal_group_names,
+                "subordinates": include_subordinates,
+                "has_selected_ids": bool(selected_employee_ids),
+            },
+        )
+
+        try:
+            if selected_employee_ids:
+                return await _handle_direct_addition(
+                    service=introduction_service,
+                    token=token,
+                    document_id=document_id,
+                    employee_ids=selected_employee_ids,
+                    comment=comment,
+                )
+
+            return await _handle_search_and_create(
+                service=introduction_service,
+                token=token,
+                document_id=document_id,
+                last_names=last_names,
+                department_names=department_names,
+                group_names=group_names,
+                personal_group_names=personal_group_names,
+                include_subordinates=bool(include_subordinates),
+                comment=comment,
+            )
+
+        except GraphInterrupt:
+            raise
+        except Exception as e:
+            logger.error(
+                "Introduction creation failed: %s", e,
+                exc_info=True,
+                extra={"document_id": document_id},
+            )
+            return {
+                "status": "error",
+                "message": f"❌ Произошла ошибка при создании ознакомления: {e!s}",
+            }
+
+    return StructuredTool.from_function(
+        func=introduction_create_tool,
+        name="introduction_create_tool",
+        description=(
+            "Создает список ознакомления с документом.\n"
+            "Типы исполнителей:\n"
+            "1. Индивидуальные: по фамилии/ФИО (last_names)\n"
+            "2. Подразделения: все сотрудники отдела (department_names)\n"
+            "3. Группы: все сотрудники группы (group_names)\n"
+            "4. Личные группы: сотрудники из личной группы пользователя (personal_group_names)\n"
+            "5. Подчинённые: сотрудники подчинённых подразделений (include_subordinates=True)\n\n"
+            "ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ."
+        ),
+        args_schema=IntroductionInput,
+    )

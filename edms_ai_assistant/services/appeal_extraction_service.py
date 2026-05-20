@@ -1,82 +1,42 @@
+# edms_ai_assistant/services/appeal_extraction_service.py
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
-from edms_ai_assistant.llm import get_chat_model
 
 logger = logging.getLogger(__name__)
 
-
 _CITY_STOPWORDS: frozenset[str] = frozenset(
     {
-        "республики",
-        "республика",
-        "беларуси",
-        "беларусь",
-        "беларусские",
-        "области",
-        "область",
-        "района",
-        "район",
-        "министерства",
-        "министерство",
-        "исполнительного",
-        "исполнительный",
-        "комитета",
-        "комитет",
-        "совета",
-        "совет",
-        "центра",
-        "центр",
-        "лет",
-        "годов",
-        "года",
-        "улицы",
-        "улица",
-        "проспекта",
-        "проспект",
-        "переулка",
-        "переулок",
+        "республики", "республика", "беларуси", "беларусь", "беларусские",
+        "области", "область", "района", "район", "министерства", "министерство",
+        "исполнительного", "исполнительный", "комитета", "комитет", "совета", "совет",
+        "центра", "центр", "лет", "годов", "года", "улицы", "улица",
+        "проспекта", "проспект", "переулка", "переулок",
     }
 )
 
 _POSTAL_PREFIX_CITY: dict[str, str] = {
-    "210": "Витебск",
-    "211": "Витебск",
-    "212": "Могилёв",
-    "213": "Могилёв",
-    "220": "Минск",
-    "221": "Минск",
-    "222": "Молодечно",
-    "223": "Борисов",
-    "224": "Пинск",
-    "225": "Брест",
-    "230": "Гродно",
-    "231": "Лида",
-    "232": "Гродно",
-    "236": "Барановичи",
-    "246": "Гомель",
-    "247": "Гомель",
+    "210": "Витебск", "211": "Витебск", "212": "Могилёв", "213": "Могилёв",
+    "220": "Минск", "221": "Минск", "222": "Молодечно", "223": "Борисов",
+    "224": "Пинск", "225": "Брест", "230": "Гродно", "231": "Лида",
+    "232": "Гродно", "236": "Барановичи", "246": "Гомель", "247": "Гомель",
     "248": "Гомель",
 }
 
 _PHONE_CODE_CITY: dict[str, str] = {
-    "17": "Минск",
-    "162": "Брест",
-    "163": "Барановичи",
-    "152": "Гродно",
-    "154": "Лида",
-    "232": "Гомель",
-    "236": "Молодечно",
-    "222": "Могилёв",
-    "212": "Витебск",
-    "174": "Борисов",
-    "224": "Пинск",
+    "17": "Минск", "162": "Брест", "163": "Барановичи", "152": "Гродно",
+    "154": "Лида", "232": "Гомель", "236": "Молодечно", "222": "Могилёв",
+    "212": "Витебск", "174": "Борисов", "224": "Пинск",
 }
 _MINSK_SHORT_PHONE_FIRST_DIGITS: frozenset[str] = frozenset({"2", "3"})
 
@@ -87,9 +47,9 @@ class AppealExtractionService:
     DEFAULT_MAX_RETRIES = 3
     BASE_RETRY_DELAY = 2
 
-    def __init__(self):
-        base_llm = get_chat_model()
-        self.extraction_llm = base_llm.with_config({"temperature": 0.0})
+    def __init__(self, llm: BaseChatModel):
+        """Внедряем LLM через DI вместо вызова глобального get_chat_model()."""
+        self.extraction_llm = llm.with_config({"temperature": 0.0})
         logger.info("AppealExtractionService initialized with temperature=0.0")
 
     async def extract_appeal_fields(self, text: str) -> AppealFields:
@@ -99,15 +59,11 @@ class AppealExtractionService:
         try:
             parser = JsonOutputParser(pydantic_object=AppealFields)
             prompt = self._build_extraction_prompt()
+
             chain = prompt | self.extraction_llm | parser
 
             preprocessed_text = self._preprocess_text(text)
             truncated_text = self._truncate_text(preprocessed_text)
-
-            logger.debug(
-                "Invoking LLM for extraction",
-                extra={"text_length": len(truncated_text)},
-            )
 
             result = await chain.ainvoke(
                 {
@@ -117,121 +73,60 @@ class AppealExtractionService:
             )
 
             if isinstance(result, dict):
-                if result.get("shortSummary"):
-                    ss = str(result["shortSummary"]).strip()
-                    if len(ss) > 80:
-                        result["shortSummary"] = ss[:80]
-                        logger.warning(
-                            "Pre-validate: shortSummary слишком длинный (%d символов) → обрезан до 80",
-                            len(ss),
-                        )
-                    else:
-                        result["shortSummary"] = ss
-                if (
-                    result.get("organizationName")
-                    and len(str(result["organizationName"])) > 300
-                ):
+                if result.get("shortSummary") and len(str(result["shortSummary"])) > 80:
+                    result["shortSummary"] = str(result["shortSummary"])[:80]
+                if result.get("organizationName") and len(str(result["organizationName"])) > 300:
                     result["organizationName"] = str(result["organizationName"])[:300]
                 if result.get("fullAddress") and len(str(result["fullAddress"])) > 500:
                     result["fullAddress"] = str(result["fullAddress"])[:500]
 
             appeal_data = AppealFields.model_validate(result)
-            appeal_data = self._post_process_fields(
-                appeal_data, preprocessed_text, raw_text=text
-            )
 
-            logger.info(
-                "Appeal data extracted successfully",
-                extra={
-                    "has_fio": bool(appeal_data.fioApplicant),
-                    "has_org": bool(appeal_data.organizationName),
-                    "declarant_type": appeal_data.declarantType,
-                    "citizen_type": appeal_data.citizenType,
-                    "has_city": bool(appeal_data.cityName),
-                },
-            )
-
-            return appeal_data
+            return self._post_process_fields(appeal_data, raw_text=text)
 
         except Exception as e:
-            logger.error(
-                "LLM extraction failed: %s: %s", type(e).__name__, e, exc_info=True
-            )
+            logger.error("LLM extraction failed: %s: %s", type(e).__name__, e, exc_info=True)
             return AppealFields()
 
-    def _post_process_fields(
-        self, fields: AppealFields, text: str, raw_text: str
-    ) -> AppealFields:
+    @staticmethod
+    def _post_process_fields(fields: AppealFields, raw_text: str) -> AppealFields:
+        """Иммутабельное обновление полей через model_copy (Pydantic V2)."""
+        updates: dict[str, Any] = {}
+
         if fields.declarantType == "ENTITY":
             if not fields.dateDocCorrespondentOrg and fields.correspondentOrgNumber:
-                parsed_date = self._parse_date_from_number(
-                    fields.correspondentOrgNumber
-                )
+                parsed_date = AppealExtractionService._parse_date_from_number(fields.correspondentOrgNumber)
                 if parsed_date:
-                    fields.dateDocCorrespondentOrg = parsed_date
-                    logger.info(
-                        "Parsed date from correspondentOrgNumber: %s", parsed_date
-                    )
+                    updates["dateDocCorrespondentOrg"] = parsed_date
 
         if not fields.cityName and fields.fullAddress:
-            extracted_city = self._extract_city_from_address(fields.fullAddress)
+            extracted_city = AppealExtractionService._extract_city_from_address(fields.fullAddress)
             if extracted_city:
-                fields.cityName = extracted_city
-                logger.info("Extracted city from address: %s", extracted_city)
+                updates["cityName"] = extracted_city
 
         if fields.signed and len(fields.signed) > 20:
-            cleaned_signed = self._extract_fio_from_signed(fields.signed)
+            cleaned_signed = AppealExtractionService._extract_fio_from_signed(fields.signed)
             if cleaned_signed != fields.signed:
-                logger.info(
-                    "signed trimmed: '%s' → '%s'", fields.signed[:60], cleaned_signed
-                )
-                fields.signed = cleaned_signed
-
-        if fields.index and fields.fullAddress:
-            if fields.index not in fields.fullAddress:
-                logger.info(
-                    "index '%s' not in fullAddress '%s' — keeping index (postal code is independent of address)",
-                    fields.index,
-                    fields.fullAddress[:60],
-                )
-
-        if fields.declarantType == "ENTITY" and not fields.organizationName:
-            proximity = self._recover_org_from_address_proximity(text)
-            if proximity:
-                fields.organizationName = proximity
-                logger.info(
-                    "organizationName from address proximity: %s", proximity[:60]
-                )
-            else:
-                recovered = self._recover_org_name_from_text(text)
-                if recovered:
-                    fields.organizationName = recovered
-                    logger.info(
-                        "Recovered organizationName from Russian text: %s",
-                        recovered[:60],
-                    )
+                updates["signed"] = cleaned_signed
 
         if not fields.cityName and raw_text:
-            fallback_city = self._extract_city_from_full_text(
+            fallback_city = AppealExtractionService._extract_city_from_full_text(
                 raw_text, phone=fields.phone, email=fields.email, index=fields.index
             )
             if fallback_city:
-                fields.cityName = fallback_city
-                logger.info(
-                    "City via full-text fallback: %s (phone=%s email=%s index=%s)",
-                    fallback_city,
-                    fields.phone,
-                    fields.email,
-                    fields.index,
-                )
+                updates["cityName"] = fallback_city
 
         if not fields.submissionForm and fields.email:
-            fields.submissionForm = SubmissionFormAppeal.ELECTRONIC
-            logger.info("Set submissionForm=ELECTRONIC based on email presence")
+            updates["submissionForm"] = SubmissionFormAppeal.ELECTRONIC
+
+        if updates:
+            logger.info("Post-processed fields updates: %s", list(updates.keys()))
+            return fields.model_copy(update=updates)
 
         return fields
 
-    def _parse_date_from_number(self, number: str) -> str | None:
+    @staticmethod
+    def _parse_date_from_number(number: str) -> str | None:
         date_patterns = [
             r"от\s+(\d{1,2})\.(\d{1,2})\.(\d{4})",
             r"от\s+(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})",
@@ -246,23 +141,14 @@ class AppealExtractionService:
                         month_num = int(month)
                     else:
                         month_map = {
-                            "января": 1,
-                            "февраля": 2,
-                            "марта": 3,
-                            "апреля": 4,
-                            "мая": 5,
-                            "июня": 6,
-                            "июля": 7,
-                            "августа": 8,
-                            "сентября": 9,
-                            "октября": 10,
-                            "ноября": 11,
-                            "декабря": 12,
+                            "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
+                            "мая": 5, "июня": 6, "июля": 7, "августа": 8,
+                            "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
                         }
                         month_num = month_map.get(month.lower(), 1)
 
                     dt = datetime(int(year), month_num, int(day), tzinfo=timezone.utc)
-                    return dt.isoformat()
+                    return dt.isoformat().replace("+00:00", "Z")
                 except (ValueError, KeyError):
                     pass
 
@@ -275,13 +161,14 @@ class AppealExtractionService:
                 if 1 <= m_int <= 12 and 1 <= d_int <= 31:
                     year_full = 2000 + y_short
                     dt = datetime(year_full, m_int, d_int, tzinfo=timezone.utc)
-                    return dt.isoformat()
+                    return dt.isoformat().replace("+00:00", "Z")
             except ValueError:
                 pass
 
         return None
 
-    def _extract_city_from_address(self, address: str) -> str | None:
+    @staticmethod
+    def _extract_city_from_address(address: str) -> str | None:
         m = re.search(r"\bг\.\s+([А-ЯЁ][а-яё]{3,})", address)
         if m and m.group(1).lower() not in _CITY_STOPWORDS:
             return m.group(1).strip()
@@ -298,10 +185,10 @@ class AppealExtractionService:
 
     @staticmethod
     def _extract_city_from_full_text(
-        text: str,
-        phone: str | None = None,
-        email: str | None = None,
-        index: str | None = None,
+            text: str,
+            phone: str | None = None,
+            email: str | None = None,
+            index: str | None = None,
     ) -> str | None:
 
         def _city_from_postal(fragment: str) -> str | None:
@@ -319,19 +206,19 @@ class AppealExtractionService:
             return None
 
         lines = text.split("\n")
-        phone_digits = re.sub(r"[\s\-\(\)]", "", phone) if phone else ""
+        phone_digits = re.sub(r"[\s()-]", "", phone) if phone else ""
         email_lower = email.lower() if email else ""
 
         anchor_indices: list[int] = []
         for i, line in enumerate(lines):
-            line_clean = re.sub(r"[\s\-\(\)]", "", line)
+            line_clean = re.sub(r"[\s()-]", "", line)
             if (phone_digits and phone_digits in line_clean) or (
-                email_lower and email_lower in line.lower()
+                    email_lower and email_lower in line.lower()
             ):
                 anchor_indices.append(i)
 
         def _city_from_phone_code(phone_str: str) -> str | None:
-            digits = re.sub(r"[^\d]", "", phone_str)
+            digits = re.sub(r"\D", "", phone_str)
             if digits.startswith("375"):
                 digits = digits[3:]
             if digits.startswith("0") and len(digits) >= 3:
@@ -348,7 +235,7 @@ class AppealExtractionService:
             return None
 
         for anchor in anchor_indices:
-            context = "\n".join(lines[max(0, anchor - 5) : anchor + 3])
+            context = "\n".join(lines[max(0, anchor - 5): anchor + 3])
             city = _city_from_postal(context)
             if city:
                 return city
@@ -367,7 +254,7 @@ class AppealExtractionService:
         return None
 
     async def extract_with_retry(
-        self, text: str, max_attempts: int | None = None
+            self, text: str, max_attempts: int | None = None
     ) -> AppealFields:
         max_attempts = max_attempts or self.DEFAULT_MAX_RETRIES
 
@@ -378,34 +265,28 @@ class AppealExtractionService:
                 if self._is_valid_extraction(result):
                     logger.info(
                         "Extraction successful on attempt %d/%d",
-                        attempt,
-                        max_attempts,
+                        attempt, max_attempts,
                         extra={"attempt": attempt, "max_attempts": max_attempts},
                     )
                     return result
 
                 logger.warning(
                     "Attempt %d/%d: LLM returned insufficient data",
-                    attempt,
-                    max_attempts,
+                    attempt, max_attempts,
                     extra={"attempt": attempt},
                 )
 
             except Exception as e:
                 logger.error(
                     "Attempt %d/%d failed: %s: %s",
-                    attempt,
-                    max_attempts,
-                    type(e).__name__,
-                    e,
+                    attempt, max_attempts, type(e).__name__, e,
                     extra={"attempt": attempt, "error": str(e)},
                 )
 
             if attempt < max_attempts:
                 wait_time = self._calculate_retry_delay(attempt)
                 logger.info(
-                    "Waiting %ds before retry...",
-                    wait_time,
+                    "Waiting %ds before retry...", wait_time,
                     extra={"wait_time": wait_time, "attempt": attempt},
                 )
                 await asyncio.sleep(wait_time)
@@ -417,33 +298,36 @@ class AppealExtractionService:
         )
         return AppealFields()
 
-    def _validate_text_length(self, text: str) -> bool:
+    @staticmethod
+    def _validate_text_length(text: str) -> bool:
         if not text:
             logger.warning("Empty text provided for extraction")
             return False
 
         text_length = len(text.strip())
 
-        if text_length < self.MIN_TEXT_LENGTH:
+        if text_length < AppealExtractionService.MIN_TEXT_LENGTH:
             logger.warning(
                 "Text too short for analysis (min: %d, got: %d)",
-                self.MIN_TEXT_LENGTH,
-                text_length,
+                AppealExtractionService.MIN_TEXT_LENGTH, text_length,
             )
             return False
 
         return True
 
-    def _truncate_text(self, text: str) -> str:
-        if len(text) <= self.MAX_TEXT_LENGTH:
+    @staticmethod
+    def _truncate_text(text: str) -> str:
+        if len(text) <= AppealExtractionService.MAX_TEXT_LENGTH:
             return text
 
         logger.debug(
-            "Truncating text for LLM: %d → %d chars", len(text), self.MAX_TEXT_LENGTH
+            "Truncating text for LLM: %d → %d chars",
+            len(text), AppealExtractionService.MAX_TEXT_LENGTH
         )
-        return text[: self.MAX_TEXT_LENGTH]
+        return text[:AppealExtractionService.MAX_TEXT_LENGTH]
 
-    def _preprocess_text(self, text: str) -> str:
+    @staticmethod
+    def _preprocess_text(text: str) -> str:
         _BELARUSIAN_MARKERS = frozenset("ўЎіІ")
         lines = text.split("\n")
         filtered = [ln for ln in lines if not any(c in _BELARUSIAN_MARKERS for c in ln)]
@@ -452,9 +336,7 @@ class AppealExtractionService:
             removed = len(lines) - len(filtered)
             logger.debug(
                 "Bilingual preprocess: removed %d Belarusian line(s), %d → %d chars",
-                removed,
-                len(text),
-                len(result),
+                removed, len(text), len(result),
             )
         return result
 
@@ -464,12 +346,12 @@ class AppealExtractionService:
 
     @classmethod
     def _calculate_retry_delay(cls, attempt: int) -> int:
-        return cls.BASE_RETRY_DELAY**attempt
+        return cls.BASE_RETRY_DELAY ** attempt
 
     @staticmethod
     def _recover_org_name_from_text(text: str) -> str | None:
         quoted_pattern = re.compile(
-            r'[«""]([А-ЯЁа-яё][^«»""\n]{5,80})[»""]',
+            r'[«»“”„"]([А-ЯЁа-яё][^«»“”„"\n]{5,80})[«»“”„"]',
             re.MULTILINE,
         )
         org_prefix_pattern = re.compile(
@@ -478,7 +360,7 @@ class AppealExtractionService:
             r"открытое акционерное общество|"
             r"государственное учреждение|"
             r"\bруп\b|\bгп\b|\bгу\b|\bоао\b)"
-            r'\s+[«""]([^«»""\n]{5,80})[»""]',
+            r'\s+[«»“”„"]([^«»“”„"\n]{5,80})[«»“”„"]',
             re.IGNORECASE | re.MULTILINE,
         )
 
@@ -487,9 +369,7 @@ class AppealExtractionService:
                 candidate = m.group(1).strip()
                 if any(c in candidate for c in "ўЎіІ"):
                     continue
-                if len(candidate) >= 8 and not re.search(
-                    r"\d{5,}|ул\.|пр\.", candidate
-                ):
+                if len(candidate) >= 8 and not re.search(r"\d{5,}|ул\.|пр\.", candidate):
                     return candidate
 
         return None
@@ -501,7 +381,7 @@ class AppealExtractionService:
             r"(?:ул\.|пр\.|пер\.|бул\.|e-mail|тел\.|факс|@|\d{6})",
             re.IGNORECASE,
         )
-        quoted_pattern = re.compile(r'[«"\""]([А-ЯЁа-яё][^«»"\""\'\n]{4,70})[»"\""]')
+        quoted_pattern = re.compile(r'[«»“”„"\']([А-ЯЁа-яё][^«»“”„"\'\n]{4,70})[«»“”„"\']')
 
         for i, line in enumerate(lines):
             if contact_pattern.search(line):
