@@ -1,44 +1,65 @@
 # edms_ai_assistant/clients/control_client.py
-"""
-EDMS AI Assistant — Control HTTP Client.
-"""
 from __future__ import annotations
+
 import logging
 from typing import Any
+from uuid import UUID
+
+from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.clients.transport import IAsyncTransport
+from edms_ai_assistant.config import EdmsSettings
+from edms_ai_assistant.core.exceptions import EdmsNotFoundError
+from edms_ai_assistant.domain.document import ControlDto
 
 logger = logging.getLogger(__name__)
 
 
-class ControlClient:
+class ControlClient(EdmsBaseClient):
     """Клиент для управления контролем документов."""
 
-    def __init__(self, transport: IAsyncTransport):
-        self._transport = transport
+    def __init__(self, transport: IAsyncTransport, settings: EdmsSettings):
+        super().__init__(transport, settings)
 
     async def get_control_types(self, token: str) -> list[dict[str, Any]]:
-        result = await self._transport.request("GET", "api/control-type", token=token,
-                                               params={"page": "0", "size": "100"})
-        if result.status_code == 204: return []
-        data = result.json()
-        return data if isinstance(data, list) else data.get("content", [])
+        """Получает типы контроля."""
+        result = await self._make_request(
+            "GET", "api/control-type", token=token, params={"page": 0, "size": 100}
+        )
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict) and "content" in result:
+            return result["content"]
+        return []
 
-    async def get_control(self, token: str, document_id: str) -> dict[str, Any] | None:
-        resp = await self._transport.request("GET", f"api/document/{document_id}/control", token=token)
-        if resp.status_code == 204: return None
-        data = resp.json()
-        return data if data.get("id") or data.get("controlTypeId") else None
+    async def get_control(self, token: str, document_id: UUID | str) -> ControlDto | None:
+        """Получает запись о контроле документа."""
+        try:
+            return await self._request_dto(
+                "GET", f"api/document/{document_id}/control", token, ControlDto
+            )
+        except EdmsNotFoundError:
+            return None
 
-    async def set_control(self, token: str, document_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        resp = await self._transport.request("POST", f"api/document/{document_id}/control", token=token, json=payload)
-        return resp.json() if resp.content else {}
+    async def set_control(self, token: str, document_id: UUID | str, payload: dict[str, Any]) -> ControlDto:
+        """Ставит документ на контроль."""
+        return await self._request_dto(
+            "POST", f"api/document/{document_id}/control", token, ControlDto, json_data=payload
+        )
 
-    async def edit_control(self, token: str, document_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        resp = await self._transport.request("PUT", f"api/document/{document_id}/control", token=token, json=payload)
-        return resp.json() if resp.content else {}
+    async def edit_control(self, token: str, document_id: UUID | str, payload: dict[str, Any]) -> ControlDto:
+        """Редактирует запись о контроле."""
+        return await self._request_dto(
+            "PUT", f"api/document/{document_id}/control", token, ControlDto, json_data=payload
+        )
 
-    async def remove_control(self, token: str, document_id: str) -> None:
-        await self._transport.request("PUT", "api/document/control", token=token, json={"id": document_id})
+    async def remove_control(self, token: str, document_id: UUID | str) -> None:
+        """Снимает с контроля."""
+        await self._make_request(
+            "PUT", "api/document/control", token, json_data={"id": str(document_id)}, is_json_response=False
+        )
 
-    async def delete_control(self, token: str, document_id: str) -> None:
-        await self._transport.request("DELETE", f"api/document/{document_id}/control", token=token)
+    async def delete_control(self, token: str, document_id: UUID | str) -> None:
+        """Удаляет запись о контроле."""
+        await self._make_request(
+            "DELETE", f"api/document/{document_id}/control", token, is_json_response=False
+        )

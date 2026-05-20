@@ -1,79 +1,70 @@
 # edms_ai_assistant/tools/__init__.py
-"""
-EDMS AI Assistant — Tool Registry.
-"""
+from __future__ import annotations
 
-from edms_ai_assistant.tools.access_grief_tool import access_grief_tool
+import logging
+from typing import TYPE_CHECKING, Any
 
-from .appeal_autofill import autofill_appeal_document
-from .attachment import doc_get_file_content
-from .create_document_from_file import create_document_from_file
-from .doc_compliance_check import doc_compliance_check
-from .doc_control import doc_control
-from .doc_next_process import doc_next_process
-from .doc_search import doc_search_tool
-from .doc_update_field import doc_update_field
-from .document import doc_get_details
-from .document_comparison import doc_compare_documents
-from .document_versions import doc_get_versions
-from .employee_search import employee_search_tool
-from .file_compare_tool import doc_compare_attachment_with_local
-from .introduction import introduction_create_tool
-from .local_file_tool import read_local_file_content
-from .summarization import doc_summarize_text
-from .task import task_create_tool
-from edms_ai_assistant.tools.ask_user_select import ask_user_to_select
+from langchain_core.tools import StructuredTool
 
-all_tools = [
-    # Documents
-    doc_get_details,
-    doc_get_versions,
-    doc_compare_documents,
-    doc_search_tool,
-    create_document_from_file,
-    # Content
-    doc_get_file_content,
-    read_local_file_content,
-    doc_compare_attachment_with_local,
-    # Analysis
-    doc_summarize_text,
-    # Workflow
-    introduction_create_tool,
-    task_create_tool,
-    autofill_appeal_document,
-    doc_update_field,
-    # Control
-    doc_control,
-    # People
-    employee_search_tool,
-    # Compliance
-    doc_compliance_check,
-    # Access griefs
-    access_grief_tool,
-    # Process bpmn
-    doc_next_process,
+from edms_ai_assistant.tools.document import create_doc_get_details_tool
+from edms_ai_assistant.tools.doc_search import create_doc_search_tool
+from edms_ai_assistant.tools.attachment import create_attachment_fetch_tool
+from edms_ai_assistant.tools.create_document_from_file import create_document_from_file_tool
+from edms_ai_assistant.tools.document_comparison import create_doc_compare_documents_tool
+from edms_ai_assistant.tools.doc_compliance_check import create_doc_compliance_check_tool
+from edms_ai_assistant.tools.document_versions import create_doc_get_versions_tool
+from edms_ai_assistant.tools.introduction import create_introduction_tool
+from edms_ai_assistant.tools.doc_update_field import create_doc_update_field_tool
+from edms_ai_assistant.tools.doc_next_process import create_doc_next_process_tool
+from edms_ai_assistant.tools.doc_control import create_doc_control_tool
+from edms_ai_assistant.tools.local_file_tool import create_local_file_reader_tool
+from edms_ai_assistant.tools.summarization import create_doc_summarize_text_tool
+from edms_ai_assistant.tools.task import create_task_tool
+from edms_ai_assistant.tools.file_compare_tool import create_file_compare_tool
+from edms_ai_assistant.tools.access_grief_tool import create_access_grief_tool
+from edms_ai_assistant.tools.employee_search import create_employee_search_tool
+from edms_ai_assistant.tools.appeal_autofill import create_appeal_autofill_tool
 
-    ask_user_to_select
-]
+if TYPE_CHECKING:
+    from edms_ai_assistant.core.deps import AppDeps
 
-__all__ = [
-    "all_tools",
-    "autofill_appeal_document",
-    "doc_compare_attachment_with_local",
-    "doc_compare_documents",
-    "doc_get_details",
-    "doc_get_file_content",
-    "doc_get_versions",
-    "doc_search_tool",
-    "doc_summarize_text",
-    "doc_update_field",
-    "doc_control",
-    "employee_search_tool",
-    "introduction_create_tool",
-    "read_local_file_content",
-    "task_create_tool",
-    "create_document_from_file",
-    "doc_compliance_check",
-    "access_grief_tool",
-    "doc_next_process",
-]
+logger = logging.getLogger(__name__)
+
+
+def init_tools(deps: AppDeps, llm: Any) -> list[StructuredTool]:
+    """Инициализирует все инструменты агента с внедрением зависимостей.
+
+    Args:
+        deps: Контейнер зависимостей приложения.
+        llm: Модель чата для инструментов, требующих LLM.
+
+    Returns:
+        Список инструментов StructuredTool, готовых к использованию в LangGraph.
+    """
+    tools = [
+        create_doc_get_details_tool(deps.document_service),
+        create_doc_search_tool(deps.document_client),
+        create_attachment_fetch_tool(deps),
+        create_document_from_file_tool(deps),
+        create_doc_compare_documents_tool(deps.document_client, llm),
+        create_doc_compliance_check_tool(deps),
+        create_doc_get_versions_tool(deps.document_client),
+        create_introduction_tool(deps),
+        create_doc_update_field_tool(deps.base_client),
+        create_doc_next_process_tool(deps.base_client, deps.employee_client),
+        create_doc_control_tool(deps.control_client, deps.employee_client),
+        create_local_file_reader_tool(deps.base_client),
+        create_doc_summarize_text_tool(deps.summarization_service, llm),
+        create_task_tool(deps),
+        create_file_compare_tool(deps.document_client, deps.attachment_client),
+        create_access_grief_tool(deps.access_grief_client, deps.employee_client),
+        create_employee_search_tool(deps),
+        create_appeal_autofill_tool(deps),
+    ]
+
+    logger.info("Initialized %d tools with DI factories.", len(tools))
+    return tools
+
+
+# Legacy export for backward compatibility
+all_tools: list[StructuredTool] = []

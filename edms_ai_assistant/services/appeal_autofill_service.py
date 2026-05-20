@@ -21,23 +21,14 @@ from edms_ai_assistant.clients.attachment_client import AttachmentClient
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.reference_client import ReferenceClient
 from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
-from edms_ai_assistant.generated.resources_openapi import (
-    DeclarantType as GeneratedDeclarantType,
-)
-from edms_ai_assistant.generated.resources_openapi import (
-    DocumentAppealDto,
-    DocumentDto,
-)
+from edms_ai_assistant.domain.document import DocumentDto, DocumentAppealDto
+from edms_ai_assistant.domain.enums import DeclarantType
 from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
 from edms_ai_assistant.utils.file_utils import extract_text_from_bytes
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
+from edms_ai_assistant.utils.edms_formatter import EdmsFormatter
 
 logger = logging.getLogger(__name__)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Models & Dataclasses
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 @dataclass(frozen=True)
@@ -62,11 +53,6 @@ class AutofillResult:
         if self.summary_choices_hint:
             result["summary_choices_hint"] = self.summary_choices_hint
         return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Utility Classes
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class ValueSanitizer:
@@ -126,11 +112,6 @@ class DocumentOperationExecutor:
         payload = [{"operationType": operation_type, "body": body}]
         json_safe_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
 
-        logger.debug(
-            "Executing %s", operation_type,
-            extra={"document_id": document_id, "operation": operation_type},
-        )
-
         try:
             await client.execute_document_operations(token, document_id, json_safe_payload)
             logger.info("%s executed successfully", operation_type)
@@ -143,34 +124,30 @@ class AttachmentSelector:
     SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".txt", ".doc", ".rtf", ".odt", ".xlsx")
 
     @classmethod
-    def select(cls, document: DocumentDto, attachment_id: str | None) -> tuple:
+    def select(cls, document: DocumentDto, attachment_id: str | None) -> tuple[Any, list[str]]:
         warnings = []
+        attachments = getattr(document, "attachment_document", None) or []
 
-        if not document.attachmentDocument:
+        if not attachments:
             raise ValueError("В документе отсутствуют вложения")
 
         target = None
         if attachment_id:
             target = next(
-                (a for a in document.attachmentDocument if str(a.id) == attachment_id), None,
+                (a for a in attachments if str(getattr(a, "id", "")) == attachment_id), None,
             )
             if not target:
                 warnings.append(f"Вложение ID={attachment_id} не найдено, используется автоподбор")
 
         if not target:
             target = next(
-                (a for a in document.attachmentDocument if
-                 a.name and a.name.lower().endswith(cls.SUPPORTED_EXTENSIONS)),
-                document.attachmentDocument[0],
+                (a for a in attachments if
+                 getattr(a, "name", "") and str(getattr(a, "name", "")).lower().endswith(cls.SUPPORTED_EXTENSIONS)),
+                attachments[0],
             )
 
-        logger.info("Attachment selected: %s", target.name)
+        logger.info("Attachment selected: %s", getattr(target, "name", "unknown"))
         return target, warnings
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Resolvers & Builders
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _is_good_correspondent_match(query: str, canonical: str) -> bool:
@@ -201,12 +178,12 @@ class GeographyResolver:
         self.ref_client = ref_client
         self.token = token
 
-    async def resolve_geography(self, document: Any, fields: Any) -> dict[str, Any]:
+    async def resolve_geography(self, document: DocumentDto, fields: AppealFields) -> dict[str, Any]:
         geo_data: dict[str, Any] = {}
 
-        city_name = self._get_field(document, fields, "cityName")
-        region_name = self._get_field(document, fields, "regionName")
-        district_name = self._get_field(document, fields, "districtName")
+        city_name = self._get_field(document, fields, "city_name", "cityName")
+        region_name = self._get_field(document, fields, "region_name", "regionName")
+        district_name = self._get_field(document, fields, "district_name", "districtName")
 
         await self._resolve_country(document, fields, geo_data)
 
@@ -218,30 +195,26 @@ class GeographyResolver:
 
         await self._resolve_city(city_name, document, geo_data)
 
-        logger.info(
-            "Geography resolved: country=%s region=%s district=%s city=%s",
-            geo_data.get("countryAppealName"), geo_data.get("regionName", "—(auto)"),
-            geo_data.get("districtName", "—(auto)"), geo_data.get("cityName"),
-        )
         return geo_data
 
     @staticmethod
-    def _get_field(document: Any, fields: Any, attr: str) -> str | None:
-        d = document.documentAppeal
-        db_val = getattr(d, attr, None) if d else None
+    def _get_field(document: DocumentDto, fields: AppealFields, snake_attr: str, camel_attr: str) -> str | None:
+        d = getattr(document, "document_appeal", None)
+        db_val = getattr(d, snake_attr, None) if d else None
         if not ValueSanitizer.is_empty(db_val):
-            return db_val
-        llm_val = getattr(fields, attr, None)
+            return str(db_val)
+
+        llm_val = getattr(fields, camel_attr, None)
         if not ValueSanitizer.is_empty(llm_val):
-            return llm_val
+            return str(llm_val)
         return None
 
-    async def _resolve_country(self, document: Any, fields: Any, geo_data: dict) -> None:
-        d = document.documentAppeal
+    async def _resolve_country(self, document: DocumentDto, fields: AppealFields, geo_data: dict[str, Any]) -> None:
+        d = getattr(document, "document_appeal", None)
         country_name: str | None = None
 
-        if d and not ValueSanitizer.is_empty(d.countryAppealName):
-            country_name = d.countryAppealName
+        if d and not ValueSanitizer.is_empty(getattr(d, "country_appeal_name", None)):
+            country_name = str(getattr(d, "country_appeal_name", ""))
         elif not ValueSanitizer.is_empty(fields.country):
             country_name = fields.country
 
@@ -251,27 +224,23 @@ class GeographyResolver:
                 if data:
                     geo_data["countryAppealId"] = str(data.id) if data.id else None
                     geo_data["countryAppealName"] = data.name
-                else:
-                    logger.warning("Country not found: %s", country_name)
-            except Exception as exc:
-                logger.error("Country resolution error: %s", exc)
-        elif d and d.countryAppealId:
-            geo_data["countryAppealId"] = str(d.countryAppealId)
+            except Exception:
+                logger.error("Country resolution error", exc_info=True)
+        elif d and getattr(d, "country_appeal_id", None):
+            geo_data["countryAppealId"] = str(getattr(d, "country_appeal_id", ""))
 
-    async def _lookup(self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict) -> None:
+    async def _lookup(self, endpoint: str, name: str, id_key: str, name_key: str, geo_data: dict[str, Any]) -> None:
         try:
             method = getattr(self.ref_client, f"find_{endpoint}_with_name")
             data = await method(self.token, name)
             if data:
                 geo_data[id_key] = str(data.id) if data.id else None
                 geo_data[name_key] = data.name
-            else:
-                logger.warning("%s not found in reference: %s", endpoint, name)
-        except Exception as exc:
-            logger.error("%s lookup error for '%s': %s", endpoint, name, exc)
+        except Exception:
+            logger.error("%s lookup error", endpoint, exc_info=True)
 
-    async def _resolve_city(self, city_name: str | None, document: Any, geo_data: dict) -> None:
-        d = document.documentAppeal
+    async def _resolve_city(self, city_name: str | None, document: DocumentDto, geo_data: dict[str, Any]) -> None:
+        d = getattr(document, "document_appeal", None)
         if city_name:
             try:
                 data = await self.ref_client.find_city_with_hierarchy(self.token, city_name)
@@ -287,12 +256,10 @@ class GeographyResolver:
                         geo_data["regionId"] = str(data.region_id)
                     if "regionName" not in geo_data and data.region_name:
                         geo_data["regionName"] = data.region_name
-                else:
-                    logger.warning("City not found in reference: '%s'", city_name)
-            except Exception as exc:
-                logger.error("City resolution error for '%s': %s", city_name, exc, exc_info=True)
-        elif d and d.cityId:
-            geo_data["cityId"] = str(d.cityId)
+            except Exception:
+                logger.error("City resolution error", exc_info=True)
+        elif d and getattr(d, "city_id", None):
+            geo_data["cityId"] = str(getattr(d, "city_id", ""))
 
 
 class AppealFieldsBuilder:
@@ -302,16 +269,14 @@ class AppealFieldsBuilder:
         self.warnings: list[str] = []
 
     async def build(
-            self, document: DocumentDto, fields: AppealFields, extracted_text: str, geo_data: dict,
+            self, document: DocumentDto, fields: AppealFields, extracted_text: str, geo_data: dict[str, Any],
     ) -> dict[str, Any]:
-        d = document.documentAppeal or DocumentAppealDto()
+        d = getattr(document, "document_appeal", None) or DocumentAppealDto()
         payload: dict[str, Any] = {}
 
-        geo_key_order = [
-            "countryAppealId", "countryAppealName", "regionId", "regionName",
-            "districtId", "districtName", "cityId", "cityName",
-        ]
-        for key in geo_key_order:
+        geo_keys = ["countryAppealId", "countryAppealName", "regionId", "regionName",
+                    "districtId", "districtName", "cityId", "cityName"]
+        for key in geo_keys:
             if key in geo_data:
                 payload[key] = geo_data[key]
 
@@ -325,15 +290,15 @@ class AppealFieldsBuilder:
 
         return self._filter_payload(payload)
 
-    async def _add_correspondent(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
-        if d.correspondentAppealId:
-            payload["correspondentAppealId"] = str(d.correspondentAppealId)
-            payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(d.correspondentAppeal)
+    async def _add_correspondent(self, d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
+        if getattr(d, "correspondent_appeal_id", None):
+            payload["correspondentAppealId"] = str(d.correspondent_appeal_id)
+            payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(getattr(d, "correspondent_appeal", None))
             return
 
         corr_name: str | None = None
-        if not ValueSanitizer.is_empty(d.correspondentAppeal):
-            corr_name = d.correspondentAppeal
+        if not ValueSanitizer.is_empty(getattr(d, "correspondent_appeal", None)):
+            corr_name = str(d.correspondent_appeal)
         elif not ValueSanitizer.is_empty(fields.correspondentAppeal):
             corr_name = fields.correspondentAppeal
 
@@ -347,152 +312,97 @@ class AppealFieldsBuilder:
             else:
                 payload["correspondentAppeal"] = ValueSanitizer.sanitize_string(corr_name)
 
-        if not payload.get("correspondentAppealId"):
-            payload["correspondentAppealId"] = None
-            if "correspondentAppeal" not in payload:
-                payload["correspondentAppeal"] = None
-
     @staticmethod
-    def _add_personal_data(d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
-        if not ValueSanitizer.is_empty(d.fioApplicant):
-            payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fioApplicant)
+    def _add_personal_data(d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
+        if not ValueSanitizer.is_empty(getattr(d, "fio_applicant", None)):
+            payload["fioApplicant"] = ValueSanitizer.sanitize_string(d.fio_applicant)
         elif not ValueSanitizer.is_empty(fields.fioApplicant):
             payload["fioApplicant"] = ValueSanitizer.sanitize_string(fields.fioApplicant)
 
-        if d.dateDocCorrespondentOrg:
-            payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(d.dateDocCorrespondentOrg)
+        if getattr(d, "date_doc_correspondent_org", None):
+            payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(d.date_doc_correspondent_org)
         elif not ValueSanitizer.is_empty(fields.dateDocCorrespondentOrg):
             payload["dateDocCorrespondentOrg"] = ValueSanitizer.fix_datetime_format(fields.dateDocCorrespondentOrg)
 
-    async def _add_classification(self, d: DocumentAppealDto, fields: AppealFields, extracted_text: str,
-                                  payload: dict) -> None:
-        if d.citizenTypeId:
-            payload["citizenTypeId"] = str(d.citizenTypeId)
+    async def _add_classification(self, d: Any, fields: AppealFields, extracted_text: str, payload: dict[str, Any]) -> None:
+        if getattr(d, "citizen_type_id", None):
+            payload["citizenTypeId"] = str(d.citizen_type_id)
         elif not ValueSanitizer.is_empty(fields.citizenType):
             citizen_type_id = await self.ref_client.find_citizen_type(self.token, fields.citizenType)
             if citizen_type_id:
                 payload["citizenTypeId"] = citizen_type_id
 
-        if d.subjectId:
-            payload["subjectId"] = str(d.subjectId)
+        if getattr(d, "subject_id", None):
+            payload["subjectId"] = str(d.subject_id)
         else:
             subject_id = await self.ref_client.find_best_subject(self.token, extracted_text)
             if subject_id:
                 payload["subjectId"] = subject_id
 
-    async def _add_declarant_type(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
+    async def _add_declarant_type(self, d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
         if fields.declarantType:
-            if isinstance(fields.declarantType, str):
-                try:
-                    payload["declarantType"] = getattr(GeneratedDeclarantType, fields.declarantType.upper())
-                except AttributeError:
-                    payload["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
-            else:
-                payload["declarantType"] = fields.declarantType
-        elif d.declarantType:
-            payload["declarantType"] = d.declarantType
+            try:
+                payload["declarantType"] = DeclarantType(fields.declarantType.upper())
+            except (ValueError, AttributeError):
+                payload["declarantType"] = DeclarantType.INDIVIDUAL
+        elif getattr(d, "declarant_type", None):
+            payload["declarantType"] = d.declarant_type
         else:
-            payload["declarantType"] = GeneratedDeclarantType.INDIVIDUAL
-            self.warnings.append("declarantType установлен INDIVIDUAL по умолчанию")
+            payload["declarantType"] = DeclarantType.INDIVIDUAL
 
-    async def _add_conditional_fields(self, d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
-        if payload.get("declarantType") == GeneratedDeclarantType.ENTITY:
+    async def _add_conditional_fields(self, d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
+        if payload.get("declarantType") == DeclarantType.ENTITY:
             raw_org: str | None = (
-                d.organizationName if not ValueSanitizer.is_empty(d.organizationName) else fields.organizationName
+                str(d.organization_name) if not ValueSanitizer.is_empty(getattr(d, "organization_name", None)) else fields.organizationName
             )
             if not ValueSanitizer.is_empty(raw_org):
-                # ИСПРАВЛЕНИЕ: Убрано подчеркивание
-                corr_data = await self.ref_client._find_entity_with_name(
-                    self.token, "correspondent", raw_org, "Организация"
-                )
-                if corr_data and _is_good_correspondent_match(raw_org, corr_data.name or ""):
+                corr_data = await self.ref_client._find_entity_with_name(self.token, "correspondent", str(raw_org), "Организация")
+                if corr_data and _is_good_correspondent_match(str(raw_org), corr_data.name or ""):
                     payload["organizationName"] = corr_data.name
                 else:
                     payload["organizationName"] = ValueSanitizer.sanitize_string(raw_org)
-            else:
-                payload["organizationName"] = None
 
-            payload["signed"] = ValueSanitizer.sanitize_string(
-                d.signed if not ValueSanitizer.is_empty(d.signed) else fields.signed
-            )
-            payload["correspondentOrgNumber"] = ValueSanitizer.sanitize_string(
-                d.correspondentOrgNumber if not ValueSanitizer.is_empty(
-                    d.correspondentOrgNumber) else fields.correspondentOrgNumber
-            )
-        elif payload.get("declarantType") == GeneratedDeclarantType.INDIVIDUAL:
+            payload["signed"] = ValueSanitizer.sanitize_string(getattr(d, "signed", None) or fields.signed)
+            payload["correspondentOrgNumber"] = ValueSanitizer.sanitize_string(getattr(d, "correspondent_org_number", None) or fields.correspondentOrgNumber)
+        elif payload.get("declarantType") == DeclarantType.INDIVIDUAL:
             payload["organizationName"] = None
             payload["signed"] = None
             payload["correspondentOrgNumber"] = None
 
-    # ИСПРАВЛЕНИЕ: Добавлен декоратор @staticmethod
     @staticmethod
-    def _add_common_fields(d: DocumentAppealDto, fields: AppealFields, payload: dict) -> None:
-        payload["collective"] = fields.collective if fields.collective is not None else d.collective
-        payload["anonymous"] = fields.anonymous if fields.anonymous is not None else d.anonymous
-        payload["reasonably"] = fields.reasonably if fields.reasonably is not None else d.reasonably
+    def _add_common_fields(d: Any, fields: AppealFields, payload: dict[str, Any]) -> None:
+        payload["collective"] = fields.collective if fields.collective is not None else getattr(d, "collective", False)
+        payload["anonymous"] = fields.anonymous if fields.anonymous is not None else getattr(d, "anonymous", False)
+        payload["reasonably"] = fields.reasonably if fields.reasonably is not None else getattr(d, "reasonably", False)
 
-        raw_receipt = d.receiptDate if d.receiptDate else fields.receiptDate
-        if raw_receipt:
-            payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt)
-        else:
-            today = datetime.now(UTC)
-            payload["receiptDate"] = today.strftime("%Y-%m-%dT00:00:00Z")
+        raw_receipt = getattr(d, "receipt_date", None) or fields.receiptDate
+        payload["receiptDate"] = ValueSanitizer.fix_datetime_format(raw_receipt) or datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")
 
-        payload["fullAddress"] = ValueSanitizer.sanitize_string(
-            d.fullAddress if not ValueSanitizer.is_empty(d.fullAddress) else fields.fullAddress)
-        payload["phone"] = ValueSanitizer.sanitize_string(
-            d.phone if not ValueSanitizer.is_empty(d.phone) else fields.phone)
-        payload["email"] = ValueSanitizer.sanitize_string(
-            d.email if not ValueSanitizer.is_empty(d.email) else fields.email)
-        payload["index"] = ValueSanitizer.sanitize_string(
-            d.index if not ValueSanitizer.is_empty(d.index) else fields.index)
-        payload["indexDateCoverLetter"] = ValueSanitizer.sanitize_string(
-            d.indexDateCoverLetter if not ValueSanitizer.is_empty(
-                d.indexDateCoverLetter) else fields.indexDateCoverLetter
-        )
-        payload["reviewProgress"] = ValueSanitizer.sanitize_string(
-            d.reviewProgress if not ValueSanitizer.is_empty(d.reviewProgress) else fields.reviewProgress
-        )
+        payload["fullAddress"] = ValueSanitizer.sanitize_string(getattr(d, "full_address", None) or fields.fullAddress)
+        payload["phone"] = ValueSanitizer.sanitize_string(getattr(d, "phone", None) or fields.phone)
+        payload["email"] = ValueSanitizer.sanitize_string(getattr(d, "email", None) or fields.email)
+        payload["index"] = ValueSanitizer.sanitize_string(getattr(d, "index", None) or fields.index)
 
-        submission_form = getattr(d, "submissionForm", None)
-        if not submission_form and fields.submissionForm:
-            submission_form = fields.submissionForm
-        payload["submissionForm"] = submission_form if submission_form else SubmissionFormAppeal.WRITTEN
+        sub_form = getattr(d, "submission_form", None) or fields.submissionForm
+        payload["submissionForm"] = sub_form if sub_form else SubmissionFormAppeal.WRITTEN
 
-    # ИСПРАВЛЕНИЕ: Добавлен декоратор @staticmethod
     @staticmethod
-    def _add_db_only_fields(d: DocumentAppealDto, payload: dict) -> None:
-        if d.subjectId:
-            payload["subjectId"] = str(d.subjectId)
-        if d.solutionResultId:
-            payload["solutionResultId"] = str(d.solutionResultId)
-        if d.nomenclatureAffairId:
-            payload["nomenclatureAffairId"] = str(d.nomenclatureAffairId)
+    def _add_db_only_fields(d: Any, payload: dict[str, Any]) -> None:
+        for field, snake in [("subjectId", "subject_id"), ("solutionResultId", "solution_result_id"), ("nomenclatureAffairId", "nomenclature_affair_id")]:
+            if getattr(d, snake, None):
+                payload[field] = str(getattr(d, snake))
 
-    def _filter_payload(self, payload: dict) -> dict[str, Any]:
+    def _filter_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         _ALLOW_NULL = {
             "correspondentAppeal", "correspondentAppealId", "submissionForm",
             "organizationName", "signed", "correspondentOrgNumber", "fioApplicant",
             "fullAddress", "phone", "email", "index", "receiptDate",
             "dateDocCorrespondentOrg", "collective", "anonymous", "reasonably",
         }
-
-        filtered = {}
-        for k, v in payload.items():
-            if v is not None or k in _ALLOW_NULL:
-                filtered[k] = v
-
+        filtered = {k: v for k, v in payload.items() if v is not None or k in _ALLOW_NULL}
         if not filtered.get("declarantType"):
-            raise ValueError("declarantType обязателен, но не установлен")
-        if not filtered.get("submissionForm"):
-            filtered["submissionForm"] = SubmissionFormAppeal.WRITTEN
-
+            filtered["declarantType"] = DeclarantType.INDIVIDUAL
         return filtered
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Main Service Class
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class AppealAutofillService:
@@ -513,146 +423,80 @@ class AppealAutofillService:
         self.chat_model = chat_model
 
     async def process_and_fill(
-            self,
-            token: str,
-            document_id: str,
-            attachment_id: str | None,
-            generate_summary_choices: bool = False,
+            self, token: str, document_id: str, attachment_id: str | None, generate_summary_choices: bool = False,
     ) -> AutofillResult:
-        """Основной метод оркестрации автозаполнения."""
-
         document = await self._load_document(token, document_id)
-        self._validate_document_category(document)
+        if document.doc_category_const != "APPEAL":
+            raise ValueError(f"Документ должен быть категории APPEAL, а не {document.doc_category_const}")
 
         target_attachment, warnings = AttachmentSelector.select(document, attachment_id)
-
         extracted_text = await self._extract_text(token, document_id, target_attachment)
-        self._validate_text_length(extracted_text)
+        if not extracted_text or len(extracted_text) < self.MIN_TEXT_LENGTH:
+            raise ValueError("Текст не извлечен или слишком короткий")
 
         fields = await self.extraction_service.extract_appeal_fields(extracted_text)
-
         await self._update_document(token, document_id, document, fields, extracted_text)
 
         summary_choices = None
-        summary_hint = None
-        current_summary = getattr(fields, "shortSummary", None)
-
         if generate_summary_choices:
-            summary_choices = await self.generate_summary_variants(extracted_text, current_summary)
-            if summary_choices:
-                summary_hint = (
-                    "Выберите заголовок или предложите свой вариант. "
-                    "Скажите 'Установи заголовок: <текст>' чтобы применить."
-                )
+            summary_choices = await self.generate_summary_variants(extracted_text, fields.shortSummary)
 
         return AutofillResult(
             status="success",
             message="Документ успешно заполнен",
             warnings=warnings if warnings else None,
-            attachment_used=target_attachment.name,
+            attachment_used=getattr(target_attachment, "name", "unknown"),
             last_extracted_text=extracted_text,
-            last_short_summary=current_summary,
+            last_short_summary=fields.shortSummary,
             summary_choices=summary_choices,
-            summary_choices_hint=summary_hint,
         )
 
     async def _load_document(self, token: str, document_id: str) -> DocumentDto:
-        raw_document = await self.doc_client.get_document_metadata(token, document_id)
-        doc = DocumentDto.model_validate(raw_document)
+        doc = await self.doc_client.get_document_metadata(token, document_id)
+        if not doc:
+            raise ValueError(f"Документ {document_id} не найден")
         return doc
 
-    def _validate_document_category(self, document: DocumentDto) -> None:
-        if document.docCategoryConstant != "APPEAL":
-            raise ValueError(f"Документ должен быть категории APPEAL, а не {document.docCategoryConstant}")
-
     async def _extract_text(self, token: str, document_id: str, attachment: Any) -> str:
-        file_bytes = await self.attach_client.get_attachment_content(
-            token, document_id, str(attachment.id)
-        )
-        extracted_text = extract_text_from_bytes(file_bytes, attachment.name)
-        logger.info("Text extracted: %d chars", len(extracted_text))
-        return extracted_text
+        file_bytes = await self.attach_client.get_attachment_content(token, document_id, str(getattr(attachment, "id", "")))
+        if not file_bytes: return ""
+        return extract_text_from_bytes(file_bytes, getattr(attachment, "name", ""))
 
-    def _validate_text_length(self, text: str) -> None:
-        if not text or len(text) < self.MIN_TEXT_LENGTH:
-            raise ValueError("Текст не извлечен или слишком короткий")
-
-    async def _update_document(
-            self, token: str, document_id: str, document: DocumentDto, fields: AppealFields, extracted_text: str
-    ) -> None:
+    async def _update_document(self, token: str, document_id: str, document: DocumentDto, fields: AppealFields, extracted_text: str) -> None:
         await self._execute_main_fields_update(token, document_id, document, fields)
-        await self._execute_appeal_fields_update(token, document_id, document, fields, extracted_text)
 
-    async def _execute_main_fields_update(
-            self, token: str, document_id: str, document: DocumentDto, fields: AppealFields
-    ) -> None:
-        delivery_id = document.deliveryMethodId
+        geo_resolver = GeographyResolver(self.ref_client, token)
+        geo_data = await geo_resolver.resolve_geography(document, fields)
+        fields_builder = AppealFieldsBuilder(self.ref_client, token)
+        appeal_payload = await fields_builder.build(document, fields, extracted_text, geo_data)
+
+        await DocumentOperationExecutor.execute(self.doc_client, token, document_id, "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE", appeal_payload)
+
+    async def _execute_main_fields_update(self, token: str, document_id: str, document: DocumentDto, fields: AppealFields) -> None:
+        delivery_id = getattr(document, "delivery_method_id", None)
         if not delivery_id:
-            delivery_method_name = (
-                fields.deliveryMethod if not ValueSanitizer.is_empty(fields.deliveryMethod) else "Электронно"
-            )
-            delivery_id = await self.ref_client.find_delivery_method(token, delivery_method_name)
+            name = fields.deliveryMethod or "Электронно"
+            delivery_id = await self.ref_client.find_delivery_method(token, name)
 
-        raw_summary = (
-            ValueSanitizer.sanitize_string(fields.shortSummary)
-            if not ValueSanitizer.is_empty(fields.shortSummary)
-            else document.shortSummary
-        )
+        raw_summary = fields.shortSummary or document.short_summary
         if raw_summary and len(raw_summary) > 80:
             raw_summary = raw_summary[:80]
 
         main_payload = {
             "shortSummary": raw_summary,
             "deliveryMethodId": delivery_id,
-            "documentTypeId": str(document.documentTypeId) if document.documentTypeId else None,
-            "pages": document.pages,
-            "note": document.note,
-            "additionalPages": document.additionalPages,
-            "exemplarCount": document.exemplarCount,
-            "investProgramId": document.investProgramId,
+            "documentTypeId": str(document.document_type.id) if document.document_type else None,
         }
-        main_payload = {k: v for k, v in main_payload.items() if v is not None}
-
-        await DocumentOperationExecutor.execute(
-            self.doc_client, token, document_id, "DOCUMENT_MAIN_FIELDS_UPDATE", main_payload
-        )
-
-    async def _execute_appeal_fields_update(
-            self, token: str, document_id: str, document: DocumentDto, fields: AppealFields, extracted_text: str
-    ) -> None:
-        geo_resolver = GeographyResolver(self.ref_client, token)
-        geo_data = await geo_resolver.resolve_geography(document, fields)
-
-        fields_builder = AppealFieldsBuilder(self.ref_client, token)
-        appeal_payload = await fields_builder.build(document, fields, extracted_text, geo_data)
-
-        await DocumentOperationExecutor.execute(
-            self.doc_client, token, document_id, "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE", appeal_payload
-        )
+        await DocumentOperationExecutor.execute(self.doc_client, token, document_id, "DOCUMENT_MAIN_FIELDS_UPDATE", {k:v for k,v in main_payload.items() if v is not None})
 
     async def generate_summary_variants(self, text: str, current_summary: str | None) -> list[str]:
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "Ты — эксперт по делопроизводству. Сформулируй РОВНО 3 варианта краткого содержания (заголовка) обращения. "
-                    "Каждый вариант — отдельная строка, максимум 80 символов. "
-                    "Стили: 1) краткий (суть в 5-8 словах), 2) официальный (с указанием типа обращения), "
-                    "3) описательный (с ключевыми деталями). Отвечай ТОЛЬКО тремя строками без нумерации.",
-                ),
-                ("user", "Текст обращения:\n{text}"),
-            ]
-        )
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Сформулируй РОВНО 3 варианта краткого содержания обращения (до 80 симв)."),
+            ("user", "Текст:\n{text}"),
+        ])
         chain = prompt | self.chat_model | StrOutputParser()
-
         try:
             result = await chain.ainvoke({"text": text[:2000]})
-            variants = [v.strip() for v in result.strip().split("\n") if v.strip()]
-            variants = [v[:77] + "..." if len(v) > 80 else v for v in variants[:3]]
-            if current_summary and current_summary not in variants:
-                variants = [(current_summary[:77] + "..." if len(
-                    current_summary) > 80 else current_summary)] + variants[:2]
-            return variants[:3]
-        except Exception as exc:
-            logger.warning("Failed to generate summary variants: %s", exc)
+            return [v.strip() for v in result.strip().split("\n") if v.strip()][:3]
+        except Exception:
             return [current_summary] if current_summary else []

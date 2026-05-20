@@ -1,60 +1,31 @@
 # edms_ai_assistant/clients/document_creator_client.py
-"""
-EDMS AI Assistant — Document Creator Client.
-
-  1. GET  /api/doc-profile   → поиск профиля по категории документа
-  2. POST /api/document      → создание документа из профиля
-  3. POST /api/document/{id}/attachment → загрузка файла как вложения
-"""
-
 from __future__ import annotations
 
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
+from edms_ai_assistant.clients.transport import IAsyncTransport
+from edms_ai_assistant.config import EdmsSettings
 from edms_ai_assistant.domain.document import DocumentWithPermissions
 
 logger = logging.getLogger(__name__)
 
-_CATEGORY_LABELS: dict[str, str] = {
-    "APPEAL": "Обращение",
-    "INCOMING": "Входящий",
-    "OUTGOING": "Исходящий",
-    "INTERN": "Внутренний",
-    "CONTRACT": "Договор",
-    "MEETING": "Совещание",
-    "MEETING_QUESTION": "Вопрос повестки",
-    "QUESTION": "Вопрос",
-    "CUSTOM": "Произвольный",
-}
 
+class DocumentCreatorClient(EdmsBaseClient):
+    """HTTP client for the document-creation-from-file workflow."""
 
-class DocumentCreatorClient:
-    """HTTP client for the document-creation-from-file workflow.
-    """
-
-    def __init__(self, base_client: EdmsBaseClient):
-        self._client = base_client
-
-    # ── 1. Profile lookup ─────────────────────────────────────────────────────
+    def __init__(self, transport: IAsyncTransport, settings: EdmsSettings):
+        super().__init__(transport, settings)
 
     async def find_profile_by_category(
             self,
             token: str,
             doc_category: str,
     ) -> dict[str, Any] | None:
-        """Find the first active accessible DocumentProfile for the given category.
-
-        Args:
-            token: JWT bearer token.
-            doc_category: ``DocumentCategoryConstants`` value, e.g. ``"APPEAL"``.
-
-        Returns:
-            First matching ``DocumentProfileDto`` as dict, or ``None`` if not found.
-        """
+        """Find the first active accessible DocumentProfile for the given category."""
         normalized = doc_category.strip().upper()
         params: dict[str, Any] = {
             "docCategoryConst": normalized,
@@ -62,73 +33,30 @@ class DocumentCreatorClient:
             "withAccess": "true",
             "listAttribute": "true",
         }
-        logger.info(
-            "Looking up profile for category '%s' (%s)",
-            _CATEGORY_LABELS.get(normalized, normalized),
-            normalized,
-        )
 
-        result = await self._client._make_request(
-            "GET", "api/doc-profile", token=token, params=params
-        )
+        result = await self._make_request("GET", "api/doc-profile", token, params=params)
 
         if isinstance(result, list) and result:
-            logger.info(
-                "Profile found: '%s' (id=%s…)",
-                result[0].get("name", "?"),
-                str(result[0].get("id", ""))[:8],
-            )
-            return result[0]
-
-        if isinstance(result, dict):
-            content: list = result.get("content") or []
-            if content:
-                logger.info(
-                    "Profile found in page: '%s' (id=%s…)",
-                    content[0].get("name", "?"),
-                    str(content[0].get("id", ""))[:8],
-                )
-                return content[0]
-
-        logger.warning("No active profile found for category '%s'", normalized)
+            return cast(dict[str, Any], result[0])
+        if isinstance(result, dict) and "content" in result:
+            content = result["content"]
+            if isinstance(content, list) and content:
+                return cast(dict[str, Any], content[0])
         return None
-
-    # ── 2. Document creation ──────────────────────────────────────────────────
 
     async def create_document(
             self,
             token: str,
             profile_id: str,
     ) -> DocumentWithPermissions | None:
-        """Create a new document from the given profile.
-
-        Args:
-            token: JWT bearer token.
-            profile_id: UUID string of the ``DocumentProfile`` to use.
-
-        Returns:
-            ``DocumentWithPermissions`` DTO, or ``None`` on failure.
-        """
-        logger.info("Creating document from profile %s…", str(profile_id)[:8])
-
-        result = await self._client._make_request(
-            "POST",
-            "api/document",
-            token=token,
-            json={"id": str(profile_id)},
-        )
-
-        if isinstance(result, dict) and result:
-            doc_id = str(
-                result.get("id") or (result.get("document") or {}).get("id") or ""
+        """Create a new document from the given profile."""
+        try:
+            return await self._request_dto(
+                "POST", "api/document", token, DocumentWithPermissions, json_data={"id": profile_id}
             )
-            logger.info("Document created: id=%s…", doc_id[:8] if doc_id else "?")
-            return DocumentWithPermissions.model_validate(result)
-
-        logger.error("Document creation returned empty response")
-        return None
-
-    # ── 3. Attachment upload ──────────────────────────────────────────────────
+        except Exception:
+            logger.error("Document creation failed", exc_info=True)
+            return None
 
     async def upload_attachment(
             self,
@@ -137,50 +65,20 @@ class DocumentCreatorClient:
             file_path: str,
             file_name: str | None = None,
     ) -> dict[str, Any] | None:
-        """Upload a local file as ``MAIN_ATTACHMENT`` to the document.
-
-        Делегирует формирование multipart/form-data базовому клиенту.
-
-        Args:
-            token: JWT bearer token.
-            document_id: Target document UUID string.
-            file_path: Absolute local filesystem path to the file.
-            file_name: Override display name (defaults to the file's basename).
-
-        Returns:
-            ``AttachmentDocumentDto`` as dict on success, ``None`` if the file
-            is not found locally.
-        """
+        """Upload a local file as MAIN_ATTACHMENT to the document."""
         path = Path(file_path)
         if not path.exists():
-            logger.error("Attachment file not found: '%s'", file_path)
             return None
 
         display_name = (file_name or path.name).strip()
         content_type, _ = mimetypes.guess_type(display_name)
         content_type = content_type or "application/octet-stream"
 
-        endpoint = f"api/document/{document_id}/attachment"
-
-        logger.info(
-            "Uploading attachment '%s' (%s) → document %s…",
-            display_name,
-            content_type,
-            document_id[:8],
-        )
-
         file_content = path.read_bytes()
-        result = await self._client._upload_file(
-            endpoint=endpoint,
+        return await self._upload_file(
+            endpoint=f"api/document/{document_id}/attachment",
             token=token,
             file_name=display_name,
             file_content=file_content,
             content_type=content_type,
         )
-
-        if result:
-            logger.info(
-                "Attachment uploaded: att_id=%s…",
-                str(result.get("id", "?"))[:8],
-            )
-        return result

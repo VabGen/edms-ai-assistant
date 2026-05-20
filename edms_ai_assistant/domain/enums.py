@@ -209,6 +209,11 @@ class CorrespondentType(StrEnum):  # Type2
     GTB_ORG = "GTB_ORG"
 
 
+class DeclarantType(StrEnum):
+    INDIVIDUAL = "INDIVIDUAL"
+    ENTITY = "ENTITY"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Task & Report Enums
 # ══════════════════════════════════════════════════════════════════════════════

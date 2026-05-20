@@ -11,7 +11,8 @@ class EdmsBaseDto(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
         alias_generator=to_camel,
-        extra="allow",
+        extra="ignore",
+        frozen=True,
     )
 
 

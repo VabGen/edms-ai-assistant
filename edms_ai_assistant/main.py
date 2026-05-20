@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse  # <-- ДОБАВЛЕН ИМПОРТ
+from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
@@ -20,12 +21,14 @@ from edms_ai_assistant.api import (
     system_router,
 )
 from edms_ai_assistant.api.deps import UPLOAD_DIR
-from edms_ai_assistant.clients.redis_client import close_redis, init_redis
-from edms_ai_assistant.config import settings
+from edms_ai_assistant.clients.transport import HttpxTransport
+from edms_ai_assistant.core.deps import init_deps
+from edms_ai_assistant.config import settings, edms_settings
 from edms_ai_assistant.db.database import init_db
 from edms_ai_assistant.summarizer.api.router import router as summarizer_router
 from edms_ai_assistant.summarizer.container import build_summarization_service
 from edms_ai_assistant.summarizer.observability.logging_ctx import install_request_id_filter
+from edms_ai_assistant.llm import get_chat_model
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
@@ -59,31 +62,41 @@ def _setup_telemetry(app: FastAPI) -> None:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan — startup and shutdown."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     await init_db()
-    await init_redis()
+
+    import redis.asyncio as aioredis
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    transport = HttpxTransport(base_url=str(edms_settings.base_url), default_timeout=edms_settings.timeout)
+    llm = get_chat_model()
+
+    deps = init_deps(transport, redis, llm)
+    _app.state.deps = deps
 
     try:
-        agent = EdmsDocumentAgent()
+        summarization_service = await build_summarization_service(settings)
+        _app.state.summarization_service = summarization_service
+        deps.summarization_service = summarization_service
+        logger.info("SummarizationService ready")
+    except Exception as exc:
+        logger.error("SummarizationService initialization failed: %s", exc, exc_info=True)
+        _app.state.summarization_service = None
+
+    try:
+        agent = EdmsDocumentAgent(deps=deps, llm=llm)
         _app.state.agent = agent
         logger.info("EDMS AI Assistant started")
     except Exception as exc:
         logger.critical("Agent initialization failed. Exiting.", exc_info=True)
         raise SystemExit(1) from exc
 
-    try:
-        summarization_service = await build_summarization_service(settings)
-        _app.state.summarization_service = summarization_service
-        logger.info("SummarizationService ready")
-    except Exception as exc:
-        logger.error("SummarizationService initialization failed: %s", exc, exc_info=True)
-        _app.state.summarization_service = None
-
     yield
 
-    await close_redis()
+    await redis.close()
+    await transport.close()
+
     service = getattr(_app.state, "summarization_service", None)
     if service is not None:
         try:

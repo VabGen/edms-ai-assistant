@@ -1,9 +1,12 @@
 # edms_ai_assistant/core/deps.py
 from __future__ import annotations
 
-from pydantic import BaseModel
+import redis.asyncio as aioredis
+from pydantic import BaseModel, ConfigDict
+from typing import Any, Optional
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
+from edms_ai_assistant.clients.transport import IAsyncTransport
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.document_creator_client import DocumentCreatorClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -13,8 +16,10 @@ from edms_ai_assistant.clients.reference_client import ReferenceClient
 from edms_ai_assistant.clients.attachment_client import AttachmentClient
 from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
 from edms_ai_assistant.clients.control_client import ControlClient
+from edms_ai_assistant.clients.task_client import TaskClient
 
 from edms_ai_assistant.services.document_service import DocumentService
+from edms_ai_assistant.services.document_enricher import DocumentEnricher
 from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
 from edms_ai_assistant.services.appeal_autofill_service import AppealAutofillService
 from edms_ai_assistant.services.resolution_service import ResolutionService
@@ -22,20 +27,20 @@ from edms_ai_assistant.services.task_service import TaskService
 from edms_ai_assistant.services.introduction_service import IntroductionService
 from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
+from edms_ai_assistant.services.entity_extractor import EntityExtractor
+from edms_ai_assistant.services.query_refiner import QueryRefiner
+from edms_ai_assistant.config import edms_settings, settings
 
 
 class AppDeps(BaseModel):
-    """Контейнер зависимостей приложения (Application Dependencies).
+    """Контейнер зависимостей приложения (Application Dependencies)."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    Используется для внедрения зависимостей (DI) в инструменты (Tool Factories)
-    и обработчики API. Содержит заранее сконфигурированные инстансы клиентов и сервисов.
-    """
-    model_config = {"arbitrary_types_allowed": True}
-
-    # Базовый клиент (нужен для Tool Factories, делающих прямые запросы)
+    transport: IAsyncTransport
+    redis: aioredis.Redis
     base_client: EdmsBaseClient
 
-    # Клиенты (Транспортный слой)
+    # Клиенты
     document_client: DocumentClient
     employee_client: EmployeeClient
     department_client: DepartmentClient
@@ -45,8 +50,9 @@ class AppDeps(BaseModel):
     access_grief_client: AccessGriefClient
     control_client: ControlClient
     document_creator_client: DocumentCreatorClient
+    task_client: TaskClient
 
-    # Сервисы (Бизнес-логика)
+    # Сервисы
     document_service: DocumentService
     appeal_extraction_service: AppealExtractionService
     appeal_autofill_service: AppealAutofillService
@@ -56,54 +62,62 @@ class AppDeps(BaseModel):
     file_processor_service: FileProcessorService
     nlp_service: EDMSNaturalLanguageService
 
+    # Опциональные сервисы (инициализируемые позже в lifespan)
+    summarization_service: Optional[Any] = None
 
-def init_deps(base_client: EdmsBaseClient) -> AppDeps:
-    """Фабрика для создания и связывания всех зависимостей приложения.
 
-    Вызывается один раз при старте приложения (в lifespan).
+def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> AppDeps:
+    """Фабрика для создания и связывания всех зависимостей приложения."""
 
-    Args:
-        base_client: Сконфигурированный базовый HTTP-клиент для СЭД.
+    base_client = EdmsBaseClient(transport, edms_settings)
 
-    Returns:
-        Полностью сконфигурированный контейнер AppDeps.
-    """
     # ── Инициализация клиентов ────────────────────────────────────────────────
-    document_client = DocumentClient(base_client)
-    employee_client = EmployeeClient(base_client)
-    department_client = DepartmentClient(base_client)
-    group_client = GroupClient(base_client)
-    reference_client = ReferenceClient(base_client)
-    attachment_client = AttachmentClient(base_client)
-    access_grief_client = AccessGriefClient(base_client)
-    control_client = ControlClient(base_client)
-    document_creator_client = DocumentCreatorClient(base_client)
+    document_client = DocumentClient(transport, edms_settings)
+    employee_client = EmployeeClient(transport, edms_settings)
+    department_client = DepartmentClient(transport, edms_settings)
+    group_client = GroupClient(transport, edms_settings)
+    reference_client = ReferenceClient(transport, edms_settings)
+    attachment_client = AttachmentClient(transport, edms_settings)
+    access_grief_client = AccessGriefClient(transport, edms_settings)
+    control_client = ControlClient(transport, edms_settings)
+    document_creator_client = DocumentCreatorClient(transport, edms_settings)
+    task_client = TaskClient(transport, edms_settings)
 
     # ── Инициализация сервисов ───────────────────────────────────────────────
-    # Внедряем клиенты в сервисы согласно их конструкторам
+    entity_extractor = EntityExtractor()
+    query_refiner = QueryRefiner()
+    nlp_service = EDMSNaturalLanguageService(entity_extractor=entity_extractor, query_refiner=query_refiner)
+    enricher = DocumentEnricher(document_client)
+
+    document_service = DocumentService(
+        document_client=document_client,
+        document_enricher=enricher,
+        nlp_service=nlp_service,
+        redis=redis,
+        cache_ttl=settings.CACHE_TTL_SECONDS
+    )
+
     resolution_service = ResolutionService(
         employee_client=employee_client,
         department_client=department_client,
         group_client=group_client,
     )
 
-    file_processor_service = FileProcessorService()
-    nlp_service = EDMSNaturalLanguageService()
-
-    # Предполагаем, что остальные сервисы также принимают нужные клиенты
-    document_service = DocumentService(
-        document_client=document_client,
-        # document_enricher=DocumentEnricher(base_client), # Если внедряем обогатитель
-    )
-    appeal_extraction_service = AppealExtractionService()
+    appeal_extraction_service = AppealExtractionService(llm=llm)
     appeal_autofill_service = AppealAutofillService(
-        reference_client=reference_client,
-        # employee_client=employee_client,
+        doc_client=document_client,
+        attach_client=attachment_client,
+        ref_client=reference_client,
+        extraction_service=appeal_extraction_service,
+        chat_model=llm
     )
-    task_service = TaskService()
-    introduction_service = IntroductionService()
+    task_service = TaskService(resolution_service=resolution_service, task_client=task_client)
+    introduction_service = IntroductionService(resolution_service=resolution_service, transport=transport)
+    file_processor_service = FileProcessorService()
 
     return AppDeps(
+        transport=transport,
+        redis=redis,
         base_client=base_client,
         document_client=document_client,
         employee_client=employee_client,
@@ -114,6 +128,7 @@ def init_deps(base_client: EdmsBaseClient) -> AppDeps:
         access_grief_client=access_grief_client,
         control_client=control_client,
         document_creator_client=document_creator_client,
+        task_client=task_client,
         document_service=document_service,
         appeal_extraction_service=appeal_extraction_service,
         appeal_autofill_service=appeal_autofill_service,

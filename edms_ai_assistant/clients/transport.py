@@ -18,6 +18,7 @@ from edms_ai_assistant.core.exceptions import (
     EdmsConnectionError,
     EdmsNotFoundError,
     EdmsServerError,
+    EdmsValidationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,8 @@ class HttpxTransport(IAsyncTransport):
         if status_code in (401, 403):
             raise EdmsAuthenticationError("Authentication/Authorization failed", status_code=status_code,
                                           context=context)
+        if status_code == 422:
+            raise EdmsValidationError("Validation error", status_code=status_code, context=context)
         if 400 <= status_code < 500:
             raise EdmsClientError("Client error", status_code=status_code, context=context)
         if status_code >= 500:

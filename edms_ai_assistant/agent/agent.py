@@ -17,11 +17,11 @@ from edms_ai_assistant.agent.context import AgentRequest, ContextParams, is_vali
 from edms_ai_assistant.agent.escaping import xml_escape_text
 from edms_ai_assistant.agent.graph import GraphBuilder
 from edms_ai_assistant.agent.prompts import PromptBuilder
-from edms_ai_assistant.agent.repositories import IDocumentRepository
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.generated.resources_openapi import DocumentDto
+from edms_ai_assistant.domain.document import DocumentDto
 from edms_ai_assistant.services.nlp_service import UserIntent
-from edms_ai_assistant.tools import all_tools
+from edms_ai_assistant.tools import init_tools
+from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -42,29 +42,29 @@ class EdmsDocumentAgent:
 
     def __init__(
         self,
-        document_repo: IDocumentRepository | None = None,
+        deps: AppDeps,
         checkpointer: BaseCheckpointSaver | None = None,
         llm: Any = None,
     ) -> None:
-        self._document_repo = document_repo or _NullDocumentRepository()
+        """Инициализация агента с DI."""
+        self.deps = deps
         self._checkpointer: BaseCheckpointSaver = checkpointer or MemorySaver()
+        self._model = llm or self._init_model()
 
-        if llm is not None:
-            self._model = llm
-        else:
-            from edms_ai_assistant.llm import get_chat_model
-
-            self._model = get_chat_model()
-
+        self.tools = init_tools(deps, self._model)
         self._graph_builder = GraphBuilder(
-            tools=all_tools,
+            tools=self.tools,
             checkpointer=self._checkpointer,
         )
-        self._graph_builder.set_model(self._model.bind_tools(all_tools))
+        self._graph_builder.set_model(self._model.bind_tools(self.tools))
         self._graph = self._graph_builder.compile()
-        logger.info(
-            "EdmsDocumentAgent initialized: tools=%d", len(all_tools)
-        )
+
+        logger.info("EdmsDocumentAgent initialized with %d DI-powered tools.", len(self.tools))
+
+    @staticmethod
+    def _init_model() -> Any:
+        from edms_ai_assistant.llm import get_chat_model
+        return get_chat_model()
 
     @property
     def graph(self) -> Any:
@@ -76,18 +76,10 @@ class EdmsDocumentAgent:
         return self._checkpointer
 
     def refresh_model(self) -> None:
-        """Перепривязать тулы к новой инстансе LLM (после смены настроек).
-
-        Перекомпилировать граф не нужно — узел ``call_model`` читает ссылку
-        builder._model в рантайме (см. closure в ``GraphBuilder.compile``).
-        """
-        from edms_ai_assistant.llm import get_chat_model  # noqa: PLC0415
-
-        current = get_chat_model()
-        if current is not self._model:
-            self._model = current
-            self._graph_builder.set_model(current.bind_tools(all_tools))
-            logger.info("EdmsDocumentAgent: LLM model refreshed")
+        """Перепривязать тулы к новой инстансе LLM (после смены настроек)."""
+        self._model = self._init_model()
+        self._graph_builder.set_model(self._model.bind_tools(self.tools))
+        logger.info("EdmsDocumentAgent: LLM model refreshed")
 
     def build_initial_inputs(
         self,
@@ -100,12 +92,7 @@ class EdmsDocumentAgent:
         file_name: str | None,
         doc_info: DocumentDto | None = None,
     ) -> tuple[dict[str, Any], ContextParams]:
-        """Build graph inputs + context for a brand-new turn.
-
-        Mirrors the prompt/context construction performed by ``chat()`` but
-        without invoking the legacy ``OrchestrationLoop``. The returned
-        ``inputs`` should be passed to ``self.graph.astream(inputs, config)``.
-        """
+        """Build graph inputs + context for a brand-new turn."""
         request = AgentRequest(
             message=message,
             user_token=user_token,
@@ -120,20 +107,11 @@ class EdmsDocumentAgent:
         return inputs, context
 
     async def health_check(self) -> dict[str, bool]:
-        checks: dict[str, bool] = {}
-        try:
-            checks["llm"] = self._model is not None
-        except Exception:
-            checks["llm"] = False
-        try:
-            checks["graph"] = self._graph is not None
-        except Exception:
-            checks["graph"] = False
-        try:
-            checks["tools"] = bool(all_tools)
-        except Exception:
-            checks["tools"] = False
-        return checks
+        return {
+            "llm": self._model is not None,
+            "graph": self._graph is not None,
+            "tools": bool(self.tools)
+        }
 
     def _build_inputs(
         self,
@@ -143,10 +121,8 @@ class EdmsDocumentAgent:
     ) -> dict[str, Any]:
         semantic_xml = self._build_semantic_xml(doc_info=doc_info)
         fp = context.file_path
-        if fp and not is_valid_uuid(fp):
-            intent = UserIntent.FILE_ANALYSIS
-        else:
-            intent = UserIntent.UNKNOWN
+        intent = UserIntent.FILE_ANALYSIS if fp and not is_valid_uuid(fp) else UserIntent.UNKNOWN
+
         system_prompt = PromptBuilder.build(
             context=context,
             intent=intent,
@@ -194,28 +170,16 @@ class EdmsDocumentAgent:
             return xml_escape_text(str(value)) if value is not None else ""
 
         lines: list[str] = ["\n\n<semantic_context>"]
-        short_summary = getattr(doc_info, "shortSummary", None)
-        if short_summary:
-            lines.append(f"  <title>{esc(short_summary)}</title>")
-        reg_number = getattr(doc_info, "regNumber", None)
-        if reg_number:
-            lines.append(f"  <reg_number>{esc(reg_number)}</reg_number>")
-        status = getattr(doc_info, "status", None)
-        if status:
-            lines.append(f"  <status>{esc(status)}</status>")
-        category = getattr(doc_info, "docCategoryConstant", None)
-        if category:
-            lines.append(f"  <category>{esc(category)}</category>")
+
+        # Переход на snake_case аттрибуты Pydantic модели
+        if doc_info.short_summary:
+            lines.append(f"  <title>{esc(doc_info.short_summary)}</title>")
+        if doc_info.reg_number:
+            lines.append(f"  <reg_number>{esc(doc_info.reg_number)}</reg_number>")
+        if doc_info.status:
+            lines.append(f"  <status>{esc(doc_info.status)}</status>")
+        if doc_info.doc_category_const:
+            lines.append(f"  <category>{esc(doc_info.doc_category_const)}</category>")
+
         lines.append("</semantic_context>")
         return "\n".join(lines)
-
-
-class _NullDocumentRepository:
-    """Null-object implementation of IDocumentRepository.
-
-    Used as a default fallback when no repository is provided.
-    Method must remain an instance method to satisfy the Protocol signature.
-    """
-
-    async def get_document(self, _token: str, _doc_id: str) -> None:  # noqa: PLR6301
-        return None

@@ -1,5 +1,6 @@
 # edms_ai_assistant/core/exceptions.py
 
+from typing import Any
 from fastapi import HTTPException
 
 
@@ -43,7 +44,7 @@ class CacheException(AppException):
 class EdmsError(Exception):
     """Базовое исключение для всех ошибок интеграции с EDMS."""
 
-    def __init__(self, message: str, context: dict | None = None):
+    def __init__(self, message: str, context: dict[str, Any] | None = None):
         self.context = context or {}
         super().__init__(message)
 
@@ -56,7 +57,7 @@ class EdmsConnectionError(EdmsError):
 class EdmsClientError(EdmsError):
     """Ошибки 4xx (клиентские)."""
 
-    def __init__(self, message: str, status_code: int, context: dict | None = None):
+    def __init__(self, message: str, status_code: int, context: dict[str, Any] | None = None):
         self.status_code = status_code
         super().__init__(message, context)
 
@@ -71,10 +72,15 @@ class EdmsAuthenticationError(EdmsClientError):
     pass
 
 
+class EdmsValidationError(EdmsClientError):
+    """Ошибка валидации 422."""
+    pass
+
+
 class EdmsServerError(EdmsError):
     """Ошибки 5xx (серверные)."""
 
-    def __init__(self, message: str, status_code: int, context: dict | None = None):
+    def __init__(self, message: str, status_code: int, context: dict[str, Any] | None = None):
         self.status_code = status_code
         super().__init__(message, context)
 

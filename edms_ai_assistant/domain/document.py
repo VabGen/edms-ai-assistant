@@ -12,16 +12,19 @@ from edms_ai_assistant.domain.enums import (
     AttachmentType,
     CreateType,
     DocCategory,
+    DeclarantType,
     DocumentProcessType,
     DocumentStatus,
     JobStatus,
 )
+from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
 
 class DocumentTypeDto(EdmsBaseDto):
     id: int | None = None
     type_name: str | None = None
     doc_category_const: DocCategory | None = None
+    document_appeal: DocumentAppealDto | None = None
     active: bool | None = None
     object_type: str | None = Field(None, max_length=3, min_length=3, description="вид по таблицы 2 окб")
     create_date: datetime | None = None
@@ -48,6 +51,8 @@ class DocumentDto(EdmsBaseDto):
     on_control: bool | None = None
     create_type: CreateType | None = None
     doc_category_const: DocCategory | None = None
+    document_appeal: DocumentAppealDto | None = None
+    delivery_method_id: UUID | None = None
 
 
 class DocPermissionContainer(EdmsBaseDto):
@@ -141,3 +146,37 @@ class DocumentUserPropsDto(EdmsBaseDto):
 class DocumentFormField(EdmsBaseDto):
     id: str | None = None
     payload: dict[str, dict[str, Any]] | None = None
+
+
+class DocumentAppealDto(EdmsBaseDto):
+    id: UUID | None = None
+    declarant_type: DeclarantType | None = None
+    submission_form: SubmissionFormAppeal | None = None
+    fio_applicant: str | None = None
+    organization_name: str | None = None
+    correspondent_org_number: str | None = None
+    date_doc_correspondent_org: datetime | None = None
+    receipt_date: datetime | None = None
+    full_address: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    index: str | None = None
+    city_id: UUID | None = None
+    city_name: str | None = None
+    district_id: UUID | None = None
+    district_name: str | None = None
+    region_id: UUID | None = None
+    region_name: str | None = None
+    country_appeal_id: UUID | None = None
+    country_appeal_name: str | None = None
+    citizen_type_id: UUID | None = None
+    subject_id: UUID | None = None
+    correspondent_appeal_id: UUID | None = None
+    correspondent_appeal: str | None = None
+    collective: bool | None = None
+    anonymous: bool | None = None
+    reasonably: bool | None = None
+    solution_result_id: UUID | None = None
+    nomenclature_affair_id: UUID | None = None
+    index_date_cover_letter: str | None = None
+    review_progress: str | None = None
