@@ -9,6 +9,7 @@ from pydantic import Field
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import (
     GroupByStoragePeriod,
+    ReminderType,
     StoragePeriodType,
     YearPostfix,
 )
@@ -211,7 +212,6 @@ class TypicalControlPointDto(EdmsBaseDto):
 
 
 class RemindersRulesDto(EdmsBaseDto):
-    from edms_ai_assistant.domain.enums import ReminderType
     id: ReminderType | None = None
     organization_id: str | None = None
     cron: str | None = None
