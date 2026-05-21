@@ -87,6 +87,7 @@ export function WidgetChat() {
     handsFreeRef.current = prefs.voice.handsFreeEnabled
     const prevLoadingRef = useRef(false)
     const toggleMicRef = useRef<() => void>(() => undefined)
+    const needsReloadRef = useRef(false)
 
     const {
         isListening,
@@ -123,6 +124,20 @@ export function WidgetChat() {
     useEffect(() => {
         bottomRef.current?.scrollIntoView({behavior: 'smooth'})
     }, [messages])
+
+    useEffect(() => {
+        if (!loading && needsReloadRef.current) {
+            needsReloadRef.current = false
+
+            const t = setTimeout(() => {
+                void sendMessage('reloadActiveTab', undefined)
+            }, 1000)
+
+            return () => clearTimeout(t)
+        }
+
+        return undefined
+    }, [loading])
 
     const getOrCreateThreadId = useCallback(async (): Promise<string> => {
         if (threadId) return threadId
@@ -245,11 +260,11 @@ export function WidgetChat() {
                 const fields = m.compliance.fields.map((f) =>
                     keys.has(f.field_key)
                         ? {
-                              ...f,
-                              status: 'ok' as const,
-                              card_value: valueByKey.get(f.field_key) ?? f.card_value,
-                              correct_value: null,
-                          }
+                            ...f,
+                            status: 'ok' as const,
+                            card_value: valueByKey.get(f.field_key) ?? f.card_value,
+                            correct_value: null,
+                        }
                         : f,
                 )
                 const remainingMismatches = fields.filter((f) => f.status === 'mismatch').length
@@ -262,11 +277,7 @@ export function WidgetChat() {
                     },
                 }
             })
-            // Give the agent ~8s to call doc_update_field before reloading the page.
-            // This accommodates multi-field updates and heavy backend operations.
-            window.setTimeout(() => {
-                void sendMessage('reloadActiveTab', undefined)
-            }, 8000)
+            needsReloadRef.current = true
         },
         [updateMessage],
     )
@@ -298,7 +309,6 @@ export function WidgetChat() {
                                 file_path: filePath,
                             })
                         } catch {
-                            // non-fatal: cache may not exist yet
                         }
                     }
                     const res = await sendMessage('summarizeDocument', {
@@ -508,7 +518,7 @@ export function WidgetChat() {
                         <Paperclip size={15}/>
                     </button>
 
-                    <div className="w-px h-4 bg-zinc-200 mx-0.5 shrink-0" />
+                    <div className="w-px h-4 bg-zinc-200 mx-0.5 shrink-0"/>
 
                     <input
                         ref={fileInputRef}

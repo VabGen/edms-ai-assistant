@@ -45,10 +45,29 @@ function registerSsePort(): void {
 
         const ctrl = new AbortController()
         let started = false
+        let keepAliveInterval: ReturnType<typeof setInterval> | null = null
+
+        function startKeepAlive() {
+            if (keepAliveInterval) clearInterval(keepAliveInterval)
+            keepAliveInterval = setInterval(() => {
+                try {
+                    port.postMessage({type: 'ping'})
+                } catch (e) {
+                    if (keepAliveInterval) clearInterval(keepAliveInterval)
+                }
+            }, 20000)
+        }
+
+        port.onDisconnect.addListener(() => {
+            ctrl.abort()
+            if (keepAliveInterval) clearInterval(keepAliveInterval)
+        })
 
         port.onMessage.addListener(async (payload: unknown) => {
             if (started) return
             started = true
+
+            startKeepAlive()
 
             const p = payload as Record<string, any>
             const msgLower = (p.message || '').trim().toLowerCase()
@@ -140,6 +159,15 @@ function registerSsePort(): void {
                     for (const part of parts) {
                         if (!part.trim()) continue
 
+                        // 🔥 Обработка SSE-комментариев (Keep-Alive от Nginx/Python)
+                        if (part.startsWith(':')) {
+                            try {
+                                port.postMessage({type: 'ping'})
+                            } catch {
+                            }
+                            continue
+                        }
+
                         let eventType = 'message'
                         let dataStr = ''
 
@@ -168,10 +196,6 @@ function registerSsePort(): void {
             } finally {
                 port.disconnect()
             }
-        })
-
-        port.onDisconnect.addListener(() => {
-            ctrl.abort()
         })
     })
 }

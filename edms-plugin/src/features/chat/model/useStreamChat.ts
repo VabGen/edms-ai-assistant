@@ -82,7 +82,7 @@ export function useStreamChat() {
 
             port.onMessage.addListener((raw: unknown) => {
                 const msg = raw as { type: string; data?: unknown; error?: string }
-
+                if (msg.type === 'ping') return;
                 if (msg.type === 'sse_event' && msg.data) {
                     const event = parseSseEvent(msg.data)
                     if (event) {

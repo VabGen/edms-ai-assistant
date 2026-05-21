@@ -60,9 +60,11 @@ def extract_navigate_url_from_tool_message(msg: ToolMessage) -> str | None:
          This covers ``create_document_from_file`` and similar tools that
          return ``{"status": "success", "document_id": "…"}``.
     """
+    if getattr(msg, "name", None) == "doc_update_field":
+        return None
+
     data = _parse_tool_content(msg.content)
     if not data or not isinstance(data, dict):
-        # Fallback: regex over raw string content
         if isinstance(msg.content, str):
             match = re.search(
                 r'"navigate_url"\s*:\s*"(/document-form/[^"]+)"',
@@ -76,10 +78,10 @@ def extract_navigate_url_from_tool_message(msg: ToolMessage) -> str | None:
         return data["navigate_url"]
 
     if (
-        data.get("status") == "success"
-        and data.get("document_id")
-        and "overall" not in data
-        and "fields" not in data
+            data.get("status") == "success"
+            and data.get("document_id")
+            and "overall" not in data
+            and "fields" not in data
     ):
         doc_id = data["document_id"]
         return f"/document-form/{doc_id}"

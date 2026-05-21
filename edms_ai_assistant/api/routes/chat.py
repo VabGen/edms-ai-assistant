@@ -109,8 +109,8 @@ class ChatStateResponse(BaseModel):
 # ── Internal helpers ──────────────────────────────────────────────────────
 
 async def _ensure_clean_state(
-    agent: EdmsDocumentAgent,
-    config: dict[str, Any],
+        agent: EdmsDocumentAgent,
+        config: dict[str, Any],
 ) -> None:
     """Repair the graph state if it contains dangling tool_calls.
 
@@ -163,6 +163,7 @@ async def _ensure_clean_state(
         "Repaired dangling tool calls: %s",
         [tc["id"] for tc in last_msg.tool_calls],
     )
+
 
 def _make_config(
         thread_id: str,
@@ -244,10 +245,10 @@ async def _validate_resume_kind(
 # ── Streaming core ────────────────────────────────────────────────────────
 
 async def _stream_graph_events(
-    agent: EdmsDocumentAgent,
-    payload: Any,
-    config: dict[str, Any],
-    thread_id: str,
+        agent: EdmsDocumentAgent,
+        payload: Any,
+        config: dict[str, Any],
+        thread_id: str,
 ) -> AsyncIterator[str]:
     """Drive graph.astream and translate events into SSE.
 
@@ -256,144 +257,180 @@ async def _stream_graph_events(
         never gets stuck in loading state.
       - Handles GraphInterrupt, CancelledError, and unexpected exceptions.
       - Sends ui_component events for compliance/navigate ToolMessages.
+      - Sends SSE_KEEPALIVE every 15s if the stream is silent (e.g. long tool run).
     """
+    queue = asyncio.Queue()
     compliance_sent = False
     navigate_sent = False
-    sent_done = False
+
+    async def producer():
+        try:
+            async for mode, chunk in agent.graph.astream(
+                    payload,
+                    config=config,
+                    stream_mode=["updates", "custom"],
+            ):
+                await queue.put(("chunk", mode, chunk))
+        except GraphInterrupt as exc:
+            await queue.put(("interrupt", exc))
+        except asyncio.CancelledError:
+            await queue.put(("cancelled", None))
+        except Exception as exc:
+            await queue.put(("error", exc))
+        finally:
+            await queue.put(None)
+
+    producer_task = asyncio.create_task(producer())
 
     try:
-        async for mode, chunk in agent.graph.astream(
-            payload,
-            config=config,
-            stream_mode=["updates", "custom"],
-        ):
-            # Send keepalive to prevent timeouts during long tool execution (e.g. OCR)
-            yield SSE_KEEPALIVE.decode()
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=15.0)
 
-            # ── Custom channel: UIDirective ──────────────────────────────
-            if mode == "custom":
-                if isinstance(chunk, dict) and "ui" in chunk:
-                    directive = chunk["ui"]
+                if item is None:
+                    yield format_sse("done", {"thread_id": thread_id, "paused": False})
+                    return
+
+                item_type = item[0]
+
+                if item_type == "interrupt":
+                    exc = item[1]
+                    for itr in getattr(exc, "args", []):
+                        if isinstance(itr, Interrupt):
+                            yield format_sse(
+                                "interrupt",
+                                {
+                                    "interrupt_id": getattr(itr, "id", None),
+                                    "thread_id": thread_id,
+                                    "payload": itr.value,
+                                },
+                            )
+                    yield format_sse("done", {"thread_id": thread_id, "paused": True})
+                    return
+
+                # --- Обработка отмены (Stop) ---
+                if item_type == "cancelled":
+                    logger.info("Stream cancelled for thread=%s", thread_id)
+                    yield format_sse("done", {"thread_id": thread_id, "paused": False})
+                    return
+
+                if item_type == "error":
+                    exc = item[1]
+                    logger.exception("chat stream failed for thread=%s", thread_id)
                     yield format_sse(
-                        "ui_update",
-                        {
-                            "directive_id": directive.get("directive_id"),
-                            "thread_id": thread_id,
-                            "directive": directive,
-                        },
+                        "error",
+                        {"code": "INTERNAL", "message": str(exc), "thread_id": thread_id},
                     )
-                continue
+                    return
 
-            # ── Updates channel ──────────────────────────────────────────
-            if mode != "updates" or not isinstance(chunk, dict):
-                continue
+                mode, chunk = item[1], item[2]
 
-            # ── Interrupts ──────────────────────────────────────────────
-            interrupts = chunk.get("__interrupt__")
-            if interrupts:
-                for itr in interrupts:
-                    value = getattr(itr, "value", itr)
-                    interrupt_id = getattr(itr, "id", None)
-                    yield format_sse(
-                        "interrupt",
-                        {
-                            "interrupt_id": interrupt_id,
-                            "thread_id": thread_id,
-                            "payload": value,
-                        },
-                    )
-                yield format_sse("done", {"thread_id": thread_id, "paused": True})
-                return
-
-            # ── Scan ALL nodes for ToolMessages with structured data ────
-            for node_name, node_update in chunk.items():
-                if node_name == "__interrupt__":
-                    continue
-                if not isinstance(node_update, dict):
+                # ── Custom channel: UIDirective ──────────────────────────────
+                if mode == "custom":
+                    if isinstance(chunk, dict) and "ui" in chunk:
+                        directive = chunk["ui"]
+                        yield format_sse(
+                            "ui_update",
+                            {
+                                "directive_id": directive.get("directive_id"),
+                                "thread_id": thread_id,
+                                "directive": directive,
+                            },
+                        )
                     continue
 
-                messages = node_update.get("messages", []) or []
-                for msg in messages:
-                    if not isinstance(msg, ToolMessage):
+                # ── Updates channel ──────────────────────────────────────────
+                if mode != "updates" or not isinstance(chunk, dict):
+                    continue
+
+                # ── Interrupts inside updates ────────────────────────────────
+                interrupts = chunk.get("__interrupt__")
+                if interrupts:
+                    for itr in interrupts:
+                        value = getattr(itr, "value", itr)
+                        interrupt_id = getattr(itr, "id", None)
+                        yield format_sse(
+                            "interrupt",
+                            {
+                                "interrupt_id": interrupt_id,
+                                "thread_id": thread_id,
+                                "payload": value,
+                            },
+                        )
+                    yield format_sse("done", {"thread_id": thread_id, "paused": True})
+                    return
+
+                # ── Scan ALL nodes for ToolMessages with structured data ────
+                for node_name, node_update in chunk.items():
+                    if node_name == "__interrupt__":
+                        continue
+                    if not isinstance(node_update, dict):
                         continue
 
-                    logger.debug(
-                        "ToolMessage from node=%s name=%s content_type=%s",
-                        node_name,
-                        getattr(msg, "name", "?"),
-                        type(msg.content).__name__,
-                    )
+                    messages = node_update.get("messages", []) or []
+                    for msg in messages:
+                        if not isinstance(msg, ToolMessage):
+                            continue
 
-                    # Compliance data
-                    if not compliance_sent:
-                        compliance_data = extract_compliance_from_tool_message(msg)
-                        if compliance_data:
-                            yield build_compliance_sse_event(compliance_data)
-                            compliance_sent = True
-                            logger.info(
-                                "Compliance UI event sent: overall=%s fields=%d",
-                                compliance_data.get("overall"),
-                                len(compliance_data.get("fields", [])),
-                            )
+                        logger.debug(
+                            "ToolMessage from node=%s name=%s content_type=%s",
+                            node_name,
+                            getattr(msg, "name", "?"),
+                            type(msg.content).__name__,
+                        )
 
-                    # Navigate URL
-                    if not navigate_sent:
-                        nav_url = extract_navigate_url_from_tool_message(msg)
-                        if nav_url:
-                            yield build_navigate_sse_event(nav_url)
-                            navigate_sent = True
-                            logger.info("Navigate UI event sent: %s", nav_url)
-                        else:
-                            data = _parse_tool_content(msg.content)
-                            if isinstance(data, dict) and data.get("status") == "success":
-                                logger.debug(
-                                    "ToolMessage success but no navigate derived: "
-                                    "keys=%s document_id=%s has_overall=%s has_fields=%s",
-                                    list(data.keys()),
-                                    data.get("document_id"),
-                                    "overall" in data,
-                                    "fields" in data,
+                        # Compliance data
+                        if not compliance_sent:
+                            compliance_data = extract_compliance_from_tool_message(msg)
+                            if compliance_data:
+                                yield build_compliance_sse_event(compliance_data)
+                                compliance_sent = True
+                                logger.info(
+                                    "Compliance UI event sent: overall=%s fields=%d",
+                                    compliance_data.get("overall"),
+                                    len(compliance_data.get("fields", [])),
                                 )
 
-            # ── Agent messages (text responses) ─────────────────────────
-            agent_update = chunk.get("agent")
-            if isinstance(agent_update, dict):
-                for msg in agent_update.get("messages", []) or []:
-                    rendered = _serialise_message(msg)
-                    if rendered is not None and rendered["role"] == "assistant":
-                        logger.debug(
-                            "Agent message sent: content_len=%d",
-                            len(rendered.get("content", "")),
-                        )
-                        yield format_sse("message", rendered)
+                        # Navigate URL
+                        if not navigate_sent:
+                            nav_url = extract_navigate_url_from_tool_message(msg)
+                            if nav_url:
+                                yield build_navigate_sse_event(nav_url)
+                                navigate_sent = True
+                                logger.info("Navigate UI event sent: %s", nav_url)
+                            else:
+                                data = _parse_tool_content(msg.content)
+                                if isinstance(data, dict) and data.get("status") == "success":
+                                    logger.debug(
+                                        "ToolMessage success but no navigate derived: "
+                                        "keys=%s document_id=%s has_overall=%s has_fields=%s",
+                                        list(data.keys()),
+                                        data.get("document_id"),
+                                        "overall" in data,
+                                        "fields" in data,
+                                    )
 
-    except GraphInterrupt as exc:
-        for itr in getattr(exc, "args", []):
-            if isinstance(itr, Interrupt):
-                yield format_sse(
-                    "interrupt",
-                    {
-                        "interrupt_id": getattr(itr, "id", None),
-                        "thread_id": thread_id,
-                        "payload": itr.value,
-                    },
-                )
-        yield format_sse("done", {"thread_id": thread_id, "paused": True})
-        return
-    except asyncio.CancelledError:
-        # Stream was aborted by user clicking Stop — send done so frontend resets
-        logger.info("Stream cancelled for thread=%s", thread_id)
-        yield format_sse("done", {"thread_id": thread_id, "paused": False})
-        return
-    except Exception as exc:
-        logger.exception("chat stream failed for thread=%s", thread_id)
-        yield format_sse(
-            "error",
-            {"code": "INTERNAL", "message": str(exc), "thread_id": thread_id},
-        )
-        return
+                # ── Agent messages (text responses) ─────────────────────────
+                agent_update = chunk.get("agent")
+                if isinstance(agent_update, dict):
+                    for msg in agent_update.get("messages", []) or []:
+                        rendered = _serialise_message(msg)
+                        if rendered is not None and rendered["role"] == "assistant":
+                            logger.debug(
+                                "Agent message sent: content_len=%d",
+                                len(rendered.get("content", "")),
+                            )
+                            yield format_sse("message", rendered)
 
-    yield format_sse("done", {"thread_id": thread_id, "paused": False})
+            except asyncio.TimeoutError:
+                yield SSE_KEEPALIVE.decode()
+
+    finally:
+        producer_task.cancel()
+        try:
+            await producer_task
+        except asyncio.CancelledError:
+            pass
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
