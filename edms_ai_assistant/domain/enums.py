@@ -297,3 +297,21 @@ class ReminderType(StrEnum):  # Id в RemindersRulesDto
     INACTION_ACCEPTANCE_INVENTORY = "INACTION_ACCEPTANCE_INVENTORY"
     DEADLINE_CONTRACT_DURATION_END = "DEADLINE_CONTRACT_DURATION_END"
     DEADLINE_EXECUTION_DOCUMENT_CONTROL_POINT = "DEADLINE_EXECUTION_DOCUMENT_CONTROL_POINT"
+
+
+class ContentType(StrEnum):
+    JSON = "application/json"
+    TEXT = "text/plain"
+    PDF = "application/pdf"
+
+
+class RecognitionFileTypeEnum(StrEnum):
+    PDF = "PDF"
+    JPG = "JPG"
+    PNG = "PNG"
+
+
+class RecognitionLanguageEnum(StrEnum):
+    RUS = "rus"
+    ENG = "eng"
+    BEL = "bel"
