@@ -78,6 +78,9 @@ export function WidgetChat() {
     const [isFocused, setIsFocused] = useState(false)
     const [pendingResume, setPendingResume] = useState<ResumeValue | null>(null)
 
+    // Флаг для принудительного отключения зависшего микрофона
+    const [isMicForceStopped, setIsMicForceStopped] = useState(false)
+
     const bottomRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -109,8 +112,11 @@ export function WidgetChat() {
         },
     })
 
+    // Виртуальное состояние: true только если API слушает И мы не глушим его принудительно
+    const isMicActive = isListening && !isMicForceStopped
+
     const displayInput =
-        isListening && interimTranscript
+        isMicActive && interimTranscript
             ? input + (input ? ' ' : '') + interimTranscript
             : input
 
@@ -153,6 +159,7 @@ export function WidgetChat() {
         if ((!text && !attachedFile) || loading) return
 
         stopMic()
+        setIsMicForceStopped(false) // Сбрасываем блок при отправке
         setInput('')
 
         const token = getAuthToken()
@@ -220,6 +227,8 @@ export function WidgetChat() {
         streamHandleRef.current?.abort()
         streamHandleRef.current = null
         abort()
+        stopMic()
+        setIsMicForceStopped(false) // Сброс при остановке генерации
     }, [abort])
 
     const handleInterruptReply = useCallback(
@@ -532,38 +541,63 @@ export function WidgetChat() {
                         ref={textareaRef}
                         rows={1}
                         value={displayInput}
-                        onChange={(e) => !isListening && setInput(e.target.value)}
+                        onChange={(e) => {
+                            // Если микрофон завис или слушает, а юзер начал печатать — глушим его
+                            if (isMicActive) {
+                                stopMic()
+                                setIsMicForceStopped(true) // Принудительно выходим из режима слушания в UI
+                            }
+                            setInput(e.target.value)
+                        }}
                         onKeyDown={handleKeyDown}
                         onFocus={() => setIsFocused(true)}
                         onBlur={() => setIsFocused(false)}
                         placeholder={
-                            isListening
+                            isMicActive
                                 ? 'Слушаю…'
                                 : attachedFile
                                     ? 'Комментарий...'
                                     : 'Спросите помощника...'
                         }
-                        disabled={loading && !isListening}
+                        disabled={loading && !isMicActive}
                         className={cn(
                             'flex-1 resize-none bg-transparent text-slate-900 placeholder:text-slate-400',
                             'focus:outline-none text-[13px] leading-snug py-1 min-h-[22px] max-h-[120px] overflow-y-auto text-center scrollbar-none',
-                            isListening && 'text-indigo-700 font-medium',
+                            isMicActive && 'text-indigo-700 font-medium',
                         )}
                     />
 
                     {isSpeechSupported && (
                         <button
                             type="button"
-                            onClick={toggleMic}
-                            title={isListening ? 'Остановить' : 'Голосовой ввод'}
+                            onClick={() => {
+                                if (isMicActive) {
+                                    // Если UI показывает, что слушаем — выключаем
+                                    stopMic()
+                                    setIsMicForceStopped(true)
+                                } else {
+                                    // Если UI показывает, что не слушаем — включаем
+                                    setIsMicForceStopped(false)
+
+                                    // Если API завис (isListening=true), сначала сбрасываем его
+                                    if (isListening) {
+                                        stopMic()
+                                        // Даём браузеру 100мс на очистку, затем запускаем
+                                        setTimeout(() => toggleMic(), 100)
+                                    } else {
+                                        toggleMic()
+                                    }
+                                }
+                            }}
+                            title={isMicActive ? 'Остановить' : 'Голосовой ввод'}
                             className={cn(
                                 'shrink-0 w-8 h-8 flex items-center justify-center rounded-lg transition-all',
-                                isListening
+                                isMicActive
                                     ? 'text-indigo-500 bg-indigo-50'
                                     : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50',
                             )}
                         >
-                            {isListening ? <SoundWave active/> : <Mic size={16}/>}
+                            {isMicActive ? <SoundWave active/> : <Mic size={16}/>}
                         </button>
                     )}
 

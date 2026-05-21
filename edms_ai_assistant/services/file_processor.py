@@ -62,7 +62,7 @@ def _find_tesseract_binary() -> str | None:
     logger.warning("Tesseract binary not found anywhere")
     return None
 
-
+# $env:Path += ";C:\Program Files\Tesseract-OCR"
 def _find_tessdata_prefix() -> str | None:
     """Определяет путь к tessdata для Tesseract OCR."""
     # 1. Явная переменная окружения
