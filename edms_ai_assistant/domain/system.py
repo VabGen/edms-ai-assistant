@@ -17,7 +17,11 @@ from edms_ai_assistant.domain.enums import (
     ReportColumn,
     ReportType,
 )
-from edms_ai_assistant.domain.document import AttachmentDto
+
+
+class AttachmentDto(EdmsBaseDto):
+    name: str | None = Field(None, description="Наименование вложенного файла")
+    size: int | None = Field(None, description="Размер вложенного файла")
 
 
 class TemplateDto(EdmsBaseDto):

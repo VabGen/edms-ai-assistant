@@ -61,6 +61,7 @@ class AppDeps(BaseModel):
     introduction_service: IntroductionService
     file_processor_service: FileProcessorService
     nlp_service: EDMSNaturalLanguageService
+    chat_model: Any
 
     # Опциональные сервисы (инициализируемые позже в lifespan)
     summarization_service: Optional[Any] = None
@@ -137,4 +138,5 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
         introduction_service=introduction_service,
         file_processor_service=file_processor_service,
         nlp_service=nlp_service,
+        chat_model=llm,
     )

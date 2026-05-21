@@ -19,7 +19,7 @@ from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.clients.department_client import DepartmentClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.core.deps import AppDeps
-from edms_ai_assistant.generated.resources_openapi import EmployeeDto
+from edms_ai_assistant.domain.employee import EmployeeDto
 from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,

@@ -35,6 +35,14 @@ class AttachmentDto(EdmsBaseDto):
     size: int | None = Field(None, description="Размер вложенного файла")
 
 
+class AttachmentDocumentDto(EdmsBaseDto):
+    id: UUID | None = None
+    name: str | None = None
+    size: int | None = None
+    attachment_document_type: AttachmentDocumentType | None = None
+    upload_date: datetime | None = None
+
+
 class DocumentDto(EdmsBaseDto):
     id: UUID | None = None
     name: str | None = None
@@ -53,6 +61,7 @@ class DocumentDto(EdmsBaseDto):
     doc_category_const: DocCategory | None = None
     document_appeal: DocumentAppealDto | None = None
     delivery_method_id: UUID | None = None
+    attachment_document: list[AttachmentDocumentDto] | None = None
 
 
 class DocPermissionContainer(EdmsBaseDto):

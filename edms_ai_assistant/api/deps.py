@@ -13,6 +13,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+from edms_ai_assistant.core.deps import AppDeps
 
 UPLOAD_DIR: Path = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 
@@ -36,6 +37,17 @@ def get_agent(request: Request) -> EdmsDocumentAgent:
 
 
 AgentDep = Annotated[EdmsDocumentAgent, Depends(get_agent)]
+
+
+def get_deps(request: Request) -> AppDeps:
+    """FastAPI dependency: return the AppDeps container from app.state."""
+    deps = getattr(request.app.state, "deps", None)
+    if deps is None:
+        raise HTTPException(status_code=503, detail="Зависимости приложения не инициализированы.")
+    return deps
+
+
+DepsDep = Annotated[AppDeps, Depends(get_deps)]
 
 
 # ── Auth Dependencies ────────────────────────────────────────────────────────

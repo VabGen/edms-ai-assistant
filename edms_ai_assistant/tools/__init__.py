@@ -24,6 +24,7 @@ from edms_ai_assistant.tools.file_compare_tool import create_file_compare_tool
 from edms_ai_assistant.tools.access_grief_tool import create_access_grief_tool
 from edms_ai_assistant.tools.employee_search import create_employee_search_tool
 from edms_ai_assistant.tools.appeal_autofill import create_appeal_autofill_tool
+from edms_ai_assistant.tools.ask_user_select import ask_user_to_select
 
 if TYPE_CHECKING:
     from edms_ai_assistant.core.deps import AppDeps
@@ -60,6 +61,7 @@ def init_tools(deps: AppDeps, llm: Any) -> list[StructuredTool]:
         create_access_grief_tool(deps.access_grief_client, deps.employee_client),
         create_employee_search_tool(deps),
         create_appeal_autofill_tool(deps),
+        ask_user_to_select,
     ]
 
     logger.info("Initialized %d tools with DI factories.", len(tools))
