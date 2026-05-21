@@ -13,10 +13,11 @@ import {useApplyPreferences} from '@features/settings/model/useApplyPreferences'
 import {sendMessage} from '@shared/api/messaging'
 import {getAuthToken} from '@/shared/lib/auth'
 import {extractDocIdFromUrl} from '@/shared/lib/url'
+import {detectStructuredOutput} from '@/features/chat/lib/detectStructuredOutput'
 import {toast} from '@/shared/lib/toast'
 import {ChatMessage} from '@/shared/ui/ChatMessage'
 import {InterruptRenderer} from '@/shared/ui/InterruptRenderer'
-import {ComplianceResult} from '@/shared/ui/ComplianceResult'
+import {ComplianceCheckResult} from '@/features/chat/ui/structured/ComplianceCheckResult'
 import {cn} from '@shared/lib/cn'
 import type {ChatMessage as ChatMessageType} from '@entities/message/model/types'
 import type {InterruptPayload, ResumeValue} from '@entities/interrupt/model/types'
@@ -447,7 +448,6 @@ export function WidgetChat() {
                         <MessageRow
                             key={msg.id}
                             msg={msg}
-                            threadId={threadId}
                             onInterruptReply={handleInterruptReply}
                             onFieldFixed={handleFieldFixed}
                             onAllFixed={handleAllFixed}
@@ -619,7 +619,6 @@ export function WidgetChat() {
 
 interface MessageRowProps {
     msg: ChatMessageType
-    threadId: string | null
     onInterruptReply: (resume: ResumeValue) => void
     onFieldFixed: (messageId: string, fieldKey: string, newValue: string) => void
     onAllFixed: (
@@ -642,7 +641,6 @@ const SUMMARY_TYPE_LABELS: Record<string, string> = {
 
 function MessageRow({
                         msg,
-                        threadId,
                         onInterruptReply,
                         onFieldFixed,
                         onAllFixed,
@@ -673,26 +671,18 @@ function MessageRow({
             <div className={cn(msg.role === 'user' ? 'max-w-[60%]' : 'max-w-full')}>
                 {msg.content && (
                     <ChatMessage
+                        id={msg.id}
                         content={msg.content}
                         role={msg.role}
                         timestamp={msg.timestamp}
                         isError={msg.isError === true}
                         onDocumentClick={onDocumentClick}
                         onAttachmentClick={onAttachmentClick}
+                        compliance={msg.compliance}
+                        refreshMeta={msg.refreshMeta}
                     />
                 )}
 
-                {msg.compliance != null && msg.role === 'assistant' && (
-                    <div style={{marginTop: msg.content ? 8 : 0}}>
-                        <ComplianceResult
-                            data={msg.compliance}
-                            threadId={threadId}
-                            refreshMeta={msg.refreshMeta}
-                            onFieldFixed={handleFieldFixed}
-                            onAllFixed={handleAllFixed}
-                        />
-                    </div>
-                )}
 
                 {msg.refreshMeta != null && msg.compliance == null && msg.role === 'assistant' && refreshLabel && (
                     <div style={{marginTop: msg.content ? 6 : 0}}>
