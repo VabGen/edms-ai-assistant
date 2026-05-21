@@ -1,131 +1,238 @@
-import { FileText, XCircle, AlertTriangle, CheckCircle, Info, Lightbulb } from 'lucide-react'
-import type { ComplianceData, ComplianceField } from '@/entities/message/model/types'
-import { Card, CardHeader, CardTitle, IconBox } from '@shared/ui/primitives'
-import { cn } from '@shared/lib/cn'
+import {useState, memo, useCallback} from 'react'
+import {CheckCircle, AlertTriangle, HelpCircle, RefreshCw, Zap, Lightbulb, Info, XCircle} from 'lucide-react'
+import type {ComplianceData, ComplianceField, RefreshMeta} from '@/entities/message/model/types'
+import {Card, CardHeader, CardTitle, IconBox} from '@shared/ui/primitives'
+import {cn} from '@shared/lib/cn'
 
-export function ComplianceCheckResult({data}: { data: ComplianceData }) {
+interface Props {
+    data: ComplianceData
+    refreshMeta?: RefreshMeta | null | undefined
+    onFieldFixed?: (fieldKey: string, newValue: string) => void
+    onAllFixed?: (fixedFields: Array<{ fieldKey: string; label: string; newValue: string }>) => void
+    onRefreshDocument?: () => void
+    onSendMessage?: (text: string) => void
+}
+
+const STATUS_CFG: Record<string, any> = {
+    ok: {
+        Icon: CheckCircle,
+        variant: 'success',
+        label: 'OK',
+    },
+    mismatch: {
+        Icon: XCircle,
+        variant: 'error',
+        label: 'Расхождение',
+    },
+    not_found: {
+        Icon: HelpCircle,
+        variant: 'zinc',
+        label: 'Не в файле',
+    },
+    missing: {
+        Icon: HelpCircle,
+        variant: 'zinc',
+        label: 'Отсутствует',
+    },
+    warning: {
+        Icon: AlertTriangle,
+        variant: 'warning',
+        label: 'Внимание',
+    },
+}
+
+interface FieldCardProps {
+    field: ComplianceField
+    onFixed?: ((fieldKey: string, newValue: string) => void) | undefined
+    disabled: boolean
+}
+
+const FieldCard = memo(({field, onFixed, disabled}: FieldCardProps) => {
+    const cfg = STATUS_CFG[field.status] || STATUS_CFG.not_found
+    const {Icon} = cfg
+    const canFix = field.status === 'mismatch' && !!field.correct_value && !disabled && !!onFixed
+
+    const handleClick = useCallback(() => {
+        if (!canFix || !field.correct_value || !onFixed) return
+        onFixed(field.field_key, field.correct_value)
+    }, [canFix, field.field_key, field.correct_value, onFixed])
+
+    return (
+        <div
+          onClick={handleClick}
+          className={cn(
+            "p-4 transition-all group relative",
+            canFix ? "cursor-pointer hover:bg-zinc-50 " : "cursor-default"
+          )}
+        >
+            <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2.5">
+                    <IconBox icon={Icon} variant={cfg.variant} size="sm" />
+                    <span className="text-[13px] font-bold text-zinc-800  leading-none">{field.label}</span>
+                </div>
+                <span className={cn(
+                    "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
+                    cfg.variant === 'success' && "bg-emerald-50 text-emerald-600",
+                    cfg.variant === 'error' && "bg-rose-50 text-rose-600",
+                    cfg.variant === 'warning' && "bg-amber-50 text-amber-600",
+                    cfg.variant === 'zinc' && "bg-zinc-100 text-zinc-500",
+                )}>
+                    {cfg.label}
+                </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div className="bg-zinc-50  p-2.5 rounded-lg border border-zinc-100 ">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В карточке</div>
+                    <div className="text-[12px] font-medium text-zinc-700  break-words leading-relaxed">{field.card_value}</div>
+                </div>
+                <div className={cn(
+                    "p-2.5 rounded-lg border",
+                    field.status === 'mismatch' ? "bg-rose-50/30 border-rose-100/50" : "bg-zinc-50  border-zinc-100 "
+                )}>
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В файле</div>
+                    <div className={cn(
+                        "text-[12px] font-bold break-words leading-relaxed",
+                        field.status === 'mismatch' ? "text-rose-600" : "text-zinc-700 ",
+                        !field.correct_value && "text-zinc-300 italic font-normal"
+                    )}>
+                        {field.correct_value || '—'}
+                    </div>
+                </div>
+            </div>
+
+            {canFix && (
+                <div className="mt-3 flex items-center gap-1.5 text-[10px] font-bold text-blue-500 uppercase tracking-tight animate-pulse">
+                    <Zap size={10} /> Нажмите, чтобы исправить
+                </div>
+            )}
+
+            {field.recommendation && (
+                <div className="mt-3 p-3 bg-amber-50/50 border border-amber-100 rounded-xl text-[12px] text-amber-700 flex gap-2.5 items-start font-medium leading-relaxed">
+                    <Lightbulb size={14} className="shrink-0 mt-0.5 text-amber-500" />
+                    {field.recommendation}
+                </div>
+            )}
+        </div>
+    )
+})
+FieldCard.displayName = 'FieldCard'
+
+export const ComplianceCheckResult = memo(({
+                                          data,
+                                          refreshMeta,
+                                          onFieldFixed,
+                                          onAllFixed,
+                                          onRefreshDocument,
+                                          onSendMessage
+                                      }: Props) => {
+    const [fixingAll, setFixingAll] = useState(false)
     const isError = data.overall === 'has_mismatches'
     const isWarning = data.overall === 'cannot_verify'
 
-    const statusVariant = isError ? 'error' as const : (isWarning ? 'warning' as const : 'success' as const)
-    const StatusIcon = isError ? XCircle : (isWarning ? AlertTriangle : CheckCircle)
-    const statusText = isError
-        ? 'Найдены расхождения'
-        : (isWarning ? 'Требуется проверка' : 'Проверка пройдена')
+    const StatusIcon = isError ? AlertTriangle : (isWarning ? HelpCircle : CheckCircle)
+    const statusVariant = isError ? 'warning' : (isWarning ? 'primary' : 'success')
+    const statusTitle = isError ? 'Найдены расхождения' : (isWarning ? 'Частичная проверка' : 'Всё заполнено корректно')
 
-    const okCount = data.fields.filter((f: ComplianceField) => f.status === 'ok').length
-    const errCount = data.fields.filter((f: ComplianceField) => f.status === 'mismatch').length
-    const naCount = data.fields.filter((f: ComplianceField) => f.status === 'not_found').length
+    const mismatchFields = data.fields.filter(f => f.status === 'mismatch')
+    const otherFields = data.fields.filter(f => f.status !== 'mismatch')
+    const pendingMismatches = mismatchFields.filter(f => !!f.correct_value)
+
+    const okCount = data.fields.filter(f => f.status === 'ok').length
+    const errCount = mismatchFields.length
+    const naCount = data.fields.filter(f => f.status === 'not_found' || f.status === 'missing').length
+
+    const handleFixAll = useCallback(() => {
+        if (fixingAll || pendingMismatches.length === 0 || !onAllFixed) return
+        setFixingAll(true)
+        const fixedFields = pendingMismatches.map(field => ({
+            fieldKey: field.field_key,
+            label: field.label,
+            newValue: field.correct_value!
+        }))
+        onAllFixed(fixedFields)
+        setTimeout(() => setFixingAll(false), 800)
+    }, [fixingAll, pendingMismatches, onAllFixed])
+
+    const handleRefresh = useCallback(() => {
+        if (onRefreshDocument) onRefreshDocument()
+        if (onSendMessage) onSendMessage('Перепроверь соответствие файла и карточки документа')
+    }, [onRefreshDocument, onSendMessage])
 
     return (
-        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60 ">
+        <Card className="p-0 overflow-hidden shadow-sm border-zinc-200/60  mt-2">
             <CardHeader className={cn(
-                "flex-row items-start gap-4 p-4 space-y-0 border-b",
-                isError && "bg-rose-50/50  border-rose-100/50 ",
-                isWarning && "bg-amber-50/50  border-amber-100/50 ",
-                !isError && !isWarning && "bg-emerald-50/50  border-emerald-100/50 "
+                "flex-row items-start gap-4 p-4 space-y-0 border-b transition-colors",
+                isError ? "bg-amber-50/50 border-amber-100" : (isWarning ? "bg-blue-50/30 border-blue-100/50" : "bg-emerald-50/50 border-emerald-100")
             )}>
-                <IconBox
-                    icon={StatusIcon}
-                    variant={statusVariant}
-                    size="md"
-                    className="mt-1"
-                />
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                        <CardTitle className={cn(
-                            "text-base font-bold flex items-center gap-2",
-                            isError && "text-rose-600 ",
-                            isWarning && "text-amber-600 ",
-                            !isError && !isWarning && "text-emerald-600 "
-                        )}>
-                            {statusText}
-                        </CardTitle>
-                    </div>
-                    <div className="text-[13px] text-zinc-600  leading-relaxed font-medium">
-                        {data.summary}
-                    </div>
+                <IconBox icon={StatusIcon} variant={statusVariant} size="md" className="mt-1" />
+                <div className="flex-1">
+                    <CardTitle className={cn(
+                        "text-base font-bold",
+                        isError ? "text-amber-700" : (isWarning ? "text-blue-700" : "text-emerald-700")
+                    )}>
+                        {statusTitle}
+                    </CardTitle>
+                    {data.summary && <div className="text-[12px] text-zinc-500 font-medium mt-1 leading-relaxed">{data.summary}</div>}
                 </div>
+                {pendingMismatches.length > 0 && (
+                    <div className="px-2 py-1 rounded-full bg-rose-100 text-rose-600 text-[10px] font-bold uppercase tracking-wider border border-rose-200">
+                        {pendingMismatches.length} расх.
+                    </div>
+                )}
             </CardHeader>
 
-            <div className="flex items-center gap-4 px-4 py-3 bg-zinc-50/50  border-b border-zinc-100 ">
+            <div className="flex items-center gap-4 px-4 py-3 bg-zinc-50/50 border-b border-zinc-100">
                 {okCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600  uppercase tracking-tight">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 uppercase tracking-tight">
                         <CheckCircle size={12} /> {okCount} ок
                     </div>
                 )}
                 {errCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-600  uppercase tracking-tight">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-600 uppercase tracking-tight">
                         <XCircle size={12} /> {errCount} ошибка
                     </div>
                 )}
                 {naCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400  uppercase tracking-tight">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 uppercase tracking-tight">
                         <Info size={12} /> {naCount} не найдено
                     </div>
                 )}
             </div>
 
-            <div className="divide-y divide-zinc-100 ">
-                {data.fields.map((field: ComplianceField, idx: number) => {
-                    const isFieldError = field.status === 'mismatch'
-                    const isFieldOk = field.status === 'ok'
+            {(refreshMeta || (pendingMismatches.length > 1 && onAllFixed)) && (
+                <div className="p-2 bg-zinc-50/50 border-b border-zinc-100 space-y-1">
+                    {refreshMeta && (
+                        <button type="button" onClick={handleRefresh}
+                                className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-white border border-zinc-200 text-zinc-600 text-[11px] font-bold hover:bg-zinc-50 active:scale-95 transition-all shadow-sm">
+                            <RefreshCw size={12} className="text-zinc-400"/> Обновить данные
+                        </button>
+                    )}
 
-                    return (
-                        <div key={idx} className="p-4 hover:bg-zinc-50/30  transition-all group">
-                            <div className="flex items-center justify-between gap-3 mb-3">
-                                <div className="flex items-center gap-2.5">
-                                    <div className={cn(
-                                        "w-1.5 h-1.5 rounded-full shrink-0",
-                                        isFieldError ? "bg-rose-500" : (isFieldOk ? "bg-emerald-500" : "bg-zinc-300")
-                                    )} />
-                                    <span className="text-[13px] font-bold text-zinc-800  leading-none">{field.label}</span>
-                                </div>
-                                <span className={cn(
-                                    "px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
-                                    isFieldError ? "bg-rose-50 text-rose-600  " :
-                                    (isFieldOk ? "bg-emerald-50 text-emerald-600  " :
-                                    "bg-zinc-100 text-zinc-500  ")
-                                )}>
-                                    {isFieldError ? 'Ошибка' : (isFieldOk ? 'OK' : 'Пропуск')}
-                                </span>
-                            </div>
+                    {pendingMismatches.length > 1 && onAllFixed && (
+                        <button type="button" onClick={handleFixAll} disabled={fixingAll}
+                                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-blue-600 text-white text-[11px] font-bold hover:bg-blue-700 active:scale-95 transition-all shadow-md shadow-blue-200">
+                            {fixingAll ? <RefreshCw size={13} className="animate-spin"/> : <Zap size={13}/>}
+                            {fixingAll ? 'Исправляю...' : `Исправить всё (${pendingMismatches.length})`}
+                        </button>
+                    )}
+                </div>
+            )}
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-zinc-50  p-2.5 rounded-lg border border-zinc-100 ">
-                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В карточке</div>
-                                    <div className="text-[12px] font-medium text-zinc-700  break-words leading-relaxed">{field.card_value}</div>
-                                </div>
-                                <div className={cn(
-                                    "p-2.5 rounded-lg border",
-                                    isFieldError ? "bg-rose-50/30  border-rose-100/50 " : "bg-zinc-50  border-zinc-100 "
-                                )}>
-                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">В файле</div>
-                                    <div className={cn(
-                                        "text-[12px] font-bold break-words leading-relaxed",
-                                        isFieldError ? "text-rose-600 " : "text-zinc-700 ",
-                                        !field.file_value && "text-zinc-300  italic font-normal"
-                                    )}>
-                                        {field.file_value || '—'}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {field.recommendation && (
-                                <div className="mt-3 p-3 bg-amber-50/50  border border-amber-100  rounded-xl text-[12px] text-amber-700  flex gap-2.5 items-start font-medium leading-relaxed">
-                                    <Lightbulb size={14} className="shrink-0 mt-0.5 text-amber-500" />
-                                    {field.recommendation}
-                                </div>
-                            )}
-                        </div>
-                    )
-                })}
+            <div className="divide-y divide-zinc-100">
+                {mismatchFields.length > 0 && (
+                    <div className="bg-rose-50/10">
+                        {mismatchFields.map(field => <FieldCard key={field.field_key} field={field} onFixed={onFieldFixed} disabled={fixingAll}/>)}
+                    </div>
+                )}
+                {otherFields.map(field => <FieldCard key={field.field_key} field={field} onFixed={onFieldFixed} disabled={fixingAll}/>)}
             </div>
 
-            <div className="p-3 bg-zinc-50/50  border-t border-zinc-100  text-[11px] text-zinc-400 font-medium flex items-center gap-2">
+            <div className="p-3 bg-zinc-50/50 border-t border-zinc-100 text-[11px] text-zinc-400 font-medium flex items-center gap-2">
                 <Info size={12} className="text-zinc-300" />
-                Проверено AI. Результат добавлен в карточку.
+                Результаты проверки соответствия
             </div>
         </Card>
     )
-}
+})
+ComplianceCheckResult.displayName = 'ComplianceCheckResult'

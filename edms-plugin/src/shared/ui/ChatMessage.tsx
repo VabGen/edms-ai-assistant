@@ -17,7 +17,12 @@ import {
 import { DocCard } from './cards/DocCard'
 import { AttachmentCard } from './cards/AttachmentCard'
 import { AttachmentClickContext, DocumentClickContext } from './ChatContext'
-import { parseStructuredOutput } from '@/features/chat/lib/parseStructuredOutput'
+import { detectStructuredOutput } from '@/features/chat/lib/detectStructuredOutput'
+import { useChatStore } from '@/features/chat/model/useChatStore'
+import { useStreamChat } from '@/features/chat/model/useStreamChat'
+import { sendMessage } from '@/shared/api/messaging'
+import { extractDocIdFromUrl } from '@/shared/lib/url'
+import { getAuthToken } from '@/shared/lib/auth'
 import { ComplianceCheckResult } from '@/features/chat/ui/structured/ComplianceCheckResult'
 import { ThesisPlanResult } from '@/features/chat/ui/structured/ThesisPlanResult'
 import { AbstractiveResult } from '@/features/chat/ui/structured/AbstractiveResult'
@@ -26,17 +31,20 @@ import { ActionItemsResult } from '@/features/chat/ui/structured/ActionItemsResu
 import { ExecutiveSummaryResult } from '@/features/chat/ui/structured/ExecutiveSummaryResult'
 import { DetailedNotesResult } from '@/features/chat/ui/structured/DetailedNotesResult'
 import { MultilingualResult } from '@/features/chat/ui/structured/MultilingualResult'
-import type { StructuredOutput } from '@/entities/message/model/types'
+import type { StructuredOutput, ComplianceData, RefreshMeta } from '@/entities/message/model/types'
 import { cn } from '@shared/lib/cn'
 
 
 interface Props {
+    id: string
     content: string
     role: 'user' | 'assistant'
     timestamp: number
     isError?: boolean
     onAttachmentClick?: (fileName: string) => void
     onDocumentClick?: (documentId: string) => void
+    compliance?: ComplianceData | undefined
+    refreshMeta?: RefreshMeta | undefined
 }
 
 
@@ -65,10 +73,126 @@ function CopyButton({text}: { text: string }) {
     )
 }
 
-function StructuredOutputRenderer({output}: { output: StructuredOutput }) {
+function StructuredOutputRenderer({
+    output,
+    messageId,
+    refreshMeta
+}: {
+    output: StructuredOutput,
+    messageId: string,
+    refreshMeta?: RefreshMeta | undefined
+}) {
+    const { updateMessage, threadId } = useChatStore()
+    const { startStream } = useStreamChat()
+
+    const getOrCreateThreadId = useCallback(async (): Promise<string> => {
+        if (threadId) return threadId
+        const token = getAuthToken()
+        if (!token) throw new Error('Войдите в систему')
+        const res = await sendMessage('createNewChat', {user_token: token})
+        // Note: we can't call setThreadId here easily without risking loops if not careful,
+        // but useChatStore actions are available.
+        return res.thread_id
+    }, [threadId])
+
+    const applyOptimisticFix = useCallback(
+        (fixed: Array<{ fieldKey: string; newValue: string }>) => {
+            updateMessage(messageId, (m) => {
+                if (!m.compliance && !(m.content && detectStructuredOutput(m.content).output?.type === 'compliance')) return m
+
+                // This is a bit tricky since compliance might be in m.compliance or m.content
+                const currentCompliance = m.compliance || (detectStructuredOutput(m.content).output?.data as any)
+                if (!currentCompliance) return m
+
+                const keys = new Set(fixed.map((f) => f.fieldKey))
+                const valueByKey = new Map(fixed.map((f) => [f.fieldKey, f.newValue]))
+                const fields = currentCompliance.fields.map((f: any) =>
+                    keys.has(f.field_key)
+                        ? {
+                              ...f,
+                              status: 'ok' as const,
+                              card_value: valueByKey.get(f.field_key) ?? f.card_value,
+                              correct_value: null,
+                          }
+                        : f,
+                )
+                const remainingMismatches = fields.filter((f: any) => f.status === 'mismatch').length
+                const updatedCompliance = {
+                    ...currentCompliance,
+                    fields,
+                    overall: remainingMismatches === 0 ? ('ok' as const) : currentCompliance.overall,
+                }
+
+                if (m.compliance) {
+                    return { ...m, compliance: updatedCompliance }
+                } else {
+                    // If it was in content, we might want to update content too, but that's complex.
+                    // For now, let's just set the compliance property which takes precedence in rendering.
+                    return { ...m, compliance: updatedCompliance }
+                }
+            })
+
+            // Give the agent ~8s to call doc_update_field before reloading the page.
+            window.setTimeout(() => {
+                void sendMessage('reloadActiveTab', undefined)
+            }, 8000)
+        },
+        [messageId, updateMessage]
+    )
+
+    const handleFieldFixed = useCallback(
+        (fieldKey: string, newValue: string) => {
+            applyOptimisticFix([{fieldKey, newValue}])
+            void (async () => {
+                const token = getAuthToken()
+                if (!token) return
+                const tid = await getOrCreateThreadId()
+                startStream({
+                    message: `Исправь поле ${fieldKey} на значение: ${newValue}`,
+                    userToken: token,
+                    threadId: tid,
+                    contextUiId: extractDocIdFromUrl(),
+                    filePath: null,
+                    resumeValue: null,
+                })
+            })()
+        },
+        [applyOptimisticFix, getOrCreateThreadId, startStream],
+    )
+
+    const handleAllFixed = useCallback(
+        (fixedFields: Array<{ fieldKey: string; label: string; newValue: string }>) => {
+            applyOptimisticFix(fixedFields)
+            void (async () => {
+                const token = getAuthToken()
+                if (!token) return
+                const tid = await getOrCreateThreadId()
+                const corrections = fixedFields
+                    .map((f) => `${f.label}: ${f.newValue}`)
+                    .join(', ')
+                startStream({
+                    message: `Исправь следующие поля: ${corrections}`,
+                    userToken: token,
+                    threadId: tid,
+                    contextUiId: extractDocIdFromUrl(),
+                    filePath: null,
+                    resumeValue: null,
+                })
+            })()
+        },
+        [applyOptimisticFix, getOrCreateThreadId, startStream],
+    )
+
     switch (output.type) {
         case 'compliance':
-            return <ComplianceCheckResult data={output.data}/>
+            return (
+                <ComplianceCheckResult
+                    data={output.data}
+                    refreshMeta={refreshMeta}
+                    onFieldFixed={handleFieldFixed}
+                    onAllFixed={handleAllFixed}
+                />
+            )
         case 'thesis':
             return <ThesisPlanResult data={output.data}/>
         case 'abstractive':
@@ -303,11 +427,14 @@ function ErrorMessage({raw, timeLabel}: { raw: string; timeLabel: string }) {
 // ─── Main ChatMessage ────────────────────────────────────────────────────────
 
 export function ChatMessage({
+                                id,
                                 content,
                                 role,
                                 timestamp,
                                 onAttachmentClick,
                                 onDocumentClick,
+                                compliance,
+                                refreshMeta,
                             }: Props) {
     const isUser = role === 'user'
     const isRawError = typeof content === 'string' && content.startsWith('__error__:')
@@ -325,7 +452,17 @@ export function ChatMessage({
     }
 
     // ── Structured output detection ──
-    const structured = !isUser ? parseStructuredOutput(content) : null
+    let { output: structured, shouldHideText } = !isUser
+        ? detectStructuredOutput(content)
+        : { output: null, shouldHideText: false }
+
+    if (compliance && !isUser) {
+        structured = { type: 'compliance', data: compliance }
+        shouldHideText = true
+    }
+
+    // If it's technical JSON that shouldn't be seen at all
+    if (shouldHideText && !structured) return null
 
     // ── Sanitize HTML → markdown ──
     const sanitized = sanitizeHtmlToMarkdown(content)
@@ -334,17 +471,19 @@ export function ChatMessage({
         <div className={cn("flex w-full mb-3 last:mb-0", isUser ? "justify-end" : "justify-start")}>
             <div
                 className={cn(
-                    "w-full px-5 py-4 edms-chat-text transition-all duration-300 animate-edms-fade-in",
+                    "w-full transition-all duration-300 animate-edms-fade-in",
                     isUser
-                        ? "bg-indigo-600 text-white rounded-[20px] rounded-tr-[4px] shadow-sm"
-                        : "bg-white text-zinc-900 border border-zinc-100/80 rounded-[20px] rounded-tl-[4px] shadow-sm"
+                        ? "bg-indigo-600 text-white rounded-[20px] rounded-tr-[4px] shadow-sm px-5 py-4"
+                        : (shouldHideText && structured)
+                            ? "bg-transparent border-none shadow-none p-0"
+                            : "bg-white text-zinc-900 border border-zinc-100/80 rounded-[20px] rounded-tl-[4px] shadow-sm px-5 py-4"
                 )}
             >
                 <AttachmentClickContext.Provider value={onAttachmentClick ?? null}>
                     <DocumentClickContext.Provider value={onDocumentClick ?? null}>
 
                         {structured ? (
-                            <StructuredOutputRenderer output={structured}/>
+                            <StructuredOutputRenderer output={structured} messageId={id} refreshMeta={refreshMeta}/>
                         ) : (
                             <ReactMarkdown
                                 remarkPlugins={[remarkGfm, remarkLazyList]}
