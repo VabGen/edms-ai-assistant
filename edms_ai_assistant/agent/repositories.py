@@ -13,7 +13,7 @@ import logging
 from typing import Protocol, runtime_checkable
 
 from edms_ai_assistant.clients.document_client import DocumentClient
-from edms_ai_assistant.generated.resources_openapi import DocumentDto
+from edms_ai_assistant.domain.document import DocumentDto
 
 logger = logging.getLogger(__name__)
 

@@ -19,26 +19,24 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import StreamingResponse
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
-from edms_ai_assistant.api.deps import get_agent
+from edms_ai_assistant.api.deps import DepsDep, get_agent, get_deps
+from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
     is_system_attachment,
     resolve_user_context,
     unwrap_text_from_agent_result,
 )
-from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.model import AssistantResponse, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
-from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.summarizer.errors import SummarizerError
 from edms_ai_assistant.summarizer.pipeline.direct import StreamEvent
 from edms_ai_assistant.summarizer.service import (
     SummarizationRequest,
     SummarizationResponse,
-    format_output_as_markdown,
 )
 from edms_ai_assistant.summarizer.structured.models import SummaryMode
-from edms_ai_assistant.tools.attachment import doc_get_file_content
+from edms_ai_assistant.tools.attachment import create_attachment_fetch_tool
 from edms_ai_assistant.utils.hash_utils import get_file_hash
 
 logger = logging.getLogger(__name__)
@@ -135,6 +133,7 @@ async def _resolve_file_bytes(
     current_path: str,
     is_uuid: bool,
     user_input: UserInput,
+    deps: DepsDep,
 ) -> tuple[bytes | None, str]:
     """Достаёт байты документа: локальный файл или EDMS-вложение.
 
@@ -162,6 +161,7 @@ async def _resolve_file_bytes(
                 thread_id="action_resolve",
                 user_id=uid,
             )
+            doc_get_file_content = create_attachment_fetch_tool(deps)
             raw_result = await doc_get_file_content.ainvoke(
                 {"attachment_id": current_path},
                 config=tool_config,
@@ -195,6 +195,7 @@ async def api_direct_summarize(
     user_input: UserInput,
     background_tasks: BackgroundTasks,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    deps: Annotated[AppDeps, Depends(get_deps)],
 ) -> AssistantResponse:
     current_path = (user_input.file_path or "").strip()
     is_uuid = is_system_attachment(current_path)
@@ -232,61 +233,61 @@ async def api_direct_summarize(
             logger.warning("Could not hash local file: %s", exc)
     elif user_input.context_ui_id:
         try:
-            async with DocumentClient() as doc_client:
-                doc_dto = await doc_client.get_document_metadata(
-                    user_input.user_token, user_input.context_ui_id
-                )
-                attachments: list = []
-                if hasattr(doc_dto, "attachmentDocument"):
-                    attachments = doc_dto.attachmentDocument or []
-                elif isinstance(doc_dto, dict):
-                    attachments = doc_dto.get("attachmentDocument") or []
+            doc_client = deps.document_client
+            doc_dto = await doc_client.get_document_metadata(
+                user_input.user_token, user_input.context_ui_id
+            )
+            attachments: list = []
+            if hasattr(doc_dto, "attachmentDocument"):
+                attachments = doc_dto.attachmentDocument or []
+            elif isinstance(doc_dto, dict):
+                attachments = doc_dto.get("attachmentDocument") or []
 
-                if attachments:
+            if attachments:
 
-                    def _norm(s: str) -> str:
-                        return re.sub(r"[^a-zA-Zа-яА-Я0-9]", "", s.lower()) if s else ""
+                def _norm(s: str) -> str:
+                    return re.sub(r"[^a-zA-Zа-яА-Я0-9]", "", s.lower()) if s else ""
 
-                    clean_input = _norm(current_path)
-                    if clean_input:
-                        for att in attachments:
-                            att_name = (
-                                (
-                                    att.get("name", "")
-                                    if isinstance(att, dict)
-                                    else getattr(att, "name", "")
-                                )
-                                or ""
-                            ).strip()
-                            att_id = str(
-                                (
-                                    att.get("id", "")
-                                    if isinstance(att, dict)
-                                    else getattr(att, "id", "")
-                                )
-                                or ""
+                clean_input = _norm(current_path)
+                if clean_input:
+                    for att in attachments:
+                        att_name = (
+                            (
+                                att.get("name", "")
+                                if isinstance(att, dict)
+                                else getattr(att, "name", "")
                             )
-                            if clean_input in _norm(att_name):
-                                file_identifier = att_id
-                                break
-
-                    if not file_identifier and attachments:
-                        first = attachments[0]
-                        file_identifier = (
-                            str(
-                                (
-                                    first.get("id", "")
-                                    if isinstance(first, dict)
-                                    else getattr(first, "id", "")
-                                )
-                                or ""
+                            or ""
+                        ).strip()
+                        att_id = str(
+                            (
+                                att.get("id", "")
+                                if isinstance(att, dict)
+                                else getattr(att, "id", "")
                             )
-                            or None
+                            or ""
                         )
+                        if clean_input in _norm(att_name):
+                            file_identifier = att_id
+                            break
 
-                    if file_identifier:
-                        current_path = file_identifier
-                        is_uuid = True
+                if not file_identifier and attachments:
+                    first = attachments[0]
+                    file_identifier = (
+                        str(
+                            (
+                                first.get("id", "")
+                                if isinstance(first, dict)
+                                else getattr(first, "id", "")
+                            )
+                            or ""
+                        )
+                        or None
+                    )
+
+                if file_identifier:
+                    current_path = file_identifier
+                    is_uuid = True
         except Exception as exc:
             logger.error("Error resolving EDMS attachments: %s", exc)
 
@@ -310,6 +311,7 @@ async def api_direct_summarize(
 
             elif is_uuid and user_input.context_ui_id:
                 try:
+                    doc_get_file_content = create_attachment_fetch_tool(deps)
                     raw_result = await doc_get_file_content.ainvoke(
                         {"attachment_id": current_path},
                         config=tool_config,
@@ -388,6 +390,7 @@ async def api_direct_summarize(
     raw_text = ""
     try:
         if is_uuid and user_input.context_ui_id:
+            doc_get_file_content = create_attachment_fetch_tool(deps)
             result = await doc_get_file_content.ainvoke(
                 {"attachment_id": current_path},
                 config=tool_config,
@@ -399,7 +402,8 @@ async def api_direct_summarize(
             else:
                 raw_text = str(result)
         elif current_path and Path(current_path).exists():
-            raw_text = await FileProcessorService.extract_text_async(current_path)
+            file_processor = deps.file_processor_service
+            raw_text = await file_processor.extract_text_async(current_path)
     except Exception as exc:
         logger.warning(
             "Direct text extraction failed (%s), falling back to Agent...", exc
@@ -502,6 +506,7 @@ def _sse(payload: dict) -> str:
 async def api_direct_summarize_stream(
     request: Request,
     user_input: UserInput,
+    deps: Annotated[AppDeps, Depends(get_deps)],
 ) -> StreamingResponse:
     """
     SSE-стриминг суммаризации с тем же JSON-контрактом, что /actions/summarize.
@@ -547,6 +552,7 @@ async def api_direct_summarize_stream(
                 current_path=current_path,
                 is_uuid=is_uuid_input,
                 user_input=user_input,
+                deps=deps,
             )
             if not file_bytes or len(file_bytes) <= 10:
                 yield _sse({
