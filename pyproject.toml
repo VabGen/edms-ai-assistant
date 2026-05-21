@@ -154,7 +154,7 @@ packages = ["edms_ai_assistant"]
 exclude = [".venv"]
 
 
-# ─── Ruff ─────────────────────────────────────────────────────────────────────
+# ─── Ruff ─── ruff check . ─────────────────────────────────────────────────────
 
 [tool.ruff]
 target-version = "py313"
@@ -196,11 +196,11 @@ ignore = [
 known-first-party = ["edms_ai_assistant"]
 
 [tool.ruff.format]
-quote-style = "double"
+quote-style  = "double"
 indent-style = "space"
 
 
-# ─── Black ────────────────────────────────────────────────────────────────────
+# ─── Black ── black edms_ai_assistant/ ─────────────────────────────────────────
 
 [tool.black]
 line-length    = 88
@@ -208,7 +208,7 @@ target-version = ["py313"]
 extend-exclude = "(generated|migrations)/"
 
 
-# ─── isort ────────────────────────────────────────────────────────────────────
+# ─── isort ─── isort edms_ai_assistant/ ────────────────────────────────────────
 
 [tool.isort]
 profile           = "black"
@@ -217,7 +217,7 @@ known_first_party = ["edms_ai_assistant"]
 skip_glob         = ["edms_ai_assistant/generated/*"]
 
 
-# ─── Mypy ─────────────────────────────────────────────────────────────────────
+# ─── Mypy ─── uv run mypy ─────────────────────────────────────────────────────
 
 [tool.mypy]
 python_version         = "3.13"
@@ -226,7 +226,11 @@ ignore_missing_imports = true
 check_untyped_defs     = true
 warn_return_any        = true
 warn_unused_configs    = true
-exclude                = ["edms_ai_assistant/generated/", "tests/"]
+packages               = ["edms_ai_assistant"]
+exclude                = [
+    "edms_ai_assistant/generated/",
+    "tests/"
+]
 
 [[tool.mypy.overrides]]
 module        = "edms_ai_assistant.generated.*"
