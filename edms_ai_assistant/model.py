@@ -11,9 +11,10 @@ from typing import Annotated, Any, Literal, TYPE_CHECKING
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import TypedDict
+from langchain_core.messages import BaseMessage
 
-if TYPE_CHECKING:
-    from langchain_core.messages import BaseMessage
+# if TYPE_CHECKING:
+#     from langchain_core.messages import BaseMessage
 
 # ─────────────────────────────────────────────────────────────
 # LangGraph state

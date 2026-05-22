@@ -130,7 +130,8 @@ function registerSsePort(): void {
                                 } else if (payload.event === 'error') {
                                     port.postMessage({type: 'sse_error', error: payload.message})
                                 }
-                            } catch { /* ignore malformed */ }
+                            } catch { /* ignore malformed */
+                            }
                         }
                     }
                 } catch (err: any) {
@@ -155,9 +156,23 @@ function registerSsePort(): void {
                 if (!res.ok) {
                     const errBody = (await res.json().catch(() => ({}))) as Record<string, unknown>
                     const detail = errBody['detail']
+                    let errorMsg = `HTTP ${res.status}`
+
+                    if (typeof detail === 'string') {
+                        errorMsg = detail
+                    } else if (Array.isArray(detail)) {
+                        errorMsg = detail
+                            .map((err: any) => {
+                                const field = err.loc?.slice(1).join('.') || 'данные'
+                                const msg = err.msg || err.type || 'неверный формат'
+                                return `${field}: ${msg}`
+                            })
+                            .join('; ')
+                    }
+
                     port.postMessage({
                         type: 'sse_error',
-                        error: typeof detail === 'string' ? detail : `HTTP ${res.status}`,
+                        error: errorMsg,
                     })
                     port.disconnect()
                     return

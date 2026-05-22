@@ -33,7 +33,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command, Interrupt
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, ConfigDict
 
 from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
@@ -66,6 +66,7 @@ router = APIRouter(tags=["Chat"])
 
 
 class _UserContext(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     firstName: str | None = None
     lastName: str | None = None
     middleName: str | None = None
@@ -74,6 +75,7 @@ class _UserContext(BaseModel):
 
 
 class ChatStreamRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     message: str = Field(..., min_length=1, max_length=8000)
     user_token: str = Field(..., min_length=10)
     thread_id: str | None = Field(None, max_length=255)
@@ -92,6 +94,7 @@ class ChatResumeRequest(BaseModel):
     for diagnostics — the engine itself routes by checkpoint, not by id.
     """
 
+    model_config = ConfigDict(extra="ignore")
     thread_id: str = Field(..., min_length=1, max_length=255)
     user_token: str = Field(..., min_length=10)
     resume_value: dict[str, Any]

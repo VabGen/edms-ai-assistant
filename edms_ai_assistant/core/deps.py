@@ -73,6 +73,18 @@ class AppDeps(BaseModel):
 def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: BaseLanguageModel) -> AppDeps:
     """Фабрика для создания и связывания всех зависимостей приложения."""
 
+    if not getattr(AppDeps, '_is_rebuilt', False):
+        from edms_ai_assistant.clients.transport import IAsyncTransport as _IAsyncTransport
+        import redis.asyncio as _aioredis
+        from langchain_core.language_models import BaseLanguageModel as _BaseLanguageModel
+
+        globals()['IAsyncTransport'] = _IAsyncTransport
+        globals()['aioredis'] = _aioredis
+        globals()['BaseLanguageModel'] = _BaseLanguageModel
+
+        AppDeps.model_rebuild()
+        AppDeps._is_rebuilt = True
+
     base_client = EdmsBaseClient(transport, edms_settings)
 
     # ── Инициализация клиентов ────────────────────────────────────────────────

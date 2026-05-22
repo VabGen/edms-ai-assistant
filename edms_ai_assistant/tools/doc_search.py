@@ -233,7 +233,7 @@ def create_doc_search_tool(document_client: DocumentClient) -> StructuredTool:
                         "Автор": doc["author"],
                     },
                     metadata={
-                        "url": f"/document/{doc['id']}",
+                        "url": f"/document-form/{doc['id']}",
                         "category": doc["category"],
                         "status": doc["status"],
                     }
