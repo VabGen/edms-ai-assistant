@@ -13,15 +13,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from time import monotonic
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from opentelemetry import trace
 from pydantic import BaseModel
 
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.deps import get_agent, get_admin_user
 from edms_ai_assistant.config import settings
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

@@ -4,9 +4,12 @@ from __future__ import annotations
 import logging
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.config import EdmsSettings
-from edms_ai_assistant.domain.task_models import CreateTaskRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.domain.task_models import CreateTaskRequest
+    from edms_ai_assistant.config import EdmsSettings
+    from edms_ai_assistant.clients.transport import IAsyncTransport
 
 logger = logging.getLogger(__name__)
 

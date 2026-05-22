@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 from functools import wraps
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +43,8 @@ def _should_retry(exc: Exception) -> bool:
     """
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
-        if status in _NO_RETRY_STATUS_CODES:
-            return False
-        return True
-    if isinstance(exc, httpx.RequestError):
-        return True
-    return False
+        return status not in _NO_RETRY_STATUS_CODES
+    return bool(isinstance(exc, httpx.RequestError))
 
 
 _EXPECTED_BUSINESS_STATUS_CODES: frozenset[int] = frozenset({400, 404, 422})

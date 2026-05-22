@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any, TYPE_CHECKING
 
 from edms_ai_assistant.summarizer.chunking.structural import SmartChunker, TextChunk
 from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
@@ -23,8 +23,11 @@ from edms_ai_assistant.summarizer.pipeline.direct import (
     PipelineResult,
     StreamEvent,
 )
-from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
-from edms_ai_assistant.summarizer.structured.models import SummaryMode
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from edms_ai_assistant.summarizer.structured.models import SummaryMode
+    from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +248,7 @@ class MapReducePipeline:
         *,
         language: str = "ru",
         span: Any = None,
-    ) -> AsyncIterator["StreamEvent | PipelineResult"]:
+    ) -> AsyncIterator[StreamEvent | PipelineResult]:
         """
         Стрим-версия map-reduce: map выполняется параллельно (нестримящий),
         а reduce — стримится по токенам. Это компромисс: нет смысла стримить

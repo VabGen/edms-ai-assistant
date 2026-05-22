@@ -4,12 +4,14 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.services.file_processor import FileProcessorService
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.file_processor import FileProcessorService
 
 logger = logging.getLogger(__name__)
 

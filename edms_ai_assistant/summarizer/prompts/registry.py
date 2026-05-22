@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import Final
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from edms_ai_assistant.summarizer.structured.models import (
     MODE_OUTPUT_MODEL,
@@ -298,7 +298,7 @@ PROMPT_MAP_GENERIC = PromptTemplate(
     name="map_generic_v2",
     mode=SummaryMode.ABSTRACTIVE,
     version="2.0.0",
-    system=f"""Ты обрабатываешь ФРАГМЕНТ большого документа.
+    system="""Ты обрабатываешь ФРАГМЕНТ большого документа.
 Твоя задача — извлечь ключевую информацию из этого фрагмента.
 ОБЯЗАТЕЛЬНО: отвечай на русском языке. Только текст, без JSON.""",
     user_template="""Изложи ключевое содержание этого фрагмента в 2-4 предложениях на русском языке.
@@ -312,7 +312,7 @@ PROMPT_MAP_EXTRACTIVE = PromptTemplate(
     name="map_extractive_v2",
     mode=SummaryMode.EXTRACTIVE,
     version="2.0.0",
-    system=f"""Ты обрабатываешь ФРАГМЕНТ большого документа.
+    system="""Ты обрабатываешь ФРАГМЕНТ большого документа.
 Извлеки ключевые факты из этого фрагмента.
 ОБЯЗАТЕЛЬНО: отвечай на русском языке. Только текст, без JSON.""",
     user_template="""Перечисли 3-5 ключевых фактов из этого фрагмента на русском языке.

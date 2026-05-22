@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Type, TypeVar, cast
+from typing import Any, TypeVar, cast, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.config import EdmsSettings
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.transport import IAsyncTransport
+    from edms_ai_assistant.config import EdmsSettings
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ class EdmsBaseClient:
             method: str,
             endpoint: str,
             token: str,
-            response_model: Type[T],
+            response_model: type[T],
             *,
             params: dict[str, Any] | None = None,
             json_data: Any = None,
@@ -95,7 +97,7 @@ class EdmsBaseClient:
             method: str,
             endpoint: str,
             token: str,
-            item_model: Type[T],
+            item_model: type[T],
             *,
             params: dict[str, Any] | None = None,
             json_data: Any = None,
@@ -141,4 +143,4 @@ class EdmsBaseClient:
         if response.status_code == 204 or not response.content:
             return {}
 
-        return cast(dict[str, Any], response.json())
+        return cast("dict[str, Any]", response.json())

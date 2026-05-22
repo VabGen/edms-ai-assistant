@@ -4,12 +4,14 @@ from __future__ import annotations
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.config import EdmsSettings
 from edms_ai_assistant.domain.document import DocumentWithPermissions
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.transport import IAsyncTransport
+    from edms_ai_assistant.config import EdmsSettings
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +39,11 @@ class DocumentCreatorClient(EdmsBaseClient):
         result = await self._make_request("GET", "api/doc-profile", token, params=params)
 
         if isinstance(result, list) and result:
-            return cast(dict[str, Any], result[0])
+            return cast("dict[str, Any]", result[0])
         if isinstance(result, dict) and "content" in result:
             content = result["content"]
             if isinstance(content, list) and content:
-                return cast(dict[str, Any], content[0])
+                return cast("dict[str, Any]", content[0])
         return None
 
     async def create_document(

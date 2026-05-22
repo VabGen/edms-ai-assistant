@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from pydantic import (
     Field,
@@ -243,7 +242,7 @@ class Settings(BaseSettings):
         return "DEBUG" if env == "development" else "INFO"
 
     @model_validator(mode="after")
-    def enforce_production_security(self) -> "Settings":
+    def enforce_production_security(self) -> Settings:
         """Запрещает запуск в production с дефолтными секретами."""
         if self.ENVIRONMENT == "production":
             if self.JWT_SECRET_KEY.get_secret_value() == "change-me-in-production":

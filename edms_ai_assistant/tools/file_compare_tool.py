@@ -13,11 +13,10 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Annotated
+from typing import Any, Annotated, TYPE_CHECKING
 
 from langgraph.errors import GraphInterrupt
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -28,10 +27,13 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
-from edms_ai_assistant.clients.attachment_client import AttachmentClient
-from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.clients.attachment_client import AttachmentClient
+    from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 

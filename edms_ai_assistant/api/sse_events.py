@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from langchain_core.messages import ToolMessage
+
+if TYPE_CHECKING:
+    from langchain_core.messages import ToolMessage
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────

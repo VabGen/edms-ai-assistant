@@ -9,7 +9,7 @@ import logging
 import os
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ if _DB_TZ_OVERRIDE:
 else:
     DB_TZ = LOCAL_TZ
 
-UTC_TZ = timezone.utc
+UTC_TZ = UTC
 
 
 def get_timezone_info() -> dict[str, Any]:

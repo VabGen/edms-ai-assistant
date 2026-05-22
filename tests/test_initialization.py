@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock
 import redis.asyncio as aioredis
 from edms_ai_assistant.core.deps import init_deps

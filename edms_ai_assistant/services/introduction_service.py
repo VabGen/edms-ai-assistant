@@ -7,8 +7,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.services.resolution_service import ResolutionService
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.resolution_service import ResolutionService
+    from edms_ai_assistant.clients.transport import IAsyncTransport
 
 logger = logging.getLogger(__name__)
 

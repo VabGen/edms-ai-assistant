@@ -22,16 +22,18 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Annotated
+from typing import Any, Annotated, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
-from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from edms_ai_assistant.clients.base_client import EdmsBaseClient
 
 logger = logging.getLogger(__name__)
 

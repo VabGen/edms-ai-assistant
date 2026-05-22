@@ -4,14 +4,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, UTC
+from typing import Any, TYPE_CHECKING
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
+
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +149,7 @@ class AppealExtractionService:
                         }
                         month_num = month_map.get(month.lower(), 1)
 
-                    dt = datetime(int(year), month_num, int(day), tzinfo=timezone.utc)
+                    dt = datetime(int(year), month_num, int(day), tzinfo=UTC)
                     return dt.isoformat().replace("+00:00", "Z")
                 except (ValueError, KeyError):
                     pass
@@ -160,7 +162,7 @@ class AppealExtractionService:
                 m_int, d_int, y_short = int(month_num), int(day_num), int(year_short)
                 if 1 <= m_int <= 12 and 1 <= d_int <= 31:
                     year_full = 2000 + y_short
-                    dt = datetime(year_full, m_int, d_int, tzinfo=timezone.utc)
+                    dt = datetime(year_full, m_int, d_int, tzinfo=UTC)
                     return dt.isoformat().replace("+00:00", "Z")
             except ValueError:
                 pass

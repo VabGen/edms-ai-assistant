@@ -4,8 +4,11 @@ from __future__ import annotations
 import logging
 import re
 
-from edms_ai_assistant.clients.reference_client import ReferenceClient
 from edms_ai_assistant.llm import get_chat_model
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.reference_client import ReferenceClient
 
 logger = logging.getLogger(__name__)
 

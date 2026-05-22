@@ -10,8 +10,11 @@ import logging
 from pathlib import Path
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
-from edms_ai_assistant.model import UserInput
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.model import UserInput
 
 logger = logging.getLogger(__name__)
 

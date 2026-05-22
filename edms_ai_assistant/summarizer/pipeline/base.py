@@ -7,9 +7,11 @@ DirectSummarizationPipeline и MapReducePipeline.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
 
-from edms_ai_assistant.summarizer.structured.models import SummaryMode
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.summarizer.structured.models import SummaryMode
 
 
 @runtime_checkable

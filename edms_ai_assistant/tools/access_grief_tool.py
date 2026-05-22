@@ -19,16 +19,18 @@ EDMS AI Assistant — Access Grief Search Tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
 import httpx
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, model_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
-from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
-from edms_ai_assistant.clients.employee_client import EmployeeClient
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

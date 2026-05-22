@@ -4,7 +4,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from edms_ai_assistant.config import settings
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -87,7 +88,7 @@ def _run_sync_migrations() -> None:
             raise RuntimeError("Alembic migration failed")
 
     except Exception as e:
-        logger.error(f"Failed to run Alembic subprocess: {repr(e)}")
+        logger.error(f"Failed to run Alembic subprocess: {e!r}")
         raise
 
 
@@ -108,10 +109,8 @@ async def init_db():
     """Инициализация БД: применение миграций Alembic и проверка подключения."""
 
     # ── 1. Запуск миграций ────────────────────────────────────────────
-    try:
+    with contextlib.suppress(Exception):
         await _run_async_migrations()
-    except Exception:
-        pass
 
     # ── 2. Проверка подключения ───────────────────────────────────────
     async with engine.connect() as conn:

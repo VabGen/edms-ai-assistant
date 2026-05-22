@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Annotated, Any, AsyncIterator
+from typing import Annotated, Any, TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -35,7 +35,6 @@ from langgraph.errors import GraphInterrupt
 from langgraph.types import Command, Interrupt
 from pydantic import BaseModel, Field, ValidationError
 
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
     ResumeValueAdapter,
@@ -53,6 +52,10 @@ from edms_ai_assistant.api.sse_events import (
 
 from edms_ai_assistant.model import NewChatRequest, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +262,6 @@ async def _stream_graph_events(
     """
     compliance_sent = False
     navigate_sent = False
-    sent_done = False
 
     try:
         async for mode, chunk in agent.graph.astream(

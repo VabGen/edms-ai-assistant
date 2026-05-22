@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import logging
-from langchain_core.runnables import RunnableConfig
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

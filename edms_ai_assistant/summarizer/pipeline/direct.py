@@ -9,9 +9,8 @@ import dataclasses
 import json
 import logging
 import re
-import time
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator
+from typing import Any, TYPE_CHECKING
 
 import httpx
 from pydantic import ValidationError
@@ -24,7 +23,6 @@ from edms_ai_assistant.summarizer.errors import (
     LLMResponseError,
     LLMServerError,
     LLMTransportError,
-    PipelineError,
 )
 from edms_ai_assistant.summarizer.errors import ValidationError as SummarizerValidationError
 
@@ -41,14 +39,15 @@ from edms_ai_assistant.summarizer.observability.tracing import (
     record_llm_call,
     trace_stage,
 )
-from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
 from edms_ai_assistant.summarizer.structured.models import (
     MODE_OUTPUT_MODEL,
-    AbstractiveOutput,
-    ExtractiveOutput,
     LLMBaseModel,
     SummaryMode,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,7 @@ class LLMClient(ABC):
         model: str,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-    ) -> AsyncIterator["StreamEvent"]:
+    ) -> AsyncIterator[StreamEvent]:
         """Стрим OpenAI-совместимых дельт.
 
         Yields:
@@ -388,7 +387,7 @@ def _try_repair_truncated_json(raw: str) -> str | None:
             repaired = _repair_json(text)
             if repaired and repaired != "null":
                 return repaired
-        except Exception as exc:  # noqa: BLE001 — best-effort
+        except Exception as exc:
             logger.debug("json_repair failed: %s", exc)
 
     try:
@@ -485,15 +484,15 @@ def _extract_json_from_text(raw: str, mode: SummaryMode) -> str | None:
 
 class PipelineResult:
     __slots__ = (
-        "mode",
-        "output",
-        "raw_json",
-        "input_tokens",
-        "output_tokens",
-        "latency_ms",
-        "model",
-        "chunking_strategy",
         "chunk_count",
+        "chunking_strategy",
+        "input_tokens",
+        "latency_ms",
+        "mode",
+        "model",
+        "output",
+        "output_tokens",
+        "raw_json",
     )
 
     def __init__(
@@ -633,7 +632,7 @@ class DirectSummarizationPipeline:
         *,
         language: str = "ru",
         span: Any = None,
-    ) -> AsyncIterator["StreamEvent | PipelineResult"]:
+    ) -> AsyncIterator[StreamEvent | PipelineResult]:
         """
         Стрим-версия: yields StreamEvent (kind='delta') во время генерации
         и финальный PipelineResult со структурированным выводом в конце.

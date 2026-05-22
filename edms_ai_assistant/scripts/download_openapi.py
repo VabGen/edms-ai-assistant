@@ -74,7 +74,7 @@ def run_datamodel_codegen(input_file: str, output_file: str) -> bool:
     ]
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             cmd, check=True, capture_output=True, text=True, encoding="utf-8"
         )
         logger.info("datamodel-code-generator executed successfully.")
@@ -148,7 +148,7 @@ def fix_generated_file(file_path: str):
 
     pydantic_import_line = ""
     if needed_pydantic_items:
-        items_list = sorted(list(needed_pydantic_items))
+        items_list = sorted(needed_pydantic_items)
         pydantic_import_line = f"from pydantic import {', '.join(items_list)}\n"
 
     future_import_pattern = r"(from __future__ import [^\n]+\n(?:\s*#[^\n]*\n)*)"

@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from langchain_core.language_models import BaseLanguageModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
@@ -35,6 +33,11 @@ from edms_ai_assistant.agent.messages_utils import (
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.model import AgentState
 
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langchain_core.language_models import BaseLanguageModel
+
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
@@ -45,11 +48,11 @@ class GraphBuilder:
     def __init__(
         self,
         tools: list[Any],
-        checkpointer: BaseCheckpointSaver,
+        checkpointer: BaseCheckpointSaver[Any],
     ) -> None:
         self._tools = tools
         self._checkpointer = checkpointer
-        self._model: BaseLanguageModel | None = None
+        self._model: BaseLanguageModel[Any] | None = None
         self._model_lock: asyncio.Lock | None = None
 
     def _get_lock(self) -> asyncio.Lock:
@@ -58,14 +61,14 @@ class GraphBuilder:
             self._model_lock = asyncio.Lock()
         return self._model_lock
 
-    async def set_model_async(self, model: BaseLanguageModel) -> None:
+    async def set_model_async(self, model: BaseLanguageModel[Any]) -> None:
         async with self._get_lock():
             self._model = model
 
-    def set_model(self, model: BaseLanguageModel) -> None:
+    def set_model(self, model: BaseLanguageModel[Any]) -> None:
         self._model = model
 
-    def compile(self) -> CompiledStateGraph:
+    def compile(self) -> CompiledStateGraph[AgentState, Any, Any]:
         """Компилирует state graph для native HITL pipeline.
 
         Тулы сами решают, когда приостановить граф, через
@@ -79,7 +82,7 @@ class GraphBuilder:
         Raises:
             RuntimeError: При ошибке компиляции LangGraph.
         """
-        workflow: StateGraph = StateGraph(AgentState)
+        workflow: StateGraph[AgentState, Any, Any] = StateGraph(AgentState)
         builder_ref = self
 
         # ── Node: call_model (PURE — no string parsing, no injection) ────
@@ -140,7 +143,7 @@ class GraphBuilder:
                         timeout=llm_timeout,
                     )
                     return {"messages": [response]}
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     span.set_attribute("error", "timeout")
                     logger.error("LLM call timed out after %.1fs", llm_timeout)
                     return {

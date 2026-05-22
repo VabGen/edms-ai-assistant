@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
@@ -19,14 +19,14 @@ class EdmsBaseDto(BaseModel):
 T = TypeVar("T")
 
 
-class SpringPage(EdmsBaseDto, Generic[T]):
+class SpringPage[T](EdmsBaseDto):
     """Модель Spring Data Page<T>."""
     content: list[T]
     total_elements: int = 0
     total_pages: int = 0
 
 
-class SpringSlice(EdmsBaseDto, Generic[T]):
+class SpringSlice[T](EdmsBaseDto):
     """Модель Spring Data Slice<T>."""
     content: list[T]
     has_next: bool = False

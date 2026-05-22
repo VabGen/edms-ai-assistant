@@ -10,26 +10,29 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
-from edms_ai_assistant.clients.attachment_client import AttachmentClient
-from edms_ai_assistant.clients.document_client import DocumentClient
-from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.domain.document import DocumentDto
-from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.tools.attachment import (
     _get_attachment_id,
     _get_attachment_name,
     _resolve_attachment,
 )
+import contextlib
+
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from edms_ai_assistant.clients.document_client import DocumentClient
+    from edms_ai_assistant.services.file_processor import FileProcessorService
+    from edms_ai_assistant.core.deps import AppDeps
+    from edms_ai_assistant.clients.attachment_client import AttachmentClient
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -299,10 +302,8 @@ async def _extract_text(
         return None
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -658,7 +659,7 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
         all_llm_fields: list[dict[str, Any]] = []
         used_names: list[str] = []
 
-        for (name, _), result in zip(texts, llm_raw):
+        for (name, _), result in zip(texts, llm_raw, strict=False):
             if isinstance(result, Exception):
                 logger.error("LLM failed for '%s': %s", name, result)
                 all_llm_fields.extend(

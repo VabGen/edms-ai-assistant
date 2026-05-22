@@ -28,7 +28,7 @@ request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 class RequestIdFilter(logging.Filter):
     """Делает request_id доступным как `record.request_id` для всех логгеров."""
 
-    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+    def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = request_id_var.get()
         return True
 
@@ -40,4 +40,4 @@ def install_request_id_filter(logger: logging.Logger | None = None) -> None:
         target.addFilter(RequestIdFilter())
 
 
-__all__ = ["request_id_var", "RequestIdFilter", "install_request_id_filter"]
+__all__ = ["RequestIdFilter", "install_request_id_filter", "request_id_var"]

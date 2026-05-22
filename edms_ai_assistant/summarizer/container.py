@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def build_summarization_service(settings: object) -> "SummarizationService":
+async def build_summarization_service(settings: object) -> SummarizationService:
     from edms_ai_assistant.db.database import AsyncSessionLocal
     from edms_ai_assistant.summarizer.cache.cache import (
         PostgresL2Cache,
@@ -31,7 +31,6 @@ async def build_summarization_service(settings: object) -> "SummarizationService
     from edms_ai_assistant.summarizer.observability.tracing import setup_tracing
     from edms_ai_assistant.summarizer.pipeline.direct import OpenAICompatibleClient
     from edms_ai_assistant.summarizer.service import SummarizationService
-    from edms_ai_assistant.tools.summarization import set_summarization_service
 
     config = SummarizerConfig.from_app_settings(settings)
 
@@ -66,7 +65,11 @@ async def build_summarization_service(settings: object) -> "SummarizationService
         max_output_tokens=config.max_output_tokens,
     )
 
-    set_summarization_service(service)
+    try:
+        from edms_ai_assistant.tools.summarization import set_summarization_service
+        set_summarization_service(service)
+    except ImportError:
+        logger.warning("Could not set summarization service in tools (ImportError)")
 
     logger.info(
         "SummarizationService готов: model=%s context_window=%d max_output_tokens=%d",

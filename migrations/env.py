@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.db.database import Base
 
-from edms_ai_assistant.summarizer.cache.cache import RedisL1Cache, PostgresL2Cache
 
 config = context.config
 

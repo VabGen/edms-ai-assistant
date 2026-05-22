@@ -2,20 +2,22 @@
 from __future__ import annotations
 
 import logging
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import Any, TYPE_CHECKING
 
-from edms_ai_assistant.domain.document import DocumentDto
-from edms_ai_assistant.domain.employee import EmployeeDto
-from edms_ai_assistant.services.entity_extractor import EntityExtractor
-from edms_ai_assistant.services.query_refiner import QueryRefiner
 from edms_ai_assistant.utils.edms_formatter import EdmsFormatter
 from edms_ai_assistant.utils.format_utils import clean_dict
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.entity_extractor import EntityExtractor
+    from edms_ai_assistant.domain.document import DocumentDto
+    from edms_ai_assistant.domain.employee import EmployeeDto
+    from edms_ai_assistant.services.query_refiner import QueryRefiner
 
 logger = logging.getLogger(__name__)
 
 
-class UserIntent(str, Enum):
+class UserIntent(StrEnum):
     """Enumeration of recognized user intents."""
     UNKNOWN = "UNKNOWN"
     FILE_ANALYSIS = "FILE_ANALYSIS"

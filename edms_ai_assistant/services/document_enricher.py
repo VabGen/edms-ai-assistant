@@ -1,12 +1,13 @@
 # edms_ai_assistant/services/document_enricher.py
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class DocumentEnricher:
 
         # Fetch attachments through the client instead of raw transport
         try:
-            attachments = await self._client.get_document_recipients(token, str(doc_id))
+            await self._client.get_document_recipients(token, str(doc_id))
             # Recipients are already part of doc if includes were used,
             # but this illustrates the pattern. For now we just return as is
             # since DocumentClient.get_document_metadata now uses FULL_DOC_INCLUDES.

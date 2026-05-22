@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.config import EdmsSettings
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.reference import (
     CityHierarchyDto,
     ReferenceItemDto,
     SubjectDto,
 )
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.config import EdmsSettings
+    from edms_ai_assistant.clients.transport import IAsyncTransport
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,7 @@ class ReferenceClient(EdmsBaseClient):
         for field in priority_fields:
             val = record.get(field)
             if val and isinstance(val, str) and val.strip():
-                return cast(str, val.strip())
+                return cast("str", val.strip())
         return None
 
     async def find_country_with_name(self, token: str, name: str) -> ReferenceItemDto | None:

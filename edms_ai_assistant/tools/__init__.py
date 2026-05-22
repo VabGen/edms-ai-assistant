@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.tools import StructuredTool
 
 from edms_ai_assistant.tools.document import create_doc_get_details_tool
 from edms_ai_assistant.tools.doc_search import create_doc_search_tool
@@ -27,6 +26,7 @@ from edms_ai_assistant.tools.appeal_autofill import create_appeal_autofill_tool
 from edms_ai_assistant.tools.ask_user_select import ask_user_to_select
 
 if TYPE_CHECKING:
+    from langchain_core.tools import StructuredTool
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)

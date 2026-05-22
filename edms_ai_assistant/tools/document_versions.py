@@ -9,14 +9,16 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Annotated
+from typing import Any, Annotated, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel
 
 from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
-from edms_ai_assistant.clients.document_client import DocumentClient
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +189,7 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
                         )
                         continue
 
-                    # Конвертируем DTO в dict с camelCase ключами для переиспользования 
+                    # Конвертируем DTO в dict с camelCase ключами для переиспользования
                     # логики сравнения, которая опирается на ключи API СЭД
                     dict_from = doc_from_dto.model_dump(by_alias=True, exclude_none=True)
                     dict_to = doc_to_dto.model_dump(by_alias=True, exclude_none=True)

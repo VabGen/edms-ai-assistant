@@ -8,9 +8,8 @@ EDMS AI Assistant — Appeal Autofill Tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -18,7 +17,10 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_document_id_from_config,
     get_token_from_config,
 )
-from edms_ai_assistant.core.deps import AppDeps
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 

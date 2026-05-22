@@ -73,7 +73,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = credentials.credentials
 
     # TODO: Заменить на реальную логику декодирования JWT
     # from edms_ai_assistant.core.security import decode_access_token

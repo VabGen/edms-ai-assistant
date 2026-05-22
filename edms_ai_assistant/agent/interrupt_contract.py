@@ -16,7 +16,7 @@ takes care of suspension, persistence and resume.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -169,14 +169,7 @@ class FilePickerInterrupt(_BasePayload):
 
 
 InterruptPayload = Annotated[
-    Union[
-        DisambiguationInterrupt,
-        ConfirmationInterrupt,
-        TextInputInterrupt,
-        SelectInterrupt,
-        CardSelectInterrupt,
-        FilePickerInterrupt,
-    ],
+    DisambiguationInterrupt | ConfirmationInterrupt | TextInputInterrupt | SelectInterrupt | CardSelectInterrupt | FilePickerInterrupt,
     Field(discriminator="kind"),
 ]
 InterruptPayloadAdapter: TypeAdapter[InterruptPayload] = TypeAdapter(InterruptPayload)
@@ -227,15 +220,7 @@ class AbortResume(_BaseResume):
 
 
 ResumeValue = Annotated[
-    Union[
-        DisambiguationResume,
-        ConfirmationResume,
-        TextInputResume,
-        SelectResume,
-        CardSelectResume,
-        FilePickerResume,
-        AbortResume,
-    ],
+    DisambiguationResume | ConfirmationResume | TextInputResume | SelectResume | CardSelectResume | FilePickerResume | AbortResume,
     Field(discriminator="kind"),
 ]
 ResumeValueAdapter: TypeAdapter[ResumeValue] = TypeAdapter(ResumeValue)

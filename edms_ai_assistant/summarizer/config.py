@@ -43,7 +43,7 @@ class SummarizerConfig(BaseModel):
             llm_base_url=str(
                 getattr(settings, "LLM_GENERATIVE_URL", "http://localhost:11434/v1")
             ),
-            llm_model=str(getattr(settings, "LLM_GENERATIVE_MODEL")),
+            llm_model=str(settings.LLM_GENERATIVE_MODEL),
             llm_api_key=api_key if api_key is not None else None,
             llm_timeout_s=float(getattr(settings, "LLM_TIMEOUT", 120.0)),
             context_window_tokens=int(

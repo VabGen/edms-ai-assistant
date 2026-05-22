@@ -7,7 +7,7 @@ from edms_ai_assistant.core.exceptions import (
 
 __all__ = [
     "AppException",
-    "LLMException",
-    "DocumentTooLargeException",
     "CacheException",
+    "DocumentTooLargeException",
+    "LLMException",
 ]

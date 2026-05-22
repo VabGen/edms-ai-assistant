@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
 
@@ -51,7 +51,7 @@ class TextChunk:
         index: int,
         section_title: str | None = None,
         char_start: int = 0,
-    ) -> "TextChunk":
+    ) -> TextChunk:
         stripped = text.strip()
         return cls(
             text=stripped,

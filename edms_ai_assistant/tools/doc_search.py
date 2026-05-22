@@ -27,9 +27,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -40,8 +39,11 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
-from edms_ai_assistant.clients.document_client import DocumentClient
-from edms_ai_assistant.domain.document import DocumentDto
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.domain.document import DocumentDto
+    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 

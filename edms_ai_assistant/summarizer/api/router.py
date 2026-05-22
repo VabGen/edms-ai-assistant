@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Annotated, AsyncIterator
+from typing import Annotated, TYPE_CHECKING
 
 from fastapi import (
     APIRouter,
@@ -41,7 +41,6 @@ from edms_ai_assistant.summarizer.errors import (
     LLMRateLimitedError,
     LLMServerError,
     LLMTransportError,
-    PipelineError,
     SummarizerError,
     TextExtractionError,
 )
@@ -55,6 +54,9 @@ from edms_ai_assistant.summarizer.service import (
     format_output_as_markdown,
 )
 from edms_ai_assistant.summarizer.structured.models import SummaryMode
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +298,7 @@ async def summarize_stream(
                 logger.error("Stream summarization failed: %s", exc, exc_info=True)
                 yield _sse({"event": "error", "message": "Ошибка суммаризации"})
             yield "data: [DONE]\n\n"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Stream summarization failed: %s", exc, exc_info=True)
             yield _sse({"event": "error", "message": "Ошибка суммаризации"})
             yield "data: [DONE]\n\n"

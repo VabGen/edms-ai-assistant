@@ -6,17 +6,19 @@ LLM and Embedding model initialization.
 from __future__ import annotations
 
 import logging
-
-from langchain_core.embeddings import Embeddings
-from langchain_core.language_models import BaseLanguageModel
+from typing import Any, TYPE_CHECKING
 
 from edms_ai_assistant.config import settings
+
+if TYPE_CHECKING:
+    from langchain_core.embeddings import Embeddings
+    from langchain_core.language_models import BaseLanguageModel
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_API_KEY = "placeholder-key"
 
-_chat_model_instance: BaseLanguageModel | None = None
+_chat_model_instance: BaseLanguageModel[Any] | None = None
 _embedding_model_instance: Embeddings | None = None
 
 
@@ -77,7 +79,7 @@ def _detect_backend(base_url: str, model_name: str) -> str:
     return "openai"
 
 
-def get_chat_model() -> BaseLanguageModel:
+def get_chat_model() -> BaseLanguageModel[Any]:
     """Create or return cached chat model instance from current runtime settings.
 
     Бэкенды:
@@ -128,8 +130,6 @@ def get_chat_model() -> BaseLanguageModel:
                 temperature=temperature,
                 num_predict=settings.LLM_OLLAMA_NUM_PREDICT,
                 num_ctx=settings.LLM_OLLAMA_NUM_CTX,
-                timeout=timeout,
-                streaming=True,
             )
             logger.info(
                 "ChatOllama (local) initialized: model=%s num_ctx=%d num_predict=%d",
@@ -146,22 +146,20 @@ def get_chat_model() -> BaseLanguageModel:
     if backend == "openai_ollama":
         try:
             from langchain_openai import ChatOpenAI
+            from pydantic import SecretStr
 
             openai_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
 
-            llm_params: dict[str, object] = {
-                "base_url": openai_base,
-                "api_key": "ollama",
-                "model": model_name,
-                "temperature": temperature,
-                "timeout": timeout,
-                "max_retries": max_retries,
-                "streaming": True,
-            }
-            if max_tokens:
-                llm_params["max_tokens"] = max_tokens
-
-            _chat_model_instance = ChatOpenAI(**llm_params)
+            _chat_model_instance = ChatOpenAI(
+                base_url=openai_base,
+                api_key=SecretStr("ollama"),
+                model=model_name,
+                temperature=temperature,
+                timeout=timeout,
+                max_retries=max_retries,
+                streaming=True,
+                max_tokens=max_tokens or None,
+            )
             logger.info(
                 "ChatOpenAI→Ollama initialized: model=%s url=%s",
                 model_name,
@@ -177,26 +175,24 @@ def get_chat_model() -> BaseLanguageModel:
     # ── OpenAI-compatible (прокси, облако) ────────────────────────────────────
     try:
         from langchain_openai import ChatOpenAI
+        from pydantic import SecretStr
 
-        api_key: str = _DEFAULT_API_KEY
+        final_api_key: SecretStr = SecretStr(_DEFAULT_API_KEY)
         if settings.OPENAI_API_KEY:
-            api_key = settings.OPENAI_API_KEY.get_secret_value()
+            final_api_key = settings.OPENAI_API_KEY
         elif settings.LLM_API_KEY:
-            api_key = settings.LLM_API_KEY.get_secret_value()
+            final_api_key = settings.LLM_API_KEY
 
-        llm_params: dict[str, object] = {
-            "base_url": base_url,
-            "api_key": api_key,
-            "model": model_name,
-            "temperature": temperature,
-            "timeout": timeout,
-            "max_retries": max_retries,
-            "streaming": True,
-        }
-        if max_tokens:
-            llm_params["max_tokens"] = max_tokens
-
-        _chat_model_instance = ChatOpenAI(**llm_params)
+        _chat_model_instance = ChatOpenAI(
+            base_url=base_url,
+            api_key=final_api_key,
+            model=model_name,
+            temperature=temperature,
+            timeout=timeout,
+            max_retries=max_retries,
+            streaming=True,
+            max_tokens=max_tokens or None,
+        )
         logger.info("ChatOpenAI initialized: model=%s url=%s", model_name, base_url)
         return _chat_model_instance
 
@@ -235,11 +231,11 @@ def get_embedding_model() -> Embeddings:
     )
 
     try:
+        from pydantic import SecretStr
         _embedding_model_instance = OpenAIEmbeddings(
             base_url=base_url,
-            api_key=api_key,
+            api_key=SecretStr(api_key),
             model=model_name,
-            request_timeout=settings.EMBEDDING_REQUEST_TIMEOUT,
             max_retries=settings.EMBEDDING_MAX_RETRIES,
             chunk_size=settings.EMBEDDING_CHUNK_SIZE,
         )

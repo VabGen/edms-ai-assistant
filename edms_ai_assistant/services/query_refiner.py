@@ -5,9 +5,11 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from edms_ai_assistant.services.entity_extractor import Entity
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.entity_extractor import Entity
 
 logger = logging.getLogger(__name__)
 

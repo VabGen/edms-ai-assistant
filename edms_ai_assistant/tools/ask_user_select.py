@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Annotated
+from typing import Any, Annotated, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool, InjectedToolArg
 from pydantic import BaseModel, Field
 
@@ -22,6 +21,9 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
     CardSelectResume,
 )
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

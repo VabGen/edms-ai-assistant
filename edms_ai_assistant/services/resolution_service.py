@@ -5,15 +5,18 @@ import logging
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from edms_ai_assistant.clients.department_client import DepartmentClient
-from edms_ai_assistant.clients.employee_client import EmployeeClient
-from edms_ai_assistant.clients.group_client import GroupClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
-from edms_ai_assistant.domain.employee import EmployeeDto
 from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,
     build_employee_filter,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.domain.employee import EmployeeDto
+    from edms_ai_assistant.clients.group_client import GroupClient
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from edms_ai_assistant.clients.department_client import DepartmentClient
 
 logger = logging.getLogger(__name__)
 

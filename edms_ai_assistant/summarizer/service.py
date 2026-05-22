@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any, AsyncIterator
+from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -38,10 +38,12 @@ from edms_ai_assistant.summarizer.prompts.registry import (
     get_prompt_registry,
 )
 from edms_ai_assistant.summarizer.structured.models import (
-    LLMBaseModel,
     QualityScore,
     SummaryMode,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -741,7 +743,7 @@ class SummarizationService:
                 temperature=0.0,
                 max_tokens=300,
             )
-        except Exception as exc:  # noqa: BLE001 — best-effort
+        except Exception as exc:
             logger.warning("Quality judge LLM call failed: %s", exc)
             return None
 
@@ -777,12 +779,12 @@ class SummarizationService:
                     asyncio.gather(*pending, return_exceptions=True),
                     timeout=5.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "Background cache writes did not finish within 5s (%d pending)",
                     len(pending),
                 )
         try:
             await self._llm.aclose()
-        except Exception as exc:  # noqa: BLE001 — best-effort shutdown
+        except Exception as exc:
             logger.warning("LLM client close failed: %s", exc)

@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from edms_ai_assistant.services.resolution_service import ResolutionService
-from edms_ai_assistant.domain.employee import EmployeeDto, DepartmentDto, GroupDto
+from edms_ai_assistant.domain.employee import EmployeeDto, DepartmentDto
 
 @pytest.mark.asyncio
 async def test_resolve_employees():
@@ -47,7 +47,7 @@ async def test_resolve_departments():
         EmployeeDto(id=uuid4(), first_name="Dep", last_name="Member")
     ])
 
-    found_ids, not_found, total = await service.resolve_departments("token", ["Test Dep"])
+    found_ids, _not_found, total = await service.resolve_departments("token", ["Test Dep"])
 
     assert len(found_ids) == 1
     assert total == 1

@@ -112,7 +112,7 @@ def _get_cached_ocr(file_path: str) -> str | None:
         if src_stat.st_mtime > cache_stat.st_mtime or src_stat.st_size == 0:
             return None
 
-        with open(cache_path, "r", encoding="utf-8") as f:
+        with open(cache_path, encoding="utf-8") as f:
             text = f.read()
             if text.strip():
                 logger.info("Using cached OCR result for %s", file_path)
@@ -395,7 +395,7 @@ class FileProcessorService:
             ocr_lang = "rus"
         else:
             raise RuntimeError(
-                f"No OCR languages available. Install tesseract-ocr-rus and tesseract-ocr-eng."
+                "No OCR languages available. Install tesseract-ocr-rus and tesseract-ocr-eng."
             )
 
         logger.info(

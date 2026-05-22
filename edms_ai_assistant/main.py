@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
@@ -29,6 +28,10 @@ from edms_ai_assistant.summarizer.api.router import router as summarizer_router
 from edms_ai_assistant.summarizer.container import build_summarization_service
 from edms_ai_assistant.summarizer.observability.logging_ctx import install_request_id_filter
 from edms_ai_assistant.llm import get_chat_model
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
@@ -62,7 +65,7 @@ def _setup_telemetry(app: FastAPI) -> None:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan — startup and shutdown."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     await init_db()

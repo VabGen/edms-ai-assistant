@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 # Revision identifiers
 revision: str = "001_summarization_cache"

@@ -34,9 +34,8 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -44,9 +43,12 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_document_id_from_config,
     get_token_from_config,
 )
-from edms_ai_assistant.clients.control_client import ControlClient
-from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from edms_ai_assistant.clients.control_client import ControlClient
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +164,7 @@ class DocControlInput(BaseModel):
         return n
 
     @model_validator(mode="after")
-    def fill_term_days(self) -> "DocControlInput":
+    def fill_term_days(self) -> DocControlInput:
         """Ensure control_term_days is always set for action=set.
 
         Priority:
@@ -560,7 +562,7 @@ def create_doc_control_tool(
 
                 # ── Тип контроля ───────────────────────────────────────────────
                 if control_type_name:
-                    ct_id, ct_name, need_input = await _resolve_control_type(
+                    ct_id, _ct_name, need_input = await _resolve_control_type(
                         control_client, token, control_type_name
                     )
                     if need_input:

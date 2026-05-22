@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
 
-from edms_ai_assistant.clients.task_client import TaskClient
 from edms_ai_assistant.domain.task_models import (
     CreateTaskRequest,
     CreateTaskRequestExecutor,
     TaskCreationResult,
     TaskType,
 )
-from edms_ai_assistant.services.resolution_service import ResolutionService
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.resolution_service import ResolutionService
+    from edms_ai_assistant.clients.task_client import TaskClient
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +74,7 @@ class TaskService:
                 )
 
         if not responsible_id:
-            responsible_id = list(emp_ids)[0]
+            responsible_id = next(iter(emp_ids))
 
         # Формируем DTO
         executors = [

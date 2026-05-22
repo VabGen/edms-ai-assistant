@@ -9,18 +9,15 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
 import json
-from typing import AsyncIterator
 
 import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.deps import DepsDep, get_agent, get_deps
-from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
     is_system_attachment,
@@ -39,11 +36,16 @@ from edms_ai_assistant.summarizer.structured.models import SummaryMode
 from edms_ai_assistant.tools.attachment import create_attachment_fetch_tool
 from edms_ai_assistant.utils.hash_utils import get_file_hash
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from edms_ai_assistant.core.deps import AppDeps
+    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Actions"])
 
-_MODE_MAP: dict[str, SummaryMode] = {  # noqa: E501
+_MODE_MAP: dict[str, SummaryMode] = {
     "extractive": SummaryMode.EXTRACTIVE,
     "abstractive": SummaryMode.ABSTRACTIVE,
     "thesis": SummaryMode.THESIS,
@@ -91,8 +93,8 @@ async def _run_agent_once(
     ``GraphInterrupt``; we surface this as an empty string so the caller
     can fall back gracefully.
     """
-    from langchain_core.messages import AIMessage  # noqa: PLC0415
-    from langgraph.errors import GraphInterrupt  # noqa: PLC0415
+    from langchain_core.messages import AIMessage
+    from langgraph.errors import GraphInterrupt
 
     inputs, _ctx = agent.build_initial_inputs(
         message=message,
@@ -619,7 +621,7 @@ async def api_direct_summarize_stream(
             logger.warning("Stream summarization rejected: %s", exc)
             yield _sse({"event": "error", "message": str(exc)})
             yield "data: [DONE]\n\n"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Stream summarization failed: %s", exc, exc_info=True)
             yield _sse({"event": "error", "message": "Внутренняя ошибка сервера."})
             yield "data: [DONE]\n\n"

@@ -9,23 +9,25 @@ import json
 import logging
 import re as _re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from edms_ai_assistant.clients.attachment_client import AttachmentClient
-from edms_ai_assistant.clients.document_client import DocumentClient
-from edms_ai_assistant.clients.reference_client import ReferenceClient
 from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
 from edms_ai_assistant.domain.document import DocumentDto, DocumentAppealDto
 from edms_ai_assistant.domain.enums import DeclarantType
-from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
 from edms_ai_assistant.utils.file_utils import extract_text_from_bytes
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.appeal_extraction_service import AppealExtractionService
+    from edms_ai_assistant.clients.attachment_client import AttachmentClient
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from edms_ai_assistant.clients.reference_client import ReferenceClient
+    from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +96,7 @@ class ValueSanitizer:
             return dt
         if isinstance(dt, datetime):
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt.isoformat().replace("+00:00", "Z")
         return None
 

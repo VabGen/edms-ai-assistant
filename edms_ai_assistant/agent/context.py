@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -38,14 +38,14 @@ def is_valid_uuid(value: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class AgentStatus(str, Enum):
+class AgentStatus(StrEnum):
     SUCCESS = "success"
     ERROR = "error"
     REQUIRES_ACTION = "requires_action"
     PROCESSING = "processing"
 
 
-class ActionType(str, Enum):
+class ActionType(StrEnum):
     SUMMARIZE_SELECTION = "summarize_selection"
     DISAMBIGUATION = "requires_disambiguation"
     CONFIRMATION = "requires_confirmation"
@@ -131,7 +131,7 @@ class ContextParams:
             if parts:
                 object.__setattr__(self, "user_full_name", " ".join(parts))
 
-    def with_intent(self, intent: Any) -> "ContextParams":
+    def with_intent(self, intent: Any) -> ContextParams:
         """
         Создаёт новый иммутабельный ContextParams с установленным intent.
 
@@ -181,7 +181,7 @@ class AgentRequest(BaseModel):
         return v.strip()
 
     @model_validator(mode="after")
-    def _require_message(self) -> "AgentRequest":
+    def _require_message(self) -> AgentRequest:
         if not (self.message and self.message.strip()):
             raise ValueError("message must be provided")
         return self

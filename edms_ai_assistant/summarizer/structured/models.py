@@ -7,11 +7,13 @@ JSON Schema is passed to LLM response_format for type safety at API boundary.
 
 from __future__ import annotations
 
-from datetime import date
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+
+if TYPE_CHECKING:
+    from datetime import date
 
 # ---------------------------------------------------------------------------
 # Auto-truncation infrastructure

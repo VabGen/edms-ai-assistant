@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.config import EdmsSettings
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.employee import (
     CurrentUserDto,
@@ -14,6 +12,10 @@ from edms_ai_assistant.domain.employee import (
     EmployeeDto,
     RoleDto,
 )
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.config import EdmsSettings
+    from edms_ai_assistant.clients.transport import IAsyncTransport
 
 logger = logging.getLogger(__name__)
 

@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
 from edms_ai_assistant.config import settings
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +62,7 @@ def get_redis_client() -> aioredis.Redis:
 
 # ── FastAPI Dependencies ───────────────────────────────────────────────────
 
-async def get_redis() -> AsyncGenerator[aioredis.Redis, None]:
+async def get_redis() -> AsyncGenerator[aioredis.Redis]:
     """FastAPI dependency: предоставляет активное соединение Redis."""
     # Используем глобальный пул для FastAPI
     yield _global_client.get_client()

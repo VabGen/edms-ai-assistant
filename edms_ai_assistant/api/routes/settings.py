@@ -185,7 +185,7 @@ class _RuntimeSettingsStore:
         self._defaults: dict[str, Any] = {}
         self._overrides: dict[str, dict[str, Any]] = {}
 
-        for group, field_map in self._SETTINGS_MAP.items():
+        for _group, field_map in self._SETTINGS_MAP.items():
             for _field, attr in field_map.items():
                 self._defaults[attr] = getattr(settings, attr, None)
 

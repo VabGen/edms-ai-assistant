@@ -1,12 +1,10 @@
 # edms_ai_assistant/core/deps.py
 from __future__ import annotations
 
-import redis.asyncio as aioredis
 from pydantic import BaseModel, ConfigDict
-from typing import Any, Optional
+from typing import Any, TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.transport import IAsyncTransport
 from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.clients.document_creator_client import DocumentCreatorClient
 from edms_ai_assistant.clients.employee_client import EmployeeClient
@@ -30,6 +28,11 @@ from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 from edms_ai_assistant.services.entity_extractor import EntityExtractor
 from edms_ai_assistant.services.query_refiner import QueryRefiner
 from edms_ai_assistant.config import edms_settings, settings
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.transport import IAsyncTransport
+    import redis.asyncio as aioredis
+    from langchain_core.language_models import BaseLanguageModel
 
 
 class AppDeps(BaseModel):
@@ -61,13 +64,13 @@ class AppDeps(BaseModel):
     introduction_service: IntroductionService
     file_processor_service: FileProcessorService
     nlp_service: EDMSNaturalLanguageService
-    chat_model: Any
+    chat_model: BaseLanguageModel
 
     # Опциональные сервисы (инициализируемые позже в lifespan)
-    summarization_service: Optional[Any] = None
+    summarization_service: Any | None = None
 
 
-def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> AppDeps:
+def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: BaseLanguageModel) -> AppDeps:
     """Фабрика для создания и связывания всех зависимостей приложения."""
 
     base_client = EdmsBaseClient(transport, edms_settings)

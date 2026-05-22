@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-import redis.asyncio as aioredis
 from pydantic import BaseModel, ConfigDict, Field
 
 from edms_ai_assistant.clients.document_client import (
@@ -15,11 +14,13 @@ from edms_ai_assistant.clients.document_client import (
 )
 from edms_ai_assistant.core.exceptions import (
     DocumentNotFoundError,
-    DocumentOperationError,
 )
 from edms_ai_assistant.domain.document import DocumentDto
-from edms_ai_assistant.services.document_enricher import DocumentEnricher
-from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.services.document_enricher import DocumentEnricher
+    import redis.asyncio as aioredis
+    from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 
 logger = logging.getLogger(__name__)
 

@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-from uuid import UUID
+from typing import Any, TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.clients.transport import IAsyncTransport
-from edms_ai_assistant.config import EdmsSettings
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.document import (
     BpmnProcessActivityDto,
@@ -22,6 +19,11 @@ from edms_ai_assistant.domain.document import (
     ExecutionDocumentStatCount,
     TasksAndProjectsDto,
 )
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.transport import IAsyncTransport
+    from uuid import UUID
+    from edms_ai_assistant.config import EdmsSettings
 
 logger = logging.getLogger(__name__)
 

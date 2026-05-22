@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-from uuid import UUID
+from typing import Any, TYPE_CHECKING
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
-from edms_ai_assistant.domain.enums import (
-    AttachmentDocumentType,
-    AttachmentType,
-    CreateType,
-    DocCategory,
-    DeclarantType,
-    DocumentProcessType,
-    DocumentStatus,
-    JobStatus,
-)
-from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.domain.enums import (
+        AttachmentDocumentType,
+        CreateType,
+        DocCategory,
+        DeclarantType,
+        DocumentProcessType,
+        DocumentStatus,
+    )
+    from uuid import UUID
+    from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
+    from datetime import datetime
 
 
 class DocumentTypeDto(EdmsBaseDto):

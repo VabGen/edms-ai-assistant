@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 
 from edms_ai_assistant.agent.context import AgentRequest, ContextParams, is_valid_uuid
@@ -18,10 +17,14 @@ from edms_ai_assistant.agent.escaping import xml_escape_text
 from edms_ai_assistant.agent.graph import GraphBuilder
 from edms_ai_assistant.agent.prompts import PromptBuilder
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.domain.document import DocumentDto
 from edms_ai_assistant.services.nlp_service import UserIntent
 from edms_ai_assistant.tools import init_tools
-from edms_ai_assistant.core.deps import AppDeps
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.core.deps import AppDeps
+    from edms_ai_assistant.domain.document import DocumentDto
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langchain_core.language_models import BaseLanguageModel
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +46,13 @@ class EdmsDocumentAgent:
     def __init__(
         self,
         deps: AppDeps,
-        checkpointer: BaseCheckpointSaver | None = None,
-        llm: Any = None,
+        checkpointer: BaseCheckpointSaver[Any] | None = None,
+        llm: BaseLanguageModel[Any] | None = None,
     ) -> None:
         """Инициализация агента с DI."""
         self.deps = deps
-        self._checkpointer: BaseCheckpointSaver = checkpointer or MemorySaver()
-        self._model = llm or self._init_model()
+        self._checkpointer: BaseCheckpointSaver[Any] = checkpointer or MemorySaver()
+        self._model: BaseLanguageModel[Any] = llm or self._init_model()
 
         self.tools = init_tools(deps, self._model)
         self._graph_builder = GraphBuilder(
@@ -62,7 +65,7 @@ class EdmsDocumentAgent:
         logger.info("EdmsDocumentAgent initialized with %d DI-powered tools.", len(self.tools))
 
     @staticmethod
-    def _init_model() -> Any:
+    def _init_model() -> BaseLanguageModel[Any]:
         from edms_ai_assistant.llm import get_chat_model
         return get_chat_model()
 
@@ -72,7 +75,7 @@ class EdmsDocumentAgent:
         return self._graph
 
     @property
-    def checkpointer(self) -> BaseCheckpointSaver:
+    def checkpointer(self) -> BaseCheckpointSaver[Any]:
         return self._checkpointer
 
     def refresh_model(self) -> None:

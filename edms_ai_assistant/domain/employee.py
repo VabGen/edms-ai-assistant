@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
-from uuid import UUID
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
-from edms_ai_assistant.domain.enums import BlockedField, GroupType, RoleObjectType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.domain.enums import GroupType, RoleObjectType
+    from uuid import UUID
+    from datetime import datetime
 
 
 class PostDto(EdmsBaseDto):

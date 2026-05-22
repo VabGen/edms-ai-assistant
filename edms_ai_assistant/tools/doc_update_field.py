@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Annotated
+from typing import Any, Annotated, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
-from edms_ai_assistant.clients.document_client import DocumentClient
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.document_client import DocumentClient
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

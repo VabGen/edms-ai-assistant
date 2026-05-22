@@ -182,10 +182,9 @@ class PostgresL2Cache(SummarizationCache):
     async def set(self, entry: CacheEntry, ttl_seconds: int = 2_592_000) -> None:
         """Store entry with TTL (default: 30 days)."""
         try:
-            async with self._session_factory() as session:
-                async with session.begin():
-                    await session.execute(
-                        sa_text("""
+            async with self._session_factory() as session, session.begin():
+                await session.execute(
+                    sa_text("""
                             INSERT INTO edms.summarization_cache
                                 (cache_key, file_hash, mode, language, prompt_version,
                                  cache_entry_json, input_tokens, output_tokens,
@@ -201,33 +200,32 @@ class PostgresL2Cache(SummarizationCache):
                                 expires_at = EXCLUDED.expires_at,
                                 updated_at = NOW()
                         """),
-                        {
-                            "key": entry.cache_key,
-                            "file_hash": entry.file_hash,
-                            "mode": entry.mode,
-                            "language": entry.language,
-                            "pv": entry.prompt_version,
-                            "entry_json": entry.model_dump_json(),
-                            "input_t": entry.input_tokens,
-                            "output_t": entry.output_tokens,
-                            "cost": entry.cost_usd,
-                            "model": entry.model_name,
-                            "ttl": ttl_seconds,
-                        },
-                    )
+                    {
+                        "key": entry.cache_key,
+                        "file_hash": entry.file_hash,
+                        "mode": entry.mode,
+                        "language": entry.language,
+                        "pv": entry.prompt_version,
+                        "entry_json": entry.model_dump_json(),
+                        "input_t": entry.input_tokens,
+                        "output_t": entry.output_tokens,
+                        "cost": entry.cost_usd,
+                        "model": entry.model_name,
+                        "ttl": ttl_seconds,
+                    },
+                )
         except Exception as exc:
             logger.error("Postgres L2 SET failed — cache write dropped: %s", exc)
 
     async def delete(self, cache_key: str) -> None:
         try:
-            async with self._session_factory() as session:
-                async with session.begin():
-                    await session.execute(
-                        sa_text(
-                            "DELETE FROM edms.summarization_cache WHERE cache_key = :key"
-                        ),
-                        {"key": cache_key},
-                    )
+            async with self._session_factory() as session, session.begin():
+                await session.execute(
+                    sa_text(
+                        "DELETE FROM edms.summarization_cache WHERE cache_key = :key"
+                    ),
+                    {"key": cache_key},
+                )
         except Exception as exc:
             logger.warning("Postgres L2 DELETE failed: %s", exc)
 
@@ -293,7 +291,7 @@ class TwoLevelCache:
     async def _safe_backfill(self, entry: CacheEntry) -> None:
         try:
             await self._l1.set(entry, self._l1_ttl)
-        except Exception as exc:  # noqa: BLE001 — best-effort
+        except Exception as exc:
             logger.debug("L1 backfill failed: %s", exc)
 
     async def set(self, entry: CacheEntry) -> None:
@@ -311,25 +309,24 @@ class TwoLevelCache:
     async def invalidate_by_file(self, file_hash: str, mode: str | None = None) -> None:
         """Invalidate cache entries for a given file hash, optionally filtered by mode."""
         try:
-            async with self._l2._session_factory() as session:
-                async with session.begin():
-                    if mode:
-                        result = await session.execute(
-                            sa_text(
-                                "DELETE FROM edms.summarization_cache "
-                                "WHERE file_hash = :fh AND mode = :mode RETURNING cache_key"
-                            ),
-                            {"fh": file_hash, "mode": mode},
-                        )
-                    else:
-                        result = await session.execute(
-                            sa_text(
-                                "DELETE FROM edms.summarization_cache "
-                                "WHERE file_hash = :fh RETURNING cache_key"
-                            ),
-                            {"fh": file_hash},
-                        )
-                    keys = [row[0] for row in result.fetchall()]
+            async with self._l2._session_factory() as session, session.begin():
+                if mode:
+                    result = await session.execute(
+                        sa_text(
+                            "DELETE FROM edms.summarization_cache "
+                            "WHERE file_hash = :fh AND mode = :mode RETURNING cache_key"
+                        ),
+                        {"fh": file_hash, "mode": mode},
+                    )
+                else:
+                    result = await session.execute(
+                        sa_text(
+                            "DELETE FROM edms.summarization_cache "
+                            "WHERE file_hash = :fh RETURNING cache_key"
+                        ),
+                        {"fh": file_hash},
+                    )
+                keys = [row[0] for row in result.fetchall()]
             await asyncio.gather(
                 *[self._l1.delete(k) for k in keys],
                 return_exceptions=True,

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from tenacity import (
@@ -34,10 +34,10 @@ class IAsyncTransport(Protocol):
             url: str,
             *,
             token: str,
-            params: Optional[Dict[str, Any]] = None,
+            params: dict[str, Any] | None = None,
             json: Any = None,
-            files: Optional[Dict[str, Any]] = None,
-            timeout: Optional[int] = None,
+            files: dict[str, Any] | None = None,
+            timeout: int | None = None,
     ) -> httpx.Response:
         ...
 
@@ -52,7 +52,7 @@ class HttpxTransport(IAsyncTransport):
         )
 
     @staticmethod
-    def _get_headers(token: str) -> Dict[str, str]:
+    def _get_headers(token: str) -> dict[str, str]:
         if not token or not token.strip():
             raise ValueError("Authorization token is missing or empty.")
         return {"Authorization": f"Bearer {token}"}
@@ -63,10 +63,10 @@ class HttpxTransport(IAsyncTransport):
             url: str,
             *,
             token: str,
-            params: Optional[Dict[str, Any]] = None,
+            params: dict[str, Any] | None = None,
             json: Any = None,
-            files: Optional[Dict[str, Any]] = None,
-            timeout: Optional[int] = None,
+            files: dict[str, Any] | None = None,
+            timeout: int | None = None,
     ) -> httpx.Response:
         """Публичный метод, удовлетворяющий контракту IAsyncTransport без декораторов."""
         response: httpx.Response = await self._request_with_retry(
@@ -92,10 +92,10 @@ class HttpxTransport(IAsyncTransport):
             url: str,
             *,
             token: str,
-            params: Optional[Dict[str, Any]] = None,
+            params: dict[str, Any] | None = None,
             json: Any = None,
-            files: Optional[Dict[str, Any]] = None,
-            timeout: Optional[int] = None,
+            files: dict[str, Any] | None = None,
+            timeout: int | None = None,
     ) -> httpx.Response:
         """Внутренняя реализация с ретраями"""
         headers = self._get_headers(token)

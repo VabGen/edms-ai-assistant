@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -16,17 +15,20 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
-from edms_ai_assistant.clients.department_client import DepartmentClient
-from edms_ai_assistant.clients.employee_client import EmployeeClient
-from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.domain.employee import EmployeeDto
-from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
 from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,
     build_employee_filter,
     get_merged_name_parts,
     merge_name_parts,
 )
+
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.department_client import DepartmentClient
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService
+    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -496,7 +498,7 @@ def create_employee_search_tool(deps: AppDeps) -> StructuredTool:
             return {"status": "cancelled", "message": "Выбор сотрудника отменён пользователем."}
         except GraphInterrupt:
             raise
-        except Exception as exc:  # noqa: B902 - Broad exception required to prevent agent crash
+        except Exception as exc:
             logger.error("Employee search failed", exc_info=True)
             return {"status": "error", "message": f"Ошибка поиска: {exc}"}
 

@@ -10,9 +10,8 @@ import logging
 import re as _re
 import uuid
 from enum import StrEnum
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,7 +22,18 @@ from edms_ai_assistant.agent.interrupt_contract import (
     SelectResume,
 )
 
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
 logger = logging.getLogger(__name__)
+
+_summarization_service: Any = None
+
+
+def set_summarization_service(service: Any) -> None:
+    """Устанавливает глобальный сервис суммаризации для использования в туле."""
+    global _summarization_service
+    _summarization_service = service
 
 
 class SummarizeType(StrEnum):
@@ -270,7 +280,10 @@ def create_doc_summarize_text_tool(
 
         normalised = _normalise_summary_type(summary_type)
 
-        if summarization_service is None:
+        # Пытаемся использовать переданный сервис или глобальный (установленный через set_summarization_service)
+        svc = summarization_service or _summarization_service
+
+        if svc is None:
             return await _llm_fallback(clean_text, normalised)
 
         try:
@@ -298,7 +311,7 @@ def create_doc_summarize_text_tool(
                 force_refresh=False,
             )
 
-            resp = await summarization_service.summarize(req)
+            resp = await svc.summarize(req)
             content = format_output_as_markdown(resp)
 
             return {

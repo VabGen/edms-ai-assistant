@@ -7,14 +7,14 @@ Moved from `models/task_models.py` to resolve the naming conflict between
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class TaskType(str, Enum):
+class TaskType(StrEnum):
     """Типы поручений в системе."""
 
     GENERAL = "GENERAL"
