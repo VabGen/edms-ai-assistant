@@ -217,7 +217,7 @@ async def doc_search_tool(
                     "Автор": doc["author"],
                 },
                 metadata={
-                    "url": f"/document/{doc['id']}",
+                    "url": f"/document-form/{doc['id']}",
                     "category": doc["category"],
                     "status": doc["status"],
                 }
@@ -225,15 +225,12 @@ async def doc_search_tool(
             for doc in documents
         ]
 
-        # Выбрасываем Interrupt — это остановит граф и отправит JSON на фронтенд
         resume = ask_human(CardSelectInterrupt(
             prompt=f"Найдено документов: {len(content)}",
             cards=cards,
             multiple=False,
         ))
 
-        # Граф возобновлен. Инструмент возвращает ID выбранного документа,
-        # чтобы LLM могла продолжить работу (например, ответить "Открываю документ...")
         if isinstance(resume, CardSelectResume) and resume.selected_ids:
             selected_id = resume.selected_ids[0]
             return {
