@@ -419,14 +419,17 @@ class PromptRegistry:
     def get_reduce(self, mode: SummaryMode) -> PromptTemplate:
         return self._REDUCE.get(mode, self._DIRECT[mode])
 
-    def get_judge(self) -> PromptTemplate:
+    @staticmethod
+    def get_judge() -> PromptTemplate:
         """Промпт для LLM-as-judge — оценки качества вывода."""
         return PROMPT_QUALITY_JUDGE
 
-    def version(self) -> str:
+    @staticmethod
+    def version() -> str:
         return PROMPT_REGISTRY_VERSION
 
-    def cache_version_tag(self) -> str:
+    @staticmethod
+    def cache_version_tag() -> str:
         return f"prompts:{PROMPT_REGISTRY_VERSION}"
 
 

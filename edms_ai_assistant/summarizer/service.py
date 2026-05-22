@@ -174,7 +174,7 @@ def _decode_text(data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Output → Text formatter
+# Output -> Text formatter
 # ---------------------------------------------------------------------------
 
 
@@ -612,7 +612,7 @@ class SummarizationService:
 
         Поведение:
           - Cache hit: сразу yield финальный response (без дельт).
-          - Малый документ: DirectPipeline.run_stream → дельты + финальный результат.
+          - Малый документ: DirectPipeline.run_stream -> дельты + финальный результат.
           - Большой документ: фолбэк на не-стримящий map-reduce, в конце один response.
 
         Финальный SummarizationResponse кладётся в кэш как обычно.
@@ -634,7 +634,7 @@ class SummarizationService:
             prompt_version=self._prompts.cache_version_tag(),
         )
 
-        # Cache hit → выдаём готовый response без дельт
+        # Cache hit -> выдаём готовый response без дельт
         if not request.force_refresh:
             cached_entry, cache_source = await self._cache.get(cache_key)
             if cached_entry is not None:

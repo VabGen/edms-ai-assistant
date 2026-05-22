@@ -33,7 +33,7 @@ class TaskClient(EdmsBaseClient):
         endpoint = f"api/document/{document_id}/task/batch"
         payload = [task.model_dump(mode="json", by_alias=True) for task in tasks]
 
-        await self._make_request(
+        await self.make_request(
             "POST",
             endpoint,
             token=token,

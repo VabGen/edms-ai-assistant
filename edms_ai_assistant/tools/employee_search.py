@@ -89,7 +89,7 @@ class EmployeeSearchInput(BaseModel):
         if merged.last_name: data["last_name"] = merged.last_name
         if merged.first_name: data["first_name"] = merged.first_name
         if merged.middle_name: data["middle_name"] = merged.middle_name
-        logger.info("Auto-parsed query='%s' → %s", q.strip(), merged.to_display())
+        logger.info("Auto-parsed query='%s' -> %s", q.strip(), merged.to_display())
         data["query"] = None
         return data
 
@@ -127,32 +127,32 @@ class EmployeeSearchInput(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _score_result(result: dict[str, Any], last_name: str | None, first_name: str | None, middle_name: str | None,
+def _score_result(result: EmployeeDto, last_name: str | None, first_name: str | None, middle_name: str | None,
                   full_post_name: str | None) -> int:
     score = 0
     if last_name:
-        val = (result.get("lastName") or "").lower()
+        val = (result.last_name or "").lower()
         term = last_name.lower()
         if val == term:
             score += 10
         elif val.startswith(term):
             score += 5
     if first_name:
-        val = (result.get("firstName") or "").lower()
+        val = (result.first_name or "").lower()
         term = first_name.lower()
         if val == term:
             score += 10
         elif val.startswith(term):
             score += 5
     if middle_name:
-        val = (result.get("middleName") or "").lower()
+        val = (result.middle_name or "").lower()
         term = middle_name.lower()
         if val == term:
             score += 10
         elif val.startswith(term):
             score += 5
     if full_post_name:
-        post_name = ((result.get("post") or {}).get("postName") or "").lower()
+        post_name = (result.post.post_name if result.post else "").lower()
         term = full_post_name.lower()
         if post_name == term:
             score += 10
@@ -163,8 +163,8 @@ def _score_result(result: dict[str, Any], last_name: str | None, first_name: str
     return score
 
 
-def _find_best_match(results: list[dict[str, Any]], last_name: str | None, first_name: str | None,
-                     middle_name: str | None, full_post_name: str | None) -> dict[str, Any] | None:
+def _find_best_match(results: list[EmployeeDto], last_name: str | None, first_name: str | None,
+                     middle_name: str | None, full_post_name: str | None) -> EmployeeDto | None:
     has_criteria = any((last_name, first_name, middle_name, full_post_name))
     if not has_criteria: return None
     scored = [(r, _score_result(r, last_name, first_name, middle_name, full_post_name)) for r in results]
@@ -180,25 +180,24 @@ def _find_best_match(results: list[dict[str, Any]], last_name: str | None, first
     return None
 
 
-def _filter_by_post(results: list[dict[str, Any]], full_post_name: str) -> list[dict[str, Any]]:
+def _filter_by_post(results: list[EmployeeDto], full_post_name: str) -> list[EmployeeDto]:
     term = full_post_name.lower()
     filtered = []
     for r in results:
-        post_name = ((r.get("post") or {}).get("postName") or "").lower()
+        post_name = (r.post.post_name if r.post else "").lower()
         if term in post_name: filtered.append(r)
     return filtered if filtered else results
 
 
-def _serialize_employee_raw(raw: dict[str, Any]) -> dict[str, Any]:
-    post = raw.get("post") or {}
-    department = raw.get("department") or {}
-    parts = [raw.get("lastName") or "", raw.get("firstName") or "", raw.get("middleName") or ""]
+def _serialize_employee_dto(emp: EmployeeDto) -> dict[str, Any]:
+    parts = [emp.last_name or "", emp.first_name or "", emp.middle_name or ""]
     full_name = " ".join(p for p in parts if p).strip() or "—"
     return {
-        "id": str(raw.get("id", "")), "full_name": full_name,
-        "post": post.get("postName") or "—", "department": department.get("name") or "—",
-        "active": raw.get("active"), "fired": raw.get("fired"),
-        "email": raw.get("email") or "—", "phone": raw.get("phone") or "—", "room": raw.get("room") or "—",
+        "id": str(emp.id or ""), "full_name": full_name,
+        "post": emp.post.post_name if emp.post else "—",
+        "department": emp.department.name if emp.department else "—",
+        "active": emp.active,
+        "email": emp.email or "—", "phone": emp.phone or "—",
     }
 
 
@@ -243,15 +242,14 @@ async def _resolve_single_department(
     return resolved[0] if resolved else None
 
 
-async def _build_enriched_card(token: str, raw: dict[str, Any], nlp_service: EDMSNaturalLanguageService,
+async def _build_enriched_card(token: str, emp: EmployeeDto, nlp_service: EDMSNaturalLanguageService,
                                employee_client: EmployeeClient) -> dict[str, Any]:
-    emp_id = str(raw.get("id", ""))
+    emp_id = str(emp.id or "")
     try:
-        emp = EmployeeDto.model_validate(raw)
         card = nlp_service.process_employee_info(emp)
     except Exception:
         logger.warning("NLP formatting failed", exc_info=True)
-        card = _serialize_employee_raw(raw)
+        card = _serialize_employee_dto(emp)
 
     try:
         roles_raw = await employee_client.get_employee_roles(token, emp_id)
@@ -264,9 +262,7 @@ async def _build_enriched_card(token: str, raw: dict[str, Any], nlp_service: EDM
         # ИСПРАВЛЕНИЕ: Типизация словаря для линтера (устраняет Expected type...got...instead)
         access_griefs = []
         for g in (griefs_raw or []):
-            grief_obj = g.grief if isinstance(g.grief, dict) else g
-            if isinstance(grief_obj, dict):
-                access_griefs.append({"id": str(grief_obj.get("id", "")), "name": grief_obj.get("name") or "—"})
+            access_griefs.append({"id": str(g.id or ""), "name": g.name or "—"})
         card["access_griefs"] = access_griefs
     except Exception:
         card["access_griefs"] = []
@@ -277,9 +273,9 @@ async def _build_enriched_card(token: str, raw: dict[str, Any], nlp_service: EDM
 async def _get_employee_card(token: str, employee_id: str, nlp_service: EDMSNaturalLanguageService,
                              employee_client: EmployeeClient) -> dict[str, Any]:
     try:
-        raw = await employee_client.get_employee(token, employee_id)
-        if not raw: return {"status": "not_found", "message": "Сотрудник не найден."}
-        card = await _build_enriched_card(token, raw, nlp_service, employee_client)
+        emp = await employee_client.get_employee(token, employee_id)
+        if not emp: return {"status": "not_found", "message": "Сотрудник не найден."}
+        card = await _build_enriched_card(token, emp, nlp_service, employee_client)
         return {"status": "found", "total": 1, "employee_card": card}
     except Exception as exc:
         logger.error("Failed to fetch employee", exc_info=True)
@@ -288,14 +284,14 @@ async def _get_employee_card(token: str, employee_id: str, nlp_service: EDMSNatu
 
 async def _resolve_via_ask_human(
         token: str,
-        results: list[dict[str, Any]],
+        results: list[EmployeeDto],
         choices: list[dict[str, Any]],
         merged_last_name: str | None,
         nlp_service: EDMSNaturalLanguageService,
         employee_client: EmployeeClient,
 ) -> dict[str, Any]:
     """Disambiguate over native ``ask_human`` and return the picked card."""
-    index: dict[str, dict[str, Any]] = {str(r.get("id", "")): r for r in results}
+    index: dict[str, EmployeeDto] = {str(r.id or ""): r for r in results}
 
     resume = ask_human(CardSelectInterrupt(
         prompt=(
@@ -475,7 +471,7 @@ def create_employee_search_tool(deps: AppDeps) -> StructuredTool:
             best = _find_best_match(results, last_name=merged.last_name, first_name=merged.first_name,
                                     middle_name=merged.middle_name, full_post_name=full_post_name)
             if best:
-                logger.info("Best match found via scoring", extra={"id": str(best.get("id", ""))[:8]})
+                logger.info("Best match found via scoring", extra={"id": str(best.id or "")[:8]})
                 return {"status": "found", "total": 1,
                         "employee_card": await _build_enriched_card(token, best, nlp_service, employee_client)}
 
@@ -487,7 +483,7 @@ def create_employee_search_tool(deps: AppDeps) -> StructuredTool:
                             "employee_card": await _build_enriched_card(token, display_results[0], nlp_service,
                                                                         employee_client)}
 
-            choices = [_serialize_employee_raw(r) for r in display_results[:effective_size]]
+            choices = [_serialize_employee_dto(r) for r in display_results[:effective_size]]
             logger.info("Multiple employees found", extra={"count": len(choices)})
             return await _resolve_via_ask_human(token=token, results=display_results, choices=choices,
                                                 merged_last_name=merged.last_name, nlp_service=nlp_service,

@@ -98,7 +98,7 @@ def emit_ui(directive: UIDirective) -> None:
 
 # In AgentState, add:
 #   last_ui_directives: Annotated[
-#       dict[str, str],   # directive_id → component
+#       dict[str, str],   # directive_id -> component
 #       operator.or_,
 #   ] = {}
 #

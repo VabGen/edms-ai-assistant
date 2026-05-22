@@ -3,9 +3,9 @@
 Universal Human-in-the-Loop interruption contract for LangGraph.
 
 Design:
-- Outbound (server → frontend): ``InterruptPayload`` — discriminated union by
+- Outbound (server -> frontend): ``InterruptPayload`` — discriminated union by
   ``kind`` describing what the tool needs from the user.
-- Inbound (frontend → server): ``ResumeValue`` — discriminated union by ``kind``
+- Inbound (frontend -> server): ``ResumeValue`` — discriminated union by ``kind``
   carrying the user's answer.  The matching ``kind`` on both sides guarantees
   static, parse-free routing.
 
@@ -87,7 +87,7 @@ class FileRef(BaseModel):
     size_bytes: int | None = None
 
 
-# ── Outbound payloads (tool → frontend) ───────────────────────────────────
+# ── Outbound payloads (tool -> frontend) ───────────────────────────────────
 
 
 class _BasePayload(BaseModel):
@@ -175,7 +175,7 @@ InterruptPayload = Annotated[
 InterruptPayloadAdapter: TypeAdapter[InterruptPayload] = TypeAdapter(InterruptPayload)
 
 
-# ── Inbound resume values (frontend → tool) ───────────────────────────────
+# ── Inbound resume values (frontend -> tool) ───────────────────────────────
 
 
 class _BaseResume(BaseModel):

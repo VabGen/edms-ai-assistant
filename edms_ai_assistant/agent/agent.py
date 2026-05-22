@@ -38,7 +38,7 @@ class EdmsDocumentAgent:
       • ``build_initial_inputs(...)`` — собирает первичные messages для astream;
       • ``health_check()`` — лёгкий readiness probe.
 
-    HITL живёт нативно: тулы вызывают ``ask_human(payload)`` →
+    HITL живёт нативно: тулы вызывают ``ask_human(payload)`` ->
     ``langgraph.types.interrupt()``, что атомарно пишет чекпойнт и поднимает
     ``GraphInterrupt``. Resume идёт через ``Command(resume=value)`` из API.
     """

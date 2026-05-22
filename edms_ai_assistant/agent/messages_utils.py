@@ -3,7 +3,7 @@
 Message-trimming and validation utilities for the LangGraph agent.
 
 Centralises the pairwise-trim algorithm and dangling-tool_calls check
-so that ``call_model`` stays a pure history→LLM→response function.
+so that ``call_model`` stays a pure history->LLM->response function.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ class StateCorruptedError(RuntimeError):
 
 
 def trim_pairwise(messages: list[BaseMessage], max_count: int) -> list[BaseMessage]:
-    """Trim messages from the front, preserving ``AIMessage→ToolMessage`` pairs.
+    """Trim messages from the front, preserving ``AIMessage->ToolMessage`` pairs.
 
     An ``AIMessage`` that carries ``tool_calls`` and **all** of its
     corresponding ``ToolMessage`` responses form an atomic group — they

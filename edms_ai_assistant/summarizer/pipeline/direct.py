@@ -382,8 +382,9 @@ def _try_repair_truncated_json(raw: str) -> str | None:
     if not text:
         return None
 
-    if _HAS_JSON_REPAIR and _repair_json is not None:
+    if _HAS_JSON_REPAIR:
         try:
+            # We already know _repair_json is available via probe
             repaired = _repair_json(text)
             if repaired and repaired != "null":
                 return repaired
@@ -611,7 +612,7 @@ class DirectSummarizationPipeline:
         if span:
             record_llm_call(span, "direct", self._model, in_t, out_t, latency_ms)
 
-        output = self._validate_output(mode, raw_text)
+        output = self.validate_output(mode, raw_text)
 
         return PipelineResult(
             mode=mode,
@@ -675,7 +676,7 @@ class DirectSummarizationPipeline:
         if span:
             record_llm_call(span, "direct.stream", self._model, in_t, out_t, latency_ms)
 
-        output = self._validate_output(mode, accumulated)
+        output = self.validate_output(mode, accumulated)
         yield PipelineResult(
             mode=mode,
             output=output,
@@ -688,7 +689,7 @@ class DirectSummarizationPipeline:
             chunk_count=1,
         )
 
-    def _validate_output(self, mode: SummaryMode, raw_text: str) -> LLMBaseModel:
+    def validate_output(self, mode: SummaryMode, raw_text: str) -> LLMBaseModel:
         """
         Разбирает и валидирует вывод LLM.
 
@@ -702,7 +703,7 @@ class DirectSummarizationPipeline:
         model_cls = MODE_OUTPUT_MODEL[mode]
 
         # Кандидаты для парсинга
-        candidates = self._build_candidates(raw_text)
+        candidates = self.build_candidates(raw_text)
 
         last_error: Exception | None = None
         for i, candidate in enumerate(candidates):
@@ -741,7 +742,8 @@ class DirectSummarizationPipeline:
             f"Последняя ошибка: {last_error}"
         )
 
-    def _build_candidates(self, raw: str) -> list[str]:
+    @staticmethod
+    def build_candidates(raw: str) -> list[str]:
         """Генерирует кандидатов для JSON-парсинга."""
         candidates: list[str] = []
         text = raw.strip()

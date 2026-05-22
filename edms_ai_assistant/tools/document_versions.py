@@ -145,7 +145,7 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
 
             # ── Сбор метаданных всех версий ─────────────────────────────────
             versions_info: list[dict[str, Any]] = []
-            version_ids: dict[str, str] = {}  # "1" → doc_uuid
+            version_ids: dict[str, str] = {}  # "1" -> doc_uuid
 
             for v in sorted_versions:
                 vnum = v.version or (len(versions_info) + 1)
@@ -199,7 +199,7 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
 
                     comparisons.append(
                         {
-                            "pair": f"Версия {from_vnum} → Версия {to_vnum}",
+                            "pair": f"Версия {from_vnum} -> Версия {to_vnum}",
                             "from_version": int(from_vnum),
                             "to_version": int(to_vnum),
                             "metadata_changes": meta_diff,

@@ -121,7 +121,8 @@ class QueryRefiner:
             text_lower = re.sub(r"\b" + synonym + r"\b", canonical, text_lower)
         return text_lower
 
-    def add_context(self, text: str, intent: UserIntent, entities: dict[str, list[Entity]]) -> str:
+    @staticmethod
+    def add_context(text: str, intent: UserIntent, entities: dict[str, list[Entity]]) -> str:
         hints: list[str] = []
         if intent == UserIntent.SEARCH:
             if "persons" in entities: hints.append(f"исполнитель: {entities['persons'][0].value}")

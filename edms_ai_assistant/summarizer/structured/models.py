@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _TRUNCATE_CACHE: dict[type, dict[str, int]] = {}
-"""Cache: model class → {field_name: max_length} to avoid re-computing schemas."""
+"""Cache: model class -> {field_name: max_length} to avoid re-computing schemas."""
 
 
 def _extract_max_length(schema: dict) -> int | None:
@@ -94,7 +94,7 @@ class LLMBaseModel(BaseModel):
         and add an ellipsis — preserving the rest of the response.
 
         This validator is inherited by **every** sub-model, including nested
-        ones (``ThesisSection`` → ``ThesisPoint``), because Pydantic calls
+        ones (``ThesisSection`` -> ``ThesisPoint``), because Pydantic calls
         ``model_validator`` on each model class independently during
         recursive validation.
         """
@@ -125,19 +125,17 @@ class ExecutiveSummaryOutput(LLMBaseModel):
         list[str],
         Field(
             description="3-5 ключевых тезисов, каждый не более 20 слов",
-            default_factory=list,
             min_length=0,
             max_length=5,
         ),
-    ]
+    ] = []
     recommendation: Annotated[
         str | None,
         Field(
             description="Рекомендуемое действие, если документ требует решения",
-            default=None,
             max_length=300,
         ),
-    ]
+    ] = None
 
     @field_validator("bullets")
     @classmethod
@@ -161,26 +159,23 @@ class DetailedNotesOutput(LLMBaseModel):
         str,
         Field(
             description="Тип документа: ДОГОВОР, ПИСЬМО, РЕГЛАМЕНТ, ПРОТОКОЛ и т.д.",
-            default="ДОКУМЕНТ",
             max_length=50,
         ),
-    ]
+    ] = "ДОКУМЕНТ"
     sections: Annotated[list[NoteSection], Field(min_length=1, max_length=15)]
     key_entities: Annotated[
         list[str],
         Field(
             description="Организации, люди, номера документов",
-            default_factory=list,
             max_length=20,
         ),
-    ]
+    ] = []
     date_range: Annotated[
         str | None,
         Field(
             description="Диапазон дат в документе (ISO формат)",
-            default=None,
         ),
-    ]
+    ] = None
 
 
 # ---------------------------------------------------------------------------
@@ -200,34 +195,31 @@ class ActionItem(LLMBaseModel):
         str | None,
         Field(
             description="Ответственный. null если не указан явно.",
-            default=None,
             max_length=100,
         ),
-    ]
+    ] = None
     deadline: Annotated[
         date | None,
         Field(
             description="Срок в ISO 8601. null если не указан явно.",
-            default=None,
         ),
-    ]
-    priority: Annotated[Priority, Field(default=Priority.MEDIUM)]
+    ] = None
+    priority: Annotated[Priority, Field()] = Priority.MEDIUM
     source_fragment: Annotated[
         str,
         Field(
             description="Цитата из источника",
-            default="",
             max_length=500,
         ),
-    ]
-    confidence: Annotated[float, Field(default=0.8, ge=0.0, le=1.0)]
+    ] = ""
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.8
 
 
 class ActionItemsOutput(LLMBaseModel):
     action_items: Annotated[
-        list[ActionItem], Field(default_factory=list, max_length=50)
-    ]
-    document_context: Annotated[str, Field(default="", max_length=200)]
+        list[ActionItem], Field(max_length=50)
+    ] = []
+    document_context: Annotated[str, Field(max_length=200)] = ""
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -242,14 +234,14 @@ class ActionItemsOutput(LLMBaseModel):
 
 class ThesisPoint(LLMBaseModel):
     claim: Annotated[str, Field(max_length=200)]
-    evidence: Annotated[str | None, Field(default=None, max_length=300)]
-    sub_points: Annotated[list[str], Field(default_factory=list, max_length=5)]
+    evidence: Annotated[str | None, Field(max_length=300)] = None
+    sub_points: Annotated[list[str], Field(max_length=5)] = []
 
 
 class ThesisSection(LLMBaseModel):
-    title: Annotated[str, Field(default="", max_length=100)]
+    title: Annotated[str, Field(max_length=100)] = ""
     thesis: Annotated[str, Field(max_length=300)]
-    points: Annotated[list[ThesisPoint], Field(default_factory=list, max_length=5)]
+    points: Annotated[list[ThesisPoint], Field(max_length=5)] = []
 
 
 class ThesisPlanOutput(LLMBaseModel):
@@ -260,8 +252,8 @@ class ThesisPlanOutput(LLMBaseModel):
             max_length=250,
         ),
     ]
-    sections: Annotated[list[ThesisSection], Field(default_factory=list, max_length=6)]
-    conclusion: Annotated[str, Field(default="", max_length=300)]
+    sections: Annotated[list[ThesisSection], Field(max_length=6)] = []
+    conclusion: Annotated[str, Field(max_length=300)] = ""
 
 
 # ---------------------------------------------------------------------------
@@ -274,24 +266,22 @@ class ExtractedFact(LLMBaseModel):
         str,
         Field(
             description="Категория: ДАТА, ПЕРСОНА, ОРГАНИЗАЦИЯ, СУММА, ТРЕБОВАНИЕ, СРОК, ПРОЧЕЕ",
-            default="ПРОЧЕЕ",
             max_length=20,
         ),
-    ]
+    ] = "ПРОЧЕЕ"
     label: Annotated[str, Field(max_length=80)]
     value: Annotated[str, Field(max_length=300)]
 
 
 class ExtractiveOutput(LLMBaseModel):
-    facts: Annotated[list[ExtractedFact], Field(default_factory=list, max_length=20)]
+    facts: Annotated[list[ExtractedFact], Field(max_length=20)] = []
     document_summary: Annotated[
         str,
         Field(
             description="Одно предложение — суть документа",
-            default="",
             max_length=200,
         ),
-    ]
+    ] = ""
 
 
 # ---------------------------------------------------------------------------
@@ -311,11 +301,10 @@ class AbstractiveOutput(LLMBaseModel):
         list[str],
         Field(
             description="2-5 главных тем",
-            default_factory=list,
             min_length=0,
             max_length=5,
         ),
-    ]
+    ] = []
 
 
 # ---------------------------------------------------------------------------
@@ -328,27 +317,24 @@ class MultilingualOutput(LLMBaseModel):
         str,
         Field(
             description="BCP-47 язык источника (ru, en, be и т.д.)",
-            default="ru",
             max_length=10,
         ),
-    ]
+    ] = "ru"
     summary_language: Annotated[
         str,
         Field(
             description="BCP-47 язык вывода",
-            default="ru",
             max_length=10,
         ),
-    ]
+    ] = "ru"
     summary: Annotated[str, Field(max_length=2000)]
     translation_notes: Annotated[
         str | None,
         Field(
             description="Примечания по переводу",
-            default=None,
             max_length=300,
         ),
-    ]
+    ] = None
 
 
 # ---------------------------------------------------------------------------

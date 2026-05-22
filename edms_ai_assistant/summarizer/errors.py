@@ -16,11 +16,11 @@
     └── CacheError                           — внутренний сбой кэша (логируется, но не падает)
 
 Маппинг на HTTP-коды (см. api/router.py):
-    TextExtractionError, ValidationError → 422
-    LLMRateLimitedError                  → 503
-    LLMClientError                       → 502
-    LLMServerError, LLMTransportError    → 504
-    PipelineError, LLMError, прочее      → 500
+    TextExtractionError, ValidationError -> 422
+    LLMRateLimitedError                  -> 503
+    LLMClientError                       -> 502
+    LLMServerError, LLMTransportError    -> 504
+    PipelineError, LLMError, прочее      -> 500
 """
 
 from __future__ import annotations

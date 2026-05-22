@@ -10,7 +10,7 @@ from edms_ai_assistant.domain.task_models import (
     TaskCreationResult,
     TaskType,
 )
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from edms_ai_assistant.services.resolution_service import ResolutionService
@@ -104,7 +104,7 @@ class TaskService:
         ]
         return await self._submit_task(token, document_id, task_text, executors, planed_date_end, task_type)
 
-    async def resolve_bulk_executors(self, token: str, **kwargs) -> dict:
+    async def resolve_bulk_executors(self, token: str, **kwargs: Any) -> dict[str, Any]:
         """Прокси метод для ResolutionService, возвращает доменную модель."""
         result = await self._resolution.resolve_bulk(token, **kwargs)
         return {
@@ -112,6 +112,39 @@ class TaskService:
             "not_found": result.not_found,
             "resolved_summary": result.resolved_summary,
         }
+
+    async def collect_executors(
+            self,
+            token: str,
+            executor_last_names: list[str],
+            responsible_last_name: str | None = None,
+    ) -> tuple[list[CreateTaskRequestExecutor], list[str], list[dict[str, Any]]]:
+        """Собирает исполнителей и подготавливает данные для disambiguation."""
+        emp_ids, not_found, ambiguous = await self._resolution.resolve_employees(token, executor_last_names)
+
+        responsible_id: UUID | None = None
+        if responsible_last_name:
+            resp_ids, _, _ = await self._resolution.resolve_employees(token, [responsible_last_name])
+            if resp_ids:
+                responsible_id = next(iter(resp_ids))
+
+        if not responsible_id and emp_ids:
+            responsible_id = next(iter(emp_ids))
+
+        executors = [
+            CreateTaskRequestExecutor(employeeId=emp_id, responsible=(emp_id == responsible_id))
+            for emp_id in emp_ids
+        ]
+
+        ambiguous_data = [
+            {
+                "search_query": am.search_query,
+                "matches": am.matches
+            }
+            for am in ambiguous
+        ]
+
+        return executors, not_found, ambiguous_data
 
     async def _submit_task(
             self, token: str, document_id: str, task_text: str,

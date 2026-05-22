@@ -102,9 +102,9 @@ class RedisL1Cache(SummarizationCache):
 
     async def get(self, cache_key: str) -> CacheEntry | None:
         try:
-            from edms_ai_assistant.clients.redis_client import redis_client
+            from edms_ai_assistant.clients.redis_client import get_redis_client
 
-            data = await redis_client.get_client().get(cache_key)
+            data = await get_redis_client().get(cache_key)
             if data is None:
                 return None
             return CacheEntry.model_validate_json(data)
@@ -114,9 +114,9 @@ class RedisL1Cache(SummarizationCache):
 
     async def set(self, entry: CacheEntry, ttl_seconds: int = 3600) -> None:
         try:
-            from edms_ai_assistant.clients.redis_client import redis_client
+            from edms_ai_assistant.clients.redis_client import get_redis_client
 
-            await redis_client.get_client().setex(
+            await get_redis_client().setex(
                 entry.cache_key,
                 ttl_seconds,
                 entry.model_dump_json(),
@@ -126,17 +126,17 @@ class RedisL1Cache(SummarizationCache):
 
     async def delete(self, cache_key: str) -> None:
         try:
-            from edms_ai_assistant.clients.redis_client import redis_client
+            from edms_ai_assistant.clients.redis_client import get_redis_client
 
-            await redis_client.get_client().delete(cache_key)
+            await get_redis_client().delete(cache_key)
         except Exception as exc:
             logger.debug("Redis DELETE failed: %s", exc)
 
     async def health_check(self) -> bool:
         try:
-            from edms_ai_assistant.clients.redis_client import redis_client
+            from edms_ai_assistant.clients.redis_client import get_redis_client
 
-            await redis_client.get_client().ping()
+            await get_redis_client().ping()
             return True
         except Exception:
             return False
@@ -159,11 +159,11 @@ class PostgresL2Cache(SummarizationCache):
         Args:
             session_factory: SQLAlchemy async_sessionmaker instance.
         """
-        self._session_factory = session_factory
+        self.session_factory = session_factory
 
     async def get(self, cache_key: str) -> CacheEntry | None:
         try:
-            async with self._session_factory() as session:
+            async with self.session_factory() as session:
                 result = await session.execute(
                     sa_text(
                         "SELECT cache_entry_json FROM edms.summarization_cache "
@@ -182,7 +182,7 @@ class PostgresL2Cache(SummarizationCache):
     async def set(self, entry: CacheEntry, ttl_seconds: int = 2_592_000) -> None:
         """Store entry with TTL (default: 30 days)."""
         try:
-            async with self._session_factory() as session, session.begin():
+            async with self.session_factory() as session, session.begin():
                 await session.execute(
                     sa_text("""
                             INSERT INTO edms.summarization_cache
@@ -219,7 +219,7 @@ class PostgresL2Cache(SummarizationCache):
 
     async def delete(self, cache_key: str) -> None:
         try:
-            async with self._session_factory() as session, session.begin():
+            async with self.session_factory() as session, session.begin():
                 await session.execute(
                     sa_text(
                         "DELETE FROM edms.summarization_cache WHERE cache_key = :key"
@@ -231,7 +231,7 @@ class PostgresL2Cache(SummarizationCache):
 
     async def health_check(self) -> bool:
         try:
-            async with self._session_factory() as session:
+            async with self.session_factory() as session:
                 await session.execute(sa_text("SELECT 1"))
             return True
         except Exception:
@@ -246,7 +246,7 @@ class PostgresL2Cache(SummarizationCache):
 class TwoLevelCache:
     """Transparent two-level cache (Redis L1 + Postgres L2).
 
-    Read path:  L1 → L2 → None
+    Read path:  L1 -> L2 -> None
     Write path: L1 + L2 (concurrent)
     L1 miss + L2 hit: backfills L1 automatically
     """
@@ -309,7 +309,7 @@ class TwoLevelCache:
     async def invalidate_by_file(self, file_hash: str, mode: str | None = None) -> None:
         """Invalidate cache entries for a given file hash, optionally filtered by mode."""
         try:
-            async with self._l2._session_factory() as session, session.begin():
+            async with self._l2.session_factory() as session, session.begin():
                 if mode:
                     result = await session.execute(
                         sa_text(

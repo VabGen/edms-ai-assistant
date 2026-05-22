@@ -187,7 +187,7 @@ def end_of_day_local(dt=None) -> datetime:
 
 
 def _parse_string_to_local(dt_str: str) -> str | None:
-    """Парсит строку → локальный TZ."""
+    """Парсит строку -> локальный TZ."""
     if not dt_str or not dt_str.strip():
         return None
 
@@ -224,7 +224,7 @@ def _parse_string_to_local(dt_str: str) -> str | None:
 
 
 def _datetime_to_local(dt: datetime) -> str:
-    """datetime → локальный TZ."""
+    """datetime -> локальный TZ."""
     if dt.tzinfo is not None:
         return dt.astimezone(LOCAL_TZ).isoformat()
     else:
@@ -232,7 +232,7 @@ def _datetime_to_local(dt: datetime) -> str:
 
 
 def _date_to_local(d: date) -> str:
-    """date → локальный TZ."""
+    """date -> локальный TZ."""
     dt = datetime(d.year, d.month, d.day, tzinfo=LOCAL_TZ)
     return dt.isoformat()
 

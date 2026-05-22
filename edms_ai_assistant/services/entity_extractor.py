@@ -118,12 +118,14 @@ class EntityExtractor:
                                   confidence=0.8 if match.group(3) else 0.6))
         return persons
 
-    def extract_numbers(self, text: str) -> list[Entity]:
+    @staticmethod
+    def extract_numbers(text: str) -> list[Entity]:
         return [Entity(type=EntityType.NUMBER, value=float(m.group(0).replace(",", ".")), raw_text=m.group(0),
                        normalized_value=float(m.group(0).replace(",", "."))) for m in
                 re.finditer(r"\b(\d+(?:[.,]\d+)?)\b", text)]
 
-    def extract_money(self, text: str) -> list[Entity]:
+    @staticmethod
+    def extract_money(text: str) -> list[Entity]:
         money = []
         for pattern, currency in [(r"(\d+(?:[.,]\d+)?)\s*(руб|₽|rub|бел\.руб)", "BYN"),
                                   (r"(\d+(?:[.,]\d+)?)\s*(\$|usd|долл)", "USD"),
@@ -135,7 +137,8 @@ class EntityExtractor:
                                     normalized_value={"amount": amount, "currency": currency}))
         return money
 
-    def extract_document_ids(self, text: str) -> list[Entity]:
+    @staticmethod
+    def extract_document_ids(text: str) -> list[Entity]:
         return [Entity(type=EntityType.DOCUMENT_ID, value=m.group(0), raw_text=m.group(0),
                        normalized_value=m.group(0).lower()) for m in UUID_RE.finditer(text)]
 

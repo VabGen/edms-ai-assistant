@@ -21,7 +21,7 @@ class AttachmentClient(EdmsBaseClient):
         Скачать содержимое вложения (сырые байты).
         GET api/document/{documentId}/attachment/{attachmentId}
         """
-        result = await self._make_request(
+        result = await self.make_request(
             "GET",
             f"api/document/{document_id}/attachment/{attachment_id}",
             token=token,

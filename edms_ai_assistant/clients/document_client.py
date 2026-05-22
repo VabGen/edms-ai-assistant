@@ -206,7 +206,7 @@ class DocumentClient(EdmsBaseClient):
 
     async def remove_document_control(self, token: str, document_id: UUID | str) -> None:
         """Removes control mark. Raises on failure."""
-        await self._make_request(
+        await self.make_request(
             "PUT",
             "api/document/control",
             token,
@@ -216,7 +216,7 @@ class DocumentClient(EdmsBaseClient):
 
     async def delete_document_control(self, token: str, document_id: UUID | str) -> None:
         """Deletes control record. Raises on failure."""
-        await self._make_request(
+        await self.make_request(
             "DELETE",
             f"api/document/{document_id}/control",
             token,
@@ -247,7 +247,7 @@ class DocumentClient(EdmsBaseClient):
 
     async def start_document(self, token: str, document_id: UUID | str) -> None:
         """Starts the document routing process. Raises on failure."""
-        await self._make_request(
+        await self.make_request(
             "POST",
             "api/document/start",
             token,
@@ -266,7 +266,7 @@ class DocumentClient(EdmsBaseClient):
         if comment:
             payload["comment"] = comment.strip()
 
-        await self._make_request(
+        await self.make_request(
             "POST",
             "api/document/cancel",
             token,
@@ -281,7 +281,7 @@ class DocumentClient(EdmsBaseClient):
             operations: list[dict[str, Any]],
     ) -> None:
         """Executes a list of operations on a document. Raises on failure."""
-        await self._make_request(
+        await self.make_request(
             "POST",
             f"api/document/{document_id}/execute",
             token,

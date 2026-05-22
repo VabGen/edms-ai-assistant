@@ -1,6 +1,17 @@
 from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
+from uuid import UUID
+from datetime import datetime
+from edms_ai_assistant.domain.enums import (
+    DocCategory,
+    DocumentStatus,
+    DocumentProcessType,
+    CreateType,
+    AttachmentDocumentType,
+    DeclarantType,
+)
+from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
 from pydantic import Field
 
@@ -189,3 +200,8 @@ class DocumentAppealDto(EdmsBaseDto):
     nomenclature_affair_id: UUID | None = None
     index_date_cover_letter: str | None = None
     review_progress: str | None = None
+
+
+DocumentTypeDto.model_rebuild()
+AttachmentDocumentDto.model_rebuild()
+DocumentDto.model_rebuild()

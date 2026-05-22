@@ -289,7 +289,7 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
 
             if target:
                 resolved_id = _get_attachment_id(target)
-                logger.info("Attachment resolved: '%s' → %s...", attachment_id, resolved_id[:8])
+                logger.info("Attachment resolved: '%s' -> %s...", attachment_id, resolved_id[:8])
         else:
             if len(attachments) == 1:
                 target = attachments[0]

@@ -127,12 +127,12 @@ class EmployeeClient(EdmsBaseClient):
             self, token: str, employee_id: str, delegate_to_id: str
     ) -> None:
         """Dismisses an employee."""
-        await self._make_request(
+        await self.make_request(
             "POST", "api/employee/dismiss", token, json_data={"id": employee_id, "to": delegate_to_id}, is_json_response=False
         )
 
     async def recover_employee(self, token: str, employee_id: str) -> None:
         """Recovers an employee."""
-        await self._make_request(
+        await self.make_request(
             "POST", "api/employee/recover", token, json_data={"id": employee_id}, is_json_response=False
         )

@@ -37,7 +37,7 @@ class ReferenceClient(EdmsBaseClient):
     def __init__(self, transport: IAsyncTransport, settings: EdmsSettings):
         super().__init__(transport, settings)
 
-    async def _find_entity_with_name(
+    async def find_entity_with_name(
             self,
             token: str,
             endpoint: str,
@@ -50,7 +50,7 @@ class ReferenceClient(EdmsBaseClient):
         search_query = search_name.strip()
 
         try:
-            fts_result = await self._make_request(
+            fts_result = await self.make_request(
                 "GET",
                 f"api/{endpoint}/fts-name",
                 token=token,
@@ -75,7 +75,7 @@ class ReferenceClient(EdmsBaseClient):
             return None
 
         try:
-            record = await self._make_request(
+            record = await self.make_request(
                 "GET",
                 f"api/{endpoint}/{entity_id}",
                 token=token,
@@ -102,10 +102,10 @@ class ReferenceClient(EdmsBaseClient):
         return None
 
     async def find_country_with_name(self, token: str, name: str) -> ReferenceItemDto | None:
-        return await self._find_entity_with_name(token, "country", name, "Страна")
+        return await self.find_entity_with_name(token, "country", name, "Страна")
 
     async def find_region_with_name(self, token: str, name: str) -> ReferenceItemDto | None:
-        return await self._find_entity_with_name(token, "region", name, "Регион")
+        return await self.find_entity_with_name(token, "region", name, "Регион")
 
     async def find_city_with_hierarchy(
             self, token: str, city_name: str
@@ -114,7 +114,7 @@ class ReferenceClient(EdmsBaseClient):
             return None
 
         try:
-            fts_result = await self._make_request(
+            fts_result = await self.make_request(
                 "GET", "api/city/fts-name", token=token, params={"fts": city_name.strip()}
             )
             if not fts_result:
@@ -125,7 +125,7 @@ class ReferenceClient(EdmsBaseClient):
                 return None
 
             city_id = fts_city["id"]
-            city_dto_raw = await self._make_request(
+            city_dto_raw = await self.make_request(
                 "GET", f"api/city/{city_id}", token=token, params={"includes": "DISTRICT_WITH_REGION"}
             )
 
@@ -156,14 +156,14 @@ class ReferenceClient(EdmsBaseClient):
 
     async def find_citizen_type(self, token: str, name: str) -> str | None:
         """Legacy helper: возвращает только id."""
-        result = await self._find_entity_with_name(token, "citizen-type", name, "Вид обращения")
+        result = await self.find_entity_with_name(token, "citizen-type", name, "Вид обращения")
         return str(result.id) if result and result.id else None
 
     async def find_delivery_method(self, token: str, name: str) -> str | None:
         """Legacy helper: возвращает только id."""
-        result = await self._find_entity_with_name(token, "delivery-method", name, "Способ доставки")
+        result = await self.find_entity_with_name(token, "delivery-method", name, "Способ доставки")
         if not result and name != "Курьер":
-            result = await self._find_entity_with_name(token, "delivery-method", "Курьер", "Способ доставки")
+            result = await self.find_entity_with_name(token, "delivery-method", "Курьер", "Способ доставки")
         return str(result.id) if result and result.id else None
 
     async def find_best_subject(self, token: str, text: str) -> str | None:
@@ -172,7 +172,7 @@ class ReferenceClient(EdmsBaseClient):
             return None
         try:
             search_query = text.strip()[:200]
-            fts_result = await self._make_request(
+            fts_result = await self.make_request(
                 "GET", "api/subject/fts-name", token=token, params={"fts": search_query}
             )
             if isinstance(fts_result, list) and fts_result:

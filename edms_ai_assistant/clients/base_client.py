@@ -24,7 +24,7 @@ class EdmsBaseClient:
         self._transport = transport
         self._settings = settings
 
-    async def _make_request(
+    async def make_request(
             self,
             method: str,
             endpoint: str,
@@ -81,7 +81,7 @@ class EdmsBaseClient:
             **kwargs: Any,
     ) -> T:
         """Выполняет запрос и валидирует ответ в Pydantic модель."""
-        data = await self._make_request(
+        data = await self.make_request(
             method,
             endpoint,
             token,
@@ -105,7 +105,7 @@ class EdmsBaseClient:
             **kwargs: Any,
     ) -> list[T]:
         """Выполняет запрос и валидирует ответ в список Pydantic моделей."""
-        data = await self._make_request(
+        data = await self.make_request(
             method,
             endpoint,
             token,

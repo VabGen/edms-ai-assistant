@@ -20,7 +20,7 @@ class SubjectService:
         self._ref_client = reference_client
 
     async def find_best_subject(self, token: str, text: str) -> str | None:
-        """LLM-based two-level subject selection (parent → child)."""
+        """LLM-based two-level subject selection (parent -> child)."""
         parents = await self._ref_client.get_parent_subjects(token)
         if not parents:
             logger.warning("Родительские темы не загружены")

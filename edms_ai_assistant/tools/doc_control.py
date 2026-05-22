@@ -7,22 +7,22 @@ EDMS AI Assistant — Document Control Tool (DI Factory).
 API endpoints (из Java DocumentController + ControlTypeController):
 
   Справочник типов контроля:
-    GET  /api/control-type                     → SliceDto<ControlTypeDto>
+    GET  /api/control-type                     -> SliceDto<ControlTypeDto>
         (params: page, size, sort + BasicSearchRequest)
 
   Контроль документа:
-    POST   /api/document/{docId}/control       → ControlDto  (создать)
-    PUT    /api/document/{docId}/control       → ControlDto  (редактировать)
-    PUT    /api/document/control               → 204         (снять, body: {id: UUID})
-    DELETE /api/document/{docId}/control       → 204         (удалить)
-    GET    /api/document/{documentId}/control  → ControlDto  (получить; пустой если нет)
+    POST   /api/document/{docId}/control       -> ControlDto  (создать)
+    PUT    /api/document/{docId}/control       -> ControlDto  (редактировать)
+    PUT    /api/document/control               -> 204         (снять, body: {id: UUID})
+    DELETE /api/document/{docId}/control       -> 204         (удалить)
+    GET    /api/document/{documentId}/control  -> ControlDto  (получить; пустой если нет)
 
 Обязательные поля для постановки на контроль (CreateControl):
   controlTypeId       — UUID типа контроля
   controlDateStart    — дата постановки (Instant)
   controlPlanDateEnd  — плановая дата окончания (Instant)
   controlTermDays     — срок в днях (int)
-  controlEmployeeId   — UUID контролёра  ← ОБЯЗАТЕЛЬНОЕ (подтверждено ошибкой 400)
+  controlEmployeeId   — UUID контролёра  <- ОБЯЗАТЕЛЬНОЕ (подтверждено ошибкой 400)
 
 Опциональные:
   comment             — комментарий
@@ -168,9 +168,9 @@ class DocControlInput(BaseModel):
         """Ensure control_term_days is always set for action=set.
 
         Priority:
-        1. control_term_days given explicitly → use as-is.
-        2. date_control_end given → compute days delta from today.
-        3. Neither → use _DEFAULT_CONTROL_DAYS and compute date_control_end.
+        1. control_term_days given explicitly -> use as-is.
+        2. date_control_end given -> compute days delta from today.
+        3. Neither -> use _DEFAULT_CONTROL_DAYS and compute date_control_end.
 
         For action='edit' we do NOT auto-fill: the user supplies only
         the fields they want to change.
@@ -262,7 +262,7 @@ async def _resolve_control_type(
             },
         )
 
-    # ── User specified a type name → try to match ─────────────────────────
+    # ── User specified a type name -> try to match ─────────────────────────
     if control_type_name:
         name_lower = control_type_name.lower()
         for ct in ctrl_types:
@@ -360,7 +360,7 @@ async def _resolve_employee(
         employee_client: Injected employee client.
         token: JWT bearer token.
         control_employee_id: Provided value (UUID string or last name).
-        required: If True and no value → return need_input.
+        required: If True and no value -> return need_input.
         current_employee_id: Fallback for edit (existing controller).
 
     Returns:
@@ -454,7 +454,7 @@ def create_doc_control_tool(
 
     Args:
         control_client: Клиент для работы с API контроля документов.
-        employee_client: Клиент для поиска сотрудников (разрешение ФИО → UUID).
+        employee_client: Клиент для поиска сотрудников (разрешение ФИО -> UUID).
 
     Returns:
         StructuredTool, готовый к регистрации в агенте.
@@ -557,8 +557,8 @@ def create_doc_control_tool(
 
                 payload: dict[str, Any] = {}
 
-                if current.get("id"):
-                    payload["id"] = current["id"]
+                if current.id:
+                    payload["id"] = current.id
 
                 # ── Тип контроля ───────────────────────────────────────────────
                 if control_type_name:
@@ -569,16 +569,18 @@ def create_doc_control_tool(
                         return need_input
                     payload["controlTypeId"] = ct_id
                 else:
-                    if current.get("controlTypeId"):
-                        payload["controlTypeId"] = current["controlTypeId"]
+                    if current.control_type_id:
+                        payload["controlTypeId"] = current.control_type_id
 
                 # ── Контролёр ──────────────────────────────────────────────────
+                # Note: ControlDto might need to be checked for controlEmployeeId attribute
+                current_emp_id = getattr(current, "control_employee_id", None)
                 emp_id, need_input = await _resolve_employee(
                     employee_client,
                     token,
                     control_employee_id,
                     required=False,
-                    current_employee_id=current.get("controlEmployeeId"),
+                    current_employee_id=str(current_emp_id) if current_emp_id else None,
                 )
                 if need_input:
                     return need_input
@@ -595,9 +597,7 @@ def create_doc_control_tool(
                         end_d = datetime.strptime(end_date_only, "%Y-%m-%d").date()
                         payload["controlTermDays"] = max((end_d - today).days, 1)
                     except ValueError:
-                        payload["controlTermDays"] = current.get(
-                            "controlTermDays", _DEFAULT_CONTROL_DAYS
-                        )
+                        payload["controlTermDays"] = getattr(current, "control_term_days", _DEFAULT_CONTROL_DAYS)
                 elif control_term_days and control_term_days >= 1:
                     payload["controlTermDays"] = control_term_days
                     end_date_only = (
@@ -605,24 +605,26 @@ def create_doc_control_tool(
                     ).strftime("%Y-%m-%d")
                     payload["controlPlanDateEnd"] = _to_iso_end(end_date_only)
                 else:
-                    if current.get("controlPlanDateEnd"):
-                        payload["controlPlanDateEnd"] = current["controlPlanDateEnd"]
-                    if current.get("controlTermDays"):
-                        payload["controlTermDays"] = current["controlTermDays"]
+                    if current.date_control_end:
+                        payload["controlPlanDateEnd"] = current.date_control_end.isoformat()
+                    if current.control_days:
+                        payload["controlTermDays"] = current.control_days
 
                 # ── Дата постановки ────────────────────────────────────────────
-                if current.get("controlDateStart"):
-                    payload["controlDateStart"] = current["controlDateStart"]
+                current_start = getattr(current, "control_date_start", None)
+                if current_start:
+                    payload["controlDateStart"] = current_start.isoformat()
                 else:
                     payload["controlDateStart"] = _to_iso_start(
                         today.strftime("%Y-%m-%d")
                     )
 
                 # ── Комментарий ────────────────────────────────────────────────
+                current_comment = getattr(current, "comment", None)
                 if comment is not None:
                     payload["comment"] = comment.strip()
-                elif current.get("comment") is not None:
-                    payload["comment"] = current["comment"]
+                elif current_comment is not None:
+                    payload["comment"] = current_comment
 
                 logger.info(
                     "doc_control: action=edit doc=%s... payload keys=%s",

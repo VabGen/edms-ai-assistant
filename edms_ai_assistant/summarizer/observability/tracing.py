@@ -179,7 +179,8 @@ def setup_tracing(
                 BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
             )
         except ImportError:
-            pass
+            OTLPSpanExporter = None
+            BatchSpanProcessor = None
 
     if enable_in_memory:
         _in_memory_exporter = InMemorySpanExporter()

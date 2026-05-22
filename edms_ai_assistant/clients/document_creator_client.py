@@ -36,7 +36,7 @@ class DocumentCreatorClient(EdmsBaseClient):
             "listAttribute": "true",
         }
 
-        result = await self._make_request("GET", "api/doc-profile", token, params=params)
+        result = await self.make_request("GET", "api/doc-profile", token, params=params)
 
         if isinstance(result, list) and result:
             return cast("dict[str, Any]", result[0])

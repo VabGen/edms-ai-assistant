@@ -9,8 +9,7 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, TYPE_CHECKING
-
+from typing import Annotated, Any, TYPE_CHECKING, cast
 import json
 
 import aiofiles
@@ -40,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def _make_tool_config(
     document_id: str | None,
     thread_id: str = "action",
     user_id: str = "action_user",
-) -> dict:
+) -> RunnableConfig:
     """Build RunnableConfig for direct tool invocation outside the agent graph."""
     cfg: dict[str, Any] = {
         "configurable": {
@@ -70,7 +70,7 @@ def _make_tool_config(
     }
     if document_id:
         cfg["configurable"]["document_id"] = document_id
-    return cfg
+    return cast("RunnableConfig", cfg)
 
 
 async def _run_agent_once(
@@ -413,7 +413,7 @@ async def api_direct_summarize(
 
     if not raw_text or len(raw_text.strip()) < 30:
         logger.info("Using Agent fallback for text extraction...")
-        user_context = await resolve_user_context(user_input, user_id)
+        user_context = await resolve_user_context(user_input, str(user_id), deps.employee_client)
         instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
         extract_msg = (
             f"{instructions}Прочитай файл и верни его полное текстовое содержимое. "
@@ -454,7 +454,7 @@ async def api_direct_summarize(
     }
     type_label = _type_labels.get(summary_type, summary_type)
     instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
-    user_context = await resolve_user_context(user_input, user_id)
+    user_context = await resolve_user_context(user_input, str(user_id), deps.employee_client)
 
     user_context = dict(user_context)
     user_context["preferred_summary_format"] = summary_type

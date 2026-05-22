@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from edms_ai_assistant.services.resolution_service import ResolutionService
@@ -20,6 +20,14 @@ class PostIntroductionRequest(BaseModel):
     executorListIds: list[UUID] = Field(..., description="UUID сотрудников для добавления в список ознакомления")
     comment: str = Field(default="", description="Комментарий к ознакомлению")
     model_config = ConfigDict(json_encoders={UUID: str}, use_enum_values=True)
+
+
+@dataclass(frozen=True)
+class IntroductionResolutionResult:
+    """Результат резолвинга сотрудников для ознакомления."""
+    employee_ids: set[UUID] = field(default_factory=set)
+    not_found: list[str] = field(default_factory=list)
+    ambiguous: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -40,7 +48,7 @@ class IntroductionService:
             self, token: str, last_names: list[str], department_names: list[str],
             group_names: list[str], personal_group_names: list[str] | None = None,
             include_subordinates: bool = False,
-    ) -> dict:
+    ) -> IntroductionResolutionResult:
         """Резолвит сотрудников по множественным критериям."""
         result = await self._resolution.resolve_bulk(
             token=token,
@@ -52,14 +60,22 @@ class IntroductionService:
 
         emp_ids, not_found_names, ambiguous_data = await self._resolution.resolve_employees(token, last_names)
 
-        result.employee_ids.update(emp_ids)
-        result.not_found.extend(not_found_names)
+        # Результирующий set и list из resolve_bulk (ResolutionResult)
+        # Мы можем обновить их или создать новый объект.
+        combined_ids = set(result.employee_ids)
+        combined_ids.update(emp_ids)
 
-        return {
-            "employee_ids": result.employee_ids,
-            "not_found": result.not_found,
-            "ambiguous": [am.__dict__ for am in ambiguous_data],
-        }
+        combined_not_found = list(result.not_found)
+        combined_not_found.extend(not_found_names)
+
+        return IntroductionResolutionResult(
+            employee_ids=combined_ids,
+            not_found=combined_not_found,
+            ambiguous=[{
+                "search_query": am.search_query,
+                "matches": am.matches
+            } for am in ambiguous_data],
+        )
 
     async def create_introduction(
             self, token: str, document_id: str, employee_ids: list[UUID], comment: str | None = None,

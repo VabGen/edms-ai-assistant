@@ -55,12 +55,12 @@ def _detect_backend(base_url: str, model_name: str) -> str:
     """Detect the appropriate LLM backend from URL and model name.
 
     Detection rules (evaluated in order):
-    1. Ollama endpoint + «cloud» in model name → ``openai_ollama``:
-       ChatOpenAI → Ollama OpenAI-compat endpoint (/v1/chat/completions).
+    1. Ollama endpoint + «cloud» in model name -> ``openai_ollama``:
+       ChatOpenAI -> Ollama OpenAI-compat endpoint (/v1/chat/completions).
        Надёжнее ChatOllama для кастомных моделей — не зависит от /api/chat.
-    2. Ollama endpoint (без cloud) → ``ollama_local``:
+    2. Ollama endpoint (без cloud) -> ``ollama_local``:
        ChatOllama с num_ctx/num_predict для CPU.
-    3. Otherwise → ``openai``.
+    3. Otherwise -> ``openai``.
 
     Args:
         base_url: Normalized base URL string.
@@ -84,7 +84,7 @@ def get_chat_model() -> BaseLanguageModel[Any]:
 
     Бэкенды:
     - ``ollama_local``:  ChatOllama, num_ctx/num_predict from settings (CPU).
-    - ``openai_ollama``: ChatOpenAI → http://host:11434/v1 (Ollama OpenAI API).
+    - ``openai_ollama``: ChatOpenAI -> https://host:11434/v1 (Ollama OpenAI API).
       Используется для кастомных/облачных моделей вида gpt-oos:120b-cloud.
     - ``openai``:        ChatOpenAI, любой OpenAI-совместимый прокси.
 
@@ -161,15 +161,15 @@ def get_chat_model() -> BaseLanguageModel[Any]:
                 max_tokens=max_tokens or None,
             )
             logger.info(
-                "ChatOpenAI→Ollama initialized: model=%s url=%s",
+                "ChatOpenAI->Ollama initialized: model=%s url=%s",
                 model_name,
                 openai_base,
             )
             return _chat_model_instance
         except Exception as exc:
-            logger.error("ChatOpenAI→Ollama init failed: %s", exc, exc_info=True)
+            logger.error("ChatOpenAI->Ollama init failed: %s", exc, exc_info=True)
             raise RuntimeError(
-                f"Failed to initialize ChatOpenAI→Ollama: {exc}"
+                f"Failed to initialize ChatOpenAI->Ollama: {exc}"
             ) from exc
 
     # ── OpenAI-compatible (прокси, облако) ────────────────────────────────────

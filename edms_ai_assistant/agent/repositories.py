@@ -43,6 +43,9 @@ class DocumentRepository:
     gracefully in the prompt context.
     """
 
+    def __init__(self, client: DocumentClient) -> None:
+        self._client = client
+
     async def get_document(self, token: str, doc_id: str) -> DocumentDto | None:
         """Fetch and validate document metadata from the EDMS REST API.
 
@@ -54,11 +57,10 @@ class DocumentRepository:
             Validated DocumentDto, or None on any error.
         """
         try:
-            async with DocumentClient() as client:
-                raw = await client.get_document_metadata(token, doc_id)
-                doc = DocumentDto.model_validate(raw)
+            doc = await self._client.get_document_metadata(token, doc_id)
+            if doc:
                 logger.info("Document fetched", extra={"doc_id": doc_id})
-                return doc
+            return doc
         except Exception as exc:
             logger.error(
                 "Failed to fetch document",

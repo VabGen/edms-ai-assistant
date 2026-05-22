@@ -305,7 +305,7 @@ class AppealFieldsBuilder:
             corr_name = fields.correspondentAppeal
 
         if corr_name:
-            canonical = await self.ref_client._find_entity_with_name(
+            canonical = await self.ref_client.find_entity_with_name(
                 self.token, "correspondent", corr_name, "Корреспондент"
             )
             if canonical and _is_good_correspondent_match(corr_name, canonical.name or ""):
@@ -341,7 +341,8 @@ class AppealFieldsBuilder:
             if subject_id:
                 payload["subjectId"] = subject_id
 
-    async def _add_declarant_type(self, d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
+    @staticmethod
+    async def _add_declarant_type(d: DocumentAppealDto, fields: AppealFields, payload: dict[str, Any]) -> None:
         if fields.declarantType:
             try:
                 payload["declarantType"] = DeclarantType(fields.declarantType.upper())
@@ -358,7 +359,7 @@ class AppealFieldsBuilder:
                 str(d.organization_name) if not ValueSanitizer.is_empty(d.organization_name) else fields.organizationName
             )
             if not ValueSanitizer.is_empty(raw_org):
-                corr_data = await self.ref_client._find_entity_with_name(self.token, "correspondent", str(raw_org), "Организация")
+                corr_data = await self.ref_client.find_entity_with_name(self.token, "correspondent", str(raw_org), "Организация")
                 if corr_data and _is_good_correspondent_match(str(raw_org), corr_data.name or ""):
                     payload["organizationName"] = corr_data.name
                 else:
@@ -397,7 +398,8 @@ class AppealFieldsBuilder:
         if d.nomenclature_affair_id:
             payload["nomenclatureAffairId"] = str(d.nomenclature_affair_id)
 
-    def _filter_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _filter_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _ALLOW_NULL = {
             "correspondentAppeal", "correspondentAppealId", "submissionForm",
             "organizationName", "signed", "correspondentOrgNumber", "fioApplicant",

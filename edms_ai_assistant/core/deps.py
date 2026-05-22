@@ -64,13 +64,13 @@ class AppDeps(BaseModel):
     introduction_service: IntroductionService
     file_processor_service: FileProcessorService
     nlp_service: EDMSNaturalLanguageService
-    chat_model: BaseLanguageModel
+    chat_model: Any  # BaseLanguageModel[Any]
 
     # Опциональные сервисы (инициализируемые позже в lifespan)
     summarization_service: Any | None = None
 
 
-def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: BaseLanguageModel) -> AppDeps:
+def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> AppDeps:
     """Фабрика для создания и связывания всех зависимостей приложения."""
 
     if not getattr(AppDeps, '_is_rebuilt', False):

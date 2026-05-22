@@ -38,16 +38,18 @@ def cleanup_file(file_path: str) -> None:
         )
 
 
-async def resolve_user_context(user_input: UserInput, user_id: str) -> dict:
+async def resolve_user_context(user_input: UserInput, user_id: str, employee_client: EmployeeClient | None = None) -> dict:
     """Resolve user context dict from request or EDMS employee API."""
     if user_input.context:
         return user_input.context.model_dump(exclude_none=True)
 
+    if not employee_client:
+        return {"firstName": "Коллега"}
+
     try:
-        async with EmployeeClient() as emp_client:
-            ctx = await emp_client.get_employee(user_input.user_token, user_id)
-            if ctx:
-                return ctx
+        ctx = await employee_client.get_employee(user_input.user_token, user_id)
+        if ctx:
+            return ctx.model_dump(by_alias=True)
     except Exception as exc:
         logger.warning(
             "Failed to fetch employee context",

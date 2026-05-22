@@ -2,8 +2,8 @@
 StructuralChunker — header-aware document splitting.
 
 Why better than RecursiveCharacterTextSplitter:
-  Old: splits by char count → breaks sections mid-thought → LLM loses context
-  New: splits at section boundaries → each chunk is semantically complete
+  Old: splits by char count -> breaks sections mid-thought -> LLM loses context
+  New: splits at section boundaries -> each chunk is semantically complete
 
 Hierarchy:
   1. StructuralChunker: detects headers, splits at section level
@@ -133,7 +133,7 @@ _HEADER_PATTERNS: list[tuple[int, re.Pattern[str]]] = [
 
 
 # Русские/латинские аббревиатуры, которые часто соседствуют с точкой и обманывают
-# наивный sentence-splitter (".\s" → разрыв предложения).
+# наивный sentence-splitter (".\s" -> разрыв предложения).
 _SENTENCE_ABBREV = (
     "т",
     "т.е",
@@ -243,7 +243,8 @@ class StructuralChunker(ChunkingStrategy):
             sections, max_tokens=max_tokens, overlap_tokens=overlap_tokens
         )
 
-    def _parse_sections(self, text: str) -> list[Section]:
+    @staticmethod
+    def _parse_sections(text: str) -> list[Section]:
         """Parse document into sections using detected header positions."""
         # Build a unified header position map
         header_positions: list[tuple[int, int, int, str]] = (
@@ -422,7 +423,7 @@ class StructuralChunker(ChunkingStrategy):
 
 
 class TokenAwareFallbackChunker(ChunkingStrategy):
-    """Paragraph → sentence fallback chunker for unstructured documents.
+    """Paragraph -> sentence fallback chunker for unstructured documents.
 
     Used when StructuralChunker.can_handle() returns False.
     Splits at paragraph boundaries first, sentences second.
@@ -542,7 +543,8 @@ class SmartChunker:
             "token_aware_fallback",
         )
 
-    def needs_map_reduce(self, text: str, *, context_window: int = 4096) -> bool:
+    @staticmethod
+    def needs_map_reduce(text: str, *, context_window: int = 4096) -> bool:
         """Return True if document exceeds direct summarization context window."""
         # Safety margin: leave 30% for system prompt + output
         effective_window = int(context_window * 0.70)

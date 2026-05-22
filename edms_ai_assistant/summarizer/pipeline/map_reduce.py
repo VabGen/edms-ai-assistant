@@ -211,7 +211,7 @@ class MapReducePipeline:
                 latency = sw.elapsed_ms()
 
                 logger.debug(
-                    "Map chunk %d: %d tokens → %d output in %.0fms",
+                    "Map chunk %d: %d tokens -> %d output in %.0fms",
                     chunk.index,
                     chunk.token_count,
                     out_t,
@@ -335,7 +335,7 @@ class MapReducePipeline:
                     span, "map_reduce.reduce.stream", self._model, in_t, out_t, latency
                 )
 
-            output = self._direct._validate_output(mode, accumulated)
+            output = self._direct.validate_output(mode, accumulated)
 
             yield PipelineResult(
                 mode=mode,
@@ -387,7 +387,7 @@ class MapReducePipeline:
         )
         latency = sw.elapsed_ms()
 
-        output = self._direct._validate_output(mode, raw_text)
+        output = self._direct.validate_output(mode, raw_text)
 
         return PipelineResult(
             mode=mode,

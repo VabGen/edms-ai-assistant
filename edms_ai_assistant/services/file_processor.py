@@ -208,7 +208,7 @@ def _convert_doc_to_docx(doc_path: str) -> str:
         converted_path = out_dir / f"{doc_path_obj.stem}.docx"
         if converted_path.exists():
             logger.info(
-                "DOC converted to DOCX via LibreOffice: %s → %s",
+                "DOC converted to DOCX via LibreOffice: %s -> %s",
                 doc_path,
                 converted_path,
             )
@@ -230,12 +230,12 @@ class FileProcessorService:
     """Service for text extraction from multiple file formats.
 
     Extraction strategies by extension:
-        .pdf    → fitz Text Layer → OCR fallback (fitz + pytesseract) + Disk Cache
-        .docx   → docx2txt → mammoth → fitz (fallback chain)
-        .doc    → fitz (PyMuPDF) → mammoth → LibreOffice (fallback chain)
-        .txt    → TextLoader (LangChain)
-        .xlsx   → openpyxl
-        .xls    → xlrd
+        .pdf    -> fitz Text Layer -> OCR fallback (fitz + pytesseract) + Disk Cache
+        .docx   -> docx2txt -> mammoth -> fitz (fallback chain)
+        .doc    -> fitz (PyMuPDF) -> mammoth -> LibreOffice (fallback chain)
+        .txt    -> TextLoader (LangChain)
+        .xlsx   -> openpyxl
+        .xls    -> xlrd
     """
 
     SUPPORTED_EXTENSIONS = {

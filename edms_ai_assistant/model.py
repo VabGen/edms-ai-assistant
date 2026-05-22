@@ -6,7 +6,7 @@ EDMS AI Assistant — Public data contracts (Pydantic v2).
 from __future__ import annotations
 
 from operator import or_
-from typing import Annotated, Any, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Literal
 
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator

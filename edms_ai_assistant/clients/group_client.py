@@ -40,7 +40,7 @@ class GroupClient(EdmsBaseClient):
 
         try:
             # Специфичная логика маппинга для общих групп (вложенный employee)
-            raw_data = await self._make_request(
+            raw_data = await self.make_request(
                 "GET",
                 "api/group/employee/all",
                 token,
@@ -65,7 +65,7 @@ class GroupClient(EdmsBaseClient):
 
         try:
             # Личные группы пока возвращают сырой dict, так как DTO может быть сложным
-            result = await self._make_request("GET", "api/personal-group", token, params=params)
+            result = await self.make_request("GET", "api/personal-group", token, params=params)
 
             items = []
             if isinstance(result, dict) and "content" in result:
@@ -87,7 +87,7 @@ class GroupClient(EdmsBaseClient):
             return []
 
         try:
-            raw_data = await self._make_request(
+            raw_data = await self.make_request(
                 "GET",
                 "api/personal-group/employee/all",
                 token,

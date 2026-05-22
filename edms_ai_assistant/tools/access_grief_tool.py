@@ -5,15 +5,15 @@ EDMS AI Assistant — Access Grief Search Tool (DI Factory).
 Поиск грифов доступа и сотрудников с конкретными грифами.
 
 Сценарии:
-  - «Покажи сотрудников с грифом Секретно»  → grief_name='Секретно'
-  - «У кого гриф ДСП?»                      → grief_name='ДСП'
-  - «Какие грифы у сотрудника {uuid}»       → employee_id=uuid
-  - «Список всех грифов»                     → (без параметров, list_all=True)
+  - «Покажи сотрудников с грифом Секретно»  -> grief_name='Секретно'
+  - «У кого гриф ДСП?»                      -> grief_name='ДСП'
+  - «Какие грифы у сотрудника {uuid}»       -> employee_id=uuid
+  - «Список всех грифов»                     -> (без параметров, list_all=True)
 
 Маппинг:
-  grief_name    → GET /api/access-grief?name=...  → UUID → GET /api/access-grief/{id}/employees
-  grief_id      → GET /api/access-grief/{id}/employees
-  employee_id   → GET /api/employee/{id}/griefs
+  grief_name    -> GET /api/access-grief?name=...  -> UUID -> GET /api/access-grief/{id}/employees
+  grief_id      -> GET /api/access-grief/{id}/employees
+  employee_id   -> GET /api/employee/{id}/griefs
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class AccessGriefSearchInput(BaseModel):
             "UUID сотрудника — для получения списка грифов доступа "
             "конкретного сотрудника. "
             "Пример: «Какие грифы у сотрудника Иванов?» "
-            "→ сначала найдите Иванова через employee_search_tool, "
+            "-> сначала найдите Иванова через employee_search_tool, "
             "затем вызовите этот инструмент с employee_id."
         ),
     )
@@ -99,39 +99,47 @@ class AccessGriefSearchInput(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _format_grief_info(grief: dict[str, Any], grief_id: str) -> dict[str, Any]:
+def _format_grief_info(grief: AccessGriefDto, grief_id: str) -> dict[str, Any]:
     return {
-        "id": str(grief.get("id", grief_id)),
-        "name": grief.get("name") or "—",
+        "id": str(grief.id or grief_id),
+        "name": grief.name or "—",
     }
 
 
-def _format_grief_brief(grief: dict[str, Any]) -> dict[str, Any]:
+def _format_grief_brief(grief: AccessGriefDto) -> dict[str, Any]:
     return {
-        "id": str(grief.get("id", "")),
-        "name": grief.get("name") or "—",
+        "id": str(grief.id or ""),
+        "name": grief.name or "—",
     }
 
 
-def _format_employee_grief(grief: dict[str, Any]) -> dict[str, Any]:
+def _format_employee_grief(grief: EmployeeAccessGriefDto) -> dict[str, Any]:
     """Форматирует EmployeeAccessGriefDto."""
-    grief_obj = grief.get("grief") or grief
     return {
-        "id": str(grief_obj.get("id", "")),
-        "name": grief_obj.get("name") or "—",
+        "id": str(grief.id or ""),
+        "name": grief.name or "—",
     }
 
 
-def _format_grief_employee(raw: dict[str, Any]) -> dict[str, Any]:
+def _format_grief_employee(raw: EmployeeAccessGriefDto) -> dict[str, Any]:
     """Форматирует EmployeeAccessGriefDto для списка сотрудников с грифом."""
-    emp = raw.get("employee") or {}
-    post = emp.get("post") or {}
-    department = emp.get("department") or {}
+    # Note: EmployeeAccessGriefDto might need to be checked if it actually contains an employee field.
+    # Looking at domain/employee.py, EmployeeAccessGriefDto(AccessGriefDto) doesn't have employee.
+    # However, the backend might be sending it. Let's assume it behaves as DTO if possible.
+    # If the backend sends something else, we'd need to adjust the DTO.
+    # Based on _format_grief_employee logic, it seems it expects an object with 'employee' attr.
+
+    emp = getattr(raw, "employee", None)
+    if not emp:
+        return {"id": "—", "full_name": "—"}
+
+    post = getattr(emp, "post", None)
+    department = getattr(emp, "department", None)
 
     parts = [
-        emp.get("lastName") or "",
-        emp.get("firstName") or "",
-        emp.get("middleName") or "",
+        getattr(emp, "last_name", "") or "",
+        getattr(emp, "first_name", "") or "",
+        getattr(emp, "middle_name", "") or "",
     ]
     full_name = " ".join(p for p in parts if p).strip() or "—"
 
@@ -160,10 +168,10 @@ async def _resolve_grief_name(
         if griefs:
             name_lower = name.strip().lower()
             for g in griefs:
-                g_name = (g.get("name") or "").lower()
+                g_name = (g.name or "").lower()
                 if g_name == name_lower:
-                    return str(g["id"])
-            return str(griefs[0]["id"])
+                    return str(g.id)
+            return str(griefs[0].id)
 
         return None
     except httpx.HTTPStatusError as exc:
@@ -324,11 +332,11 @@ def create_access_grief_tool(
         """Searches for access griefs and employees with specific griefs.
 
         Use when the user asks:
-        - «Покажи сотрудников с грифом Секретно»   → grief_name='Секретно'
-        - «У кого гриф ДСП?»                       → grief_name='ДСП'
-        - «Какие грифы у сотрудника {uuid}»        → employee_id=uuid
-        - «Список всех грифов доступа»             → list_all=True
-        - «Сотрудники с грифом {uuid}»             → grief_id=uuid
+        - «Покажи сотрудников с грифом Секретно»   -> grief_name='Секретно'
+        - «У кого гриф ДСП?»                       -> grief_name='ДСП'
+        - «Какие грифы у сотрудника {uuid}»        -> employee_id=uuid
+        - «Список всех грифов доступа»             -> list_all=True
+        - «Сотрудники с грифом {uuid}»             -> grief_id=uuid
 
         ВАЖНО: Токен авторизации передается системой АВТОМАТИЧЕСКИ.
         Тебе НЕ НУЖНО запрашивать его у пользователя.
@@ -387,11 +395,11 @@ def create_access_grief_tool(
         description=(
             "Searches for access griefs and employees with specific griefs.\n"
             "Use when the user asks:\n"
-            "- «Покажи сотрудников с грифом Секретно»   → grief_name='Секретно'\n"
-            "- «У кого гриф ДСП?»                       → grief_name='ДСП'\n"
-            "- «Какие грифы у сотрудника {uuid}»        → employee_id=uuid\n"
-            "- «Список всех грифов доступа»             → list_all=True\n"
-            "- «Сотрудники с грифом {uuid}»             → grief_id=uuid\n\n"
+            "- «Покажи сотрудников с грифом Секретно»   -> grief_name='Секретно'\n"
+            "- «У кого гриф ДСП?»                       -> grief_name='ДСП'\n"
+            "- «Какие грифы у сотрудника {uuid}»        -> employee_id=uuid\n"
+            "- «Список всех грифов доступа»             -> list_all=True\n"
+            "- «Сотрудники с грифом {uuid}»             -> grief_id=uuid\n\n"
             "ВАЖНО: Токен авторизации передается системой АВТОМАТИЧЕСКИ. "
             "Тебе НЕ НУЖНО запрашивать его у пользователя."
         ),

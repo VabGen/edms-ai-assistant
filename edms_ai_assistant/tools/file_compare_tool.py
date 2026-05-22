@@ -239,8 +239,8 @@ def create_file_compare_tool(
         • Нужно найти различия между файлом на компьютере и файлом в СЭД
 
         НЕ ИСПОЛЬЗУЙ этот инструмент для:
-        • Сравнения двух документов СЭД → используй `doc_compare`
-        • Сравнения версий документа → используй `doc_get_versions`
+        • Сравнения двух документов СЭД -> используй `doc_compare`
+        • Сравнения версий документа -> используй `doc_get_versions`
 
         ПАРАМЕТРЫ:
         • attachment_id: UUID вложения ИЛИ имя файла. Если не указан — ищем по имени загруженного файла.
@@ -324,7 +324,7 @@ def create_file_compare_tool(
                 target = _resolve_attachment(attachments, local_path.name)
 
         if target is None:
-            logger.info("Attachment resolution failed → HITL disambiguation")
+            logger.info("Attachment resolution failed -> HITL disambiguation")
 
             cards = [
                 InterruptCard(
@@ -448,7 +448,7 @@ def create_file_compare_tool(
                 "message": f"Ошибка извлечения текста из «{resolved_name}»: {exc}",
             }
 
-        # ── 7. Нормализация → сравнение → diff ───────────────────────────────────
+        # ── 7. Нормализация -> сравнение -> diff ───────────────────────────────────
         local_text = _normalise(local_text_raw[:_MAX_TEXT_CHARS])
         att_text = _normalise(att_text_raw[:_MAX_TEXT_CHARS])
 

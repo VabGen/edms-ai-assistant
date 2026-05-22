@@ -43,7 +43,8 @@ class EDMSNaturalLanguageService:
         self.entity_extractor = entity_extractor
         self.query_refiner = query_refiner
 
-    def process_document(self, doc: DocumentDto) -> dict[str, Any]:
+    @staticmethod
+    def process_document(doc: DocumentDto) -> dict[str, Any]:
         """Produce a full structured analysis of a DocumentDto."""
         if not doc:
             logger.warning("Attempted to process None document")
@@ -114,7 +115,8 @@ class EDMSNaturalLanguageService:
             logger.error("Error processing document: %s", exc, exc_info=True)
             return {"error": "Ошибка обработки документа", "details": str(exc)}
 
-    def process_employee_info(self, emp: EmployeeDto) -> dict[str, Any]:
+    @staticmethod
+    def process_employee_info(emp: EmployeeDto) -> dict[str, Any]:
         """Build an analytical employee card from an EmployeeDto."""
         if not emp: return {}
         try:

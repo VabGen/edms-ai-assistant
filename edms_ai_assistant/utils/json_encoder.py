@@ -10,10 +10,10 @@ class CustomJSONEncoder(json.JSONEncoder):
     Кастомный JSON encoder для сериализации специальных типов данных.
 
     Поддерживает:
-    - UUID → str
-    - datetime → ISO 8601 с timezone (для java.time.Instant)
-    - Enum → value
-    - Pydantic models → dict
+    - UUID -> str
+    - datetime -> ISO 8601 с timezone (для java.time.Instant)
+    - Enum -> value
+    - Pydantic models -> dict
     """
 
     def default(self, obj):
@@ -25,20 +25,20 @@ class CustomJSONEncoder(json.JSONEncoder):
         if hasattr(obj, "dict"):
             return obj.dict()
 
-        # UUID → string
+        # UUID -> string
         if isinstance(obj, UUID):
             return str(obj)
 
-        # datetime → ISO 8601 с timezone
+        # datetime -> ISO 8601 с timezone
         if isinstance(obj, datetime):
             # Если datetime уже имеет timezone info
             if obj.tzinfo is not None:
                 return obj.isoformat()
             else:
-                # Naive datetime → добавляем 'Z' (UTC timezone)
+                # Naive datetime -> добавляем 'Z' (UTC timezone)
                 return obj.isoformat() + "Z"
 
-        # Enum → value
+        # Enum -> value
         if isinstance(obj, Enum):
             return obj.value
 

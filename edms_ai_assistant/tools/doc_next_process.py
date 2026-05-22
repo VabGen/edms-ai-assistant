@@ -9,8 +9,8 @@ API:
   Body: {id: UUID, nextId: UUID, employees: [UUID]}
 
 Логика:
-  1. GET /{id}/bpmn              → порядок и названия этапов
-  2. GET /{documentId}/process    → currentId (optimistic lock)
+  1. GET /{id}/bpmn              -> порядок и названия этапов
+  2. GET /{documentId}/process    -> currentId (optimistic lock)
   3. Если сотрудники не указаны — попытка перехода
   4. При ошибке employee.empty — запросить исполнителей у пользователя
   5. POST /process/next с employees
@@ -318,7 +318,7 @@ def create_doc_next_process_tool(
     async def _resolve_employees(
             token: str, employees: list[str]
     ) -> tuple[list[str], list[str]]:
-        """Разрешает список сотрудников: UUID → как есть, ФИО → поиск."""
+        """Разрешает список сотрудников: UUID -> как есть, ФИО -> поиск."""
         resolved: list[str] = []
         unresolved: list[str] = []
         for emp in employees:
@@ -377,9 +377,9 @@ def create_doc_next_process_tool(
         try:
             # ── Шаг 1: Получить BPMN, документ и процесс параллельно ─────
             bpmn_data, doc_data, process_data = await asyncio.gather(
-                base_client._make_request("GET", f"api/document/{document_id}/bpmn", token=token),
-                base_client._make_request("GET", f"api/document/{document_id}", token=token),
-                base_client._make_request("GET", f"api/document/{document_id}/process", token=token),
+                base_client.make_request("GET", f"api/document/{document_id}/bpmn", token=token),
+                base_client.make_request("GET", f"api/document/{document_id}", token=token),
+                base_client.make_request("GET", f"api/document/{document_id}/process", token=token),
             )
 
             # Приводим к dict | None для унификации логики парсинга
@@ -564,7 +564,7 @@ def create_doc_next_process_tool(
             )
 
             try:
-                await base_client._make_request(
+                await base_client.make_request(
                     "POST",
                     "api/document/process/next",
                     token=token,

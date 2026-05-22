@@ -2,6 +2,9 @@ from __future__ import annotations
 
 
 from pydantic import Field
+from uuid import UUID
+from datetime import datetime
+from edms_ai_assistant.domain.enums import GroupType, RoleObjectType
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from typing import TYPE_CHECKING
@@ -99,3 +102,7 @@ class GroupDto(EdmsBaseDto):
     type: GroupType
     mixed: bool
     create_date: datetime | None = None
+
+
+EmployeeDto.model_rebuild()
+DepartmentDto.model_rebuild()

@@ -4,24 +4,24 @@ EDMS AI Assistant — Document Search Tool.
 
 Поиск документов в EDMS по широкому набору параметров фильтрации.
 
-Маппинг параметров инструмента → поля DocumentFilter (Java):
-    short_summary        → shortSummary         (String, like)
-    reg_number           → regNumber            (String, like)
-    out_reg_number       → outRegNumber         (String, like)
-    doc_category         → categoryConstants    (DocumentCategoryConstants[])
-    date_from            → dateRegStart         (Instant ISO 8601)
-    date_to              → dateRegEnd           (Instant ISO 8601)
-    date_control_start   → dateControlStart     (Instant ISO 8601)
-    date_control_end     → dateControlEnd       (Instant ISO 8601)
-    author_last_name     → authorLastName       (String, like)
-    correspondent_name   → correspondentName    (String, like)
-    recipient_name       → recipientName        (String, like)
-    task_executor_last_name → taskExecutorLastName (String, like)
-    author_current_user  → authorCurrentUser    (Boolean)
-    process_executor_current_user → processExecutorCurrentUser (Boolean)
-    task_executor_current_user    → taskExecutorCurrentUser    (Boolean)
-    control_user_current_user     → controlUserCurrentUser     (Boolean)
-    introduction_current_user     → introductionCurrentUser    (Boolean)
+Маппинг параметров инструмента -> поля DocumentFilter (Java):
+    short_summary        -> shortSummary         (String, like)
+    reg_number           -> regNumber            (String, like)
+    out_reg_number       -> outRegNumber         (String, like)
+    doc_category         -> categoryConstants    (DocumentCategoryConstants[])
+    date_from            -> dateRegStart         (Instant ISO 8601)
+    date_to              -> dateRegEnd           (Instant ISO 8601)
+    date_control_start   -> dateControlStart     (Instant ISO 8601)
+    date_control_end     -> dateControlEnd       (Instant ISO 8601)
+    author_last_name     -> authorLastName       (String, like)
+    correspondent_name   -> correspondentName    (String, like)
+    recipient_name       -> recipientName        (String, like)
+    task_executor_last_name -> taskExecutorLastName (String, like)
+    author_current_user  -> authorCurrentUser    (Boolean)
+    process_executor_current_user -> processExecutorCurrentUser (Boolean)
+    task_executor_current_user    -> taskExecutorCurrentUser    (Boolean)
+    control_user_current_user     -> controlUserCurrentUser     (Boolean)
+    introduction_current_user     -> introductionCurrentUser    (Boolean)
 """
 from __future__ import annotations
 

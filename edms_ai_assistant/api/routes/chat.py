@@ -39,7 +39,7 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
     ResumeValueAdapter,
 )
-from edms_ai_assistant.api.deps import get_agent
+from edms_ai_assistant.api.deps import get_agent, get_deps
 from edms_ai_assistant.api.helpers import resolve_user_context
 from edms_ai_assistant.api.sse import SSE_KEEPALIVE, format_sse
 from edms_ai_assistant.api.sse_events import (
@@ -56,6 +56,7 @@ from edms_ai_assistant.security import extract_user_id_from_token
 if TYPE_CHECKING:
     from edms_ai_assistant.agent.agent import EdmsDocumentAgent
     from collections.abc import AsyncIterator
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +413,7 @@ async def _stream_graph_events(
 async def chat_stream(
         body: ChatStreamRequest,
         agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+        deps: Annotated[AppDeps, Depends(get_deps)],
 ) -> StreamingResponse:
     try:
         user_id = extract_user_id_from_token(body.user_token)
@@ -427,7 +429,7 @@ async def chat_stream(
         user_context = body.context.model_dump(exclude_none=True)
     else:
         bridged = UserInput(message=body.message, user_token=body.user_token)
-        user_context = await resolve_user_context(bridged, user_id)
+        user_context = await resolve_user_context(bridged, user_id, deps.employee_client)
 
     if (
             body.preferred_summary_format

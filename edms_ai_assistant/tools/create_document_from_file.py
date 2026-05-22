@@ -188,7 +188,7 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
             if _detected and _detected != "APPEAL":
                 doc_category = _detected
                 logger.info(
-                    "doc_category refined from file_name '%s': %s → %s",
+                    "doc_category refined from file_name '%s': %s -> %s",
                     file_name[:40],
                     _explicit_category,
                     doc_category,

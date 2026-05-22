@@ -72,7 +72,7 @@ class AppealFields(BaseModel):
     @classmethod
     def truncate_summary(cls, v: str | None) -> str | None:
         if v and len(v) > 80:
-            logger.debug("Краткое содержание обрезано: %d → 80 символов", len(v))
+            logger.debug("Краткое содержание обрезано: %d -> 80 символов", len(v))
             return v[:77] + "..."
         return v
 

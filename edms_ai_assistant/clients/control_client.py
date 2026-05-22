@@ -24,7 +24,7 @@ class ControlClient(EdmsBaseClient):
 
     async def get_control_types(self, token: str) -> list[dict[str, Any]]:
         """Получает типы контроля."""
-        result = await self._make_request(
+        result = await self.make_request(
             "GET", "api/control-type", token=token, params={"page": 0, "size": 100}
         )
         if isinstance(result, list):
@@ -56,12 +56,12 @@ class ControlClient(EdmsBaseClient):
 
     async def remove_control(self, token: str, document_id: UUID | str) -> None:
         """Снимает с контроля."""
-        await self._make_request(
+        await self.make_request(
             "PUT", "api/document/control", token, json_data={"id": str(document_id)}, is_json_response=False
         )
 
     async def delete_control(self, token: str, document_id: UUID | str) -> None:
         """Удаляет запись о контроле."""
-        await self._make_request(
+        await self.make_request(
             "DELETE", f"api/document/{document_id}/control", token, is_json_response=False
         )

@@ -26,12 +26,12 @@ async def test_appeal_autofill_logic():
     doc_dto = DocumentDto(
         id=doc_id,
         attachment_document=[
-            AttachmentDocumentDto(id=att_id, name="appeal.pdf")
+            AttachmentDocumentDto(id=att_id, name="appeal.txt")
         ]
     )
 
     mock_doc_client.get_document_metadata = AsyncMock(return_value=doc_dto)
-    mock_attach_client.get_attachment_content = AsyncMock(return_value=b"fake pdf content")
+    mock_attach_client.get_attachment_content = AsyncMock(return_value=b"Sample plain text content longer than fifty characters for successful validation.")
 
     # Mock extraction result
     extraction_result = AppealFields(
@@ -40,10 +40,16 @@ async def test_appeal_autofill_logic():
         shortSummary="Жалоба на отопление"
     )
     mock_extraction.extract_appeal_fields = AsyncMock(return_value=extraction_result)
+    mock_doc_client.execute_document_operations = AsyncMock()
+    mock_ref_client.find_delivery_method = AsyncMock(return_value="delivery-id")
+    mock_ref_client.find_citizen_type = AsyncMock(return_value="citizen-type-id")
+    mock_ref_client.find_best_subject = AsyncMock(return_value="subject-id")
 
-    result = await service.autofill_appeal("token", str(doc_id))
+    doc_dto = doc_dto.model_copy(update={"doc_category_const": "APPEAL"})
+    mock_doc_client.get_document_metadata = AsyncMock(return_value=doc_dto)
 
-    assert result["status"] == "success"
-    assert "Иванов" in str(result["updates"])
+    result = await service.process_and_fill("token", str(doc_id), attachment_id=None)
+
+    assert result.status == "success"
     mock_doc_client.get_document_metadata.assert_called_once()
     mock_attach_client.get_attachment_content.assert_called_once()

@@ -3,7 +3,7 @@
 GraphBuilder — компилирует LangGraph ReAct workflow.
 
 Hot-path node ``call_model`` is now a **pure** function:
-  history (trimmed) → LLM → response
+  history (trimmed) -> LLM -> response
 
 No heuristic string-parsing, no dynamic SystemMessage injection,
 no sanitizer loop, no synthetic AIMessage validator.  All
@@ -22,7 +22,6 @@ from typing import Any, TYPE_CHECKING
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from opentelemetry import trace
 
@@ -72,7 +71,7 @@ class GraphBuilder:
         """Компилирует state graph для native HITL pipeline.
 
         Тулы сами решают, когда приостановить граф, через
-        ``ask_human()`` → ``langgraph.types.interrupt()``. Никаких
+        ``ask_human()`` -> ``langgraph.types.interrupt()``. Никаких
         ``interrupt_before`` — пауза ставится в той точке кода тула,
         где она логически уместна.
 
