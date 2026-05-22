@@ -23,6 +23,7 @@ Design contract:
 
 from __future__ import annotations
 
+import re
 import asyncio
 import logging
 import uuid
@@ -193,8 +194,21 @@ def _serialise_message(msg: BaseMessage) -> dict[str, Any] | None:
         return {"role": "user", "content": str(msg.content)}
     if isinstance(msg, AIMessage):
         content = str(msg.content or "").strip()
+
+        if msg.tool_calls and not content:
+            return None
+
         if not content:
             return None
+
+        content = content.replace("(инструмент)", "").replace("(tool)", "").strip()
+
+        content = re.sub(r'^Action:\s*.*$', '', content, flags=re.MULTILINE).strip()
+        content = re.sub(r'^Thought:\s*.*$', '', content, flags=re.MULTILINE).strip()
+
+        if not content:
+            return None
+
         return {"role": "assistant", "content": content}
     return None
 

@@ -132,7 +132,7 @@ class GraphBuilder:
                     )
 
                 span.set_attribute("messages.count", len(candidate))
-                llm_timeout = getattr(settings, "AGENT_LLM_TIMEOUT", 30.0)
+                llm_timeout = getattr(settings, "AGENT_LLM_TIMEOUT", 120.0)
 
                 try:
                     response = await asyncio.wait_for(
