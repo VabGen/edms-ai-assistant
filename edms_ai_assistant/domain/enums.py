@@ -333,6 +333,11 @@ class RoleObjectType(StrEnum):  # Type14
     CONTRACT = "CONTRACT"
 
 
+class RoleType(StrEnum):
+    SYSTEM = "SYSTEM"
+    USER = "USER"
+
+
 class ActionTypeQueue(StrEnum):
     ANY = "ANY"
     ORDERED = "ORDERED"
@@ -352,6 +357,21 @@ class BlockedField(StrEnum):
     EMAIL = "EMAIL"
     PHOTO = "PHOTO"
     DEPARTMENT = "DEPARTMENT"
+
+
+class EmployeeCreateType(StrEnum):
+    MANUAL = "MANUAL"
+    LDAP = "LDAP"
+    SYSTEM = "SYSTEM"
+
+
+class UserActionType(StrEnum):
+    """Available user action types."""
+    LOGIN = "LOGIN"
+    LOGOUT = "LOGOUT"
+    SEARCH = "SEARCH"
+    DOCUMENT_VIEW = "DOCUMENT_VIEW"
+    # Add more as needed, common types used in dashboard
 
 
 class CorrespondentType(StrEnum):  # Type2

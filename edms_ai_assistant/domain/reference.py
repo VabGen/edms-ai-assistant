@@ -154,6 +154,15 @@ class UnifiedDocumentationSystemDto(EdmsBaseDto):
     active: bool | None = None
 
 
+class OrgDto(EdmsBaseDto):
+    """Organization model."""
+    id: str | None = Field(None, description="Идентификатор организации")
+    name: str | None = Field(None, description="Наименование организации")
+    current_count: int | None = Field(None, description="Текущее кол-во активных учетных записей в СЭД")
+    max_count: int | None = Field(None, description="Максимально кол-во активных учетных записей")
+    active: bool | None = Field(None, description="Признак активена ли организация")
+
+
 class InvestmentProgramDto(EdmsBaseDto):
     id: UUID | None = None
     name: str | None = None
