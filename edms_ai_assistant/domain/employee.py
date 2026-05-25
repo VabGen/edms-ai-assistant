@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-
+from typing import Annotated, TYPE_CHECKING
 from pydantic import Field
 from uuid import UUID
 from datetime import datetime
 from edms_ai_assistant.domain.enums import GroupType, RoleObjectType
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from edms_ai_assistant.domain.enums import GroupType, RoleObjectType
@@ -27,6 +26,20 @@ class MiniUserInfoDto(EdmsBaseDto):
     first_name: str | None = Field(None, description="Имя сотрудника")
     last_name: str | None = Field(None, description="Фамилия сотрудника")
     middle_name: str | None = Field(None, description="Отчество сотрудника")
+
+
+class UserInfoDto(EdmsBaseDto):
+    first_name: Annotated[str | None, Field(description="Имя сотрудника")] = None
+    last_name: Annotated[str | None, Field(description="Фамилия сотрудника")] = None
+    middle_name: Annotated[str | None, Field(description="Отчество сотрудника")] = None
+    author_post: Annotated[str | None, Field(description="Наименование должность сотрудника")] = None
+    author_department_name: Annotated[str | None, Field(description="Наименование департамента сотрудника")] = None
+    author_department: Annotated[DepartmentDto | None, Field(description="Департамент сотрудника")] = None
+    author_department_id: Annotated[UUID | None, Field(description="Идентификатор департамента сотрудника")] = None
+    author_department_org_id: str | None = None
+    employee: Annotated[EmployeeDto | None, Field(description="Сотрудник")] = None
+    employee_id: Annotated[UUID | None, Field(description="Идентификатор сотрудник")] = None
+    employee_org_id: str | None = None
 
 
 class DeputyLeaderDepartmentDto(EdmsBaseDto):

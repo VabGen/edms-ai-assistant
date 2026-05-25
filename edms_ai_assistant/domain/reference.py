@@ -40,6 +40,7 @@ class SubjectDto(EdmsBaseDto):
     parent_subject_id: UUID | None = Field(None, description="Идентификатор родительской тематики")
     parent_subject: Any | None = Field(None, description="Родительская тематика")
     active: bool | None = None
+    deleted: bool | None = None
     create_date: datetime | None = None
 
 
@@ -66,6 +67,7 @@ class CurrencyDto(EdmsBaseDto):
     id: UUID | None = None
     name: str | None = None
     active: bool | None = None
+    deleted: bool | None = None
     create_date: datetime | None = None
     code: str | None = None
 
@@ -134,6 +136,7 @@ class AdditionalDocumentTypeDto(EdmsBaseDto):
     id: UUID | None = None
     name: str | None = None
     active: bool | None = None
+    deleted: bool | None = None
     create_date: datetime | None = None
 
 
