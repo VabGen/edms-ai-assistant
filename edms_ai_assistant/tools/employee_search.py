@@ -194,9 +194,9 @@ def _serialize_employee_dto(emp: EmployeeDto) -> dict[str, Any]:
     full_name = " ".join(p for p in parts if p).strip() or "—"
     return {
         "id": str(emp.id or ""), "full_name": full_name,
-        "post": emp.post.post_name if emp.post else "—",
+        "post": emp.post.post_name if emp.post else "—", 
         "department": emp.department.name if emp.department else "—",
-        "active": emp.active,
+        "active": emp.active, 
         "email": emp.email or "—", "phone": emp.phone or "—",
     }
 

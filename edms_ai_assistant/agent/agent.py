@@ -174,7 +174,6 @@ class EdmsDocumentAgent:
 
         lines: list[str] = ["\n\n<semantic_context>"]
 
-        # Переход на snake_case аттрибуты Pydantic модели
         if doc_info.short_summary:
             lines.append(f"  <title>{esc(doc_info.short_summary)}</title>")
         if doc_info.reg_number:

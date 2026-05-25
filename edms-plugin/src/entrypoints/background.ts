@@ -145,6 +145,14 @@ function registerSsePort(): void {
             const url =
                 port.name === 'resumeChat' ? `${API}/chat/resume` : `${API}/chat/stream`
 
+            const swKeepAlive = setInterval(() => {
+                try {
+                    port.postMessage({type: 'keepalive'})
+                } catch {
+                    clearInterval(swKeepAlive)
+                }
+            }, 20_000)
+
             try {
                 const res = await fetch(url, {
                     method: 'POST',
@@ -225,6 +233,7 @@ function registerSsePort(): void {
                     port.postMessage({type: 'sse_error', error: err.message})
                 }
             } finally {
+                clearInterval(swKeepAlive)
                 port.disconnect()
             }
         })

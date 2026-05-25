@@ -64,7 +64,7 @@ class IntroductionService:
         # Мы можем обновить их или создать новый объект.
         combined_ids = set(result.employee_ids)
         combined_ids.update(emp_ids)
-
+        
         combined_not_found = list(result.not_found)
         combined_not_found.extend(not_found_names)
 

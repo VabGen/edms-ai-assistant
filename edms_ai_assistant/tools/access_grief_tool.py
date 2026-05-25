@@ -30,6 +30,7 @@ from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
     from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from edms_ai_assistant.domain.employee import AccessGriefDto, EmployeeAccessGriefDto
     from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ def _format_grief_employee(raw: EmployeeAccessGriefDto) -> dict[str, Any]:
     # However, the backend might be sending it. Let's assume it behaves as DTO if possible.
     # If the backend sends something else, we'd need to adjust the DTO.
     # Based on _format_grief_employee logic, it seems it expects an object with 'employee' attr.
-
+    
     emp = getattr(raw, "employee", None)
     if not emp:
         return {"id": "—", "full_name": "—"}
@@ -208,7 +209,7 @@ async def _get_grief_employees(
 
         employees = [_format_grief_employee(e) for e in raw_employees]
         grief_label = grief_name or (
-            grief_info.get("name") if grief_info else grief_id[:8]
+            grief_info.name if grief_info else grief_id[:8]
         )
 
         if not employees:

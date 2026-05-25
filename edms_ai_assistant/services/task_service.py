@@ -121,7 +121,7 @@ class TaskService:
     ) -> tuple[list[CreateTaskRequestExecutor], list[str], list[dict[str, Any]]]:
         """Собирает исполнителей и подготавливает данные для disambiguation."""
         emp_ids, not_found, ambiguous = await self._resolution.resolve_employees(token, executor_last_names)
-
+        
         responsible_id: UUID | None = None
         if responsible_last_name:
             resp_ids, _, _ = await self._resolution.resolve_employees(token, [responsible_last_name])
@@ -135,7 +135,7 @@ class TaskService:
             CreateTaskRequestExecutor(employeeId=emp_id, responsible=(emp_id == responsible_id))
             for emp_id in emp_ids
         ]
-
+        
         ambiguous_data = [
             {
                 "search_query": am.search_query,

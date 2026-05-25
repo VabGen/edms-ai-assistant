@@ -32,7 +32,6 @@ from edms_ai_assistant.config import edms_settings, settings
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
     import redis.asyncio as aioredis
-    from langchain_core.language_models import BaseLanguageModel
 
 
 class AppDeps(BaseModel):

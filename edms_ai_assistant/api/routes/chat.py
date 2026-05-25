@@ -31,7 +31,7 @@ from typing import Annotated, Any, TYPE_CHECKING
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from langgraph.errors import GraphInterrupt
+from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langgraph.types import Command, Interrupt
 from pydantic import BaseModel, Field, ValidationError, ConfigDict
 
@@ -50,13 +50,14 @@ from edms_ai_assistant.api.sse_events import (
     _parse_tool_content,
 )
 
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+from edms_ai_assistant.config import settings
+from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.model import NewChatRequest, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
     from collections.abc import AsyncIterator
-    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -183,11 +184,12 @@ def _make_config(
     tools (LangGraph injects it as ``config: RunnableConfig``).
     """
     cfg: dict[str, Any] = {
+        "recursion_limit": settings.AGENT_MAX_ITERATIONS * 2 + 1,
         "configurable": {
             "thread_id": thread_id,
             "user_token": user_token,
             "user_id": user_id,
-        }
+        },
     }
     if document_id:
         cfg["configurable"]["document_id"] = document_id
@@ -261,19 +263,38 @@ async def _stream_graph_events(
     Guarantees:
       - Always emits a terminal event (done/error) so the frontend
         never gets stuck in loading state.
-      - Handles GraphInterrupt, CancelledError, and unexpected exceptions.
+      - Handles GraphInterrupt, GraphRecursionError, CancelledError, and unexpected exceptions.
+      - Sends keepalive every 5 s even during long LLM inference to prevent
+        proxy / browser service-worker idle timeouts.
       - Sends ui_component events for compliance/navigate ToolMessages.
     """
     compliance_sent = False
     navigate_sent = False
+    _pending_task: asyncio.Future | None = None
 
     try:
-        async for mode, chunk in agent.graph.astream(
+        _ait = agent.graph.astream(
             payload,
             config=config,
             stream_mode=["updates", "custom"],
-        ):
-            # Send keepalive to prevent timeouts during long tool execution (e.g. OCR)
+        ).__aiter__()
+        _pending_task = asyncio.ensure_future(_ait.__anext__())
+
+        while True:
+            done_set, _ = await asyncio.wait({_pending_task}, timeout=5.0)
+            if not done_set:
+                # No graph event in the last 5 s — send keepalive
+                yield SSE_KEEPALIVE.decode()
+                continue
+
+            try:
+                mode, chunk = _pending_task.result()
+            except StopAsyncIteration:
+                break
+
+            _pending_task = asyncio.ensure_future(_ait.__anext__())
+
+            # Send keepalive after every received chunk
             yield SSE_KEEPALIVE.decode()
 
             # ── Custom channel: UIDirective ──────────────────────────────
@@ -386,12 +407,29 @@ async def _stream_graph_events(
                 )
         yield format_sse("done", {"thread_id": thread_id, "paused": True})
         return
+    except GraphRecursionError:
+        logger.warning("Graph recursion limit hit for thread=%s", thread_id)
+        yield format_sse(
+            "error",
+            {
+                "code": "TOO_MANY_STEPS",
+                "message": (
+                    "Агент выполнил слишком много шагов без результата. "
+                    "Попробуйте переформулировать запрос или начните новый чат."
+                ),
+                "thread_id": thread_id,
+            },
+        )
+        return
     except asyncio.CancelledError:
-        # Stream was aborted by user clicking Stop — send done so frontend resets
+        if _pending_task is not None and not _pending_task.done():
+            _pending_task.cancel()
         logger.info("Stream cancelled for thread=%s", thread_id)
         yield format_sse("done", {"thread_id": thread_id, "paused": False})
         return
     except Exception as exc:
+        if _pending_task is not None and not _pending_task.done():
+            _pending_task.cancel()
         logger.exception("chat stream failed for thread=%s", thread_id)
         yield format_sse(
             "error",

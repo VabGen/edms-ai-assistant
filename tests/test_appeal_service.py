@@ -5,6 +5,7 @@ from edms_ai_assistant.services.appeal_autofill_service import AppealAutofillSer
 from edms_ai_assistant.domain.document import DocumentDto, AttachmentDocumentDto
 from edms_ai_assistant.domain.appeal_fields import AppealFields
 
+
 @pytest.mark.asyncio
 async def test_appeal_autofill_logic():
     mock_doc_client = MagicMock()
@@ -31,7 +32,8 @@ async def test_appeal_autofill_logic():
     )
 
     mock_doc_client.get_document_metadata = AsyncMock(return_value=doc_dto)
-    mock_attach_client.get_attachment_content = AsyncMock(return_value=b"Sample plain text content longer than fifty characters for successful validation.")
+    mock_attach_client.get_attachment_content = AsyncMock(
+        return_value=b"Sample plain text content longer than fifty characters for successful validation.")
 
     # Mock extraction result
     extraction_result = AppealFields(
