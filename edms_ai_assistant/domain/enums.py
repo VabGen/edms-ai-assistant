@@ -421,6 +421,12 @@ class BlockedField(StrEnum):
     DEPARTMENT = "DEPARTMENT"
 
 
+class EmployeeIoType(StrEnum):
+    SECRETARY = "SECRETARY"
+    IO = "IO"
+    IO_DISMISSAL = "IO_DISMISSAL"
+
+
 class EmployeeCreateType(StrEnum):
     MANUAL = "MANUAL"
     LDAP = "LDAP"

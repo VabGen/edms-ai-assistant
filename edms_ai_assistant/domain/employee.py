@@ -10,7 +10,8 @@ from edms_ai_assistant.domain.enums import (
     GroupType,
     RoleType,
     EmployeeCreateType,
-    BlockedField
+    BlockedField,
+    EmployeeIoType,
 )
 from edms_ai_assistant.domain.reference import OrgDto
 
@@ -34,6 +35,12 @@ class PostDto(EdmsBaseDto):
     post_name: str | None = Field(None, description="Наименование должности")
     post_code: str | None = Field(None, description="Код должности")
     create_date: datetime | None = None
+
+
+class PostRequest(EdmsBaseDto):
+    id: int | None = None
+    post_name: str | None = None
+    post_code: str | None = None
 
 
 class RoleDto(EdmsBaseDto):
@@ -134,19 +141,57 @@ class UserInfoDto(EdmsBaseDto):
     employee_org_id: str | None = None
 
 
+class EmployeeIoDto(EdmsBaseDto):
+    id: UUID | None = None
+    create_date: datetime | None = None
+    target_id: UUID | None = None
+    target: EmployeeDto | None = None
+    io_id: UUID | None = None
+    io: EmployeeDto | None = None
+    system: bool | None = None
+    revocation_date: datetime | None = None
+    transfer_docs: bool | None = None
+    type: EmployeeIoType | None = None
+
+
+class SecretaryRequest(EdmsBaseDto):
+    target_id: UUID = Field(..., description="Идентификатор сотрудника за которого исполняют")
+    io_ids: list[UUID] | None = Field(None, description="Идентификаторы сотрудников которые исполняют")
+
+
+class EmployeeIoRequest(EdmsBaseDto):
+    target_id: UUID
+    io_id: UUID
+
+
 class DeputyLeaderDepartmentDto(EdmsBaseDto):
     id: UUID | None = None
+    organization_id: str | None = None
+    department_id: UUID | None = None
+    department_org_id: str | None = None
+    department: Any | None = None  # DepartmentDto
+    employee_id: UUID | None = None
+    employee_org_id: str | None = None
+    employee: EmployeeDto | None = None
 
 
 class DepartmentEmployeeNomenclatureDto(EdmsBaseDto):
     id: UUID | None = None
+    department_id: UUID | None = None
+    department_org_id: str | None = None
+    department: Any | None = None  # DepartmentDto
+    employee_id: UUID | None = None
+    employee: EmployeeDto | None = None
 
 
 class DepartmentDto(EdmsBaseDto):
     id: UUID | None = None
+    organization_id: str | None = None
+    external_id: str | None = None
     name: str | None = None
     number: str | None = None
     parent_department_id: UUID | None = None
+    parent_department_org_id: str | None = None
     parent_department: DepartmentDto | None = None
     rank: str | None = None
     department_code: str | None = None
@@ -155,13 +200,15 @@ class DepartmentDto(EdmsBaseDto):
     address: str | None = None
     room: str | None = None
     leader_id: UUID | None = None
+    leader_org_id: str | None = None
     leader: EmployeeDto | None = None
     employees: list[EmployeeDto] | None = None
     deputy_leaders: list[DeputyLeaderDepartmentDto] | None = None
     employee_nomenclatures: list[DepartmentEmployeeNomenclatureDto] | None = None
     create_date: datetime | None = None
-    order: int | None = None
     current_user_leader: bool | None = None
+    order: int | None = 0
+    child_department_write_nomenclature_affair: bool = False
 
 
 class ScanSettingJsonB(EdmsBaseDto):
@@ -170,35 +217,42 @@ class ScanSettingJsonB(EdmsBaseDto):
 
 
 class CurrentUserDto(EdmsBaseDto):
-    """DTO reflecting the CurrentUser Java class."""
+    """DTO reflecting the CustomUserDetails Java class."""
+
+    principal: str | None = None
     id: UUID | None = None
-    org_id: str | None = None
+    u_id: str | None = None
     first_name: str | None = None
     last_name: str | None = None
     middle_name: str | None = None
+    fired: bool | None = None
+    active: bool | None = None
+    organization_id: str | None = None
     full_post_name: str | None = None
-    me_io: list[Any] | None = None  # Assuming Io is a complex type
-    secretaries: list[Any] | None = None  # Assuming Secretary is a complex type
-    roles: set[UUID] | None = None
+    authorities: list[Any] | None = None
+    role_ids: set[UUID] | None = None
+    me_io: list[Any] | None = None
+    secretaries: list[Any] | None = None
     post_id: int | None = None
     department_id: UUID | None = None
-    department_name: str | None = None
+    department_org_id: str | None = None
+    department: DepartmentDto | None = None
     post: PostDto | None = None
-    fired: bool | None = None
+    group_ids: list[UUID] | None = None
     country: Any | None = None  # CountryDto
-    active: bool | None = None
-    authorities: list[Any] | None = None
     localization: Any | None = None
+    subordinates_departments: list[UUID] = Field(default_factory=list)
+    subordinates: list[UUID] = Field(default_factory=list)
+    org_boss: bool = False
     widgets: bool = False
     scan_wia: bool = False
     doc_ellipsis: bool = False
     doc_ellipsis_row: int = 4
     show_event_design: bool = True
     settings: ScanSettingJsonB | None = None
-    grief_ids: set[UUID] | None = None
     responsible_nomenclature_department_ids: list[UUID] = Field(default_factory=list)
-    subordinates_departments: list[UUID] = Field(default_factory=list)
     archivist: bool = False
+    grief_ids: set[UUID] | None = None
     views: list[Any] | None = None  # CustomViewDto
 
 
@@ -243,6 +297,13 @@ class EmployeeUpdateRequest(EdmsBaseDto):
     io_delete: UUID | None = None
     secretary_add: list[UUID] | None = None
     secretary_delete: list[UUID] | None = None
+
+
+class BasicSearchEmployeeRequest(EdmsBaseDto):
+    search: str | None = None
+    active: bool | None = None
+    fired: bool | None = None
+    department_id: UUID | None = None
 
 
 class EmployeeFilter(EdmsBaseDto):
@@ -294,8 +355,26 @@ class GroupDto(EdmsBaseDto):
     create_date: datetime | None = None
 
 
+class DepartmentFilter(EdmsBaseDto):
+    name: str | None = Field(None, description="Наименование департамента/подразделения")
+    number: str | None = Field(None, description="Номер департамента/подразделения в номенклатуре дел")
+    parent_department_id: UUID | None = Field(None, description="Идентификатор родительского департамента/подразделения")
+    rank: int | None = Field(None, description="Код сортировки")
+    department_code: str | None = Field(None, description="Код департамента/подразделения")
+    phone: str | None = Field(None, description="Телефон")
+    email: str | None = Field(None, description="Email")
+    address: str | None = Field(None, description="Адрес")
+    room: str | None = Field(None, description="Площадка")
+    leader_id: UUID | None = Field(None, description="Идентификатор руководителя департамента/подразделения")
+    employees: list[Any] | None = Field(None, description="Список сотрудников департамента/подразделения")
+    ids: list[UUID] | None = None
+    responsible_deps: bool = False
+    includes: list[str] | None = Field(None, description="Список моделей которые могу быть добавлены при отображении")
+
+
 EmployeeDto.model_rebuild()
 DepartmentDto.model_rebuild()
+EmployeeIoDto.model_rebuild()
 EmployeeAccessGriefDto.model_rebuild()
 EmployeeAddRequest.model_rebuild()
 EmployeeUpdateRequest.model_rebuild()

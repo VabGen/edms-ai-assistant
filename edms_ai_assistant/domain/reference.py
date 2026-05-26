@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
+from uuid import UUID
 
 from pydantic import Field
 
@@ -17,6 +18,8 @@ from edms_ai_assistant.domain.enums import (
 if TYPE_CHECKING:
     from uuid import UUID
     from datetime import datetime
+    from edms_ai_assistant.domain.document import DocumentProfileDto
+    from edms_ai_assistant.domain.employee import EmployeeDto, GroupDto
 
 
 class ReferenceItemDto(EdmsBaseDto):
@@ -293,24 +296,24 @@ class GeneralSetupDto(EdmsBaseDto):
     country_id: UUID | None = None
     country: CountryDto | None = None
     profile_id: UUID | None = None
-    profile: Any | None = None  # DocumentProfileDto
+    profile: DocumentProfileDto | None = None
     aismv_profile_id: UUID | None = None
-    aismv_profile: Any | None = None
+    aismv_profile: DocumentProfileDto | None = None
     employee_id: UUID | None = None
-    employee: Any | None = None  # EmployeeDto
+    employee: EmployeeDto | None = None
     aismv_author_employee_id: UUID | None = None
-    aismv_author: Any | None = None
+    aismv_author: EmployeeDto | None = None
     aismv_appeal_author_employee_id: UUID | None = None
-    aismv_appeal_author: Any | None = None
+    aismv_appeal_author: EmployeeDto | None = None
     group_id: UUID | None = None
     group_organization_id: str | None = None
-    group: Any | None = None  # GroupDto
+    group: GroupDto | None = None
     subscriber: SubscriberDto | None = None
     subscriber_id: UUID | None = None
     class_doc: str | None = Field(None, description="Унифицированный код")
     object_type: str | None = Field(None, description="Вид по таблице 2 ОКБ")
     aismv_appeal_profile_id: UUID | None = None
-    aismv_appeal_profile: Any | None = None
+    aismv_appeal_profile: DocumentProfileDto | None = None
     attachment_sign: Any | None = None
     disable_signed_fil_edit: bool | None = None
     enable_remove_draft_docs: bool | None = None
@@ -320,4 +323,4 @@ class GeneralSetupDto(EdmsBaseDto):
     work_day_start: str | None = None  # LocalTime in Java
     work_day_end: str | None = None
     organization_employee_id: UUID | None = None
-    organization_employee: Any | None = None
+    organization_employee: EmployeeDto | None = None

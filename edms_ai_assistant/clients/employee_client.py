@@ -212,5 +212,45 @@ class EmployeeClient(EdmsBaseClient):
             token,
             SliceDto[Any],
             params={"page": page, "size": size},
-            json_data=action_filter
+            json_data=action_filter,
         )
+
+    async def find_by_post_fts(self, token: str, post_name: str) -> list[EmployeeDto]:
+        """GET api/employee/fts-post"""
+        logger.info(f"Searching employee by post (FTS): {post_name}")
+        return await self._request_list(
+            "GET", "api/employee/fts-post", token, EmployeeDto, params={"fts": post_name.strip()}
+        )
+
+    async def find_by_full_post_name_fts(self, token: str, full_post_name: str) -> list[EmployeeDto]:
+        """GET api/employee/fts-full-post-name"""
+        logger.info(f"Searching employee by full post name (FTS): {full_post_name}")
+        return await self._request_list(
+            "GET", "api/employee/fts-full-post-name", token, EmployeeDto, params={"fts": full_post_name.strip()}
+        )
+
+    async def get_employee_groups(self, token: str, employee_id: UUID | str) -> list[Any]:
+        """GET api/employee/{id}/group"""
+        logger.info(f"Fetching groups for employee {employee_id}")
+        return await self.make_request("GET", f"api/employee/{employee_id}/group", token=token)
+
+    async def get_avatar(self, token: str, employee_id: UUID | str) -> bytes | None:
+        """GET api/employee/{id}/avatar"""
+        logger.info(f"Fetching avatar for employee {employee_id}")
+        try:
+            return await self.make_request("GET", f"api/employee/{employee_id}/avatar", token=token, is_json_response=False)
+        except EdmsNotFoundError:
+            return None
+
+    async def upload_avatar(self, token: str, employee_id: UUID | str, file_name: str, file_content: bytes) -> None:
+        """POST api/employee/{id}/avatar"""
+        logger.info(f"Uploading avatar for employee {employee_id}")
+        await self._upload_file(f"api/employee/{employee_id}/avatar", token, file_name, file_content, "image/jpeg")
+
+    async def get_my_avatar(self, token: str) -> bytes | None:
+        """GET api/employee/me/avatar"""
+        logger.info("Fetching current user avatar")
+        try:
+            return await self.make_request("GET", "api/employee/me/avatar", token=token, is_json_response=False)
+        except EdmsNotFoundError:
+            return None
