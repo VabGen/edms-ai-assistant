@@ -16,6 +16,11 @@ from edms_ai_assistant.domain.enums import (
     FormMeetingType,
     AppealType,
     Merge,
+    DocumentProfileAccessLinkType,
+    DocumentProfileFilterInclude,
+    ArgumentType,
+    RefType,
+    ProcessEmployeeActionQueueType,
     TaskStatus,
     TaskType,
     PeriodTaskInterval,
@@ -56,6 +61,7 @@ from edms_ai_assistant.domain.reference import (
     CurrencyDto,
     CountryDto,
     AdditionalDocumentTypeDto,
+    StoragePeriodDto,
 )
 
 if TYPE_CHECKING:
@@ -371,7 +377,7 @@ class DocumentDto(EdmsBaseDto):
     completed_task_count: int | None = None
     document_inventory_data: Any | None = None
     current_bpmn_task_name: str | None = None
-    document_form_definition: Any | None = None
+    document_form_definition: DocumentFormDto | None = None
     custom_fields: Annotated[dict[str, Any] | None, Field(description="Пользовательские поля")] = None
     additional_documents: list[AdditionalDocumentDto] | None = None
     document_form_id: UUID | None = None
@@ -439,10 +445,14 @@ class BpmnProcessActivityDto(EdmsBaseDto):
 
 class BpmnProcessDirectoryDto(EdmsBaseDto):
     id: UUID | None = None
+    organization_id: str | None = None
     name: str | None = None
+    file_name: str | None = None
+    deployment_id: str | None = None
     doc_category: DocCategory | None = None
     create_date: datetime | None = None
-    active: bool | None = None
+    deleted: bool = False
+    active: bool = True
 
 
 class KanbanBoard(EdmsBaseDto):
@@ -596,7 +606,7 @@ class DocumentProfileDto(EdmsBaseDto):
     process_directory_id: UUID | None = None
     process_directory: BpmnProcessDirectoryDto | None = None
     xml: str | None = None
-    process_definition: list[Any] | None = None
+    process_definition: list[DirectoryProcessDefinition] | None = None
     retry_prefix: str | None = None
     retry_postfix: str | None = None
     identical_prefix: str | None = None
@@ -617,6 +627,135 @@ class DocumentProfileDto(EdmsBaseDto):
     enable_access_grief: bool = False
     contract_typical: bool | None = None
     document_form_id: UUID | None = None
+    document_form: DocumentFormDto | None = None
+
+
+class DocumentFormDto(EdmsBaseDto):
+    id: Annotated[UUID | None, Field(description="Идентификатор формы документа")] = None
+    name: Annotated[str, Field(description="Наименование формы документа", min_length=1)]
+    document_constant: Annotated[DocCategory, Field(description="Константа документа")]
+    active: Annotated[bool, Field(description="Признак активен ли форма документа")] = True
+    system: Annotated[bool, Field(description="Признак системной формы документа")] = False
+    document_type_id: Annotated[int, Field(description="Идентификатор типа документа")]
+    document_type: DocumentTypeDto | None = None
+    general: Annotated[dict[str, Any] | None, Field(description="Общие настройки формы")] = None
+    fields: Annotated[list[DocumentFormField] | None, Field(description="Поля формы документа")] = None
+
+
+class DocumentFormField(EdmsBaseDto):
+    id: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+class DirectoryProcessDefinition(EdmsBaseDto):
+    order: Annotated[int, Field(description="Порядковый номер процесса", ge=1)]
+    employees: Annotated[list[DirectoryProcessEmployee] | None, Field(description="Список сотрудников (исполнителей) процесса")] = None
+    type: DocumentProcessType
+    profile_id: UUID | None = None
+    name: Annotated[str, Field(description="Наименование процесса", max_length=254)]
+    days: Annotated[int | None, Field(description="Количество дней для исполнения процесса")] = None
+    emp_action_queue_type: Annotated[ProcessEmployeeActionQueueType | None, Field(description="Тип выполнения действий в процессе, null = ANY")] = None
+
+
+class DirectoryProcessEmployee(EdmsBaseDto):
+    order: Annotated[int, Field(description="Порядковый номер в процессе")]
+    employee: Annotated[EmployeeDto, Field(description="Участник процесса")]
+
+
+class ProfileContractAttachmentDto(EdmsBaseDto):
+    id: Annotated[UUID | None, Field(description="Идентификатор вложения шаблона договора в профиле документа")] = None
+    document_profile_id: Annotated[UUID | None, Field(description="Идентификатор профиля документа")] = None
+    document_profile_org_id: Annotated[str | None, Field(description="Идентификатор организации профиля документа")] = None
+    document_profile: DocumentProfileDto | None = None
+    attachment: Annotated[AttachmentDto | None, Field(description="Файл шаблона печатной формы для договора")] = None
+    tag: Annotated[list[str] | None, Field(description="Список меток шаблона")] = None
+    template: Annotated[bool, Field(description="Наличие меток")] = False
+    upload_date: Annotated[datetime | None, Field(description="Дата загрузки")] = None
+
+
+class ProfileAccessGroupDto(EdmsBaseDto):
+    id: UUID | None = None
+    group_id: UUID | None = None
+    group: GroupDto | None = None
+    profile: DocumentProfileDto | None = None
+    profile_id: UUID | None = None
+
+
+class ProfileAccessEmployeeDto(EdmsBaseDto):
+    id: UUID | None = None
+    employee_id: UUID | None = None
+    employee: EmployeeDto | None = None
+    profile: DocumentProfileDto | None = None
+    profile_id: UUID | None = None
+
+
+class ProfileAttachmentDto(EdmsBaseDto):
+    id: UUID | None = None
+    name: str | None = None
+    size: int | None = None
+    upload_date: datetime | None = None
+    minio_name: str | None = None
+    bucket_name: str | None = None
+    profile_id: UUID | None = None
+
+
+class DocumentProfileAccessEntryDto(EdmsBaseDto):
+    id: UUID | None = None
+    document_profile_id: UUID | None = None
+    document_profile_org_id: str | None = None
+    employee_id: UUID | None = None
+    employee: EmployeeDto | None = None
+    department_id: UUID | None = None
+    department: DepartmentDto | None = None
+    department_org_id: str | None = None
+    role_id: UUID | None = None
+    role: RoleDto | None = None
+    group_id: UUID | None = None
+    group: GroupDto | None = None
+    group_organization_id: str | None = None
+    access_id: UUID | None = None
+    source_id: str | None = None
+    link_type: DocumentProfileAccessLinkType | None = None
+
+
+class DocumentProfileFilter(EdmsBaseDto):
+    name: Annotated[str | None, Field(description="Наименование профиля документа")] = None
+    doc_type_name: Annotated[str | None, Field(description="Наименование вида документа")] = None
+    doc_category_name: Annotated[str | None, Field(description="Наименование типа документа")] = None
+    reg_journal_name: Annotated[str | None, Field(description="Наименование журнала регистрации")] = None
+    active: Annotated[bool | None, Field(description="Признак активен ли профиль документа")] = None
+    doc_type_id: Annotated[int | None, Field(description="Идентификатор вида документа")] = None
+    doc_category_id: Annotated[UUID | None, Field(description="Идентификатор типа документа")] = None
+    reg_journal_id: Annotated[UUID | None, Field(description="Идентификатор журнала регистрации")] = None
+    correspondent_id: Annotated[UUID | None, Field(description="Идентификатор корреспондента")] = None
+    doc_category_const: DocCategory | None = None
+    with_access: Annotated[bool | None, Field(description="Только доступные профили по списку доступа")] = None
+    includes: list[DocumentProfileFilterInclude] | None = None
+
+
+class BpmnSearchRequest(EdmsBaseDto):
+    doc_category: DocCategory | None = None
+    search: Annotated[str | None, Field(description="Строка поиска")] = None
+    active: Annotated[bool | None, Field(description="Признак активности")] = None
+
+
+class BpmnProcessDirectoryRequest(EdmsBaseDto):
+    id: UUID | None = None
+    name: Annotated[str, Field(min_length=1)]
+    xml: Annotated[str, Field(min_length=1)]
+    doc_category: DocCategory
+    active: bool
+
+
+class FunctionDefinition(EdmsBaseDto):
+    name: str | None = None
+    args: list[ArgumentDefinition] | None = None
+
+
+class ArgumentDefinition(EdmsBaseDto):
+    type: ArgumentType | None = None
+    value: str | None = None
+    refs: list[RefType] | None = None
 
 
 class RoleMergeDto(EdmsBaseDto):
@@ -1027,7 +1166,7 @@ class NomenclatureAffairDto(EdmsBaseDto):
     name: str | None = None
     index: str | None = None
     storage_period_id: UUID | None = None
-    period: Any | None = None
+    period: StoragePeriodDto | None = None
     article_number: str | None = None
     storage_place: str | None = None
     note: str | None = None
@@ -1167,6 +1306,12 @@ DocumentQuestionDto.model_rebuild()
 AdditionalDocumentDto.model_rebuild()
 TemporaryAttachmentDto.model_rebuild()
 DocumentProfileDto.model_rebuild()
+DocumentFormDto.model_rebuild()
+DirectoryProcessDefinition.model_rebuild()
+ProfileContractAttachmentDto.model_rebuild()
+ProfileAccessGroupDto.model_rebuild()
+ProfileAccessEmployeeDto.model_rebuild()
+DocumentProfileAccessEntryDto.model_rebuild()
 GeneralSetupDto.model_rebuild()
 RoleMergeDto.model_rebuild()
 TaskDto.model_rebuild()

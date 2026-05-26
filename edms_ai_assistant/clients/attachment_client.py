@@ -131,7 +131,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/document/{document_id}/attachment/{attachment_id}/rename",
             token=token,
-            json=RenameFileRequest(name=name).model_dump(by_alias=True),
+            json_data=RenameFileRequest(name=name).model_dump(by_alias=True),
         )
         return AttachmentDocumentDto.model_validate(result)
 
@@ -143,7 +143,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/document/{document_id}/attachment/{attachment_id}/document-type",
             token=token,
-            json=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True),
         )
         return AttachmentDocumentDto.model_validate(result)
 
@@ -175,7 +175,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/attachment/convert-pdf",
             token=token,
-            json={"ids": [str(i) for i in attachment_ids]},
+            json_data={"ids": [str(i) for i in attachment_ids]},
         )
 
     async def upload_and_convert_to_pdf(
@@ -235,7 +235,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/create-empty",
             token=token,
-            json=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True),
         )
         return AttachmentDocumentDto.model_validate(result)
 
@@ -249,7 +249,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/attachment/{attachment_id}/sign",
             token=token,
-            json={"data": cms},
+            json_data={"data": cms},
         )
         return AttachmentSignature.model_validate(result)
 
@@ -259,7 +259,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/document/{document_id}/attachment/{attachment_id}/sign2",
             token=token,
-            json=SimpleCmsDto(cms=cms).model_dump(by_alias=True),
+            json_data=SimpleCmsDto(cms=cms).model_dump(by_alias=True),
         )
 
     async def remove_sign(self, token: str, document_id: UUID, attachment_id: UUID, sign_id: UUID):
@@ -276,7 +276,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/attachment/{attachment_id}/verify-sign",
             token=token,
-            json=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True),
         )
 
     # ══════════════════════════════════════════════════════════════════════════════
@@ -387,7 +387,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/temporary-attachment/{attachment_id}/mini-document/sign",
             token=token,
-            json=SimpleCmsDto(cms=cms).model_dump(by_alias=True),
+            json_data=SimpleCmsDto(cms=cms).model_dump(by_alias=True),
         )
 
     async def verify_temporary_mini_doc_sign(
@@ -398,7 +398,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/temporary-attachment/{attachment_id}/mini-document/verify-sign",
             token=token,
-            json=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True),
         )
 
     async def remove_temporary_mini_doc_sign(self, token: str, attachment_id: UUID, sign_id: UUID):
@@ -419,5 +419,5 @@ class AttachmentClient(EdmsBaseClient):
             "DELETE",
             url,
             token=token,
-            json={"ids": [str(i) for i in ids]},
+            json_data={"ids": [str(i) for i in ids]},
         )

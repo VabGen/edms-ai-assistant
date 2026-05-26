@@ -117,12 +117,12 @@ class DepartmentClient(EdmsBaseClient):
 
     async def create_department(self, token: str, department: DepartmentDto) -> DepartmentDto:
         """POST api/department"""
-        result = await self.make_request("POST", "api/department", token=token, json=department.model_dump(exclude_none=True))
+        result = await self.make_request("POST", "api/department", token=token, json_data=department.model_dump(exclude_none=True))
         return DepartmentDto.model_validate(result)
 
     async def update_department(self, token: str, department: DepartmentDto) -> DepartmentDto:
         """PUT api/department"""
-        result = await self.make_request("PUT", "api/department", token=token, json=department.model_dump(exclude_none=True))
+        result = await self.make_request("PUT", "api/department", token=token, json_data=department.model_dump(exclude_none=True))
         return DepartmentDto.model_validate(result)
 
     async def delete_department(self, token: str, department_id: UUID, ignore_errors: bool = True):
