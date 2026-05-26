@@ -10,6 +10,7 @@ from edms_ai_assistant.domain.enums import (
     DocumentProcessType,
     CreateType,
     AttachmentDocumentType,
+    AttachmentType,
     DeclarantType,
     FormMeetingType,
     AppealType,
@@ -22,7 +23,9 @@ from edms_ai_assistant.domain.enums import (
     NomenclatureDepartmentStatus,
     SummaryNomenclatureDepartmentStatus,
     DestructionActStatus,
-    AcceptanceInventoryStatus
+    AcceptanceInventoryStatus,
+    ContentType,
+    DocFileExtension,
 )
 from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
@@ -84,14 +87,56 @@ class AttachmentDocumentDto(EdmsBaseDto):
     name: Annotated[str | None, Field(description="Наименование вложения")] = None
     upload_date: datetime | None = None
     size: Annotated[int | None, Field(description="Размер вложения")] = None
-    type: str | None = None
+    type: AttachmentType | None = None
     signs: Annotated[list[AttachmentSignature] | None, Field(description="Список ЭЦП вложения")] = None
     document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
     attachment_document_type: Annotated[AttachmentDocumentType | None, Field(description="Тип вложения")] = None
     author_id: UUID | None = None
     last_modify_user_id: UUID | None = None
     modify_date: datetime | None = None
+    required_password: bool | None = None
+    source_minio_name: str | None = None
+    source_bucket_name: str | None = None
     source_original_name: str | None = None
+
+
+class TemporaryAttachmentDto(EdmsBaseDto):
+    id: UUID | None = None
+    organization_id: str | None = None
+    name: str | None = None
+    upload_date: datetime | None = None
+    size: int | None = None
+    type: AttachmentType | None = None
+    signs: list[AttachmentSignature] | None = None
+    attachment_document_type: AttachmentDocumentType | None = None
+    minio_name: str | None = None
+    bucket_name: str | None = None
+    tag: list[str] | None = None
+    content_type: ContentType | None = None
+
+
+class RenameFileRequest(EdmsBaseDto):
+    name: str = Field(..., min_length=1)
+
+
+class ChangeAttachmentDocumentTypeRequest(EdmsBaseDto):
+    attachment_document_type: AttachmentDocumentType
+
+
+class CheckAttachmentSignRequest(EdmsBaseDto):
+    id: UUID
+    check_smdo_cert: bool = False
+
+
+class CreateEmptyFileRequest(EdmsBaseDto):
+    type: AttachmentType = AttachmentType.MAIN_ATTACHMENT
+    attachment_document_type: AttachmentDocumentType = AttachmentDocumentType.ATTACHMENT
+    name: str | None = None
+    extension: DocFileExtension = DocFileExtension.DOCX
+
+
+class SimpleCmsDto(EdmsBaseDto):
+    cms: str
 
 
 class DocumentDto(EdmsBaseDto):
@@ -635,11 +680,39 @@ class ControlTypeDto(EdmsBaseDto):
     create_date: datetime | None = None
 
 
+class SignatureDto(EdmsBaseDto):
+    key_id: str | None = Field(None, description="Идентификатор открытого ключа подписавшего")
+    signer: str | None = Field(None, description="Имя подписавшего")
+    signtime: datetime | None = Field(None, description="Дата/время подписи")
+    operation_type: str | None = Field(None, description="Тип операции подписания")
+    orig_signature: str | None = Field(None, description="Значение ЭЦП в исходной системе")
+    data: str = Field(..., description="ЭЦП подпись в base64")
+    cert_serial: str | None = Field(None, description="Номер сертификата")
+    signer_fio: str | None = Field(None, description="ФИО подписавшего")
+    signer_date: datetime | None = Field(None, description="Дата подписания")
+    signer_post: str | None = Field(None, description="Должность подписавшего")
+    signer_org: str | None = Field(None, description="Организация подписавшего")
+    personal_number: str | None = Field(None, description="Личный номер")
+    issuer: str | None = Field(None, description="Издатель сертификата")
+    start: datetime | None = None
+    end: datetime | None = None
+    sign_count: int | None = None
+    attr_cert_issuer: str | None = None
+    attr_cert_issuer_id: str | None = None
+    attr_organization_name: str | None = None
+    attr_post: str | None = None
+    attr_unp: str | None = None
+    attr_unpf: str | None = None
+    attr_address: str | None = None
+    attr_start: datetime | None = None
+    attr_end: datetime | None = None
+
+
 class AttachmentSignature(EdmsBaseDto):
     id: Annotated[UUID | None, Field(description="Идентификатор ЭЦП")] = None
     date: Annotated[datetime | None, Field(description="Дата формирования ЭЦП")] = None
     check: Annotated[bool | None, Field(description="Проверка валидности ЭЦП")] = None
-    sign: Any | None = None
+    sign: SignatureDto | None = None
 
 
 class DocumentPreNomenclatureDto(EdmsBaseDto):
@@ -802,6 +875,7 @@ class IntroductionDto(EdmsBaseDto):
 
 DocumentTypeDto.model_rebuild()
 AttachmentDocumentDto.model_rebuild()
+TemporaryAttachmentDto.model_rebuild()
 DocumentProfileDto.model_rebuild()
 RoleMergeDto.model_rebuild()
 TaskDto.model_rebuild()

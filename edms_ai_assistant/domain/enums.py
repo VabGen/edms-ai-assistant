@@ -568,9 +568,24 @@ class ReminderType(StrEnum):  # Id в RemindersRulesDto
 
 
 class ContentType(StrEnum):
-    JSON = "application/json"
-    TEXT = "text/plain"
-    PDF = "application/pdf"
+    DOC = "DOC"
+    DOCX = "DOCX"
+    TIF = "TIF"
+    TIFF = "TIFF"
+    JPG = "JPG"
+    JPEG = "JPEG"
+    BMP = "BMP"
+    PDF = "PDF"
+    GIF = "GIF"
+    PNG = "PNG"
+    OTHER = "OTHER"
+
+
+class DocFileExtension(StrEnum):
+    DOCX = "DOCX"
+    PDF = "PDF"
+    XLSX = "XLSX"
+    ODT = "ODT"
 
 
 class RecognitionFileTypeEnum(StrEnum):
