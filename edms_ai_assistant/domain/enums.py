@@ -736,3 +736,8 @@ class BaseFieldsCopyType(StrEnum):
 class ResponsibleExecutorsCopyType(StrEnum):
     DOCUMENT = "DOCUMENT"
     NONE = "NONE"
+
+
+class RepeatExecutionPolicy(StrEnum):
+    ALL = "ALL"
+    ONLY_REJECTED = "ONLY_REJECTED"
