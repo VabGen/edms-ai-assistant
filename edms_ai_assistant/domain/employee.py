@@ -13,7 +13,15 @@ from edms_ai_assistant.domain.enums import (
     BlockedField,
     CreateType,
     RoleType,
-    EmployeeCreateType
+    EmployeeCreateType,
+    DocCategory,
+    DocumentStatus,
+    NomenclatureDepartmentStatus,
+    SummaryNomenclatureDepartmentStatus,
+    DestructionActStatus,
+    AcceptanceInventoryStatus,
+    PermissionType,
+    ResolvePolicy
 )
 from edms_ai_assistant.domain.reference import OrgDto
 
@@ -24,9 +32,18 @@ if TYPE_CHECKING:
         BlockedField,
         CreateType,
         RoleType,
-        EmployeeCreateType
+        EmployeeCreateType,
+        DocCategory,
+        DocumentStatus,
+        NomenclatureDepartmentStatus,
+        SummaryNomenclatureDepartmentStatus,
+        DestructionActStatus,
+        AcceptanceInventoryStatus,
+        PermissionType,
+        ResolvePolicy
     )
     from edms_ai_assistant.domain.reference import OrgDto
+    from edms_ai_assistant.domain.document import DocumentProfileDto, RoleMergeDto
 
 T = TypeVar("T")
 
@@ -76,6 +93,21 @@ class AccessGriefDto(EdmsBaseDto):
     short_name: str | None = None
     active: bool | None = None
     create_date: datetime | None = None
+
+
+class AccessGriefRequest(EdmsBaseDto):
+    id: UUID | None = None
+    name: str = Field(..., max_length=255)
+    short_name: str = Field(..., max_length=255)
+    organization_id: str | None = None
+    active: bool = True
+    employee_add: set[UUID] | None = None
+    employee_delete: list[UUID] | None = None
+
+
+class AccessGriefFilter(EdmsBaseDto):
+    search: str | None = Field(None, description="Строка поиска по названию или краткому названию")
+    active: bool | None = Field(None, description="Признак активности")
 
 
 class EmployeeAccessGriefDto(EdmsBaseDto):
@@ -304,6 +336,48 @@ class GroupDto(EdmsBaseDto):
     type: GroupType
     mixed: bool
     create_date: datetime | None = None
+
+
+class PermissionDto(EdmsBaseDto):
+    id: UUID | None = Field(None, description="ИД")
+    system_name: str | None = Field(None, description="Системное имя")
+    name: str | None = Field(None, description="Наименование")
+    type: PermissionType | None = Field(None, description="Тип")
+    doc_status: DocumentStatus | None = Field(None, description="Статус документа")
+    doc_category: DocCategory | None = Field(None, description="Тип документа")
+    profile_id: UUID | None = Field(None, description="ИД профиля документа")
+    profile: DocumentProfileDto | None = Field(None, description="Профиль документа")
+    merge_roles: list[RoleMergeDto] | None = Field(None, description="Политика обработки слияния ИД")
+    process_completed: bool | None = Field(None, description="Признак выполнения процесса")
+    current_step_completed: bool | None = Field(None, description="Признак выполнения текущего этапа")
+    last_step: bool | None = Field(None, description="Признак того что текущий этап является последним")
+    process_started: bool | None = Field(None, description="Признак того что процесс начал выполнение")
+    on_control: bool | None = Field(None, description="Документ стоит на контроле")
+    task_on_control: bool | None = Field(None, description="Поручение стоит на контроле")
+    resolve_policy: ResolvePolicy | None = Field(None, description="Политики обработки доступа")
+    has_reg_number: bool | None = Field(None, description="Регномер")
+    document_has_items: list[str] | None = Field(None, description="Типы этапов в документе при которых доступно")
+    create_type: CreateType | None = Field(None, description="Типсоздания документа")
+    task_completed: bool | None = Field(None, description="Поручение исполненно")
+    task_on_revision: bool | None = Field(None, description="Поручение на доработке")
+    child_task: bool | None = Field(None, description="Дочернее поручение")
+    task_type: str | None = Field(None, description="Тип поручения")
+    task_begin_execution: bool | None = Field(None, description="Поручение начало исполнение")
+    archive: bool | None = Field(None, description="Документ находится в архиве")
+    task_create_by_period: bool | None = Field(None, description="Поручение создано для из-за переодического выполнения")
+    has_period_tasks: bool | None = Field(None, description="На основании этого поручения были созданны переодические поручения")
+    nomenclature_department_status: NomenclatureDepartmentStatus | None = Field(None, description="Статус нумераторы подразделения")
+    summary_nomenclature_department_status: SummaryNomenclatureDepartmentStatus | None = Field(None, description="Сводный статус подразделения")
+    destruction_act_status: DestructionActStatus | None = Field(None, description="Статус акта уничтожения")
+    acceptance_inventory_status: AcceptanceInventoryStatus | None = None
+
+
+class PermissionRoleDto(EdmsBaseDto):
+    id: UUID | None = None
+    role: RoleDto | None = None
+    role_id: UUID | None = None
+    permission: PermissionDto | None = None
+    permission_id: UUID | None = None
 
 
 EmployeeDto.model_rebuild()

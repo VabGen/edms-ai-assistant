@@ -302,6 +302,50 @@ class NomenclatureStatus(StrEnum):  # Status6
     DESTROYED = "DESTROYED"
 
 
+class NomenclatureDepartmentStatus(StrEnum):
+    NEW = "NEW"
+    SIGNING = "SIGNING"
+    SIGNED = "SIGNED"
+    AGREEMENT = "AGREEMENT"
+    AGREED = "AGREED"
+    DELETED = "DELETED"
+    CANCEL = "CANCEL"
+
+
+class SummaryNomenclatureDepartmentStatus(StrEnum):
+    DRAFT = "DRAFT"
+    NEW = "NEW"
+    SIGNING = "SIGNING"
+    SIGNED = "SIGNED"
+    STATEMENT = "STATEMENT"
+    APPROVED = "APPROVED"
+    REJECT = "REJECT"
+    CANCEL = "CANCEL"
+
+
+class DestructionActStatus(StrEnum):
+    NEW = "NEW"
+    AGREEMENT = "AGREEMENT"
+    AGREED = "AGREED"
+    SIGNING = "SIGNING"
+    SIGNED = "SIGNED"
+    STATEMENT = "STATEMENT"
+    APPROVED = "APPROVED"
+    CANCEL = "CANCEL"
+
+
+class AcceptanceInventoryStatus(StrEnum):
+    NEW = "NEW"
+    SIGNING = "SIGNING"
+    SIGNED = "SIGNED"
+    STATEMENT = "STATEMENT"
+    APPROVED = "APPROVED"
+    AGREEMENT = "AGREEMENT"
+    AGREED = "AGREED"
+    REJECT = "REJECT"
+    CANCEL = "CANCEL"
+
+
 class NomenclatureType(StrEnum):
     MAIN = "MAIN"
     ADDITIONAL = "ADDITIONAL"
@@ -336,6 +380,24 @@ class RoleObjectType(StrEnum):  # Type14
 class RoleType(StrEnum):
     SYSTEM = "SYSTEM"
     USER = "USER"
+
+
+class Merge(StrEnum):
+    ALL = "ALL"
+    SELF = "SELF"
+    SELF_AND_IO = "SELF_AND_IO"
+    SUBORDINATES_AND_SELF = "SUBORDINATES_AND_SELF"
+    SUBORDINATES_AND_SELF_AND_IO = "SUBORDINATES_AND_SELF_AND_IO"
+
+
+class ResolvePolicy(StrEnum):
+    ANY = "ANY"
+    MERGE = "MERGE"
+
+
+class PermissionType(StrEnum):
+    SYSTEM = "SYSTEM"
+    DIRECTORY = "DIRECTORY"
 
 
 class ActionTypeQueue(StrEnum):

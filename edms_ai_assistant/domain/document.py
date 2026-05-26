@@ -13,6 +13,7 @@ from edms_ai_assistant.domain.enums import (
     DeclarantType,
     FormMeetingType,
     AppealType,
+    Merge
 )
 from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
@@ -384,6 +385,19 @@ class DocumentAccessEntryDto(EdmsBaseDto):
     group: GroupDto | None = None
 
 
+class DocumentProfileDto(EdmsBaseDto):
+    id: Annotated[UUID | None, Field(description="Идентификатор профиля документа")] = None
+    organization_id: str | None = None
+    name: Annotated[str | None, Field(description="Наименование профиля документа")] = None
+    formula: Annotated[list[str] | None, Field(description="Формула рег. номера")] = None
+    auto_create_incoming_doc: bool | None = None
+
+
+class RoleMergeDto(EdmsBaseDto):
+    role_id: Annotated[UUID | None, Field(description="ИД роли")] = None
+    merge: Annotated[Merge | None, Field(description="Политика обработки слияния ИД")] = None
+
+
 class CountResult(EdmsBaseDto):
     count: int = 0
 
@@ -664,6 +678,8 @@ class IntroductionDto(EdmsBaseDto):
 
 DocumentTypeDto.model_rebuild()
 AttachmentDocumentDto.model_rebuild()
+DocumentProfileDto.model_rebuild()
+RoleMergeDto.model_rebuild()
 TaskDto.model_rebuild()
 DocumentDto.model_rebuild()
 DocumentAppealDto.model_rebuild()
