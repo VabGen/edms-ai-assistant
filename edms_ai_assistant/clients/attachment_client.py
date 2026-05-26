@@ -16,6 +16,7 @@ from edms_ai_assistant.domain.document import (
     SimpleCmsDto,
     AttachmentSignature,
 )
+from edms_ai_assistant.domain.enums import AttachmentDocumentType
 
 logger = logging.getLogger(__name__)
 

@@ -39,7 +39,7 @@ from edms_ai_assistant.domain.document import (
     ContractControlPointAttachmentDto,
     ControlPointMainFields,
     ControlPointRevisionRequest,
-    ControlPointWithPermission,
+    ControlPointWithPermission, DocumentPreNomenclatureDto,
 )
 
 if TYPE_CHECKING:

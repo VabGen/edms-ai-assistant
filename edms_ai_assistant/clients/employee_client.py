@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, TYPE_CHECKING, TypeVar
+from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError

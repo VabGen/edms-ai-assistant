@@ -7,7 +7,6 @@ from uuid import UUID
 from datetime import datetime
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.document import (
     TaskDto,
     TaskExecutorsDto,
@@ -15,12 +14,12 @@ from edms_ai_assistant.domain.document import (
     ExecutionTaskStatCount,
     TaskExecutionStatByPeriod,
     KanbanBoard,
-    TaskKanbanColumnDto,
-    SliceDto,
     ChildTaskInfo,
     TaskExecutionResult,
     OrgKey
 )
+from edms_ai_assistant.domain.employee import SliceDto
+from edms_ai_assistant.domain.system import TaskKanbanColumnDto
 from edms_ai_assistant.domain.task_models import (
     CreateTaskRequest,
     UpdateTaskRequest,
