@@ -10,6 +10,11 @@ from edms_ai_assistant.domain.reference import (
     CityHierarchyDto,
     ReferenceItemDto,
     SubjectDto,
+    CitizenTypeDto,
+    CitizenTypeRequest,
+    BasicSearchRequest,
+    CityDto,
+    CityFilter,
 )
 
 if TYPE_CHECKING:
@@ -153,6 +158,96 @@ class ReferenceClient(EdmsBaseClient):
             )
         except EdmsNotFoundError:
             return []
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Citizen Types
+    # ══════════════════════════════════════════════════════════════════════════════
+
+    async def get_citizen_types(self, token: str, search: BasicSearchRequest | None = None) -> list[CitizenTypeDto]:
+        """GET api/citizen-type"""
+        params = search.model_dump(exclude_none=True) if search else {}
+        result = await self.make_request("GET", "api/citizen-type", token=token, params=params)
+        # Assuming SliceDto structure but returning content as list for simplicity if used in tools
+        if isinstance(result, dict) and "content" in result:
+            return [CitizenTypeDto.model_validate(item) for item in result["content"]]
+        return [CitizenTypeDto.model_validate(item) for item in result]
+
+    async def get_citizen_type(self, token: str, citizen_type_id: UUID) -> CitizenTypeDto:
+        """GET api/citizen-type/{id}"""
+        result = await self.make_request("GET", f"api/citizen-type/{citizen_type_id}", token=token)
+        return CitizenTypeDto.model_validate(result)
+
+    async def create_citizen_type(self, token: str, request: CitizenTypeRequest) -> CitizenTypeDto:
+        """POST api/citizen-type"""
+        result = await self.make_request("POST", "api/citizen-type", token=token, json=request.model_dump(exclude_none=True))
+        return CitizenTypeDto.model_validate(result)
+
+    async def update_citizen_type(self, token: str, request: CitizenTypeRequest) -> CitizenTypeDto:
+        """PUT api/citizen-type"""
+        result = await self.make_request("PUT", "api/citizen-type", token=token, json=request.model_dump(exclude_none=True))
+        return CitizenTypeDto.model_validate(result)
+
+    async def delete_citizen_types(self, token: str, ids: list[UUID]):
+        """DELETE api/citizen-type"""
+        await self.make_request("DELETE", "api/citizen-type", token=token, json={"ids": [str(i) for i in ids]})
+
+    async def search_citizen_type_fts(self, token: str, fts: str) -> CitizenTypeDto:
+        """GET api/citizen-type/fts-name"""
+        result = await self.make_request("GET", "api/citizen-type/fts-name", token=token, params={"fts": fts})
+        return CitizenTypeDto.model_validate(result)
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Cities
+    # ══════════════════════════════════════════════════════════════════════════════
+
+    async def get_cities_by_region(self, token: str, region_id: UUID, filter: CityFilter | None = None) -> list[CityDto]:
+        """GET api/city/{regionId}/region"""
+        params = filter.model_dump(exclude_none=True) if filter else {}
+        result = await self.make_request("GET", f"api/city/{region_id}/region", token=token, params=params)
+        return [CityDto.model_validate(item) for item in result]
+
+    async def get_cities(self, token: str, filter: CityFilter | None = None, list_attribute: bool = True) -> list[CityDto]:
+        """GET api/city"""
+        params = filter.model_dump(exclude_none=True) if filter else {}
+        params["listAttribute"] = str(list_attribute).lower()
+        result = await self.make_request("GET", "api/city", token=token, params=params)
+        if isinstance(result, dict) and "content" in result:
+            return [CityDto.model_validate(item) for item in result["content"]]
+        return [CityDto.model_validate(item) for item in result]
+
+    async def get_cities_by_district(self, token: str, district_id: UUID, filter: CityFilter | None = None, list_attribute: bool = True) -> list[CityDto]:
+        """GET api/city/{districtId}/district"""
+        params = filter.model_dump(exclude_none=True) if filter else {}
+        params["listAttribute"] = str(list_attribute).lower()
+        result = await self.make_request("GET", f"api/city/{district_id}/district", token=token, params=params)
+        if isinstance(result, dict) and "content" in result:
+            return [CityDto.model_validate(item) for item in result["content"]]
+        return [CityDto.model_validate(item) for item in result]
+
+    async def get_city(self, token: str, city_id: UUID, filter: CityFilter | None = None) -> CityDto:
+        """GET api/city/{id}"""
+        params = filter.model_dump(exclude_none=True) if filter else {}
+        result = await self.make_request("GET", f"api/city/{city_id}", token=token, params=params)
+        return CityDto.model_validate(result)
+
+    async def create_city(self, token: str, city: CityDto) -> CityDto:
+        """POST api/city"""
+        result = await self.make_request("POST", "api/city", token=token, json=city.model_dump(exclude_none=True))
+        return CityDto.model_validate(result)
+
+    async def update_city(self, token: str, city: CityDto) -> CityDto:
+        """PUT api/city"""
+        result = await self.make_request("PUT", "api/city", token=token, json=city.model_dump(exclude_none=True))
+        return CityDto.model_validate(result)
+
+    async def delete_cities(self, token: str, ids: list[UUID]):
+        """DELETE api/city"""
+        await self.make_request("DELETE", "api/city", token=token, json={"ids": [str(i) for i in ids]})
+
+    async def search_city_fts(self, token: str, fts: str) -> CityDto:
+        """GET api/city/fts-name"""
+        result = await self.make_request("GET", "api/city/fts-name", token=token, params={"fts": fts})
+        return CityDto.model_validate(result)
 
     async def find_citizen_type(self, token: str, name: str) -> str | None:
         """Legacy helper: возвращает только id."""

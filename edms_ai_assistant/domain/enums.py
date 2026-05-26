@@ -464,6 +464,25 @@ class FormMeetingType(StrEnum):
     POLLING_METHOD = "POLLING_METHOD"
 
 
+class DocumentLinkType(StrEnum):
+    RECEIVED_IN_RESPONSE_TO = "RECEIVED_IN_RESPONSE_TO"
+    CREATE_IN_RESPONSE_TO = "CREATE_IN_RESPONSE_TO"
+    LINK_DOC = "LINK_DOC"
+    TASK_DOC_LINK = "TASK_DOC_LINK"
+    CHILD_LINK_DOC = "CHILD_LINK_DOC"
+    CHILD_DOCUMENT = "CHILD_DOCUMENT"
+    PROTOCOL = "PROTOCOL"
+    CHILD_PROTOCOL = "CHILD_PROTOCOL"
+    REPLY_TO_APPLICANT = "REPLY_TO_APPLICANT"
+    PROTOCOL_MEETING_QUESTION = "PROTOCOL_MEETING_QUESTION"
+    QUESTION_DOCUMENTS = "QUESTION_DOCUMENTS"
+
+
+class ContractControlPointStatus(StrEnum):
+    EXECUTION = "EXECUTION"
+    EXECUTED = "EXECUTED"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Task & Report Enums
 # ══════════════════════════════════════════════════════════════════════════════

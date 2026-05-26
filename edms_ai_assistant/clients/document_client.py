@@ -32,6 +32,14 @@ from edms_ai_assistant.domain.document import (
     DocumentAismvRecreateRequest,
     DocumentBasedExistingBody,
     DocumentRecipientDeliveryHistoryDto,
+    ContractControlPointDto,
+    ContractControlPointFilter,
+    ContractControlPointResponsibleDto,
+    ContractControlPointLinkDto,
+    ContractControlPointAttachmentDto,
+    ControlPointMainFields,
+    ControlPointRevisionRequest,
+    ControlPointWithPermission,
 )
 
 if TYPE_CHECKING:
@@ -250,6 +258,138 @@ class DocumentClient(EdmsBaseClient):
             "DELETE",
             f"api/document/{document_id}/control",
             token,
+            is_json_response=False,
+        )
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Contract Control Points
+    # ══════════════════════════════════════════════════════════════════════════════
+
+    async def get_control_points(
+        self, token: str, document_id: UUID, filter: ContractControlPointFilter | None = None
+    ) -> list[ContractControlPointDto]:
+        """GET api/document/{documentId}/control-point"""
+        params = filter.model_dump(exclude_none=True) if filter else {}
+        return await self._request_list(
+            "GET", f"api/document/{document_id}/control-point", token, ContractControlPointDto, params=params
+        )
+
+    async def get_control_point(self, token: str, document_id: UUID, point_id: UUID) -> ContractControlPointDto:
+        """GET api/document/{documentId}/control-point/{id}"""
+        return await self._request_dto(
+            "GET", f"api/document/{document_id}/control-point/{point_id}", token, ContractControlPointDto
+        )
+
+    async def get_control_point_with_permission(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> ControlPointWithPermission:
+        """GET api/document/{documentId}/control-point/{id}/all"""
+        return await self._request_dto(
+            "GET", f"api/document/{document_id}/control-point/{point_id}/all", token, ControlPointWithPermission
+        )
+
+    async def get_control_point_permissions(self, token: str, document_id: UUID, point_id: UUID) -> list[Any]:
+        """GET api/document/{documentId}/control-point/{id}/permission"""
+        return await self.make_request(
+            "GET", f"api/document/{document_id}/control-point/{point_id}/permission", token
+        )
+
+    async def create_control_point(
+        self, token: str, document_id: UUID, fields: ControlPointMainFields
+    ) -> ContractControlPointDto:
+        """POST api/document/{documentId}/control-point"""
+        return await self._request_dto(
+            "POST",
+            f"api/document/{document_id}/control-point",
+            token,
+            ContractControlPointDto,
+            json_data=fields.model_dump(exclude_none=True),
+        )
+
+    async def execute_control_point_operations(
+        self, token: str, document_id: UUID, point_id: UUID, operations: list[dict[str, Any]]
+    ) -> None:
+        """POST api/document/{documentId}/control-point/{id}"""
+        await self.make_request(
+            "POST", f"api/document/{document_id}/control-point/{point_id}", token, json_data=operations, is_json_response=False
+        )
+
+    async def complete_control_point(self, token: str, document_id: UUID, point_id: UUID) -> ContractControlPointDto:
+        """PUT api/document/{documentId}/control-point/{id}/complete"""
+        return await self._request_dto(
+            "PUT", f"api/document/{document_id}/control-point/{point_id}/complete", token, ContractControlPointDto
+        )
+
+    async def revision_control_point(
+        self, token: str, document_id: UUID, point_id: UUID, request: ControlPointRevisionRequest
+    ) -> ContractControlPointDto:
+        """PUT api/document/{documentId}/control-point/{id}/revision"""
+        return await self._request_dto(
+            "PUT",
+            f"api/document/{document_id}/control-point/{point_id}/revision",
+            token,
+            ContractControlPointDto,
+            json_data=request.model_dump(exclude_none=True),
+        )
+
+    async def delete_control_point(self, token: str, document_id: UUID, point_id: UUID) -> None:
+        """DELETE api/document/{documentId}/control-point/{id}"""
+        await self.make_request(
+            "DELETE", f"api/document/{document_id}/control-point/{point_id}", token, is_json_response=False
+        )
+
+    async def move_control_point(
+        self, token: str, document_id: UUID, move_id: UUID, target_id: UUID
+    ) -> list[ContractControlPointDto]:
+        """PUT api/document/{documentId}/control-point/move/{moveId}/{targetId}"""
+        return await self._request_list(
+            "PUT",
+            f"api/document/{document_id}/control-point/move/{move_id}/{target_id}",
+            token,
+            ContractControlPointDto,
+        )
+
+    async def get_control_point_responsibles(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> list[ContractControlPointResponsibleDto]:
+        """GET api/document/{documentId}/control-point/{id}/responsible"""
+        return await self._request_list(
+            "GET",
+            f"api/document/{document_id}/control-point/{point_id}/responsible",
+            token,
+            ContractControlPointResponsibleDto,
+        )
+
+    async def get_control_point_links(self, token: str, document_id: UUID, point_id: UUID) -> list[ContractControlPointLinkDto]:
+        """GET api/document/{documentId}/control-point/{id}/link"""
+        return await self._request_list(
+            "GET", f"api/document/{document_id}/control-point/{point_id}/link", token, ContractControlPointLinkDto
+        )
+
+    async def get_control_point_attachments(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> list[ContractControlPointAttachmentDto]:
+        """GET api/document/{documentId}/control-point/{id}/attachment"""
+        return await self._request_list(
+            "GET", f"api/document/{document_id}/control-point/{point_id}/attachment", token, ContractControlPointAttachmentDto
+        )
+
+    async def download_control_point_attachment(self, token: str, document_id: UUID, attach_id: UUID) -> bytes:
+        """GET api/document/{documentId}/control-point/attachment/{attachId}/download"""
+        return await self.make_request(
+            "GET",
+            f"api/document/{document_id}/control-point/attachment/{attach_id}/download",
+            token=token,
+            is_json_response=False,
+            long_timeout=True,
+        )
+
+    async def delete_control_point_attachment(self, token: str, document_id: UUID, point_id: UUID, attach_id: UUID) -> None:
+        """DELETE api/document/{documentId}/control-point/{pointId}/attachment/{attachId}"""
+        await self.make_request(
+            "DELETE",
+            f"api/document/{document_id}/control-point/{point_id}/attachment/{attach_id}",
+            token=token,
             is_json_response=False,
         )
 

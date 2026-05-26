@@ -26,6 +26,8 @@ from edms_ai_assistant.domain.enums import (
     AcceptanceInventoryStatus,
     ContentType,
     DocFileExtension,
+    ContractControlPointStatus,
+    DocumentLinkType,
 )
 from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
@@ -668,6 +670,77 @@ class ContractVersionInfoDto(EdmsBaseDto):
     file_name: Annotated[str | None, Field(description="Имя файла договора")] = None
 
 
+class ContractControlPointDto(EdmsBaseDto):
+    id: UUID | None = None
+    organization_id: str | None = None
+    sequence: int | None = None
+    number: str | None = None
+    status: ContractControlPointStatus | None = None
+    description: str | None = None
+    create_date: datetime | None = None
+    deadline: datetime | None = None
+    responsible_employees: list[ContractControlPointResponsibleDto] | None = None
+    responsible_contractor: str | None = None
+    execution_contract: DocumentDto | None = None
+    execution_date: datetime | None = None
+    document_id: UUID | None = None
+    document_organization_id: str | None = None
+    comment: str | None = None
+    attachments: list[ContractControlPointAttachmentDto] | None = None
+    document_links: list[ContractControlPointLinkDto] | None = None
+
+
+class ContractControlPointAttachmentDto(EdmsBaseDto):
+    id: UUID | None = None
+    attachment: AttachmentDto | None = None
+    contract_control_point_id: UUID | None = None
+    contract_control_point_org_id: str | None = None
+    contract_control_point: Any | None = None  # To avoid circularity, will be ContractControlPointDto
+    create_date: datetime | None = None
+
+
+class ContractControlPointLinkDto(EdmsBaseDto):
+    id: UUID | None = None
+    contract_control_point_id: UUID | None = None
+    doc_link_id: UUID | None = None
+    doc_link: DocumentDto | None = None
+    type: DocumentLinkType | None = None
+
+
+class ContractControlPointResponsibleDto(EdmsBaseDto):
+    id: UUID | None = None
+    organization_id: str | None = None
+    contract_control_point_id: UUID | None = None
+    contract_control_point_org_id: str | None = None
+    user: UserInfoDto | None = None
+    completed: bool = False
+    create_date: datetime | None = None
+
+
+class ControlPointMainFields(EdmsBaseDto):
+    description: str | None = None
+    number: str | None = None
+    deadline: datetime | None = None
+    responsible_contractor: str | None = None
+    responsible_employees_add_ids: list[UUID] | None = None
+    responsible_employees_del_ids: list[UUID] | None = None
+
+
+class ControlPointRevisionRequest(EdmsBaseDto):
+    revision_comment: str | None = None
+
+
+class ContractControlPointFilter(EdmsBaseDto):
+    search: str | None = None
+    status: bool | None = None
+    includes: list[str] | None = None
+
+
+class ControlPointWithPermission(EdmsBaseDto):
+    point: ContractControlPointDto
+    permission: list[Any]  # list[UserDocPermission]
+
+
 class ControlTypeDto(EdmsBaseDto):
     id: Annotated[UUID | None, Field(description="Идентификатор типа контроля")] = None
     organization_id: str | None = None
@@ -892,3 +965,8 @@ DocumentProcessDto.model_rebuild()
 DocumentProcessItemDto.model_rebuild()
 DocumentResponsibleExecutorDto.model_rebuild()
 NomenclatureAffairDto.model_rebuild()
+ContractControlPointDto.model_rebuild()
+ContractControlPointAttachmentDto.model_rebuild()
+ContractControlPointLinkDto.model_rebuild()
+ContractControlPointResponsibleDto.model_rebuild()
+ControlPointWithPermission.model_rebuild()

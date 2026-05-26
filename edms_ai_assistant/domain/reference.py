@@ -63,6 +63,26 @@ class RegionDto(EdmsBaseDto):
     create_date: datetime | None = None
 
 
+class DistrictDto(EdmsBaseDto):
+    id: UUID | None = None
+    name_district: str | None = None
+    code_district: int | None = None
+    region_id: UUID | None = None
+    region: RegionDto | None = None
+    active: bool | None = None
+    create_date: datetime | None = None
+
+
+class CityDto(EdmsBaseDto):
+    id: UUID | None = None
+    name_city: str | None = None
+    code_city: int | None = None
+    district_id: UUID | None = None
+    district: DistrictDto | None = None
+    active: bool | None = True
+    create_date: datetime | None = None
+
+
 class CurrencyDto(EdmsBaseDto):
     id: UUID | None = None
     name: str | None = None
@@ -130,6 +150,24 @@ class CitizenTypeDto(EdmsBaseDto):
     active: bool | None = None
     report: bool | None = None
     create_date: datetime | None = None
+
+
+class CitizenTypeRequest(EdmsBaseDto):
+    id: UUID | None = None
+    name: str
+    report: bool
+    active: bool
+
+
+class BasicSearchRequest(EdmsBaseDto):
+    search: str | None = None
+    active: bool | None = None
+
+
+class CityFilter(EdmsBaseDto):
+    search: str | None = None
+    active: bool | None = None
+    includes: list[str] | None = None
 
 
 class AdditionalDocumentTypeDto(EdmsBaseDto):
