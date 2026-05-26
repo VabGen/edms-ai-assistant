@@ -623,9 +623,12 @@ class DocumentClient(EdmsBaseClient):
         params = pageable or {}
         if doc_filter:
             params.update(doc_filter)
-        return await self._request_list(
-            "GET", f"api/document/view/{view_id}/entry", token, DocumentDto, params=params
+        result = await self.make_request(
+            "GET", f"api/document/view/{view_id}/entry", token, params=params
         )
+        if isinstance(result, dict) and "content" in result:
+            return [DocumentDto.model_validate(item) for item in result["content"]]
+        return [DocumentDto.model_validate(item) for item in result]
 
     async def get_document_years(self, token: str, doc_filter: dict[str, Any] | None = None) -> list[int]:
         """Fetches years for which documents exist."""

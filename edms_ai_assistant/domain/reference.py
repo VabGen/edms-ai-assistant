@@ -6,13 +6,15 @@ from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 
+from edms_ai_assistant.domain.enums import (
+    GroupByStoragePeriod,
+    ReminderType,
+    StoragePeriodType,
+    YearPostfix,
+    WorkDaysRoundPolicy,
+)
+
 if TYPE_CHECKING:
-    from edms_ai_assistant.domain.enums import (
-        GroupByStoragePeriod,
-        ReminderType,
-        StoragePeriodType,
-        YearPostfix,
-    )
     from uuid import UUID
     from datetime import datetime
 
@@ -132,6 +134,7 @@ class StoragePeriodDto(EdmsBaseDto):
 
 class RegistrationJournalDto(EdmsBaseDto):
     id: UUID | None = None
+    organization_id: str | None = None
     journal_name: str | None = None
     counter_value: int | None = None
     active: bool | None = None
@@ -273,3 +276,48 @@ class RemindersRulesDto(EdmsBaseDto):
     subject: str | None = None
     text: str | None = None
     ignore_weekends: bool | None = None
+
+
+class ControlTypeRequest(EdmsBaseDto):
+    id: UUID | None = None
+    name: str = Field(..., description="Наименование типа контроля")
+    short_name: str = Field(..., description="Краткое наименование")
+    term: int = Field(..., description="Срок контроля (дней)")
+    active: bool = True
+    employees: list[UUID] = Field(..., min_length=1)
+
+
+class GeneralSetupDto(EdmsBaseDto):
+    organization_id: str | None = None
+    organization_name: str | None = None
+    country_id: UUID | None = None
+    country: CountryDto | None = None
+    profile_id: UUID | None = None
+    profile: Any | None = None  # DocumentProfileDto
+    aismv_profile_id: UUID | None = None
+    aismv_profile: Any | None = None
+    employee_id: UUID | None = None
+    employee: Any | None = None  # EmployeeDto
+    aismv_author_employee_id: UUID | None = None
+    aismv_author: Any | None = None
+    aismv_appeal_author_employee_id: UUID | None = None
+    aismv_appeal_author: Any | None = None
+    group_id: UUID | None = None
+    group_organization_id: str | None = None
+    group: Any | None = None  # GroupDto
+    subscriber: SubscriberDto | None = None
+    subscriber_id: UUID | None = None
+    class_doc: str | None = Field(None, description="Унифицированный код")
+    object_type: str | None = Field(None, description="Вид по таблице 2 ОКБ")
+    aismv_appeal_profile_id: UUID | None = None
+    aismv_appeal_profile: Any | None = None
+    attachment_sign: Any | None = None
+    disable_signed_fil_edit: bool | None = None
+    enable_remove_draft_docs: bool | None = None
+    days_to_keep_draft_docs: int | None = None
+    execution_date_round_policy: WorkDaysRoundPolicy = WorkDaysRoundPolicy.DOWN
+    default_process_date_round_policy: WorkDaysRoundPolicy = WorkDaysRoundPolicy.DOWN
+    work_day_start: str | None = None  # LocalTime in Java
+    work_day_end: str | None = None
+    organization_employee_id: UUID | None = None
+    organization_employee: Any | None = None
