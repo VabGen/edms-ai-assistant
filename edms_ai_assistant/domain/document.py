@@ -55,6 +55,7 @@ from edms_ai_assistant.domain.reference import (
     RegistrationJournalDto,
     CurrencyDto,
     CountryDto,
+    AdditionalDocumentTypeDto,
 )
 
 if TYPE_CHECKING:
@@ -319,7 +320,7 @@ class DocumentDto(EdmsBaseDto):
     addition_meeting_question: Annotated[DocumentDto | None, Field(description="Документ доп. заседания")] = None
     form_meeting_type: Annotated[FormMeetingType | None, Field(description="Форма заседания")] = None
     number_question: Annotated[int | None, Field(description="Порядковый номер вопроса")] = None
-    document_questions: Annotated[list[Any] | None, Field(description="Список вопросов")] = None
+    document_questions: Annotated[list[DocumentQuestionDto] | None, Field(description="Список вопросов")] = None
     has_question: Annotated[bool | None, Field(description="Отметка о наличии вопросов")] = None
     document_meeting_question_id: Annotated[UUID | None, Field(description="Ид документа заседание по вопросам")] = None
     document_meeting_question_org_id: Annotated[str | None, Field(description="Ид организации документа заседание по вопросам")] = None
@@ -372,7 +373,7 @@ class DocumentDto(EdmsBaseDto):
     current_bpmn_task_name: str | None = None
     document_form_definition: Any | None = None
     custom_fields: Annotated[dict[str, Any] | None, Field(description="Пользовательские поля")] = None
-    additional_documents: list[Any] | None = None
+    additional_documents: list[AdditionalDocumentDto] | None = None
     document_form_id: UUID | None = None
     journal_number: Annotated[int | None, Field(description="Номер журнала регистрации")] = None
 
@@ -815,8 +816,70 @@ class ContractVersionInfoDto(EdmsBaseDto):
     document_org_id: str | None = None
     version_number: Annotated[int | None, Field(description="Номер версии договора")] = None
     create_date: Annotated[datetime | None, Field(description="Дата создания договора")] = None
-    attachments: list[Any] | None = None
+    attachments: list[ContractVersionAttachmentDto] | None = None
     file_name: Annotated[str | None, Field(description="Имя файла договора")] = None
+
+
+class ContractVersionAttachmentDto(EdmsBaseDto):
+    id: UUID | None = None
+    attachment: AttachmentDto | None = None
+    contract_version_info_id: UUID | None = None
+    contract_version_info_org_id: str | None = None
+    create_date: datetime | None = None
+
+
+class DocumentQuestionDto(EdmsBaseDto):
+    id: UUID | None = None
+    question_number: Annotated[int | None, Field(description="Номер вопроса")] = None
+    question: Annotated[str | None, Field(description="Формулировка вопроса")] = None
+    document_id: UUID | None = None
+    document_org_id: str | None = None
+    document: DocumentDto | None = None
+    document_meeting_question_id: Annotated[UUID | None, Field(description="Идентификатор документа заседания")] = None
+    document_meeting_question_org_id: Annotated[str | None, Field(description="Идентификатор организации документа заседания")] = None
+    document_meeting_question: DocumentDto | None = None
+    speakers: Annotated[list[SpeakerDto] | None, Field(description="Список докладчиков")] = None
+
+
+class SpeakerDto(EdmsBaseDto):
+    id: UUID | None = None
+    document_id: UUID | None = None
+    document_org_id: str | None = None
+    document: DocumentDto | None = None
+    executor: UserInfoDto | None = None
+    type: str | None = None
+
+
+class AdditionalDocumentDto(EdmsBaseDto):
+    id: UUID | None = None
+    document_id: UUID | None = None
+    additional_document_type_id: UUID | None = None
+    additional_document_type: AdditionalDocumentTypeDto | None = None
+    parent_id: UUID | None = None
+    parent: AdditionalDocumentDto | None = None
+    attachments: list[AdditionalDocumentAttachmentDto] | None = None
+    responsibles: list[AdditionalDocumentResponsibleDto] | None = None
+    date: datetime | None = None
+    doc_number: str | None = None
+    author: UserInfoDto | None = None
+    note: str | None = None
+    create_date: datetime | None = None
+
+
+class AdditionalDocumentAttachmentDto(EdmsBaseDto):
+    id: UUID | None = None
+    attachment: AttachmentDto | None = None
+    additional_document_id: UUID | None = None
+    additional_document_org_id: str | None = None
+    create_date: datetime | None = None
+
+
+class AdditionalDocumentResponsibleDto(EdmsBaseDto):
+    id: UUID | None = None
+    additional_document_id: UUID | None = None
+    additional_document_org_id: str | None = None
+    executor: UserInfoDto | None = None
+    create_date: datetime | None = None
 
 
 class ContractControlPointDto(EdmsBaseDto):
@@ -1095,10 +1158,16 @@ class IntroductionDto(EdmsBaseDto):
     comment: str | None = None
 
 
+from edms_ai_assistant.domain.reference import GeneralSetupDto
+
 DocumentTypeDto.model_rebuild()
 AttachmentDocumentDto.model_rebuild()
+ContractVersionInfoDto.model_rebuild()
+DocumentQuestionDto.model_rebuild()
+AdditionalDocumentDto.model_rebuild()
 TemporaryAttachmentDto.model_rebuild()
 DocumentProfileDto.model_rebuild()
+GeneralSetupDto.model_rebuild()
 RoleMergeDto.model_rebuild()
 TaskDto.model_rebuild()
 TaskExecutorsDto.model_rebuild()
