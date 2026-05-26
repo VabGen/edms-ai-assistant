@@ -1,88 +1,76 @@
 # edms_ai_assistant/domain/task_models.py
-"""
-Task domain models with Disambiguation support.
-
-Moved from `models/task_models.py` to resolve the naming conflict between
-`model.py` (HTTP/LangGraph contracts) and `models/` (domain models) at root level.
-"""
+from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
-from typing import Any
+from typing import Any, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field, ConfigDict
+
+from edms_ai_assistant.domain.base import EdmsBaseDto
+from edms_ai_assistant.domain.enums import TaskType, PeriodTaskInterval
 
 
-class TaskType(StrEnum):
-    """Типы поручений в системе."""
-
-    GENERAL = "GENERAL"
-    PROJECT = "PROJECT"
-    CONTROL = "CONTROL"
-
-
-class CreateTaskRequestExecutor(BaseModel):
+class CreateTaskRequestExecutor(EdmsBaseDto):
     """Исполнитель поручения."""
-
-    employeeId: UUID = Field(..., description="UUID сотрудника-исполнителя")
-    responsible: bool = Field(
-        default=False, description="Является ли сотрудник ответственным за поручение"
-    )
-
-    model_config = ConfigDict(
-        json_encoders={UUID: str},
-        use_enum_values=True,
-    )
+    employee_id: Annotated[UUID | None, Field(description="UUID сотрудника-исполнителя")] = None
+    responsible: Annotated[bool | None, Field(description="Является ли сотрудник ответственным")] = None
+    stamp_text: str | None = None
+    create_date: datetime | None = None
+    executed_date: datetime | None = None
 
 
-class CreateTaskRequest(BaseModel):
+class CreateTaskRequest(EdmsBaseDto):
     """Request model for creating a single task."""
-
-    taskText: str = Field(..., description="Текст поручения")
-    planedDateEnd: datetime = Field(
-        ..., description="Плановая дата окончания (ISO 8601)"
-    )
-    type: TaskType = Field(default=TaskType.GENERAL, description="Тип поручения")
-    periodTask: bool = Field(default=False, description="Периодическое поручение")
-    endless: bool = Field(default=False, description="Бессрочное поручение")
-    executors: list[CreateTaskRequestExecutor] = Field(
-        ..., min_length=1, description="Список исполнителей (минимум 1)"
-    )
-
-    model_config = ConfigDict(
-        json_encoders={
-            UUID: str,
-            datetime: lambda dt: dt.isoformat() if dt.tzinfo else dt.isoformat() + "Z",
-        },
-        use_enum_values=True,
-    )
+    task_text: Annotated[str, Field(description="Текст поручения", min_length=1)]
+    planed_date_end: Annotated[datetime | None, Field(description="Плановая дата окончания")] = None
+    author_id: Annotated[UUID | None, Field(description="Автор поручения")] = None
+    type: Annotated[TaskType, Field(description="Тип поручения")] = TaskType.GENERAL
+    executors: Annotated[list[CreateTaskRequestExecutor] | None, Field(description="Исполнители")] = None
+    endless: Annotated[bool, Field(description="Бессрочное поручение")] = False
+    period_task: Annotated[bool, Field(description="Периодическое поручение")] = False
+    period: Annotated[PeriodTaskInterval | None, Field(description="Интервал создания поручения")] = None
+    create_task_for_each_executors: bool | None = False
+    control_type_id: UUID | None = None
+    control_employee_ids: list[UUID] | None = None
+    control_plan_date_end: datetime | None = None
 
 
-class CreateTaskBatchRequest(BaseModel):
+class UpdateTaskRequest(EdmsBaseDto):
+    """Request model for updating a task."""
+    id: Annotated[UUID, Field(description="ИД поручения")]
+    task_text: Annotated[str, Field(description="Текст поручения", min_length=1)]
+    planed_date_end: Annotated[datetime | None, Field(description="Планируемая дата исполнения")] = None
+    endless: Annotated[bool, Field(description="Бессрочное поручение")] = False
+    period_task: Annotated[bool, Field(description="Поручение периодическое")] = False
+    period: Annotated[PeriodTaskInterval | None, Field(description="Интервал создания")] = None
+
+
+class ExecuteTaskRequest(EdmsBaseDto):
+    """Request model for executing a task."""
+    stamp_text: Annotated[str | None, Field(description="Текст поручения")] = None
+
+
+class TaskRevisionRequest(EdmsBaseDto):
+    """Request model for task revision."""
+    text: str | None = None
+    ids: Annotated[list[UUID], Field(min_length=1)]
+
+
+class ChangeResponsibleStatus(EdmsBaseDto):
+    """Request model for changing responsible status."""
+    responsible: bool
+
+
+class CreateTaskBatchRequest(EdmsBaseDto):
     """Batch request for creating multiple tasks."""
-
     tasks: list[CreateTaskRequest] = Field(..., min_length=1)
 
-    model_config = ConfigDict(
-        json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()},
-        use_enum_values=True,
-    )
 
-
-class TaskCreationResult(BaseModel):
+class TaskCreationResult(EdmsBaseDto):
     """
     Result of task creation operation with disambiguation support.
-
-    Fields:
-        success: Флаг успешности операции
-        status: "success" | "requires_disambiguation" | "error"
-        created_count: Количество созданных поручений
-        not_found_employees: Список не найденных сотрудников
-        error_message: Сообщение об ошибке
-        ambiguous_matches: Неоднозначные совпадения (для disambiguation)
     """
-
     success: bool
     status: str = "success"  # "success" | "requires_disambiguation" | "error"
     created_count: int = 0

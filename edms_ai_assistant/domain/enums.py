@@ -473,9 +473,11 @@ class TaskStatus(StrEnum):
     EXECUTED = "EXECUTED"
 
 
-class TaskType(StrEnum):  # Type12
+class TaskType(StrEnum):
     INFORMATION = "INFORMATION"
     GENERAL = "GENERAL"
+    PROJECT = "PROJECT"
+    CONTROL = "CONTROL"
 
 
 class Period(StrEnum):
@@ -485,6 +487,22 @@ class Period(StrEnum):
     THREE_MONTHS = "THREE_MONTHS"
     SIX_MONTHS = "SIX_MONTHS"
     YEAR = "YEAR"
+
+
+class PeriodTaskInterval(StrEnum):
+    # Defaulting to common values until clarified
+    DAY = "DAY"
+    WEEK = "WEEK"
+    MONTH = "MONTH"
+    QUARTER = "QUARTER"
+    YEAR = "YEAR"
+
+
+class TaskCreateType(StrEnum):
+    # Defaulting to common values until clarified
+    MANUAL = "MANUAL"
+    SYSTEM = "SYSTEM"
+    AUTO = "AUTO"
 
 
 class PanelType(StrEnum):

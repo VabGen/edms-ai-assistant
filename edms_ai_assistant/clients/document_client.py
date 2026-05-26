@@ -26,11 +26,10 @@ from edms_ai_assistant.domain.document import (
     CountResult,
     DocumentNextProcessRequest,
     DocumentCancelAction,
-    DocumentAismvRecreqteRequest,
     RepeatIdenticalAppealDto,
     ContractVersionInfoDto,
     NomenclatureAffairDto,
-    DocumentPreNomenclatureDto,
+    DocumentAismvRecreateRequest,
     DocumentBasedExistingBody,
     DocumentRecipientDeliveryHistoryDto,
 )
@@ -835,9 +834,10 @@ class DocumentClient(EdmsBaseClient):
     async def recreate_aismv_document(
             self,
             token: str,
-            request: DocumentAismvRecreqteRequest,
+            request: DocumentAismvRecreateRequest,
     ) -> UUID:
         """Recreates an AISMV document with a different profile."""
+        logger.info(f"Recreating AISMV document {request.id} with profile {request.profile_id}")
         data = await self.make_request(
             "POST",
             "api/document/aismv-recreate",

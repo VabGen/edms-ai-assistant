@@ -13,7 +13,16 @@ from edms_ai_assistant.domain.enums import (
     DeclarantType,
     FormMeetingType,
     AppealType,
-    Merge
+    Merge,
+    TaskStatus,
+    TaskType,
+    PeriodTaskInterval,
+    PermissionType,
+    ResolvePolicy,
+    NomenclatureDepartmentStatus,
+    SummaryNomenclatureDepartmentStatus,
+    DestructionActStatus,
+    AcceptanceInventoryStatus
 )
 from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
@@ -281,9 +290,24 @@ class BpmnProcessDirectoryDto(EdmsBaseDto):
     active: bool | None = None
 
 
+class KanbanBoard(EdmsBaseDto):
+    columns: list[Any] = Field(default_factory=list)
+
+
+class TaskExecutionResult(EdmsBaseDto):
+    success: bool = True
+    message: str | None = None
+
+
+class ChildTaskInfo(EdmsBaseDto):
+    id: UUID | None = None
+    count: int = 0
+    children: list[TaskDto] = Field(default_factory=list)
+
+
 class TasksAndProjectsDto(EdmsBaseDto):
-    tasks: list[dict[str, Any]] = Field(default_factory=list)
-    task_projects: list[dict[str, Any]] = Field(default_factory=list)
+    tasks: list[TaskDto] = Field(default_factory=list)
+    task_projects: list[TaskProjectDto] = Field(default_factory=list)
 
 
 class DocumentVersionDto(EdmsBaseDto):
@@ -364,6 +388,11 @@ class CustomViewDto(EdmsBaseDto):
     default_sort_direction: Annotated[str | None, Field(max_length=10)] = None
 
 
+class OrgKey(EdmsBaseDto):
+    id: UUID
+    organization_id: str
+
+
 class DocumentAccessEntryDto(EdmsBaseDto):
     id: UUID | None = None
     document_id: UUID | None = None
@@ -424,15 +453,16 @@ class DocumentRecipientDeliveryHistoryDto(EdmsBaseDto):
 class TaskDto(EdmsBaseDto):
     id: Annotated[UUID | None, Field(description="Идентификатор поручения")] = None
     external_id: str | None = None
-    type: str | None = None
+    type: TaskType | None = None
     organization_id: str | None = None
     parent_id: Annotated[UUID | None, Field(description="Идентификатор родительского поручения")] = None
+    parent_org: str | None = None
     document_reg_date: datetime | None = None
     task_number: Annotated[str | None, Field(description="Номер поручения")] = None
     create_date: Annotated[datetime | None, Field(description="Дата создания поручения")] = None
-    task_status: str | None = None
+    task_status: TaskStatus | None = None
     author: Annotated[UserInfoDto | None, Field(description="Автор поручения")] = None
-    task_executors: Annotated[list[Any] | None, Field(description="Список исполнителей поручения")] = None
+    task_executors: Annotated[list[TaskExecutorsDto] | None, Field(description="Список исполнителей поручения")] = None
     planed_date_end: Annotated[datetime | None, Field(description="Запланированная дата окончания")] = None
     real_date_end: Annotated[datetime | None, Field(description="Реальная дата окончания")] = None
     task_change_date_requests: Annotated[list[Any] | None, Field(description="Список изменений переносов")] = None
@@ -441,6 +471,7 @@ class TaskDto(EdmsBaseDto):
     remove_control: Annotated[bool | None, Field(description="Метка снятия с контроля")] = None
     control: Annotated[ControlDto | None, Field(description="Контроль поручения")] = None
     document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
+    document_org_id: str | None = None
     document: Annotated[Any | None, Field(description="Документ")] = None
     revision: Annotated[bool | None, Field(description="Признак доработки")] = None
     count_exec: Annotated[int | None, Field(description="Количество исполнителей")] = None
@@ -451,9 +482,9 @@ class TaskDto(EdmsBaseDto):
     date_request_count: int | None = None
     executed_date_request_count: int | None = None
     endless: Annotated[bool | None, Field(description="Без срока исполнения")] = None
-    period_task: bool | None = None
+    period_task: bool = False
     period_task_count: int | None = None
-    period: str | None = None
+    period: PeriodTaskInterval | None = None
     period_task_parent_id: UUID | None = None
     period_task_parent_org_id: str | None = None
     first_execution: datetime | None = None
@@ -470,9 +501,60 @@ class DocumentCancelAction(EdmsBaseDto):
     comment: str | None = None
 
 
-class DocumentAismvRecreqteRequest(EdmsBaseDto):
+class DocumentAismvRecreateRequest(EdmsBaseDto):
     id: UUID
     profile_id: UUID
+
+
+class TaskExecutorsDto(EdmsBaseDto):
+    id: Annotated[UUID | None, Field(description="Идентификатор исполнителя поручения")] = None
+    organization_id: str | None = None
+    task_id: Annotated[UUID | None, Field(description="Идентификатор поручения")] = None
+    task_org_id: str | None = None
+    task: TaskDto | None = Field(None, description="Поручение")
+    create_date: Annotated[datetime | None, Field(description="Дата назначения")] = None
+    executed_date: Annotated[datetime | None, Field(description="Дата исполнения")] = None
+    executor: Annotated[UserInfoDto | None, Field(description="Исполнитель поручения")] = None
+    task_document_links: list[Any] | None = Field(None, description="Список документов исполнения")
+    attachments: list[Any] | None = Field(None, description="Список вложений прикрепленных к поручению")
+    responsible: Annotated[bool | None, Field(description="Ответственный исполнитель")] = None
+    executed_by_execute_for_all: Annotated[bool | None, Field(description="Исполнен методом выполнения за всех")] = None
+    executed_for_all: Annotated[bool | None, Field(description="Исполнил за всех")] = None
+    revision: Annotated[bool | None, Field(description="Отправлено на доработку")] = None
+    parent_task_id: Annotated[UUID | None, Field(description="ИД родительского поручения")] = None
+    stamp_text: Annotated[str | None, Field(description="Текст исполнения поручения")] = None
+    link_count: Annotated[int | None, Field(description="Кол-во ссылок на документы")] = None
+    execution_doc_count: Annotated[int | None, Field(description="Кол-во загруженных файлов")] = None
+    child_task_count: int | None = None
+
+
+class TaskProjectDto(EdmsBaseDto):
+    id: UUID | None = None
+    organization_id: str | None = None
+    document_reg_num: str | None = None
+    document_reg_date: datetime | None = None
+    type: TaskType | None = None
+    parent_id: UUID | None = None
+    parent_org: str | None = None
+    parent_task: Any | None = None
+    create_date: datetime | None = None
+    author: UserInfoDto | None = None
+    task_executors: list[Any] | None = None
+    planed_date_end: datetime | None = None
+    task_text: str | None = None
+    document_id: UUID | None = None
+    document_org_id: str | None = None
+    count_exec: int = 0
+
+
+class ExecutionTaskStatCount(EdmsBaseDto):
+    work: int = 0
+    limited: int = 0
+    expire: int = 0
+
+
+class TaskExecutionStatByPeriod(EdmsBaseDto):
+    count: int = 0
 
 
 class RepeatIdenticalAppealDto(EdmsBaseDto):
@@ -486,6 +568,48 @@ class RepeatIdenticalAppealDto(EdmsBaseDto):
     repeat_appeal_group_id: Annotated[UUID | None, Field(description="Идентификатор группы")] = None
     type: Annotated[AppealType | None, Field(description="Тип повторных обращений")] = None
     deleted: bool = False
+
+
+class PermissionDto(EdmsBaseDto):
+    id: UUID | None = Field(None, description="ИД")
+    system_name: str | None = Field(None, description="Системное имя")
+    name: str | None = Field(None, description="Наименование")
+    type: PermissionType | None = Field(None, description="Тип")
+    doc_status: DocumentStatus | None = Field(None, description="Статус документа")
+    doc_category: DocCategory | None = Field(None, description="Тип документа")
+    profile_id: UUID | None = Field(None, description="ИД профиля документа")
+    profile: DocumentProfileDto | None = Field(None, description="Профиль документа")
+    merge_roles: list[RoleMergeDto] | None = Field(None, description="Политика обработки слияния ИД")
+    process_completed: bool | None = Field(None, description="Признак выполнения процесса")
+    current_step_completed: bool | None = Field(None, description="Признак выполнения текущего этапа")
+    last_step: bool | None = Field(None, description="Признак того что текущий этап является последним")
+    process_started: bool | None = Field(None, description="Признак того что процесс начал выполнение")
+    on_control: bool | None = Field(None, description="Документ стоит на контроле")
+    task_on_control: bool | None = Field(None, description="Поручение стоит на контроле")
+    resolve_policy: ResolvePolicy | None = Field(None, description="Политики обработки доступа")
+    has_reg_number: bool | None = Field(None, description="Регномер")
+    document_has_items: list[str] | None = Field(None, description="Типы этапов в документе при которых доступно")
+    create_type: CreateType | None = Field(None, description="Типсоздания документа")
+    task_completed: bool | None = Field(None, description="Поручение исполненно")
+    task_on_revision: bool | None = Field(None, description="Поручение на доработке")
+    child_task: bool | None = Field(None, description="Дочернее поручение")
+    task_type: TaskType | None = Field(None, description="Тип поручения")
+    task_begin_execution: bool | None = Field(None, description="Поручение начало исполнение")
+    archive: bool | None = Field(None, description="Документ находится в архиве")
+    task_create_by_period: bool | None = Field(None, description="Поручение создано для из-за переодического выполнения")
+    has_period_tasks: bool | None = Field(None, description="На основании этого поручения были созданны переодические поручения")
+    nomenclature_department_status: NomenclatureDepartmentStatus | None = Field(None, description="Статус нумераторы подразделения")
+    summary_nomenclature_department_status: SummaryNomenclatureDepartmentStatus | None = Field(None, description="Сводный статус подразделения")
+    destruction_act_status: DestructionActStatus | None = Field(None, description="Статус акта уничтожения")
+    acceptance_inventory_status: AcceptanceInventoryStatus | None = None
+
+
+class PermissionRoleDto(EdmsBaseDto):
+    id: UUID | None = None
+    role: RoleDto | None = None
+    role_id: UUID | None = None
+    permission: PermissionDto | None = None
+    permission_id: UUID | None = None
 
 
 class ContractVersionInfoDto(EdmsBaseDto):
@@ -681,6 +805,13 @@ AttachmentDocumentDto.model_rebuild()
 DocumentProfileDto.model_rebuild()
 RoleMergeDto.model_rebuild()
 TaskDto.model_rebuild()
+TaskExecutorsDto.model_rebuild()
+TaskProjectDto.model_rebuild()
+ChildTaskInfo.model_rebuild()
+TasksAndProjectsDto.model_rebuild()
+KanbanBoard.model_rebuild()
+PermissionDto.model_rebuild()
+PermissionRoleDto.model_rebuild()
 DocumentDto.model_rebuild()
 DocumentAppealDto.model_rebuild()
 DocumentProcessDto.model_rebuild()

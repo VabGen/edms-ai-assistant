@@ -7,7 +7,7 @@ from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
-from edms_ai_assistant.domain.employee import (
+from edms_ai_assistant.domain.document import (
     PermissionDto,
     PermissionRoleDto
 )

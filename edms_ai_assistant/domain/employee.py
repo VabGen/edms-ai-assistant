@@ -1,49 +1,21 @@
 from __future__ import annotations
 
 from typing import Annotated, TYPE_CHECKING, Any, Generic, TypeVar
-from pydantic import Field, ConfigDict, AliasGenerator, model_validator
-from pydantic.alias_generators import to_camel
+from pydantic import Field
 from uuid import UUID
 from datetime import datetime
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import (
     GroupType,
-    RoleObjectType,
-    BlockedField,
-    CreateType,
     RoleType,
     EmployeeCreateType,
-    DocCategory,
-    DocumentStatus,
-    NomenclatureDepartmentStatus,
-    SummaryNomenclatureDepartmentStatus,
-    DestructionActStatus,
-    AcceptanceInventoryStatus,
-    PermissionType,
-    ResolvePolicy
+    BlockedField
 )
 from edms_ai_assistant.domain.reference import OrgDto
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.domain.enums import (
-        GroupType,
-        RoleObjectType,
-        BlockedField,
-        CreateType,
-        RoleType,
-        EmployeeCreateType,
-        DocCategory,
-        DocumentStatus,
-        NomenclatureDepartmentStatus,
-        SummaryNomenclatureDepartmentStatus,
-        DestructionActStatus,
-        AcceptanceInventoryStatus,
-        PermissionType,
-        ResolvePolicy
-    )
     from edms_ai_assistant.domain.reference import OrgDto
-    from edms_ai_assistant.domain.document import DocumentProfileDto, RoleMergeDto
 
 T = TypeVar("T")
 
@@ -62,19 +34,6 @@ class PostDto(EdmsBaseDto):
     post_name: str | None = Field(None, description="Наименование должности")
     post_code: str | None = Field(None, description="Код должности")
     create_date: datetime | None = None
-
-
-class Signature(EdmsBaseDto):
-    """Placeholder for Signature model."""
-    pass
-
-
-class AttachmentSignature(EdmsBaseDto):
-    """Model for describing document EDS."""
-    id: UUID | None = Field(None, description="Идентификатор ЭЦП")
-    date: datetime | None = Field(None, description="Дата формирования подписи ЭЦП")
-    check: bool | None = Field(None, description="Признак была ли выполнена проверка валидности ЭЦП")
-    sign: Signature | None = Field(None, description="ЭЦП")
 
 
 class RoleDto(EdmsBaseDto):
@@ -287,9 +246,6 @@ class EmployeeUpdateRequest(EdmsBaseDto):
 
 
 class EmployeeFilter(EdmsBaseDto):
-    class Include(EdmsBaseDto):
-        pass # Enum handling in client
-
     first_name: str | None = Field(None, description="Имя сотрудника")
     last_name: str | None = Field(None, description="Фамилия сотрудника")
     middle_name: str | None = Field(None, description="Отчество сотрудника")
@@ -336,48 +292,6 @@ class GroupDto(EdmsBaseDto):
     type: GroupType
     mixed: bool
     create_date: datetime | None = None
-
-
-class PermissionDto(EdmsBaseDto):
-    id: UUID | None = Field(None, description="ИД")
-    system_name: str | None = Field(None, description="Системное имя")
-    name: str | None = Field(None, description="Наименование")
-    type: PermissionType | None = Field(None, description="Тип")
-    doc_status: DocumentStatus | None = Field(None, description="Статус документа")
-    doc_category: DocCategory | None = Field(None, description="Тип документа")
-    profile_id: UUID | None = Field(None, description="ИД профиля документа")
-    profile: DocumentProfileDto | None = Field(None, description="Профиль документа")
-    merge_roles: list[RoleMergeDto] | None = Field(None, description="Политика обработки слияния ИД")
-    process_completed: bool | None = Field(None, description="Признак выполнения процесса")
-    current_step_completed: bool | None = Field(None, description="Признак выполнения текущего этапа")
-    last_step: bool | None = Field(None, description="Признак того что текущий этап является последним")
-    process_started: bool | None = Field(None, description="Признак того что процесс начал выполнение")
-    on_control: bool | None = Field(None, description="Документ стоит на контроле")
-    task_on_control: bool | None = Field(None, description="Поручение стоит на контроле")
-    resolve_policy: ResolvePolicy | None = Field(None, description="Политики обработки доступа")
-    has_reg_number: bool | None = Field(None, description="Регномер")
-    document_has_items: list[str] | None = Field(None, description="Типы этапов в документе при которых доступно")
-    create_type: CreateType | None = Field(None, description="Типсоздания документа")
-    task_completed: bool | None = Field(None, description="Поручение исполненно")
-    task_on_revision: bool | None = Field(None, description="Поручение на доработке")
-    child_task: bool | None = Field(None, description="Дочернее поручение")
-    task_type: str | None = Field(None, description="Тип поручения")
-    task_begin_execution: bool | None = Field(None, description="Поручение начало исполнение")
-    archive: bool | None = Field(None, description="Документ находится в архиве")
-    task_create_by_period: bool | None = Field(None, description="Поручение создано для из-за переодического выполнения")
-    has_period_tasks: bool | None = Field(None, description="На основании этого поручения были созданны переодические поручения")
-    nomenclature_department_status: NomenclatureDepartmentStatus | None = Field(None, description="Статус нумераторы подразделения")
-    summary_nomenclature_department_status: SummaryNomenclatureDepartmentStatus | None = Field(None, description="Сводный статус подразделения")
-    destruction_act_status: DestructionActStatus | None = Field(None, description="Статус акта уничтожения")
-    acceptance_inventory_status: AcceptanceInventoryStatus | None = None
-
-
-class PermissionRoleDto(EdmsBaseDto):
-    id: UUID | None = None
-    role: RoleDto | None = None
-    role_id: UUID | None = None
-    permission: PermissionDto | None = None
-    permission_id: UUID | None = None
 
 
 EmployeeDto.model_rebuild()
