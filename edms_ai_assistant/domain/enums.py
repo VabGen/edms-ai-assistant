@@ -464,6 +464,12 @@ class FormMeetingType(StrEnum):
     POLLING_METHOD = "POLLING_METHOD"
 
 
+class WorkDaysRoundPolicy(StrEnum):
+    UP = "UP"
+    WORK = "WORK"
+    DOWN = "DOWN"
+
+
 class DocumentLinkType(StrEnum):
     RECEIVED_IN_RESPONSE_TO = "RECEIVED_IN_RESPONSE_TO"
     CREATE_IN_RESPONSE_TO = "CREATE_IN_RESPONSE_TO"

@@ -11,6 +11,7 @@ from edms_ai_assistant.domain.enums import (
     CreateType,
     AttachmentDocumentType,
     AttachmentType,
+    CorrespondentType,
     DeclarantType,
     FormMeetingType,
     AppealType,
@@ -53,6 +54,7 @@ from edms_ai_assistant.domain.reference import (
     SubscriberDto,
     RegistrationJournalDto,
     CurrencyDto,
+    CountryDto,
 )
 
 if TYPE_CHECKING:
@@ -100,6 +102,111 @@ class AttachmentDocumentDto(EdmsBaseDto):
     source_minio_name: str | None = None
     source_bucket_name: str | None = None
     source_original_name: str | None = None
+
+
+class CorrespondentDto(EdmsBaseDto):
+    id: UUID | None = None
+    external_id: str | None = None
+    organization_id: str | None = None
+    name: str | None = None
+    delivery_method_id: int | None = None
+    delivery_method: DeliveryMethodDto | None = None
+    address: str | None = None
+    postfix: str | None = None
+    country: CountryDto | None = None
+    country_id: UUID | None = None
+    city_id: UUID | None = None
+    city_name: str | None = None
+    region_id: UUID | None = None
+    region_name: str | None = None
+    district_id: UUID | None = None
+    district_name: str | None = None
+    code: str = Field(..., description="Код")
+    state_organ: bool | None = None
+    postcode: str | None = None
+    phone: str | None = None
+    mail: str | None = None
+    active: bool | None = None
+    type: CorrespondentType | None = None
+    deleted: bool | None = None
+    department: DepartmentDto | None = None
+    department_id: UUID | None = None
+    setup: Any | None = None  # GeneralSetupDto
+    setup_id: str | None = None
+    subscriber_id: UUID | None = None
+    subscriber: SubscriberDto | None = None
+    employee_ids: list[UUID] | None = None
+    create_date: datetime | None = None
+
+
+class CorrespondentGroupDto(EdmsBaseDto):
+    id: UUID | None = None
+    organization_id: str | None = None
+    name: str | None = None
+    active: bool | None = None
+    deleted: bool | None = None
+    create_date: datetime | None = None
+
+
+class IntermediateCorrespondentDto(EdmsBaseDto):
+    id: UUID | None = None
+    correspondent_id: UUID | None = None
+    correspondent_org_id: str | None = None
+    correspondent: CorrespondentDto | None = None
+    correspondent_group_id: UUID | None = None
+    correspondent_group_org_id: str | None = None
+    correspondent_group: CorrespondentGroupDto | None = None
+
+
+class CorrespondentRequest(EdmsBaseDto):
+    id: UUID | None = None
+    name: str
+    delivery_method_id: int | None = None
+    address: str | None = None
+    postfix: str | None = None
+    country_id: UUID | None = None
+    city_id: UUID | None = None
+    region_id: UUID | None = None
+    district_id: UUID | None = None
+    code: str
+    state_organ: bool | None = None
+    postcode: str | None = None
+    phone: str | None = None
+    mail: str | None = None
+    active: bool = True
+    type: CorrespondentType = CorrespondentType.NORMAL
+
+
+class CorrespondentAddRequest(EdmsBaseDto):
+    correspondent: CorrespondentRequest
+    contact_face_add: list[Any] | None = None
+
+
+class CorrespondentUpdateRequest(EdmsBaseDto):
+    correspondent: CorrespondentRequest
+    contact_face_add: list[Any] | None = None
+    contact_face_delete: list[UUID] | None = None
+
+
+class CorrespondentGroupRequest(EdmsBaseDto):
+    id: UUID | None = None
+    name: str
+    active: bool = True
+
+
+class CorrespondentGroupAddRequest(EdmsBaseDto):
+    correspondent_group: CorrespondentGroupRequest
+
+
+class CorrespondentGroupUpdateRequest(EdmsBaseDto):
+    correspondent_group: CorrespondentGroupRequest
+    correspondent_add: set[UUID] | None = None
+    correspondent_delete: list[UUID] | None = None
+
+
+class IntermediateCorrespondentRequest(EdmsBaseDto):
+    id: UUID  # groupId
+    ids: list[UUID]  # correspondentIds
 
 
 class TemporaryAttachmentDto(EdmsBaseDto):
@@ -467,6 +574,48 @@ class DocumentProfileDto(EdmsBaseDto):
     name: Annotated[str | None, Field(description="Наименование профиля документа")] = None
     formula: Annotated[list[str] | None, Field(description="Формула рег. номера")] = None
     auto_create_incoming_doc: bool | None = None
+    active: bool | None = None
+    document_type_id: int | None = None
+    deployment_id: str | None = None
+    journal_id: UUID | None = None
+    registration_journal: RegistrationJournalDto | None = None
+    document_type: DocumentTypeDto | None = None
+    document_category: DocCategory | None = None
+    doc_author_id: UUID | None = None
+    doc_author: EmployeeDto | None = None
+    correspondent_id: UUID | None = None
+    correspondent: CorrespondentDto | None = None
+    days_execution: int | None = None
+    auto_registration: bool | None = None
+    auto_routing: bool | None = None
+    auto_control: bool | None = None
+    control_days: int | None = None
+    control_type: ControlTypeDto | None = None
+    control_type_id: UUID | None = None
+    process_directory_id: UUID | None = None
+    process_directory: BpmnProcessDirectoryDto | None = None
+    xml: str | None = None
+    process_definition: list[Any] | None = None
+    retry_prefix: str | None = None
+    retry_postfix: str | None = None
+    identical_prefix: str | None = None
+    identical_postfix: str | None = None
+    repetition_counter_initial: int | None = None
+    identity_counter_initial: int | None = None
+    anonymous_suffix: str | None = None
+    collective_suffix: str | None = None
+    required_field: list[RequiredFieldEnum] | None = None
+    access: bool | None = None
+    access_entry_count: int | None = None
+    create_date: datetime | None = None
+    appeal_organization_journal_id: UUID | None = None
+    appeal_organization_journal_org_id: str | None = None
+    appeal_organization_journal: RegistrationJournalDto | None = None
+    access_grief_id: UUID | None = None
+    access_grief: AccessGriefDto | None = None
+    enable_access_grief: bool = False
+    contract_typical: bool | None = None
+    document_form_id: UUID | None = None
 
 
 class RoleMergeDto(EdmsBaseDto):
@@ -970,3 +1119,5 @@ ContractControlPointAttachmentDto.model_rebuild()
 ContractControlPointLinkDto.model_rebuild()
 ContractControlPointResponsibleDto.model_rebuild()
 ControlPointWithPermission.model_rebuild()
+CorrespondentDto.model_rebuild()
+IntermediateCorrespondentDto.model_rebuild()
