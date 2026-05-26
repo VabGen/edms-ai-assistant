@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any, TYPE_CHECKING, Annotated
 from uuid import UUID
 from datetime import datetime
@@ -34,6 +35,7 @@ from edms_ai_assistant.domain.enums import (
     DocFileExtension,
     ContractControlPointStatus,
     DocumentLinkType,
+    RepeatExecutionPolicy,
 )
 from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 
@@ -718,6 +720,145 @@ class DocumentProfileAccessEntryDto(EdmsBaseDto):
     link_type: DocumentProfileAccessLinkType | None = None
 
 
+class DocumentFilterInclude(StrEnum):
+    DOCUMENT_TYPE = "DOCUMENT_TYPE"
+    DELIVERY_METHOD = "DELIVERY_METHOD"
+    CORRESPONDENT = "CORRESPONDENT"
+    RECIPIENT = "RECIPIENT"
+    USER_COLOR = "USER_COLOR"
+    PRE_NOMENCLATURE_AFFAIRS = "PRE_NOMENCLATURE_AFFAIRS"
+    CITIZEN_TYPE = "CITIZEN_TYPE"
+    CURRENCY = "CURRENCY"
+    PARENT_SUBJECT = "PARENT_SUBJECT"
+    REGISTRATION_JOURNAL = "REGISTRATION_JOURNAL"
+    SOLUTION_RESULT = "SOLUTION_RESULT"
+    ADDITIONAL_DOCUMENT_AND_TYPE = "ADDITIONAL_DOCUMENT_AND_TYPE"
+
+
+class DocumentFilterIoOption(StrEnum):
+    SELF = "SELF"
+    IO = "IO"
+    SUBORDINATES = "SUBORDINATES"
+    SELF_AND_IO = "SELF_AND_IO"
+    SUBORDINATES_AND_SELF_AND_IO = "SUBORDINATES_AND_SELF_AND_IO"
+
+
+class DocumentFilter(EdmsBaseDto):
+    id: UUID | None = None
+    includes: list[DocumentFilterInclude] | None = None
+    category_constants: list[DocCategory] | None = None
+    document_type_ids: list[int] | None = None
+    io_option: DocumentFilterIoOption = DocumentFilterIoOption.SELF_AND_IO
+    document_type_names: list[str] | None = None
+    reg_number: str | None = None
+    create_type: CreateType | None = None
+    date_reg_start: datetime | None = None
+    date_reg_end: datetime | None = None
+    short_summary: str | None = None
+    author_id: UUID | None = None
+    author_first_name: str | None = None
+    author_last_name: str | None = None
+    author_middle_name: str | None = None
+    executor_signing_stage_id: UUID | None = None
+    executor_signing_stage_first_name: str | None = None
+    executor_signing_stage_last_name: str | None = None
+    executor_signing_stage_middle_name: str | None = None
+    out_reg_number: str | None = None
+    recipient_ids: list[UUID] | None = None
+    recipient_name: str | None = None
+    recipient_name_or: str | None = None
+    correspondent_ids: list[UUID] | None = None
+    correspondent_name: str | None = None
+    status: list[DocumentStatus] | None = None
+    exclude_statuses: list[DocumentStatus] | None = None
+    delivery_method: str | None = None
+    delivery_method_id: int | None = None
+    investment_program_ids: list[UUID] | None = None
+    date_control_start: datetime | None = None
+    date_control_end: datetime | None = None
+    task_executor_ids: list[UUID] | None = None
+    task_executor_first_name: str | None = None
+    task_executor_last_name: str | None = None
+    task_executor_middle_name: str | None = None
+    date_task_start: datetime | None = None
+    date_task_end: datetime | None = None
+    author_current_user: bool | None = None
+    process_executor_current_user: bool | None = None
+    meeting_executor_current_user: bool | None = None
+    meeting_question_executor_current_user: bool | None = None
+    question_executor_current_user: bool | None = None
+    contract_executor_current_user: bool | None = None
+    control_user_current_user: bool | None = None
+    introduction_current_user: bool | None = None
+    additional_agreement_user: bool | None = None
+    additional_agreement_all_user: bool | None = None
+    signing_current_user: bool | None = None
+    review_current_user: bool | None = None
+    agreement_current_user: bool | None = None
+    statement_current_user: bool | None = None
+    task_executor_current_user: bool | None = None
+    introduction_all_current_user: bool | None = None
+    control_off_current_user: bool | None = None
+    control_expire_current_user: bool | None = None
+    control_expire_execution_current_user: bool | None = None
+    execution_expire_current_user: bool | None = None
+    execution_overdue_current_user: bool | None = None
+    author_expire_execution_current_user: bool | None = None
+    author_overdue_execution_current_user: bool | None = None
+    smdo_wait_outgoing_user: bool | None = None
+    user_color_is_null: bool | None = None
+    user_color: str | None = None
+    smdo_fail_outgoing_user: bool | None = None
+    only_user_organization: bool | None = None
+    organization_name: str | None = None
+    fio_applicant: str | None = None
+    applicant: str | None = None
+    reg_number_and: str | None = None
+    short_summary_and: str | None = None
+    journal_id: UUID | None = None
+    process_completed: bool | None = None
+    has_reg_date: bool | None = None
+    declarant_type: DeclarantType | None = None
+    submission_form: list[SubmissionFormAppeal] | None = None
+    repeat_identical: str | None = None
+    affair_exist: bool | None = None
+    out_reg_number_or: str | None = None
+    correspondent_name_or: str | None = None
+    author_last_name_or: str | None = None
+    organization_name_or: str | None = None
+    fio_applicant_or: str | None = None
+    applicant_or: str | None = None
+    citizen_type_id: UUID | None = None
+    anonymous: bool | None = None
+    collective: bool | None = None
+    reasonably: bool | None = None
+    region_id: UUID | None = None
+    country_appeal_id: UUID | None = None
+    district_id: UUID | None = None
+    city_id: UUID | None = None
+    receipt_date_start: datetime | None = None
+    receipt_date_end: datetime | None = None
+    reg_number_is_not_null: bool = False
+    contract_agreement: bool | None = None
+    contract_auto_prolongation: bool | None = None
+    contract_typical: bool | None = None
+    has_additional_document: bool | None = None
+    recipient_id: UUID | None = None
+    recipient_signed_from: datetime | None = None
+    recipient_signed_to: datetime | None = None
+    sign_date_from: datetime | None = None
+    sign_date_to: datetime | None = None
+    currency_ids: list[UUID] | None = None
+    contract_sum_from: float | None = None
+    contract_sum_to: float | None = None
+    days_to_completion: int | None = None
+    correspondent_recipient_id: UUID | None = None
+    recipient_correspondent_id: UUID | None = None
+    recipient_contract_number_or: str | None = None
+    create_year: int | None = None
+    pre_affair_id: UUID | None = None
+
+
 class DocumentProfileFilter(EdmsBaseDto):
     name: Annotated[str | None, Field(description="Наименование профиля документа")] = None
     doc_type_name: Annotated[str | None, Field(description="Наименование вида документа")] = None
@@ -1209,10 +1350,6 @@ class NomenclatureAffairDto(EdmsBaseDto):
     completed: bool = False
 
 
-class DocumentFormField(EdmsBaseDto):
-    id: str | None = None
-    payload: dict[str, dict[str, Any]] | None = None
-
 
 class DocumentAppealDto(EdmsBaseDto):
     country_appeal_id: Annotated[UUID | None, Field(description="Идентификатор страны заявителя")] = None
@@ -1255,22 +1392,33 @@ class DocumentAppealDto(EdmsBaseDto):
 
 class DocumentProcessDto(EdmsBaseDto):
     id: UUID | None = None
-    current_id: UUID | None = None
-    current: DocumentProcessItemDto | None = None
-    next_id: UUID | None = None
-    document_id: UUID | None = None
-    items: list[DocumentProcessItemDto] | None = None
-    completed: bool | None = None
-    started: bool | None = None
+    current_id: Annotated[UUID | None, Field(description="Идентификатор текущего этапа процесса")] = None
+    current: Annotated[DocumentProcessItemDto | None, Field(description="Текущий этап процесса")] = None
+    next_id: Annotated[UUID | None, Field(description="Идентификатор следующего этапа процесса")] = None
+    next: Annotated[DocumentProcessItemDto | None, Field(description="Следующий этап процесса")] = None
+    document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
+    items: Annotated[list[DocumentProcessItemDto] | None, Field(description="Список этапов процесса")] = None
+    completed: Annotated[bool | None, Field(description="Признак прошел ли документ все этапы")] = None
+    started: Annotated[bool | None, Field(description="Признак начал ли документ движение по маршруту")] = None
 
 
 class DocumentProcessItemDto(EdmsBaseDto):
-    id: UUID | None = None
-    process_id: UUID | None = None
-    name: str | None = None
+    id: Annotated[UUID | None, Field(description="Идентификатор этапа процесса")] = None
     type: DocumentProcessType | None = None
-    order: int | None = None
-    completed: bool | None = None
+    order: Annotated[int | None, Field(description="Порядковый номер")] = None
+    name: Annotated[str | None, Field(description="Наименование")] = None
+    days: Annotated[int | None, Field(description="Количество дней исполнения")] = None
+    start: Annotated[datetime | None, Field(description="Дата начала этапа процесса")] = None
+    end: Annotated[datetime | None, Field(description="Дата окончания этапа процесса")] = None
+    file_sign: bool | None = None
+    completed: Annotated[bool, Field(description="Признак был ли завершен этап процесса")] = False
+    started: Annotated[bool, Field(description="Признак был ли начаты действия по этапу процесса")] = False
+    executors: Annotated[list[DocumentProcessExecutorDto] | None, Field(description="Список исполнителей этапа процесса")] = None
+    process_id: Annotated[UUID | None, Field(description="Идентификатор процесса")] = None
+    next_executor_id: Annotated[UUID | None, Field(description="ИД следующего исполнителя")] = None
+    action_queue_type: Annotated[ProcessEmployeeActionQueueType | None, Field(description="Тип исполнения процесса")] = None
+    task_definition_key: Annotated[str | None, Field(description="ИД таски из дефинишена")] = None
+    document_id: UUID | None = None
 
 
 class AutoControl(EdmsBaseDto):
@@ -1285,6 +1433,137 @@ class DocumentResponsibleExecutorDto(EdmsBaseDto):
     document_id: UUID | None = None
     document: Any | None = None
     executor: UserInfoDto | None = None
+
+
+class DocumentProcessExecutorDto(EdmsBaseDto):
+    id: Annotated[UUID | None, Field(description="Идентификатор исполнителя процесса в документе")] = None
+    start: Annotated[datetime | None, Field(description="Дата начала исполнения")] = None
+    execution_end: Annotated[datetime | None, Field(description="Дата окончания исполнения")] = None
+    end: Annotated[datetime | None, Field(description="Дата окончания исполнения")] = None
+    document_process_item_id: Annotated[UUID | None, Field(description="Идентификатор этапа процесса")] = None
+    comment: Annotated[str | None, Field(description="Комментарий")] = None
+    result: Annotated[bool | None, Field(description="Признак результата исполнения")] = None
+    executor: Annotated[UserInfoDto | None, Field(description="Исполнитель")] = None
+    order: Annotated[int | None, Field(description="Позиция исполнителя в процессе")] = None
+
+
+class ProcessItemExecutorEntry(EdmsBaseDto):
+    employee_id: UUID | None = None
+    group_id: UUID | None = None
+    department_id: UUID | None = None
+
+
+class SimpleProcessAction(EdmsBaseDto):
+    result: Annotated[bool, Field(description="Признак результата действия положительный/отрицательный")]
+    employee_id: Annotated[UUID, Field(description="Идентификатор участника процесса от лица которого делается действие")]
+    comment: Annotated[str | None, Field(description="Комментарий")] = None
+    ignore_errors: Annotated[bool, Field(description="Признак игнорирования ошибок")] = False
+
+
+class PaperworkProcessAction(SimpleProcessAction):
+    profile_id: UUID | None = None
+
+
+class ProcessActionWithSign(SimpleProcessAction):
+    signs: list[DocumentAttachmentSignEntry] | None = None
+
+
+class DocumentAttachmentSignEntry(EdmsBaseDto):
+    attachment_id: UUID | None = None
+    cms: str | None = None
+
+
+class RedirectReviewProcessAction(EdmsBaseDto):
+    employee_id: Annotated[UUID, Field(description="Идентификатор участника процесса от лица которого делается действие")]
+    redirect_employee_id: Annotated[UUID, Field(description="ИД сотрудника котору будет выдан доступ к этапу рассмотрения")]
+    comment: Annotated[str | None, Field(description="Комментарий")] = None
+
+
+class RegistrationProcessRequest(EdmsBaseDto):
+    employee_id: Annotated[UUID, Field(description="Идентификатор сотрудника")]
+    ignore_errors: Annotated[bool, Field(description="Признак игнорирования ошибок")]
+    reg_date: Annotated[datetime | None, Field(description="Рег. дата")] = None
+    profile_id: Annotated[UUID | None, Field(description="ИД Профиля, если нужна регистрация другим профилем")] = None
+
+
+class FreeRegistrationProcessRequest(EdmsBaseDto):
+    employee_id: Annotated[UUID | None, Field(description="Идентификатор сотрудника")] = None
+    reg_date: Annotated[datetime, Field(description="Рег. дата")]
+    reg_num: Annotated[str, Field(description="Рег. номер", min_length=1)]
+    journal_number: int | None = None
+    ignore_errors: bool = False
+
+
+class ReserveRegnumberRequest(EdmsBaseDto):
+    ignore_errors: bool
+
+
+class SmdoRegistrationReject(EdmsBaseDto):
+    employee_id: Annotated[UUID, Field(description="Идентификатор сотрудника")]
+    comment: Annotated[str, Field(description="Комментарий", min_length=1)]
+
+
+class BpmnProcessItemDefinitionDto(EdmsBaseDto):
+    document_process_item_id: UUID | None = None
+    activity_id: str | None = None
+    started: bool | None = None
+    completed: bool | None = None
+    name: str | None = None
+    days: int | None = None
+    action_queue_type: ProcessEmployeeActionQueueType | None = None
+    type: DocumentProcessType | None = None
+    executors: list[BpmnProcessItemExecutorDefinitionDto] | None = None
+    one_for_all: bool | None = None
+    transient_execution: bool | None = None
+    auto_registration: bool | None = None
+    file_sign: bool | None = None
+    remove_control_after_execution_complete: bool | None = None
+    wait_control_remove_for_execution_complete: bool | None = None
+    repeat_execution_policy: RepeatExecutionPolicy | None = None
+    complete_after_reject_count: int | None = None
+    reject_count: int | None = None
+
+
+class BpmnProcessItemExecutorDefinitionDto(EdmsBaseDto):
+    id: UUID | None = None
+    comment: str | None = None
+    document_process_item_id: UUID | None = None
+    end: datetime | None = None
+    execution_end: datetime | None = None
+    result: bool | None = None
+    start: datetime | None = None
+    order: int | None = None
+    executor: UserInfoDto | None = None
+    group_id: UUID | None = None
+    group: GroupDto | None = None
+    department_id: UUID | None = None
+    department: DepartmentDto | None = None
+
+
+class CamundaProcessItemDefinitionRequest(EdmsBaseDto):
+    days: int | None = None
+    complete_after_reject_count: int = 0
+    repeat_execution_policy: RepeatExecutionPolicy = RepeatExecutionPolicy.ALL
+    auto_registration: bool = False
+    transient_execution: bool = False
+    one_for_all: bool = False
+    file_sign: bool | None = None
+    remove_control_after_execution_complete: bool | None = None
+    wait_control_remove_for_execution_complete: bool | None = None
+    action_queue_type: ProcessEmployeeActionQueueType | None = None
+    employees: list[ProcessItemExecutorEntry] | None = None
+
+
+class BpmnStartBeforeRequest(EdmsBaseDto):
+    id: str
+    employees: list[UUID] | None = None
+
+
+class SwapExecutorRequest(EdmsBaseDto):
+    employee_id: UUID
+    comment: str | None = None
+    execution_end: datetime | None = None
+    new_executor: ProcessItemExecutorEntry
 
 
 class IntroductionDto(EdmsBaseDto):
@@ -1302,6 +1581,14 @@ from edms_ai_assistant.domain.reference import GeneralSetupDto
 DocumentTypeDto.model_rebuild()
 AttachmentDocumentDto.model_rebuild()
 ContractVersionInfoDto.model_rebuild()
+DocumentProcessDto.model_rebuild()
+DocumentProcessItemDto.model_rebuild()
+DocumentProcessExecutorDto.model_rebuild()
+ProcessActionWithSign.model_rebuild()
+BpmnProcessItemDefinitionDto.model_rebuild()
+BpmnProcessItemExecutorDefinitionDto.model_rebuild()
+CamundaProcessItemDefinitionRequest.model_rebuild()
+SwapExecutorRequest.model_rebuild()
 DocumentQuestionDto.model_rebuild()
 AdditionalDocumentDto.model_rebuild()
 TemporaryAttachmentDto.model_rebuild()
