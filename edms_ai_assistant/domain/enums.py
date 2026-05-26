@@ -74,6 +74,11 @@ class DocumentProcessType(StrEnum):  # Type4 в OpenAPI
     CONTRACT_EXECUTION = "CONTRACT_EXECUTION"
 
 
+class ProcessEmployeeActionQueueType(StrEnum):
+    ANY = "ANY"
+    ORDERED = "ORDERED"
+
+
 class JobStatus(StrEnum):
     NEW = "NEW"
     AWAITING_CONVERSION = "AWAITING_CONVERSION"
@@ -410,6 +415,13 @@ class GroupType(StrEnum):  # Type7
     DISTRIBUTION = "DISTRIBUTION"
 
 
+class DocumentProfileAccessLinkType(StrEnum):
+    EMPLOYEE = "EMPLOYEE"
+    DEPARTMENT = "DEPARTMENT"
+    ROLE = "ROLE"
+    GROUP = "GROUP"
+
+
 class BlockedField(StrEnum):
     FIRST_NAME = "FIRST_NAME"
     LAST_NAME = "LAST_NAME"
@@ -629,3 +641,98 @@ class RecognitionLanguageEnum(StrEnum):
     RUS = "rus"
     ENG = "eng"
     BEL = "bel"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BPMN & Profile Enums
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ArgumentType(StrEnum):
+    OBJECT = "OBJECT"
+    STRING = "STRING"
+    DATETIME = "DATETIME"
+    NUMBER = "NUMBER"
+    BIGDECIMAL = "BIGDECIMAL"
+    BOOLEAN = "BOOLEAN"
+    EMPLOYEE = "EMPLOYEE"
+    CORRESPONDENT = "CORRESPONDENT"
+    CORRESPONDENT_GROUP = "CORRESPONDENT_GROUP"
+    DELIVERY_METHOD = "DELIVERY_METHOD"
+    DOCUMENT = "DOCUMENT"
+    DOCUMENT_CREATE_TYPE = "DOCUMENT_CREATE_TYPE"
+    DOCUMENT_DECLARANT_TYPE = "DOCUMENT_DECLARANT_TYPE"
+    DOCUMENT_TYPE = "DOCUMENT_TYPE"
+    DOCUMENT_RECIPIENT_LIST = "DOCUMENT_RECIPIENT_LIST"
+    DOCUMENT_CONTRACT_CURRENCY = "DOCUMENT_CONTRACT_CURRENCY"
+    DOC_CATEGORY = "DOC_CATEGORY"
+    JOURNAL = "JOURNAL"
+    DEPARTMENT = "DEPARTMENT"
+    ROLE = "ROLE"
+    GROUP = "GROUP"
+    CITIZEN_TYPE = "CITIZEN_TYPE"
+    COUNTRY = "COUNTRY"
+
+
+class RefType(StrEnum):
+    MANUAL = "MANUAL"
+    LINK = "LINK"
+    EMPLOYEE = "EMPLOYEE"
+    CORRESPONDENT = "CORRESPONDENT"
+    CORRESPONDENT_GROUP = "CORRESPONDENT_GROUP"
+    DELIVERY_METHOD = "DELIVERY_METHOD"
+    DEPARTMENT = "DEPARTMENT"
+    DOCUMENT_CREATE_TYPE = "DOCUMENT_CREATE_TYPE"
+    DOCUMENT_DECLARANT_TYPE = "DOCUMENT_DECLARANT_TYPE"
+    DOCUMENT_CONTRACT_CURRENCY = "DOCUMENT_CONTRACT_CURRENCY"
+    DOCUMENT_TYPE = "DOCUMENT_TYPE"
+    ROLE = "ROLE"
+    GROUP = "GROUP"
+    CITIZEN_TYPE = "CITIZEN_TYPE"
+    COUNTRY = "COUNTRY"
+
+
+class DocumentProfileFilterInclude(StrEnum):
+    BPMN_PROCESS_DIRECTORY = "BPMN_PROCESS_DIRECTORY"
+
+
+class DocumentLinkCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    NONE = "NONE"
+
+
+class DocumentIntroductionCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    NONE = "NONE"
+
+
+class DocumentNomenclatureAffairCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    NONE = "NONE"
+
+
+class RecipientCopyType(StrEnum):
+    CONTRACT = "CONTRACT"
+    DOCUMENT = "DOCUMENT"
+    NONE = "NONE"
+
+
+class AttachmentCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    PROFILE = "PROFILE"
+    PROFILE_AND_DOCUMENT = "PROFILE_AND_DOCUMENT"
+    NONE = "NONE"
+
+
+class ProcessCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    PROFILE = "PROFILE"
+
+
+class BaseFieldsCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    PROFILE = "PROFILE"
+
+
+class ResponsibleExecutorsCopyType(StrEnum):
+    DOCUMENT = "DOCUMENT"
+    NONE = "NONE"

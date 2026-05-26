@@ -53,14 +53,14 @@ class CorrespondentClient(EdmsBaseClient):
     async def create_correspondent(self, token: str, request: CorrespondentAddRequest) -> CorrespondentDto:
         """POST api/correspondent/v2"""
         result = await self.make_request(
-            "POST", "api/correspondent/v2", token=token, json=request.model_dump(exclude_none=True)
+            "POST", "api/correspondent/v2", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return CorrespondentDto.model_validate(result)
 
     async def update_correspondent(self, token: str, request: CorrespondentUpdateRequest) -> CorrespondentDto:
         """PUT api/correspondent/v2"""
         result = await self.make_request(
-            "PUT", "api/correspondent/v2", token=token, json=request.model_dump(exclude_none=True)
+            "PUT", "api/correspondent/v2", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return CorrespondentDto.model_validate(result)
 
@@ -70,7 +70,7 @@ class CorrespondentClient(EdmsBaseClient):
 
     async def delete_correspondents_batch(self, token: str, ids: list[UUID]):
         """DELETE api/correspondent"""
-        await self.make_request("DELETE", "api/correspondent", token=token, json={"ids": [str(i) for i in ids]})
+        await self.make_request("DELETE", "api/correspondent", token=token, json_data={"ids": [str(i) for i in ids]})
 
     async def search_correspondent_fts(self, token: str, fts: str) -> CorrespondentDto:
         """GET api/correspondent/fts-name"""
@@ -122,14 +122,14 @@ class CorrespondentClient(EdmsBaseClient):
     async def create_correspondent_group(self, token: str, request: CorrespondentGroupAddRequest) -> CorrespondentGroupDto:
         """POST api/correspondent-group/v2"""
         result = await self.make_request(
-            "POST", "api/correspondent-group/v2", token=token, json=request.model_dump(exclude_none=True)
+            "POST", "api/correspondent-group/v2", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return CorrespondentGroupDto.model_validate(result)
 
     async def update_correspondent_group(self, token: str, request: CorrespondentGroupUpdateRequest) -> CorrespondentGroupDto:
         """PUT api/correspondent-group/v2"""
         result = await self.make_request(
-            "PUT", "api/correspondent-group/v2", token=token, json=request.model_dump(exclude_none=True)
+            "PUT", "api/correspondent-group/v2", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return CorrespondentGroupDto.model_validate(result)
 
@@ -152,16 +152,16 @@ class CorrespondentClient(EdmsBaseClient):
     async def save_group_links(self, token: str, request: IntermediateCorrespondentRequest) -> list[IntermediateCorrespondentDto]:
         """POST api/correspondent-group/link"""
         result = await self.make_request(
-            "POST", "api/correspondent-group/link", token=token, json=request.model_dump(exclude_none=True)
+            "POST", "api/correspondent-group/link", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return [IntermediateCorrespondentDto.model_validate(item) for item in result]
 
     async def delete_group_links(self, token: str, request: IntermediateCorrespondentRequest):
         """DELETE api/correspondent-group/link"""
         await self.make_request(
-            "DELETE", "api/correspondent-group/link", token=token, json=request.model_dump(exclude_none=True)
+            "DELETE", "api/correspondent-group/link", token=token, json_data=request.model_dump(exclude_none=True)
         )
 
     async def delete_correspondent_groups_batch(self, token: str, ids: list[UUID]):
         """DELETE api/correspondent-group"""
-        await self.make_request("DELETE", "api/correspondent-group", token=token, json={"ids": [str(i) for i in ids]})
+        await self.make_request("DELETE", "api/correspondent-group", token=token, json_data={"ids": [str(i) for i in ids]})

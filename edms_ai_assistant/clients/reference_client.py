@@ -179,17 +179,17 @@ class ReferenceClient(EdmsBaseClient):
 
     async def create_citizen_type(self, token: str, request: CitizenTypeRequest) -> CitizenTypeDto:
         """POST api/citizen-type"""
-        result = await self.make_request("POST", "api/citizen-type", token=token, json=request.model_dump(exclude_none=True))
+        result = await self.make_request("POST", "api/citizen-type", token=token, json_data=request.model_dump(exclude_none=True))
         return CitizenTypeDto.model_validate(result)
 
     async def update_citizen_type(self, token: str, request: CitizenTypeRequest) -> CitizenTypeDto:
         """PUT api/citizen-type"""
-        result = await self.make_request("PUT", "api/citizen-type", token=token, json=request.model_dump(exclude_none=True))
+        result = await self.make_request("PUT", "api/citizen-type", token=token, json_data=request.model_dump(exclude_none=True))
         return CitizenTypeDto.model_validate(result)
 
     async def delete_citizen_types(self, token: str, ids: list[UUID]):
         """DELETE api/citizen-type"""
-        await self.make_request("DELETE", "api/citizen-type", token=token, json={"ids": [str(i) for i in ids]})
+        await self.make_request("DELETE", "api/citizen-type", token=token, json_data={"ids": [str(i) for i in ids]})
 
     async def search_citizen_type_fts(self, token: str, fts: str) -> CitizenTypeDto:
         """GET api/citizen-type/fts-name"""
@@ -232,17 +232,17 @@ class ReferenceClient(EdmsBaseClient):
 
     async def create_city(self, token: str, city: CityDto) -> CityDto:
         """POST api/city"""
-        result = await self.make_request("POST", "api/city", token=token, json=city.model_dump(exclude_none=True))
+        result = await self.make_request("POST", "api/city", token=token, json_data=city.model_dump(exclude_none=True))
         return CityDto.model_validate(result)
 
     async def update_city(self, token: str, city: CityDto) -> CityDto:
         """PUT api/city"""
-        result = await self.make_request("PUT", "api/city", token=token, json=city.model_dump(exclude_none=True))
+        result = await self.make_request("PUT", "api/city", token=token, json_data=city.model_dump(exclude_none=True))
         return CityDto.model_validate(result)
 
     async def delete_cities(self, token: str, ids: list[UUID]):
         """DELETE api/city"""
-        await self.make_request("DELETE", "api/city", token=token, json={"ids": [str(i) for i in ids]})
+        await self.make_request("DELETE", "api/city", token=token, json_data={"ids": [str(i) for i in ids]})
 
     async def search_city_fts(self, token: str, fts: str) -> CityDto:
         """GET api/city/fts-name"""

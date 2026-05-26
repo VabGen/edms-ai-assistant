@@ -42,20 +42,20 @@ class ControlClient(EdmsBaseClient):
     async def create_control_type(self, token: str, request: ControlTypeRequest) -> ControlTypeDto:
         """POST api/control-type"""
         result = await self.make_request(
-            "POST", "api/control-type", token=token, json=request.model_dump(exclude_none=True)
+            "POST", "api/control-type", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return ControlTypeDto.model_validate(result)
 
     async def update_control_type(self, token: str, request: ControlTypeRequest) -> ControlTypeDto:
         """PUT api/control-type"""
         result = await self.make_request(
-            "PUT", "api/control-type", token=token, json=request.model_dump(exclude_none=True)
+            "PUT", "api/control-type", token=token, json_data=request.model_dump(exclude_none=True)
         )
         return ControlTypeDto.model_validate(result)
 
     async def delete_control_types(self, token: str, ids: list[UUID]):
         """DELETE api/control-type"""
-        await self.make_request("DELETE", "api/control-type", token=token, json={"ids": [str(i) for i in ids]})
+        await self.make_request("DELETE", "api/control-type", token=token, json_data={"ids": [str(i) for i in ids]})
 
     async def get_control(self, token: str, document_id: UUID | str) -> ControlDto | None:
         """Получает запись о контроле документа."""
