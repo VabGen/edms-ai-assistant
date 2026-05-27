@@ -1,6 +1,6 @@
 # edms_ai_assistant/tools/document_comparison.py
 import logging
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
@@ -59,7 +59,12 @@ def _compare_attachments(doc1: dict, doc2: dict) -> dict[str, Any]:
         if isinstance(a, dict):
             return a.get("name") or a.get("originalName") or a.get("fileName") or ""
         # Поддержка Pydantic DTO
-        return getattr(a, "name", None) or getattr(a, "original_name", None) or getattr(a, "originalName", None) or ""
+        return (
+            getattr(a, "name", None)
+            or getattr(a, "original_name", None)
+            or getattr(a, "originalName", None)
+            or ""
+        )
 
     att1_names = {_get_att_name(a) for a in att1 if _get_att_name(a)}
     att2_names = {_get_att_name(a) for a in att2 if _get_att_name(a)}
@@ -77,8 +82,8 @@ def _compare_attachments(doc1: dict, doc2: dict) -> dict[str, Any]:
 
 
 def create_doc_compare_documents_tool(
-        document_client: DocumentClient,
-        chat_model: BaseChatModel,
+    document_client: DocumentClient,
+    chat_model: BaseChatModel,
 ) -> StructuredTool:
     """Фабрика для создания инструмента сравнения документов.
 
@@ -91,10 +96,10 @@ def create_doc_compare_documents_tool(
     """
 
     async def doc_compare_documents(
-            document_id_1: str,
-            document_id_2: str,
-            comparison_focus: str | None = "all",
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        document_id_1: str,
+        document_id_2: str,
+        comparison_focus: str | None = "all",
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """
         Сравнивает два документа или версии документа.

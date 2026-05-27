@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from edms_ai_assistant.llm import get_chat_model
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.reference_client import ReferenceClient
@@ -26,7 +26,9 @@ class SubjectService:
             logger.warning("Родительские темы не загружены")
             return None
 
-        themes_text = "\n".join(f"{i + 1}. {s.name}" for i, s in enumerate(parents) if s.name)
+        themes_text = "\n".join(
+            f"{i + 1}. {s.name}" for i, s in enumerate(parents) if s.name
+        )
         llm = get_chat_model()
 
         prompt = (
@@ -54,7 +56,9 @@ class SubjectService:
             if not children:
                 return parent_id
 
-            children_text = "\n".join(f"{i + 1}. {c.name}" for i, c in enumerate(children) if c.name)
+            children_text = "\n".join(
+                f"{i + 1}. {c.name}" for i, c in enumerate(children) if c.name
+            )
             prompt2 = (
                 f"Выбери ОДНУ наиболее подходящую подтему.\n\n"
                 f"СПИСОК ПОДТЕМ:\n{children_text}\n\n"

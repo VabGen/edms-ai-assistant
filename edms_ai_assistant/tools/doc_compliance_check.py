@@ -6,33 +6,37 @@ EDMS AI Assistant — Document Compliance Check Tool (DI Factory).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.domain.document import DocumentDto
 from edms_ai_assistant.tools.attachment import (
     _get_attachment_id,
     _get_attachment_name,
     _resolve_attachment,
 )
-import contextlib
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
-    from edms_ai_assistant.clients.document_client import DocumentClient
-    from edms_ai_assistant.services.file_processor import FileProcessorService
-    from edms_ai_assistant.core.deps import AppDeps
+
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
-    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.clients.document_client import DocumentClient
+    from edms_ai_assistant.core.deps import AppDeps
+    from edms_ai_assistant.services.file_processor import FileProcessorService
 
 logger = logging.getLogger(__name__)
 
@@ -72,126 +76,383 @@ FieldDef = dict[str, str]
 
 _FIELDS_BY_CATEGORY: dict[str, list[FieldDef]] = {
     "APPEAL": [
-        {"field_key": "fioApplicant", "label": "ФИО заявителя", "source": "appeal", "update_field": "fioApplicant",
-         "check_type": "text"},
-        {"field_key": "organizationName", "label": "Организация заявителя", "source": "appeal",
-         "update_field": "organizationName", "check_type": "text"},
-        {"field_key": "signed", "label": "Подписант", "source": "appeal", "update_field": "signed",
-         "check_type": "text"},
-        {"field_key": "correspondentOrgNumber", "label": "Исходящий номер организации", "source": "appeal",
-         "update_field": "correspondentOrgNumber", "check_type": "text"},
-        {"field_key": "phone", "label": "Телефон", "source": "appeal", "update_field": "phone", "check_type": "text"},
-        {"field_key": "email", "label": "Email", "source": "appeal", "update_field": "email", "check_type": "text"},
-        {"field_key": "fullAddress", "label": "Адрес заявителя", "source": "appeal", "update_field": "fullAddress",
-         "check_type": "text"},
-        {"field_key": "index", "label": "Почтовый индекс", "source": "appeal", "update_field": "index",
-         "check_type": "text"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "correspondentAppeal", "label": "Пересылающая организация", "source": "appeal",
-         "update_field": "correspondentAppeal", "check_type": "text"},
-        {"field_key": "indexDateCoverLetter", "label": "Индекс сопроводительного", "source": "appeal",
-         "update_field": "indexDateCoverLetter", "check_type": "text"},
-        {"field_key": "reviewProgress", "label": "Ход рассмотрения", "source": "appeal",
-         "update_field": "reviewProgress", "check_type": "text"},
+        {
+            "field_key": "fioApplicant",
+            "label": "ФИО заявителя",
+            "source": "appeal",
+            "update_field": "fioApplicant",
+            "check_type": "text",
+        },
+        {
+            "field_key": "organizationName",
+            "label": "Организация заявителя",
+            "source": "appeal",
+            "update_field": "organizationName",
+            "check_type": "text",
+        },
+        {
+            "field_key": "signed",
+            "label": "Подписант",
+            "source": "appeal",
+            "update_field": "signed",
+            "check_type": "text",
+        },
+        {
+            "field_key": "correspondentOrgNumber",
+            "label": "Исходящий номер организации",
+            "source": "appeal",
+            "update_field": "correspondentOrgNumber",
+            "check_type": "text",
+        },
+        {
+            "field_key": "phone",
+            "label": "Телефон",
+            "source": "appeal",
+            "update_field": "phone",
+            "check_type": "text",
+        },
+        {
+            "field_key": "email",
+            "label": "Email",
+            "source": "appeal",
+            "update_field": "email",
+            "check_type": "text",
+        },
+        {
+            "field_key": "fullAddress",
+            "label": "Адрес заявителя",
+            "source": "appeal",
+            "update_field": "fullAddress",
+            "check_type": "text",
+        },
+        {
+            "field_key": "index",
+            "label": "Почтовый индекс",
+            "source": "appeal",
+            "update_field": "index",
+            "check_type": "text",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "correspondentAppeal",
+            "label": "Пересылающая организация",
+            "source": "appeal",
+            "update_field": "correspondentAppeal",
+            "check_type": "text",
+        },
+        {
+            "field_key": "indexDateCoverLetter",
+            "label": "Индекс сопроводительного",
+            "source": "appeal",
+            "update_field": "indexDateCoverLetter",
+            "check_type": "text",
+        },
+        {
+            "field_key": "reviewProgress",
+            "label": "Ход рассмотрения",
+            "source": "appeal",
+            "update_field": "reviewProgress",
+            "check_type": "text",
+        },
     ],
     "INCOMING": [
-        {"field_key": "outRegNumber", "label": "Исходящий номер", "source": "root", "update_field": "outRegNumber",
-         "check_type": "text"},
-        {"field_key": "outRegDate", "label": "Исходящая дата", "source": "root", "update_field": "outRegDate",
-         "check_type": "text"},
-        {"field_key": "correspondentName", "label": "Корреспондент", "source": "root",
-         "update_field": "correspondentName", "check_type": "text"},
-        {"field_key": "regDate", "label": "Дата регистрации", "source": "root", "update_field": "regDate",
-         "check_type": "text"},
-        {"field_key": "regNumber", "label": "Регистрационный номер", "source": "root", "update_field": "regNumber",
-         "check_type": "presence"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "note", "label": "Примечание", "source": "root", "update_field": "note",
-         "check_type": "presence"},
+        {
+            "field_key": "outRegNumber",
+            "label": "Исходящий номер",
+            "source": "root",
+            "update_field": "outRegNumber",
+            "check_type": "text",
+        },
+        {
+            "field_key": "outRegDate",
+            "label": "Исходящая дата",
+            "source": "root",
+            "update_field": "outRegDate",
+            "check_type": "text",
+        },
+        {
+            "field_key": "correspondentName",
+            "label": "Корреспондент",
+            "source": "root",
+            "update_field": "correspondentName",
+            "check_type": "text",
+        },
+        {
+            "field_key": "regDate",
+            "label": "Дата регистрации",
+            "source": "root",
+            "update_field": "regDate",
+            "check_type": "text",
+        },
+        {
+            "field_key": "regNumber",
+            "label": "Регистрационный номер",
+            "source": "root",
+            "update_field": "regNumber",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "note",
+            "label": "Примечание",
+            "source": "root",
+            "update_field": "note",
+            "check_type": "presence",
+        },
     ],
     "OUTGOING": [
-        {"field_key": "regNumber", "label": "Регистрационный номер", "source": "root", "update_field": "regNumber",
-         "check_type": "presence"},
-        {"field_key": "regDate", "label": "Дата регистрации", "source": "root", "update_field": "regDate",
-         "check_type": "presence"},
-        {"field_key": "correspondentName", "label": "Адресат", "source": "root", "update_field": "correspondentName",
-         "check_type": "text"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "note", "label": "Примечание", "source": "root", "update_field": "note",
-         "check_type": "presence"},
+        {
+            "field_key": "regNumber",
+            "label": "Регистрационный номер",
+            "source": "root",
+            "update_field": "regNumber",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "regDate",
+            "label": "Дата регистрации",
+            "source": "root",
+            "update_field": "regDate",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "correspondentName",
+            "label": "Адресат",
+            "source": "root",
+            "update_field": "correspondentName",
+            "check_type": "text",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "note",
+            "label": "Примечание",
+            "source": "root",
+            "update_field": "note",
+            "check_type": "presence",
+        },
     ],
     "INTERN": [
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "regDate", "label": "Дата документа", "source": "root", "update_field": "regDate",
-         "check_type": "presence"},
-        {"field_key": "note", "label": "Примечание", "source": "root", "update_field": "note",
-         "check_type": "presence"},
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "regDate",
+            "label": "Дата документа",
+            "source": "root",
+            "update_field": "regDate",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "note",
+            "label": "Примечание",
+            "source": "root",
+            "update_field": "note",
+            "check_type": "presence",
+        },
     ],
     "CONTRACT": [
-        {"field_key": "contractNumber", "label": "Номер договора", "source": "root", "update_field": "contractNumber",
-         "check_type": "text"},
-        {"field_key": "contractDate", "label": "Дата договора", "source": "root", "update_field": "contractDate",
-         "check_type": "text"},
-        {"field_key": "contractSum", "label": "Сумма договора", "source": "root", "update_field": "contractSum",
-         "check_type": "text"},
-        {"field_key": "contractSigningDate", "label": "Дата подписания", "source": "root",
-         "update_field": "contractSigningDate", "check_type": "text"},
-        {"field_key": "contractDurationStart", "label": "Начало действия", "source": "root",
-         "update_field": "contractDurationStart", "check_type": "text"},
-        {"field_key": "contractDurationEnd", "label": "Окончание действия", "source": "root",
-         "update_field": "contractDurationEnd", "check_type": "text"},
-        {"field_key": "correspondentName", "label": "Контрагент", "source": "root", "update_field": "correspondentName",
-         "check_type": "text"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "note", "label": "Примечание", "source": "root", "update_field": "note",
-         "check_type": "presence"},
+        {
+            "field_key": "contractNumber",
+            "label": "Номер договора",
+            "source": "root",
+            "update_field": "contractNumber",
+            "check_type": "text",
+        },
+        {
+            "field_key": "contractDate",
+            "label": "Дата договора",
+            "source": "root",
+            "update_field": "contractDate",
+            "check_type": "text",
+        },
+        {
+            "field_key": "contractSum",
+            "label": "Сумма договора",
+            "source": "root",
+            "update_field": "contractSum",
+            "check_type": "text",
+        },
+        {
+            "field_key": "contractSigningDate",
+            "label": "Дата подписания",
+            "source": "root",
+            "update_field": "contractSigningDate",
+            "check_type": "text",
+        },
+        {
+            "field_key": "contractDurationStart",
+            "label": "Начало действия",
+            "source": "root",
+            "update_field": "contractDurationStart",
+            "check_type": "text",
+        },
+        {
+            "field_key": "contractDurationEnd",
+            "label": "Окончание действия",
+            "source": "root",
+            "update_field": "contractDurationEnd",
+            "check_type": "text",
+        },
+        {
+            "field_key": "correspondentName",
+            "label": "Контрагент",
+            "source": "root",
+            "update_field": "correspondentName",
+            "check_type": "text",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "note",
+            "label": "Примечание",
+            "source": "root",
+            "update_field": "note",
+            "check_type": "presence",
+        },
     ],
     "MEETING": [
-        {"field_key": "dateMeeting", "label": "Дата совещания", "source": "root", "update_field": "dateMeeting",
-         "check_type": "text"},
-        {"field_key": "startMeeting", "label": "Время начала", "source": "root", "update_field": "startMeeting",
-         "check_type": "text"},
-        {"field_key": "endMeeting", "label": "Время окончания", "source": "root", "update_field": "endMeeting",
-         "check_type": "text"},
-        {"field_key": "placeMeeting", "label": "Место проведения", "source": "root", "update_field": "placeMeeting",
-         "check_type": "text"},
-        {"field_key": "externalInvitees", "label": "Внешние приглашённые", "source": "root",
-         "update_field": "externalInvitees", "check_type": "presence"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
+        {
+            "field_key": "dateMeeting",
+            "label": "Дата совещания",
+            "source": "root",
+            "update_field": "dateMeeting",
+            "check_type": "text",
+        },
+        {
+            "field_key": "startMeeting",
+            "label": "Время начала",
+            "source": "root",
+            "update_field": "startMeeting",
+            "check_type": "text",
+        },
+        {
+            "field_key": "endMeeting",
+            "label": "Время окончания",
+            "source": "root",
+            "update_field": "endMeeting",
+            "check_type": "text",
+        },
+        {
+            "field_key": "placeMeeting",
+            "label": "Место проведения",
+            "source": "root",
+            "update_field": "placeMeeting",
+            "check_type": "text",
+        },
+        {
+            "field_key": "externalInvitees",
+            "label": "Внешние приглашённые",
+            "source": "root",
+            "update_field": "externalInvitees",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
     ],
     "MEETING_QUESTION": [
-        {"field_key": "dateMeetingQuestion", "label": "Дата заседания", "source": "root",
-         "update_field": "dateMeetingQuestion", "check_type": "text"},
-        {"field_key": "numberQuestion", "label": "Номер вопроса", "source": "root", "update_field": "numberQuestion",
-         "check_type": "presence"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "commentQuestion", "label": "Комментарий", "source": "root", "update_field": "commentQuestion",
-         "check_type": "presence"},
+        {
+            "field_key": "dateMeetingQuestion",
+            "label": "Дата заседания",
+            "source": "root",
+            "update_field": "dateMeetingQuestion",
+            "check_type": "text",
+        },
+        {
+            "field_key": "numberQuestion",
+            "label": "Номер вопроса",
+            "source": "root",
+            "update_field": "numberQuestion",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "commentQuestion",
+            "label": "Комментарий",
+            "source": "root",
+            "update_field": "commentQuestion",
+            "check_type": "presence",
+        },
     ],
     "QUESTION": [
-        {"field_key": "dateQuestion", "label": "Дата вопроса", "source": "root", "update_field": "dateQuestion",
-         "check_type": "text"},
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
+        {
+            "field_key": "dateQuestion",
+            "label": "Дата вопроса",
+            "source": "root",
+            "update_field": "dateQuestion",
+            "check_type": "text",
+        },
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
     ],
     "CUSTOM": [
-        {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-         "check_type": "presence"},
-        {"field_key": "regDate", "label": "Дата документа", "source": "root", "update_field": "regDate",
-         "check_type": "presence"},
+        {
+            "field_key": "shortSummary",
+            "label": "Краткое содержание",
+            "source": "root",
+            "update_field": "shortSummary",
+            "check_type": "presence",
+        },
+        {
+            "field_key": "regDate",
+            "label": "Дата документа",
+            "source": "root",
+            "update_field": "regDate",
+            "check_type": "presence",
+        },
     ],
 }
 
 _FIELDS_DEFAULT: list[FieldDef] = [
-    {"field_key": "shortSummary", "label": "Краткое содержание", "source": "root", "update_field": "shortSummary",
-     "check_type": "presence"},
+    {
+        "field_key": "shortSummary",
+        "label": "Краткое содержание",
+        "source": "root",
+        "update_field": "shortSummary",
+        "check_type": "presence",
+    },
 ]
 
 
@@ -218,8 +479,8 @@ def _format_value(value: Any) -> str | None:
 
 
 def _extract_card_fields(
-        doc: DocumentDto,
-        category: str,
+    doc: DocumentDto,
+    category: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     appeal = getattr(doc, "documentAppeal", None)
     field_defs = _get_field_defs(category)
@@ -266,12 +527,12 @@ def _extract_card_fields(
 
 
 async def _extract_text(
-        token: str,
-        document_id: str,
-        attachment_id: str,
-        attachment_name: str,
-        attach_client: AttachmentClient,
-        file_processor: FileProcessorService,
+    token: str,
+    document_id: str,
+    attachment_id: str,
+    attachment_name: str,
+    attach_client: AttachmentClient,
+    file_processor: FileProcessorService,
 ) -> str | None:
     suffix = Path(attachment_name).suffix.lower() or ".tmp"
     if suffix not in _SUPPORTED_EXTENSIONS:
@@ -343,11 +604,11 @@ _USER_PROMPT = """
 
 
 async def _run_llm(
-        category: str,
-        text_fields: list[dict[str, Any]],
-        attachment_text: str,
-        attachment_name: str,
-        llm: BaseChatModel,
+    category: str,
+    text_fields: list[dict[str, Any]],
+    attachment_text: str,
+    attachment_name: str,
+    llm: BaseChatModel,
 ) -> list[dict[str, Any]]:
     """LLM-проверка text-полей. Возвращает список field-объектов."""
     if not text_fields:
@@ -410,7 +671,7 @@ async def _run_llm(
 
 
 def _build_presence_results(
-        presence_fields: list[dict[str, Any]],
+    presence_fields: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Presence-поля всегда ok — они заполнены оператором, не ищем в файле."""
     return [
@@ -462,9 +723,9 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
     llm: BaseChatModel = deps.chat_model
 
     async def doc_compliance_check(
-            attachment_id: str | None = None,
-            check_all: bool = False,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        attachment_id: str | None = None,
+        check_all: bool = False,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Проверяет соответствие заполненных полей карточки EDMS-документа содержимому вложения.
 
@@ -492,9 +753,19 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
             document_id = get_document_id_from_config(config)
             token = get_token_from_config(config)
         except Exception as e:
-            logger.error("Failed to get token from config: %s | config keys: %s", e,
-                         list((config or {}).get("configurable", {}).keys()) if config else "None")
-            return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
+            logger.error(
+                "Failed to get token from config: %s | config keys: %s",
+                e,
+                (
+                    list((config or {}).get("configurable", {}).keys())
+                    if config
+                    else "None"
+                ),
+            )
+            return {
+                "status": "error",
+                "message": f"Ошибка авторизации: токен не найден. {e}",
+            }
 
         logger.info(
             "doc_compliance_check: doc=%s... att=%s check_all=%s",
@@ -508,7 +779,10 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
             raw = await doc_client.get_document_metadata(token, document_id)
             doc = DocumentDto.model_validate(raw)
         except Exception as exc:
-            return {"status": "error", "message": f"Не удалось получить документ: {exc}"}
+            return {
+                "status": "error",
+                "message": f"Не удалось получить документ: {exc}",
+            }
 
         cat_raw = getattr(doc, "docCategoryConstant", None)
         category = (
@@ -517,7 +791,10 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
 
         attachments = list(getattr(doc, "attachmentDocument", None) or [])
         if not attachments:
-            return {"status": "error", "message": "В документе нет вложений для проверки."}
+            return {
+                "status": "error",
+                "message": "В документе нет вложений для проверки.",
+            }
 
         # ── 2. Выбор вложений ─────────────────────────────────────────────────
         if attachment_id:
@@ -570,7 +847,9 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
         if not text_fields:
             fields = presence_results
             fields.sort(
-                key=lambda f: {"mismatch": 0, "not_found": 1, "ok": 2}.get(f["status"], 3)
+                key=lambda f: {"mismatch": 0, "not_found": 1, "ok": 2}.get(
+                    f["status"], 3
+                )
             )
             overall = _compute_overall(fields)
             stats = {
@@ -629,7 +908,9 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
             ]
             fields = fallback_text + presence_results
             fields.sort(
-                key=lambda f: {"mismatch": 0, "not_found": 1, "ok": 2}.get(f["status"], 3)
+                key=lambda f: {"mismatch": 0, "not_found": 1, "ok": 2}.get(
+                    f["status"], 3
+                )
             )
             overall = _compute_overall(fields)
             stats = {
@@ -689,7 +970,9 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
                 if existing is None:
                     agg[key] = dict(f)
                 else:
-                    if _priority.get(f["status"], 0) > _priority.get(existing["status"], 0):
+                    if _priority.get(f["status"], 0) > _priority.get(
+                        existing["status"], 0
+                    ):
                         agg[key].update(
                             {
                                 "status": f["status"],
@@ -747,7 +1030,7 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
         }
 
     return StructuredTool.from_function(
-        func=doc_compliance_check,
+        coroutine=doc_compliance_check,
         name="doc_compliance_check",
         description=(
             "Проверяет соответствие заполненных полей карточки EDMS-документа содержимому вложения.\n"

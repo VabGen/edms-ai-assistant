@@ -19,9 +19,10 @@ EDMS AI Assistant — Access Grief Search Tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
 import httpx
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, model_validator
 
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
     from edms_ai_assistant.clients.employee_client import EmployeeClient
     from edms_ai_assistant.domain.employee import AccessGriefDto, EmployeeAccessGriefDto
-    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ _MAX_EMPLOYEES: int = 50
 
 class AccessGriefSearchInput(BaseModel):
     """Схема ввода для поиска по грифам доступа."""
+
     grief_name: str | None = Field(
         None,
         max_length=300,
@@ -118,18 +119,13 @@ def _format_employee_grief(grief: EmployeeAccessGriefDto) -> dict[str, Any]:
     """Форматирует EmployeeAccessGriefDto."""
     return {
         "id": str(grief.id or ""),
-        "name": grief.name or "—",
+        "name": grief.access_grief.name or "—",
     }
 
 
 def _format_grief_employee(raw: EmployeeAccessGriefDto) -> dict[str, Any]:
     """Форматирует EmployeeAccessGriefDto для списка сотрудников с грифом."""
-    # Note: EmployeeAccessGriefDto might need to be checked if it actually contains an employee field.
-    # Looking at domain/employee.py, EmployeeAccessGriefDto(AccessGriefDto) doesn't have employee.
-    # However, the backend might be sending it. Let's assume it behaves as DTO if possible.
-    # If the backend sends something else, we'd need to adjust the DTO.
-    # Based on _format_grief_employee logic, it seems it expects an object with 'employee' attr.
-    
+
     emp = getattr(raw, "employee", None)
     if not emp:
         return {"id": "—", "full_name": "—"}
@@ -160,7 +156,7 @@ def _format_grief_employee(raw: EmployeeAccessGriefDto) -> dict[str, Any]:
 
 
 async def _resolve_grief_name(
-        grief_client: AccessGriefClient, token: str, name: str
+    grief_client: AccessGriefClient, token: str, name: str
 ) -> str | None:
     """Ищет UUID грифа по названию через GET /api/access-grief?name=..."""
     try:
@@ -189,10 +185,10 @@ async def _resolve_grief_name(
 
 
 async def _get_grief_employees(
-        grief_client: AccessGriefClient,
-        token: str,
-        grief_id: str,
-        grief_name: str | None = None,
+    grief_client: AccessGriefClient,
+    token: str,
+    grief_id: str,
+    grief_name: str | None = None,
 ) -> dict[str, Any]:
     """Получает сотрудников с указанным грифом."""
     try:
@@ -208,9 +204,7 @@ async def _get_grief_employees(
         )
 
         employees = [_format_grief_employee(e) for e in raw_employees]
-        grief_label = grief_name or (
-            grief_info.name if grief_info else grief_id[:8]
-        )
+        grief_label = grief_name or (grief_info.name if grief_info else grief_id[:8])
 
         if not employees:
             return {
@@ -244,7 +238,7 @@ async def _get_grief_employees(
 
 
 async def _get_employee_griefs(
-        employee_client: EmployeeClient, token: str, employee_id: str
+    employee_client: EmployeeClient, token: str, employee_id: str
 ) -> dict[str, Any]:
     """Получает грифы доступа конкретного сотрудника."""
     try:
@@ -276,7 +270,7 @@ async def _get_employee_griefs(
 
 
 async def _list_all_griefs(
-        grief_client: AccessGriefClient, token: str
+    grief_client: AccessGriefClient, token: str
 ) -> dict[str, Any]:
     """Возвращает список всех грифов доступа в системе."""
     try:
@@ -310,8 +304,8 @@ async def _list_all_griefs(
 
 
 def create_access_grief_tool(
-        grief_client: AccessGriefClient,
-        employee_client: EmployeeClient,
+    grief_client: AccessGriefClient,
+    employee_client: EmployeeClient,
 ) -> StructuredTool:
     """Фабрика инструмента поиска грифов с внедрением зависимостей.
 
@@ -324,11 +318,11 @@ def create_access_grief_tool(
     """
 
     async def access_grief_tool(
-            grief_name: str | None = None,
-            grief_id: str | None = None,
-            employee_id: str | None = None,
-            list_all: bool | None = None,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        grief_name: str | None = None,
+        grief_id: str | None = None,
+        employee_id: str | None = None,
+        list_all: bool | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Searches for access griefs and employees with specific griefs.
 
@@ -391,7 +385,7 @@ def create_access_grief_tool(
         }
 
     return StructuredTool.from_function(
-        func=access_grief_tool,
+        coroutine=access_grief_tool,
         name="access_grief_tool",
         description=(
             "Searches for access griefs and employees with specific griefs.\n"

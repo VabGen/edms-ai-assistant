@@ -7,30 +7,37 @@ EDMS AI Assistant — Report Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Annotated, TYPE_CHECKING
-from uuid import UUID
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.tools import StructuredTool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
-from edms_ai_assistant.domain.report import (
-    ReportTaskFilter,
-    PerformingDisciplineReportFilter,
-    VolumeOfDocumentFlowReportFilter,
-    ReceivedAppealsReportFilter,
+from edms_ai_assistant.domain.enums import (
+    DeclarantType,
+    DocCategory,
+    DocumentStatus,
+    ReportFormatType,
+    ReportTaskStatus,
 )
-from edms_ai_assistant.domain.enums import ReportTaskStatus, ReportFormatType, DocCategory, DeclarantType
+from edms_ai_assistant.domain.report import (
+    PerformingDisciplineReportFilter,
+    ReceivedAppealsReportFilter,
+    ReportTaskFilter,
+    VolumeOfDocumentFlowReportFilter,
+)
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
 
 class ReportListInput(BaseModel):
-    status: ReportTaskStatus | None = Field(None, description="Фильтр по статусу отчета.")
+    status: ReportTaskStatus | None = Field(
+        None, description="Фильтр по статусу отчета."
+    )
     page: int = Field(0, description="Номер страницы.")
     size: int = Field(10, description="Размер страницы.")
 
@@ -38,7 +45,9 @@ class ReportListInput(BaseModel):
 class PerformingDisciplineInput(BaseModel):
     date_reg_start: str = Field(..., description="Начальная дата (ISO).")
     date_reg_end: str = Field(..., description="Конечная дата (ISO).")
-    doc_categories: list[DocCategory] = Field(default_factory=list, description="Категории документов.")
+    doc_categories: list[DocCategory] = Field(
+        default_factory=list, description="Категории документов."
+    )
     in_archive: bool | None = Field(None, description="Включать архивные.")
 
 
@@ -53,7 +62,9 @@ class VolumeDocumentFlowInput(BaseModel):
 class ReceivedAppealsInput(BaseModel):
     date_reg_start: str = Field(..., description="Начальная дата (ISO).")
     date_reg_end: str = Field(..., description="Конечная дата (ISO).")
-    declarant_types: list[DeclarantType] = Field(default_factory=list, description="Типы заявителей (INDIVIDUAL/ENTITY).")
+    declarant_types: list[DeclarantType] = Field(
+        default_factory=list, description="Типы заявителей (INDIVIDUAL/ENTITY)."
+    )
     in_archive: bool | None = Field(None, description="Включать архивные.")
 
 
@@ -83,7 +94,7 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             "status": "success",
             "reports": [r.model_dump(by_alias=True) for r in result.content],
             "has_next": result.has_next,
-            "total": result.number_of_elements
+            "total": result.number_of_elements,
         }
 
     async def report_performing_discipline_tool(
@@ -101,14 +112,16 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             date_reg_start=datetime.fromisoformat(date_reg_start),
             date_reg_end=datetime.fromisoformat(date_reg_end),
             doc_category_constants=doc_categories,
-            in_archive=in_archive
+            in_archive=in_archive,
         )
 
-        result = await deps.report_client.create_performing_discipline_report(token, filter_data)
+        result = await deps.report_client.create_performing_discipline_report(
+            token, filter_data
+        )
         return {
             "status": "success",
             "message": f"Задача на формирование отчета создана. ID: {result.id}",
-            "report": result.model_dump(by_alias=True)
+            "report": result.model_dump(by_alias=True),
         }
 
     async def report_volume_flow_tool(
@@ -128,14 +141,16 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             date_reg_end=datetime.fromisoformat(date_reg_end),
             flag_diagram_circular=flag_diagram_circular,
             flag_diagram_by_type=flag_diagram_by_type,
-            in_archive=in_archive
+            in_archive=in_archive,
         )
 
-        result = await deps.report_client.create_volume_of_document_flow_report(token, filter_data)
+        result = await deps.report_client.create_volume_of_document_flow_report(
+            token, filter_data
+        )
         return {
             "status": "success",
             "message": f"Задача на формирование отчета создана. ID: {result.id}",
-            "report": result.model_dump(by_alias=True)
+            "report": result.model_dump(by_alias=True),
         }
 
     async def report_received_appeals_tool(
@@ -153,14 +168,16 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             date_reg_start=datetime.fromisoformat(date_reg_start),
             date_reg_end=datetime.fromisoformat(date_reg_end),
             declarant_types=declarant_types,
-            in_archive=in_archive
+            in_archive=in_archive,
         )
 
-        result = await deps.report_client.create_received_appeals_report(token, filter_data)
+        result = await deps.report_client.create_received_appeals_report(
+            token, filter_data
+        )
         return {
             "status": "success",
             "message": f"Задача на формирование отчета создана. ID: {result.id}",
-            "report": result.model_dump(by_alias=True)
+            "report": result.model_dump(by_alias=True),
         }
 
     async def report_document_status_tool(
@@ -178,14 +195,16 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             type=report_type,
             doc_category_constants=doc_categories,
             status=statuses,
-            in_archive=in_archive
+            in_archive=in_archive,
         )
 
-        result = await deps.report_client.create_document_on_status_report(token, filter_data)
+        result = await deps.report_client.create_document_on_status_report(
+            token, filter_data
+        )
         return {
             "status": "success",
             "message": f"Задача на формирование отчета по статусам создана. ID: {result.id}",
-            "report": result.model_dump(by_alias=True)
+            "report": result.model_dump(by_alias=True),
         }
 
     return [

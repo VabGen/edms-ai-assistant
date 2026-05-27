@@ -5,17 +5,18 @@ Actions API routes.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, TYPE_CHECKING, cast
-import json
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.deps import DepsDep, get_agent, get_deps
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
@@ -23,7 +24,8 @@ from edms_ai_assistant.api.helpers import (
     resolve_user_context,
     unwrap_text_from_agent_result,
 )
-from edms_ai_assistant.model import AssistantResponse, UserInput
+from edms_ai_assistant.core.deps import AppDeps
+from edms_ai_assistant.model import AssistantResponse, SummarizeInput, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.summarizer.errors import SummarizerError
 from edms_ai_assistant.summarizer.pipeline.direct import StreamEvent
@@ -37,8 +39,7 @@ from edms_ai_assistant.utils.hash_utils import get_file_hash
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from edms_ai_assistant.core.deps import AppDeps
-    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+
     from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ _MODE_MAP: dict[str, SummaryMode] = {
 
 
 # ── Helper: build RunnableConfig for direct tool invocation ────────────────
+
 
 def _make_tool_config(
     user_token: str,
@@ -70,7 +72,7 @@ def _make_tool_config(
     }
     if document_id:
         cfg["configurable"]["document_id"] = document_id
-    return cast("RunnableConfig", cfg)
+    return cast("RunnableConfig", cast(object, cfg))
 
 
 async def _run_agent_once(
@@ -194,7 +196,7 @@ async def _resolve_file_bytes(
 )
 async def api_direct_summarize(
     request: Request,
-    user_input: UserInput,
+    user_input: SummarizeInput,
     background_tasks: BackgroundTasks,
     agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
     deps: Annotated[AppDeps, Depends(get_deps)],
@@ -413,7 +415,9 @@ async def api_direct_summarize(
 
     if not raw_text or len(raw_text.strip()) < 30:
         logger.info("Using Agent fallback for text extraction...")
-        user_context = await resolve_user_context(user_input, str(user_id), deps.employee_client)
+        user_context = await resolve_user_context(
+            user_input, str(user_id), deps.employee_client
+        )
         instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
         extract_msg = (
             f"{instructions}Прочитай файл и верни его полное текстовое содержимое. "
@@ -429,9 +433,7 @@ async def api_direct_summarize(
             file_path=current_path,
             file_name=None,
         )
-        raw_text = unwrap_text_from_agent_result(
-            extract_result or ""
-        )
+        raw_text = unwrap_text_from_agent_result(extract_result or "")
 
     if not raw_text or len(raw_text.strip()) < 30:
         logger.warning("Text extraction returned < 30 chars — cannot summarize")
@@ -447,6 +449,45 @@ async def api_direct_summarize(
             },
         )
 
+    if current_path and not is_uuid and Path(current_path).exists():
+        background_tasks.add_task(cleanup_file, current_path)
+
+    # ── Direct summarization using service (correct mode, writes to DB cache) ──
+    if service is not None:
+        try:
+            mode = _MODE_MAP.get(summary_type, SummaryMode.ABSTRACTIVE)
+            req = SummarizationRequest(
+                file_content=raw_text.encode("utf-8"),
+                file_name="agent_extracted.txt",
+                mode=mode,
+                language="ru",
+                request_id=str(uuid.uuid4()),
+                force_refresh=False,
+            )
+            resp = await service.summarize(req)
+            output_text = json.dumps(resp.output, ensure_ascii=False)
+            return AssistantResponse(
+                status="success",
+                response=output_text,
+                thread_id=f"v2_{req.request_id[:8]}",
+                metadata={
+                    "cache_file_identifier": file_identifier,
+                    "cache_summary_type": mode.value,
+                    "cache_context_ui_id": user_input.context_ui_id,
+                    "from_cache": resp.cache_hit,
+                    "pipeline": resp.chunking_strategy,
+                    "cost_usd": resp.cost_usd,
+                    "v2": True,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Direct summarization from raw_text failed (%s) — using agent",
+                exc,
+                exc_info=True,
+            )
+
+    # ── Last resort: agent-based summarization ────────────────────────────────
     _type_labels = {
         "extractive": "ключевые факты, даты, суммы",
         "abstractive": "краткое изложение своими словами",
@@ -454,13 +495,18 @@ async def api_direct_summarize(
     }
     type_label = _type_labels.get(summary_type, summary_type)
     instructions = f"Работай с вложением {current_path}. " if is_uuid else ""
-    user_context = await resolve_user_context(user_input, str(user_id), deps.employee_client)
+    user_context = await resolve_user_context(
+        user_input, str(user_id), deps.employee_client
+    )
 
     user_context = dict(user_context)
     user_context["preferred_summary_format"] = summary_type
     response_text = await _run_agent_once(
         agent=agent,
-        message=f"{instructions}Проанализируй этот файл и выдели {type_label}.",
+        message=(
+            f"{instructions}Проанализируй этот файл и выдели {type_label}. "
+            f"Используй summary_type='{summary_type}'."
+        ),
         user_token=user_input.user_token,
         context_ui_id=user_input.context_ui_id,
         thread_id=new_thread_id,
@@ -468,20 +514,12 @@ async def api_direct_summarize(
         file_path=current_path,
         file_name=None,
     )
-    fallback_result: dict = {"content": response_text}
-    _legacy_ignored = (
-        fallback_result.get("content") or fallback_result.get("response") or ""
-    )
-
-    if current_path and not is_uuid and Path(current_path).exists():
-        background_tasks.add_task(cleanup_file, current_path)
 
     return AssistantResponse(
-        status=fallback_result.get("status", "success"),
+        status="success",
         response=response_text or "Анализ завершён.",
         thread_id=new_thread_id,
         metadata={
-            **fallback_result.get("metadata", {}),
             "cache_file_identifier": file_identifier,
             "cache_summary_type": summary_type,
             "cache_context_ui_id": user_input.context_ui_id,
@@ -495,6 +533,7 @@ async def api_direct_summarize(
 # SSE streaming endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _sse(payload: dict) -> str:
     """Формирует одну SSE data-строку."""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -507,7 +546,7 @@ def _sse(payload: dict) -> str:
 )
 async def api_direct_summarize_stream(
     request: Request,
-    user_input: UserInput,
+    user_input: SummarizeInput,
     deps: Annotated[AppDeps, Depends(get_deps)],
 ) -> StreamingResponse:
     """
@@ -548,6 +587,7 @@ async def api_direct_summarize_stream(
     async def event_gen() -> AsyncIterator[str]:
         try:
             from edms_ai_assistant.api.sse import SSE_KEEPALIVE
+
             yield SSE_KEEPALIVE.decode()
 
             file_bytes, file_name = await _resolve_file_bytes(
@@ -557,10 +597,12 @@ async def api_direct_summarize_stream(
                 deps=deps,
             )
             if not file_bytes or len(file_bytes) <= 10:
-                yield _sse({
-                    "event": "error",
-                    "message": "Не удалось прочитать содержимое документа.",
-                })
+                yield _sse(
+                    {
+                        "event": "error",
+                        "message": "Не удалось прочитать содержимое документа.",
+                    }
+                )
                 yield "data: [DONE]\n\n"
                 return
 
@@ -580,41 +622,47 @@ async def api_direct_summarize_stream(
                     if event.kind == "delta" and event.text:
                         yield _sse({"event": "delta", "text": event.text})
                     elif event.kind == "error":
-                        yield _sse({
-                            "event": "error",
-                            "message": "LLM streaming error",
-                        })
+                        yield _sse(
+                            {
+                                "event": "error",
+                                "message": "LLM streaming error",
+                            }
+                        )
                 elif isinstance(event, SummarizationResponse):
                     final = event
 
             if final is None:
-                yield _sse({
-                    "event": "error",
-                    "message": "Стриминг не вернул финальный результат.",
-                })
+                yield _sse(
+                    {
+                        "event": "error",
+                        "message": "Стриминг не вернул финальный результат.",
+                    }
+                )
                 yield "data: [DONE]\n\n"
                 return
 
             # Return raw JSON for the frontend to render structured UI
             response_text = json.dumps(final.output, ensure_ascii=False)
-            yield _sse({
-                "event": "result",
-                "status": "success",
-                "response": response_text or "{}",
-                "thread_id": new_thread_id,
-                "metadata": {
-                    "cache_file_identifier": file_identifier or final.file_hash,
-                    "cache_summary_type": mode.value,
-                    "cache_context_ui_id": user_input.context_ui_id,
-                    "from_cache": final.cache_hit,
-                    "pipeline": final.chunking_strategy,
-                    "cost_usd": final.cost_usd,
-                    "input_tokens": final.input_tokens,
-                    "output_tokens": final.output_tokens,
-                    "latency_ms": final.latency_ms,
-                    "v2": True,
-                },
-            })
+            yield _sse(
+                {
+                    "event": "result",
+                    "status": "success",
+                    "response": response_text or "{}",
+                    "thread_id": new_thread_id,
+                    "metadata": {
+                        "cache_file_identifier": file_identifier or final.file_hash,
+                        "cache_summary_type": mode.value,
+                        "cache_context_ui_id": user_input.context_ui_id,
+                        "from_cache": final.cache_hit,
+                        "pipeline": final.chunking_strategy,
+                        "cost_usd": final.cost_usd,
+                        "input_tokens": final.input_tokens,
+                        "output_tokens": final.output_tokens,
+                        "latency_ms": final.latency_ms,
+                        "v2": True,
+                    },
+                }
+            )
             yield "data: [DONE]\n\n"
 
         except SummarizerError as exc:

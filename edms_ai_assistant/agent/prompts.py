@@ -14,7 +14,7 @@ module-level flag that controls the default.
 from __future__ import annotations
 
 import html
-from typing import Final, TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from edms_ai_assistant.services.nlp_service import UserIntent
 
@@ -542,11 +542,11 @@ class PromptBuilder:
 
     @staticmethod
     def build(
-            context: ContextParams,
-            intent: UserIntent,
-            semantic_xml: str,
-            *,
-            lean: bool = False,
+        context: ContextParams,
+        intent: UserIntent,
+        semantic_xml: str,
+        *,
+        lean: bool = False,
     ) -> str:
         """Build the complete system prompt.
 

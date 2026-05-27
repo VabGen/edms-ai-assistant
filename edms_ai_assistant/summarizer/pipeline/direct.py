@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 from pydantic import ValidationError
@@ -24,16 +24,16 @@ from edms_ai_assistant.summarizer.errors import (
     LLMServerError,
     LLMTransportError,
 )
-from edms_ai_assistant.summarizer.errors import ValidationError as SummarizerValidationError
+from edms_ai_assistant.summarizer.errors import (
+    ValidationError as SummarizerValidationError,
+)
 
 # Lazy probe для опционального json_repair
+_repair_json: Callable[[str], str] | None = None
 try:
     from json_repair import repair_json as _repair_json  # type: ignore[import]
-
-    _HAS_JSON_REPAIR = True
-except ImportError:  # pragma: no cover
-    _repair_json = None  # type: ignore[assignment]
-    _HAS_JSON_REPAIR = False
+except Exception:  # pragma: no cover
+    pass
 from edms_ai_assistant.summarizer.observability.tracing import (
     Stopwatch,
     record_llm_call,
@@ -47,6 +47,7 @@ from edms_ai_assistant.summarizer.structured.models import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
     from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
 
 logger = logging.getLogger(__name__)
@@ -382,10 +383,10 @@ def _try_repair_truncated_json(raw: str) -> str | None:
     if not text:
         return None
 
-    if _HAS_JSON_REPAIR:
+    _fn = _repair_json
+    if callable(_fn):
         try:
-            # We already know _repair_json is available via probe
-            repaired = _repair_json(text)
+            repaired = _fn(text)
             if repaired and repaired != "null":
                 return repaired
         except Exception as exc:
@@ -427,7 +428,7 @@ def _extract_json_from_text(raw: str, mode: SummaryMode) -> str | None:
     text = raw.strip()
 
     # Ищем JSON-блок в тексте
-    json_match = re.search(r"\{[\s\S]*\}", text)
+    json_match = re.search(r"{[\s\S]*}", text)
     if json_match:
         candidate = json_match.group(0)
         try:
@@ -763,7 +764,7 @@ class DirectSummarizationPipeline:
             candidates.append(repaired)
 
         # 4. Извлекаем первый JSON-объект из текста
-        json_match = re.search(r"\{[\s\S]*\}", text)
+        json_match = re.search(r"{[\s\S]*}", text)
         if json_match:
             extracted = json_match.group(0)
             if extracted not in candidates:

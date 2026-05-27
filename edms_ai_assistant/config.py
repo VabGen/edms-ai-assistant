@@ -1,6 +1,5 @@
 # edms_ai_assistant/config.py
-"""Production-ready configuration with validation, security, and environment separation.
-"""
+"""Production-ready configuration with validation, security, and environment separation."""
 
 from __future__ import annotations
 
@@ -18,11 +17,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class EdmsSettings(BaseSettings):
     """Настройки для интеграции с EDMS (СЭД)."""
+
     model_config = SettingsConfigDict(
         env_prefix="EDMS_",
         env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
 
     base_url: HttpUrl = Field(default="http://127.0.0.1:8098")
@@ -35,7 +35,9 @@ class EdmsSettings(BaseSettings):
     client_secret: SecretStr | None = None
 
     # MCP & Vector DB
-    mcp_url: HttpUrl | None = Field(default=None, description="FastMCP HTTP transport URL")
+    mcp_url: HttpUrl | None = Field(
+        default=None, description="FastMCP HTTP transport URL"
+    )
     mcp_port: int = 9000
 
 
@@ -55,8 +57,12 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = Field(
         default="development", pattern="^(development|staging|production)$"
     )
-    APP_VERSION: str = Field(default="0.0.0-dev", description="Set by CI/CD from Git tags")
-    BUILD_COMMIT: str | None = Field(default=None, description="Set by CI/CD from Git SHA")
+    APP_VERSION: str = Field(
+        default="0.0.0-dev", description="Set by CI/CD from Git tags"
+    )
+    BUILD_COMMIT: str | None = Field(
+        default=None, description="Set by CI/CD from Git SHA"
+    )
     API_PORT: int = Field(default=8000, ge=1, le=65535)
     DEBUG: bool = Field(default=False)
 
@@ -76,10 +82,14 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     # ── LLM Configuration ────────────────────────────────────────────────────
-    LLM_GENERATIVE_URL: HttpUrl = Field(default="http://model-generative.shared.du.iba/v1")
+    LLM_GENERATIVE_URL: HttpUrl = Field(
+        default="http://model-generative.shared.du.iba/v1"
+    )
     LLM_GENERATIVE_MODEL: str = Field(default="generative-model")
 
-    LLM_EMBEDDING_URL: HttpUrl = Field(default="http://model-embedding.shared.du.iba/v1")
+    LLM_EMBEDDING_URL: HttpUrl = Field(
+        default="http://model-embedding.shared.du.iba/v1"
+    )
     LLM_EMBEDDING_MODEL: str = "embedding-model"
 
     LLM_API_KEY: SecretStr | None = None
@@ -188,6 +198,7 @@ class Settings(BaseSettings):
     AGENT_MAX_ITERATIONS: int = Field(default=10, ge=1, le=50)
     AGENT_MAX_CONTEXT_MESSAGES: int = Field(default=20, ge=5, le=100)
     AGENT_TIMEOUT: float = Field(default=120.0, ge=10.0, le=600.0)
+    AGENT_LLM_TIMEOUT: float = Field(default=120.0, ge=10.0, le=600.0)
     AGENT_ENABLE_TRACING: bool = False
     AGENT_LOG_LEVEL: str = "INFO"
     AGENT_MAX_RETRIES: int = 3
@@ -214,7 +225,9 @@ class Settings(BaseSettings):
     LOGGING_INCLUDE_TRACE_ID: bool = True
 
     # ── OpenTelemetry ─────────────────────────────────────────────────────────
-    OTEL_ENABLED: bool = Field(default=False, description="Enable FastAPI & HTTPX auto-instrumentation")
+    OTEL_ENABLED: bool = Field(
+        default=False, description="Enable FastAPI & HTTPX auto-instrumentation"
+    )
 
     # ── Summarization Configuration ──────────────────────────────────────────
     SUMMARIZER_CONTEXT_WINDOW: int = Field(default=4096)
@@ -246,9 +259,13 @@ class Settings(BaseSettings):
         """Запрещает запуск в production с дефолтными секретами."""
         if self.ENVIRONMENT == "production":
             if self.JWT_SECRET_KEY.get_secret_value() == "change-me-in-production":
-                raise ValueError("JWT_SECRET_KEY must be changed from default in production!")
+                raise ValueError(
+                    "JWT_SECRET_KEY must be changed from default in production!"
+                )
             if self.POSTGRES_PASSWORD.get_secret_value() == "password":
-                raise ValueError("POSTGRES_PASSWORD must be changed from default in production!")
+                raise ValueError(
+                    "POSTGRES_PASSWORD must be changed from default in production!"
+                )
         return self
 
 

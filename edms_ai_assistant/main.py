@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.datastructures import State as _AppState
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
@@ -21,14 +24,15 @@ from edms_ai_assistant.api import (
 )
 from edms_ai_assistant.api.deps import UPLOAD_DIR
 from edms_ai_assistant.clients.transport import HttpxTransport
+from edms_ai_assistant.config import edms_settings, settings
 from edms_ai_assistant.core.deps import init_deps
-from edms_ai_assistant.config import settings, edms_settings
 from edms_ai_assistant.db.database import init_db
+from edms_ai_assistant.llm import get_chat_model
 from edms_ai_assistant.summarizer.api.router import router as summarizer_router
 from edms_ai_assistant.summarizer.container import build_summarization_service
-from edms_ai_assistant.summarizer.observability.logging_ctx import install_request_id_filter
-from edms_ai_assistant.llm import get_chat_model
-from typing import TYPE_CHECKING
+from edms_ai_assistant.summarizer.observability.logging_ctx import (
+    install_request_id_filter,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -71,25 +75,31 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await init_db()
 
     import redis.asyncio as aioredis
+
     redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    transport = HttpxTransport(base_url=str(edms_settings.base_url), default_timeout=edms_settings.timeout)
+    transport = HttpxTransport(
+        base_url=str(edms_settings.base_url), default_timeout=edms_settings.timeout
+    )
     llm = get_chat_model()
 
+    state: _AppState = getattr(_app, "state")
     deps = init_deps(transport, redis, llm)
-    _app.state.deps = deps
+    state.deps = deps
 
     try:
         summarization_service = await build_summarization_service(settings)
-        _app.state.summarization_service = summarization_service
+        state.summarization_service = summarization_service
         deps.summarization_service = summarization_service
         logger.info("SummarizationService ready")
     except Exception as exc:
-        logger.error("SummarizationService initialization failed: %s", exc, exc_info=True)
-        _app.state.summarization_service = None
+        logger.error(
+            "SummarizationService initialization failed: %s", exc, exc_info=True
+        )
+        state.summarization_service = None
 
     try:
         agent = EdmsDocumentAgent(deps=deps, llm=llm)
-        _app.state.agent = agent
+        state.agent = agent
         logger.info("EDMS AI Assistant started")
     except Exception as exc:
         logger.critical("Agent initialization failed. Exiting.", exc_info=True)
@@ -100,7 +110,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await redis.close()
     await transport.close()
 
-    service = getattr(_app.state, "summarization_service", None)
+    service = getattr(state, "summarization_service", None)
     if service is not None:
         try:
             await service.aclose()
@@ -110,10 +120,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 if settings.OTEL_ENABLED:
     from edms_ai_assistant.observability.tracing import setup_tracing
+
     setup_tracing(
         service_name="edms-ai-assistant",
-        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
     )
+
 
 def create_app() -> FastAPI:
     """Application factory."""
@@ -144,7 +156,22 @@ def create_app() -> FastAPI:
 
     return application
 
+
 app = create_app()
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    logger.error(
+        "422 Validation Error on %s %s: %s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 @app.get("/download/extension", tags=["Plugin"])
 async def download_extension():
@@ -155,13 +182,16 @@ async def download_extension():
     plugin_zip = "static/plugin/extension.zip"
 
     if not os.path.exists(plugin_zip):
-        return {"error": "Extension is not built in this environment. Check Dockerfile."}
+        return {
+            "error": "Extension is not built in this environment. Check Dockerfile."
+        }
 
     return FileResponse(
         plugin_zip,
         media_type="application/zip",
-        filename="edms-ai-assistant-extension.zip"
+        filename="edms-ai-assistant-extension.zip",
     )
+
 
 if __name__ == "__main__":
     uvicorn.run(

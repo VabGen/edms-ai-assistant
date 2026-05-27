@@ -225,7 +225,8 @@ class _RuntimeSettingsStore:
                         exc,
                     )
 
-    def get_current(self) -> SettingsResponse:
+    @staticmethod
+    def get_current() -> SettingsResponse:
         """Return current effective settings by reading from global settings object.
 
         Returns:

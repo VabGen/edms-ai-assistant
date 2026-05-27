@@ -8,10 +8,10 @@ from __future__ import annotations
 from operator import or_
 from typing import Annotated, Any, Literal
 
+from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import TypedDict
-from langchain_core.messages import BaseMessage
 
 # if TYPE_CHECKING:
 #     from langchain_core.messages import BaseMessage
@@ -78,6 +78,16 @@ class UserInput(BaseModel):
     def strip_message(cls, v: str) -> str:
         """Removes surrounding whitespace from the message."""
         return v.strip()
+
+
+class SummarizeInput(UserInput):
+    """Request body for /actions/summarize endpoints.
+
+    ``message`` is not used by the summarization handler so it is made
+    optional here to avoid 422 errors from callers that omit it.
+    """
+
+    message: str = Field(default="", max_length=8000)
 
 
 # ─────────────────────────────────────────────────────────────

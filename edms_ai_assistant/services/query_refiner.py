@@ -5,8 +5,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from edms_ai_assistant.services.entity_extractor import Entity
@@ -67,15 +66,28 @@ class QueryRefiner:
     """Normalises and enriches raw user queries before LLM dispatch."""
 
     ABBREVIATIONS: dict[str, str] = {
-        "doc": "документ", "dok": "документ", "доки": "документы", "сэд": "СЭД",
-        "ознак": "ознакомление", "пор": "поручение", "исп": "исполнитель",
-        "отв": "ответственный", "сов": "совещание", "дог": "договор",
-        "рег": "регистрационный", "нотиф": "уведомление", "резол": "резолюция"
+        "doc": "документ",
+        "dok": "документ",
+        "доки": "документы",
+        "сэд": "СЭД",
+        "ознак": "ознакомление",
+        "пор": "поручение",
+        "исп": "исполнитель",
+        "отв": "ответственный",
+        "сов": "совещание",
+        "дог": "договор",
+        "рег": "регистрационный",
+        "нотиф": "уведомление",
+        "резол": "резолюция",
     }
 
     ACTION_SYNONYMS: dict[str, str] = {
-        "покажи": "найди", "выведи": "найди", "дай": "найди",
-        "скажи": "опиши", "расскажи": "опиши", "объясни": "опиши"
+        "покажи": "найди",
+        "выведи": "найди",
+        "дай": "найди",
+        "скажи": "опиши",
+        "расскажи": "опиши",
+        "объясни": "опиши",
     }
 
     CONTROL_DOMAIN_SYNONYMS = {
@@ -92,25 +104,45 @@ class QueryRefiner:
     }
 
     EDMS_DOMAIN_SYNONYMS: dict[str, str] = {
-        "история документа": "сравни версии документа", "историю документа": "сравни версии документа",
-        "что менялось": "сравни версии документа", "покажи изменения": "сравни версии документа",
-        "наложить резолюцию": "добавь резолюцию", "поставь визу": "добавь резолюцию",
-        "дай задачу": "создай поручение", "поставь задачу": "создай поручение",
-        "виза": "ознакомление", "завизировать": "добавить в ознакомление",
-        "напомни о документе": "отправь уведомление", "уведомить": "отправь уведомление",
-        "вкратце": "кратко опиши", "о чём документ": "кратко опиши документ",
-        "найти документ": "найди документ", "поиск документов": "найди документы",
-        "инфо": "информация о документе", "реквизиты": "информация о документе",
-        "создай документ": "создай документ из файла", "оформи": "создай документ из файла",
+        "история документа": "сравни версии документа",
+        "историю документа": "сравни версии документа",
+        "что менялось": "сравни версии документа",
+        "покажи изменения": "сравни версии документа",
+        "наложить резолюцию": "добавь резолюцию",
+        "поставь визу": "добавь резолюцию",
+        "дай задачу": "создай поручение",
+        "поставь задачу": "создай поручение",
+        "виза": "ознакомление",
+        "завизировать": "добавить в ознакомление",
+        "напомни о документе": "отправь уведомление",
+        "уведомить": "отправь уведомление",
+        "вкратце": "кратко опиши",
+        "о чём документ": "кратко опиши документ",
+        "найти документ": "найди документ",
+        "поиск документов": "найди документы",
+        "инфо": "информация о документе",
+        "реквизиты": "информация о документе",
+        "создай документ": "создай документ из файла",
+        "оформи": "создай документ из файла",
     }
 
     def normalize_domain_synonyms(self, text: str) -> str:
         text_lower = text.lower()
-        sorted_pairs = sorted(self.EDMS_DOMAIN_SYNONYMS.items(), key=lambda x: -len(x[0]))
-        if not sorted_pairs: return text_lower
-        pattern = re.compile("|".join(re.escape(jargon) for jargon, _ in sorted_pairs), flags=re.IGNORECASE)
-        canonical_map = {jargon.lower(): canonical for jargon, canonical in sorted_pairs}
-        return pattern.sub(lambda m: canonical_map.get(m.group(0).lower(), m.group(0)), text_lower)
+        sorted_pairs = sorted(
+            self.EDMS_DOMAIN_SYNONYMS.items(), key=lambda x: -len(x[0])
+        )
+        if not sorted_pairs:
+            return text_lower
+        pattern = re.compile(
+            "|".join(re.escape(jargon) for jargon, _ in sorted_pairs),
+            flags=re.IGNORECASE,
+        )
+        canonical_map = {
+            jargon.lower(): canonical for jargon, canonical in sorted_pairs
+        }
+        return pattern.sub(
+            lambda m: canonical_map.get(m.group(0).lower(), m.group(0)), text_lower
+        )
 
     def expand_abbreviations(self, text: str) -> str:
         return " ".join(self.ABBREVIATIONS.get(w.lower(), w) for w in text.split())
@@ -122,16 +154,25 @@ class QueryRefiner:
         return text_lower
 
     @staticmethod
-    def add_context(text: str, intent: UserIntent, entities: dict[str, list[Entity]]) -> str:
+    def add_context(
+        text: str, intent: UserIntent, entities: dict[str, list[Entity]]
+    ) -> str:
         hints: list[str] = []
         if intent == UserIntent.SEARCH:
-            if "persons" in entities: hints.append(f"исполнитель: {entities['persons'][0].value}")
-            if "dates" in entities: hints.append(
-                f"дата: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}")
+            if "persons" in entities:
+                hints.append(f"исполнитель: {entities['persons'][0].value}")
+            if "dates" in entities:
+                hints.append(
+                    f"дата: {entities['dates'][0].normalized_value or entities['dates'][0].raw_text}"
+                )
         elif intent == UserIntent.CREATE_TASK:
             hints.append(
-                f"срок: {entities['dates'][0].normalized_value}" if "dates" in entities else "срок: +7 дней (не указан)")
-            if "persons" in entities: hints.append(f"исполнитель: {entities['persons'][0].value}")
+                f"срок: {entities['dates'][0].normalized_value}"
+                if "dates" in entities
+                else "срок: +7 дней (не указан)"
+            )
+            if "persons" in entities:
+                hints.append(f"исполнитель: {entities['persons'][0].value}")
         elif intent == UserIntent.COMPARE:
             ids = entities.get("document_ids", [])
             if len(ids) >= 2:
@@ -139,13 +180,16 @@ class QueryRefiner:
             else:
                 hints.append("версии: авто")
         elif intent == UserIntent.SUMMARIZE:
-            if "numbers" in entities: hints.append(f"объём: {entities['numbers'][0].value} слов")
+            if "numbers" in entities:
+                hints.append(f"объём: {entities['numbers'][0].value} слов")
         elif intent == UserIntent.COMPOSITE:
             hints.append("тип: составной запрос")
 
         return text + " [" + "; ".join(hints) + "]" if hints else text
 
-    def refine(self, text: str, intent: UserIntent, entities: dict[str, list[Entity]]) -> str:
+    def refine(
+        self, text: str, intent: UserIntent, entities: dict[str, list[Entity]]
+    ) -> str:
         refined = text.strip()
         refined = self.normalize_domain_synonyms(refined)
         refined = self.expand_abbreviations(refined)

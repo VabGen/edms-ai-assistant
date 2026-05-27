@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Annotated, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import (
     APIRouter,
@@ -44,7 +44,9 @@ from edms_ai_assistant.summarizer.errors import (
     SummarizerError,
     TextExtractionError,
 )
-from edms_ai_assistant.summarizer.errors import ValidationError as SummarizerValidationError
+from edms_ai_assistant.summarizer.errors import (
+    ValidationError as SummarizerValidationError,
+)
 from edms_ai_assistant.summarizer.pipeline.direct import StreamEvent
 from edms_ai_assistant.summarizer.prompts.registry import get_prompt_registry
 from edms_ai_assistant.summarizer.service import (
@@ -128,7 +130,7 @@ def _parse_mode(mode: str) -> SummaryMode:
     try:
         return SummaryMode(mode)
     except ValueError:
-        valid = sorted(m.value for m in SummaryMode)
+        valid = sorted([str(m) for m in SummaryMode])
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Неверный режим '{mode}'. Допустимые: {valid}",
@@ -158,11 +160,11 @@ def _http_status_for(exc: SummarizerError) -> int:
     response_model=SummarizeModesResponse,
     summary="Список доступных режимов суммаризации",
 )
-async def get_modes(service: ServiceDep) -> SummarizeModesResponse:
+async def get_modes(_service: ServiceDep) -> SummarizeModesResponse:
     registry = get_prompt_registry()
     modes = [
         SummarizeModeInfo(
-            mode=mode.value,
+            mode=str(mode.value),
             description=_MODE_DESCRIPTIONS.get(mode, {}).get("description", ""),
             use_case=_MODE_DESCRIPTIONS.get(mode, {}).get("use_case", ""),
         )

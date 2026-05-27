@@ -10,12 +10,12 @@ import logging
 import re as _re
 import uuid
 from enum import StrEnum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
     InterruptOption,
     SelectInterrupt,
@@ -128,8 +128,8 @@ def _heuristic_recommendation(text: str) -> dict[str, str]:
 
 
 def create_doc_summarize_text_tool(
-        summarization_service: Any,
-        chat_model: BaseChatModel,
+    summarization_service: Any,
+    chat_model: BaseChatModel,
 ) -> StructuredTool:
     """Фабрика для создания инструмента суммаризации документа.
 
@@ -189,8 +189,8 @@ def create_doc_summarize_text_tool(
         }
 
     async def doc_summarize_text(
-            text: str,
-            summary_type: SummarizeType | None = None,
+        text: str,
+        summary_type: SummarizeType | None = None,
     ) -> dict[str, Any]:
         """Анализирует текст документа через LLM-пайплайн суммаризации.
 

@@ -260,7 +260,9 @@ class FileProcessorService:
         return cls._default_instance
 
     @classmethod
-    async def extract_text_async(cls, file_path: str, executor: ThreadPoolExecutor | None = None) -> str:
+    async def extract_text_async(
+        cls, file_path: str, executor: ThreadPoolExecutor | None = None
+    ) -> str:
         """Async text extraction delegating CPU work to thread pool."""
         loop = asyncio.get_running_loop()
         exec_pool = executor or cls._get_default_instance()._executor
@@ -668,11 +670,14 @@ class FileProcessorService:
 
     @classmethod
     async def _extract_excel_tables(
-            cls, file_path: str, ext: str
+        cls, file_path: str, ext: str
     ) -> list[dict[str, Any]]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            cls._get_default_instance()._executor, cls._extract_tables_sync, file_path, ext
+            cls._get_default_instance()._executor,
+            cls._extract_tables_sync,
+            file_path,
+            ext,
         )
 
     @classmethod

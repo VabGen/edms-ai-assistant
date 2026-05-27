@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from typing import Annotated, TYPE_CHECKING, Any, Generic, TypeVar
-from pydantic import Field
-from uuid import UUID
 from datetime import datetime
+from typing import TYPE_CHECKING, Annotated, Any, Generic, TypeVar
+from uuid import UUID
+
+from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import (
+    BlockedField,
+    EmployeeCreateType,
+    EmployeeIoType,
     GroupType,
     RoleType,
-    EmployeeCreateType,
-    BlockedField,
-    EmployeeIoType,
 )
 from edms_ai_assistant.domain.reference import OrgDto
 
@@ -23,6 +24,7 @@ T = TypeVar("T")
 
 class SliceDto(EdmsBaseDto, Generic[T]):
     """DTO for Slice (pagination)."""
+
     number: int = Field(0, description="Номер страницы")
     size: int = Field(20, description="Размер страницы")
     number_of_elements: int = Field(0, description="Кол-во элементов в странице")
@@ -45,7 +47,9 @@ class PostRequest(EdmsBaseDto):
 
 class RoleDto(EdmsBaseDto):
     id: UUID | None = None
-    name: str | None = Field(None, max_length=255, description="Value length should be 255 signs")
+    name: str | None = Field(
+        None, max_length=255, description="Value length should be 255 signs"
+    )
     system_name: str | None = None
     system: bool | None = None
     type: RoleType | None = None
@@ -72,7 +76,9 @@ class AccessGriefRequest(EdmsBaseDto):
 
 
 class AccessGriefFilter(EdmsBaseDto):
-    search: str | None = Field(None, description="Строка поиска по названию или краткому названию")
+    search: str | None = Field(
+        None, description="Строка поиска по названию или краткому названию"
+    )
     active: bool | None = Field(None, description="Признак активности")
 
 
@@ -94,15 +100,20 @@ class MiniUserInfoDto(EdmsBaseDto):
 
 class EmployeeDto(MiniUserInfoDto):
     """DTO model for Employee."""
+
     u_id: str | None = Field(None, description="Идентификатор аккаунта сотрудника")
-    personal_number: str | None = Field(None, description="Персональный номер сотрудника")
+    personal_number: str | None = Field(
+        None, description="Персональный номер сотрудника"
+    )
     fired: bool | None = Field(None, description="Признак уволен ли сотрудник")
     active: bool | None = Field(None, description="Признак активен ли сотрудник")
     organization_id: str | None = None
     full_post_name: str | None = Field(None, description="ФИО сотрудника")
     post_id: int | None = Field(None, description="Идентификатор должности")
     post: PostDto | None = Field(None, description="Должность сотрудника")
-    department_id: UUID | None = Field(None, description="Идентификатор департамента в котором работает сотрудник")
+    department_id: UUID | None = Field(
+        None, description="Идентификатор департамента в котором работает сотрудник"
+    )
     department: DepartmentDto | None = Field(None, description="Департамент сотрудника")
     org: OrgDto | None = Field(None, description="Организация сотрудника")
     address: str | None = Field(None, description="Адрес")
@@ -115,9 +126,13 @@ class EmployeeDto(MiniUserInfoDto):
     ldap_name: str | None = Field(None, description="LDAP Имя")
     io: bool | None = Field(None, description="Является ИО")
     have_io: bool | None = Field(None, description="Присутствуют ИО")
-    notify: bool | None = Field(None, description="Уведомлять ли сотрудника сообщениями на почту")
+    notify: bool | None = Field(
+        None, description="Уведомлять ли сотрудника сообщениями на почту"
+    )
     create_date: datetime | None = None
-    last_manual_avatar_upload_date: datetime | None = Field(None, description="Дата последней ручной загрузки аватара")
+    last_manual_avatar_upload_date: datetime | None = Field(
+        None, description="Дата последней ручной загрузки аватара"
+    )
     create_type: EmployeeCreateType | None = None
     sid: str | None = None
     current_user_leader: bool | None = None
@@ -131,13 +146,23 @@ class UserInfoDto(EdmsBaseDto):
     first_name: Annotated[str | None, Field(description="Имя сотрудника")] = None
     last_name: Annotated[str | None, Field(description="Фамилия сотрудника")] = None
     middle_name: Annotated[str | None, Field(description="Отчество сотрудника")] = None
-    author_post: Annotated[str | None, Field(description="Наименование должность сотрудника")] = None
-    author_department_name: Annotated[str | None, Field(description="Наименование департамента сотрудника")] = None
-    author_department: Annotated[DepartmentDto | None, Field(description="Департамент сотрудника")] = None
-    author_department_id: Annotated[UUID | None, Field(description="Идентификатор департамента сотрудника")] = None
+    author_post: Annotated[
+        str | None, Field(description="Наименование должность сотрудника")
+    ] = None
+    author_department_name: Annotated[
+        str | None, Field(description="Наименование департамента сотрудника")
+    ] = None
+    author_department: Annotated[
+        DepartmentDto | None, Field(description="Департамент сотрудника")
+    ] = None
+    author_department_id: Annotated[
+        UUID | None, Field(description="Идентификатор департамента сотрудника")
+    ] = None
     author_department_org_id: str | None = None
     employee: Annotated[EmployeeDto | None, Field(description="Сотрудник")] = None
-    employee_id: Annotated[UUID | None, Field(description="Идентификатор сотрудник")] = None
+    employee_id: Annotated[
+        UUID | None, Field(description="Идентификатор сотрудник")
+    ] = None
     employee_org_id: str | None = None
 
 
@@ -155,8 +180,12 @@ class EmployeeIoDto(EdmsBaseDto):
 
 
 class SecretaryRequest(EdmsBaseDto):
-    target_id: UUID = Field(..., description="Идентификатор сотрудника за которого исполняют")
-    io_ids: list[UUID] | None = Field(None, description="Идентификаторы сотрудников которые исполняют")
+    target_id: UUID = Field(
+        ..., description="Идентификатор сотрудника за которого исполняют"
+    )
+    io_ids: list[UUID] | None = Field(
+        None, description="Идентификаторы сотрудников которые исполняют"
+    )
 
 
 class EmployeeIoRequest(EdmsBaseDto):
@@ -213,6 +242,7 @@ class DepartmentDto(EdmsBaseDto):
 
 class ScanSettingJsonB(EdmsBaseDto):
     """Placeholder for scan settings."""
+
     pass
 
 
@@ -271,7 +301,9 @@ class EmployeeRequest(EdmsBaseDto):
     first_name: str = Field(..., description="Имя сотрудника")
     last_name: str = Field(..., description="Фамилия сотрудника")
     middle_name: str | None = Field(None, description="Отчество сотрудника")
-    personal_number: str | None = Field(None, description="Персональный номер сотрудника")
+    personal_number: str | None = Field(
+        None, description="Персональный номер сотрудника"
+    )
     ldap_name: str | None = Field(None, description="LDAP Имя")
     address: str | None = Field(None, description="Адрес")
     phone: str | None = Field(None, description="Телефон")
@@ -281,7 +313,9 @@ class EmployeeRequest(EdmsBaseDto):
     place: str | None = Field(None, description="Площадка")
     post_id: int | None = Field(None, description="Идентификатор должности")
     url: str | None = Field(None, description="URL")
-    department_id: UUID = Field(..., description="Идентификатор департамента в котором работает сотрудник")
+    department_id: UUID = Field(
+        ..., description="Идентификатор департамента в котором работает сотрудник"
+    )
     order: int = Field(0, description="Порядок сортировки")
 
 
@@ -315,12 +349,20 @@ class EmployeeFilter(EdmsBaseDto):
     full_post_name: str | None = Field(None, description="ФИО сотрудника")
     post_id: int | None = Field(None, description="Идентификатор должности")
     ids: list[UUID] | None = Field(None, description="Список идентификаторов")
-    department_id: list[UUID] | None = Field(None, description="Идентификатор департамента в котором работает сотрудник")
-    employee_leader_department_id: UUID | None = Field(None, description="Где сотрудник непосредственно их руководитель")
+    department_id: list[UUID] | None = Field(
+        None, description="Идентификатор департамента в котором работает сотрудник"
+    )
+    employee_leader_department_id: UUID | None = Field(
+        None, description="Где сотрудник непосредственно их руководитель"
+    )
     include_child_leaders_employee_leader_department_id: bool | None = None
-    employee_leader_department_all_id: UUID | None = Field(None, description="Где сотрудник руководитель (включая дочерние)")
+    employee_leader_department_all_id: UUID | None = Field(
+        None, description="Где сотрудник руководитель (включая дочерние)"
+    )
     only_leaders_employee_leader_department_all: bool | None = None
-    includes: list[str] | None = Field(None, description="Список моделей которые могу быть добавлены при отображении")
+    includes: list[str] | None = Field(
+        None, description="Список моделей которые могу быть добавлены при отображении"
+    )
     org_id: str | None = Field(None, description="ИД филиала")
     exclude_role_id: UUID | None = None
     exclude_group_id: UUID | None = None
@@ -329,11 +371,15 @@ class EmployeeFilter(EdmsBaseDto):
     exclude_grief_id: UUID | None = None
     exclude_ids: list[UUID] | None = None
     all: bool | None = None
-    child_departments: bool = Field(False, description="Признак поиска по всех коллег включая дочернии подразделения")
+    child_departments: bool = Field(
+        False,
+        description="Признак поиска по всех коллег включая дочернии подразделения",
+    )
 
 
 class EmployeeApi(EdmsBaseDto):
     """Simplified model for employee management."""
+
     id: UUID | None = Field(None, description="Идентификатор сотрудника")
     u_id: str = Field(..., description="Идентификатор аккаунта сотрудника")
     first_name: str = Field(..., description="Имя сотрудника")
@@ -344,7 +390,9 @@ class EmployeeApi(EdmsBaseDto):
     full_post_name: str | None = Field(None, description="ФИО сотрудника")
     roles: set[Any] = Field(..., description="Список ролей")
     post_id: int | None = Field(None, description="Идентификатор должности")
-    department_id: UUID = Field(..., description="Идентификатор департамента в котором работает сотрудник")
+    department_id: UUID = Field(
+        ..., description="Идентификатор департамента в котором работает сотрудник"
+    )
 
 
 class GroupDto(EdmsBaseDto):
@@ -356,20 +404,34 @@ class GroupDto(EdmsBaseDto):
 
 
 class DepartmentFilter(EdmsBaseDto):
-    name: str | None = Field(None, description="Наименование департамента/подразделения")
-    number: str | None = Field(None, description="Номер департамента/подразделения в номенклатуре дел")
-    parent_department_id: UUID | None = Field(None, description="Идентификатор родительского департамента/подразделения")
+    name: str | None = Field(
+        None, description="Наименование департамента/подразделения"
+    )
+    number: str | None = Field(
+        None, description="Номер департамента/подразделения в номенклатуре дел"
+    )
+    parent_department_id: UUID | None = Field(
+        None, description="Идентификатор родительского департамента/подразделения"
+    )
     rank: int | None = Field(None, description="Код сортировки")
-    department_code: str | None = Field(None, description="Код департамента/подразделения")
+    department_code: str | None = Field(
+        None, description="Код департамента/подразделения"
+    )
     phone: str | None = Field(None, description="Телефон")
     email: str | None = Field(None, description="Email")
     address: str | None = Field(None, description="Адрес")
     room: str | None = Field(None, description="Площадка")
-    leader_id: UUID | None = Field(None, description="Идентификатор руководителя департамента/подразделения")
-    employees: list[Any] | None = Field(None, description="Список сотрудников департамента/подразделения")
+    leader_id: UUID | None = Field(
+        None, description="Идентификатор руководителя департамента/подразделения"
+    )
+    employees: list[Any] | None = Field(
+        None, description="Список сотрудников департамента/подразделения"
+    )
     ids: list[UUID] | None = None
     responsible_deps: bool = False
-    includes: list[str] | None = Field(None, description="Список моделей которые могу быть добавлены при отображении")
+    includes: list[str] | None = Field(
+        None, description="Список моделей которые могу быть добавлены при отображении"
+    )
 
 
 EmployeeDto.model_rebuild()

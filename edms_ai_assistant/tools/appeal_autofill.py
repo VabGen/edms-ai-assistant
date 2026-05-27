@@ -8,8 +8,9 @@ EDMS AI Assistant — Appeal Autofill Tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -19,7 +20,6 @@ from edms_ai_assistant.agent.runnable_utils import (
 )
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
@@ -54,9 +54,9 @@ def create_appeal_autofill_tool(deps: AppDeps) -> StructuredTool:
     """Фабрика инструмента автозаполнения обращения с DI."""
 
     async def autofill_appeal_document(
-            attachment_id: str | None = None,
-            generate_summary_choices: bool = False,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        attachment_id: str | None = None,
+        generate_summary_choices: bool = False,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ вложенного документа.
 
@@ -109,7 +109,7 @@ def create_appeal_autofill_tool(deps: AppDeps) -> StructuredTool:
             return {"status": "error", "message": f"Ошибка автозаполнения: {e!s}"}
 
     return StructuredTool.from_function(
-        func=autofill_appeal_document,
+        coroutine=autofill_appeal_document,
         name="autofill_appeal_document",
         description=(
             "Автоматически заполняет карточку обращения (APPEAL) через LLM-анализ вложенного документа.\n"

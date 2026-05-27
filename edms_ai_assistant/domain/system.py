@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 
 if TYPE_CHECKING:
+    from datetime import datetime
+    from uuid import UUID
+
     from edms_ai_assistant.domain.enums import (
         DocCategory,
         PanelType,
@@ -16,8 +19,6 @@ if TYPE_CHECKING:
         ReportColumnV1,
         ReportTypeV1,
     )
-    from uuid import UUID
-    from datetime import datetime
 
 
 class AttachmentDto(EdmsBaseDto):

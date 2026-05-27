@@ -7,16 +7,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from edms_ai_assistant.summarizer.chunking.structural import SmartChunker, TextChunk
 from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
+from edms_ai_assistant.summarizer.errors import LLMTransportError, MapStageError
 from edms_ai_assistant.summarizer.observability.tracing import (
     Stopwatch,
     record_llm_call,
     trace_stage,
 )
-from edms_ai_assistant.summarizer.errors import LLMTransportError, MapStageError
 from edms_ai_assistant.summarizer.pipeline.direct import (
     DirectSummarizationPipeline,
     LLMClient,
@@ -26,8 +26,9 @@ from edms_ai_assistant.summarizer.pipeline.direct import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from edms_ai_assistant.summarizer.structured.models import SummaryMode
+
     from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
+    from edms_ai_assistant.summarizer.structured.models import SummaryMode
 
 logger = logging.getLogger(__name__)
 
@@ -291,14 +292,7 @@ class MapReducePipeline:
                 total_map_out = sum(r.output_tokens for r in successful)
 
             # --- Reduce (стримится) ---
-            sorted_results = sorted(successful, key=lambda r: r.chunk_index)
-            parts: list[str] = []
-            for r in sorted_results:
-                if not r.summary_text:
-                    continue
-                label = f"[{r.section_title}]\n" if r.section_title else ""
-                parts.append(f"{label}{r.summary_text}")
-            combined_text = "\n\n---\n\n".join(parts)
+            combined_text = self._build_combined_text(successful)
 
             template = self._prompts.get_reduce(mode)
             system, user = template.render(combined_text, language=language)
@@ -349,6 +343,18 @@ class MapReducePipeline:
                 chunk_count=len(chunks),
             )
 
+    @staticmethod
+    def _build_combined_text(map_results: list[MapResult]) -> str:
+        """Сортирует частичные результаты и объединяет их в один текст."""
+        sorted_results = sorted(map_results, key=lambda r: r.chunk_index)
+        parts: list[str] = []
+        for r in sorted_results:
+            if not r.summary_text:
+                continue
+            label = f"[{r.section_title}]\n" if r.section_title else ""
+            parts.append(f"{label}{r.summary_text}")
+        return "\n\n---\n\n".join(parts)
+
     async def _reduce_stage(
         self,
         map_results: list[MapResult],
@@ -357,20 +363,11 @@ class MapReducePipeline:
         language: str,
     ) -> PipelineResult:
         """Объединяем частичные изложения в финальный структурированный вывод."""
-        sorted_results = sorted(map_results, key=lambda r: r.chunk_index)
-
-        parts: list[str] = []
-        for r in sorted_results:
-            if not r.summary_text:
-                continue
-            label = f"[{r.section_title}]\n" if r.section_title else ""
-            parts.append(f"{label}{r.summary_text}")
-
-        combined_text = "\n\n---\n\n".join(parts)
+        combined_text = self._build_combined_text(map_results)
         combined_tokens = count_tokens(combined_text)
         logger.info(
             "Reduce: объединяем %d частичных изложений (%d токенов)",
-            len(sorted_results),
+            len(map_results),
             combined_tokens,
         )
 

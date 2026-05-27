@@ -9,8 +9,9 @@ EDMS AI Assistant — doc_get_details tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import Annotated, Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel
 
@@ -24,14 +25,12 @@ from edms_ai_assistant.services.document_service import (
 )
 from edms_ai_assistant.utils.format_utils import clean_dict
 
-if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
 logger = logging.getLogger(__name__)
 
 
 class DocDetailsInput(BaseModel):
     """Input schema for doc_get_details tool."""
+
     pass
 
 
@@ -46,7 +45,7 @@ def create_doc_get_details_tool(doc_service: DocumentService) -> StructuredTool:
     """
 
     async def doc_get_details(
-            config: Annotated[RunnableConfig, InjectedToolArg],
+        config: Annotated[RunnableConfig, InjectedToolArg],
     ) -> dict[str, Any]:
         """Анализирует текущий открытый документ СЭД и все его вложенные сущности.
 
@@ -91,7 +90,7 @@ def create_doc_get_details_tool(doc_service: DocumentService) -> StructuredTool:
             return {"status": "error", "error": f"Ошибка обработки документа: {exc}"}
 
     return StructuredTool.from_function(
-        func=doc_get_details,
+        coroutine=doc_get_details,
         name="doc_get_details",
         description=(
             "Анализирует текущий открытый документ СЭД и все его вложенные сущности. "

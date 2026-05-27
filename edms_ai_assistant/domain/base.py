@@ -8,6 +8,7 @@ from pydantic.alias_generators import to_camel
 
 class EdmsBaseDto(BaseModel):
     """Базовая модель для всех DTO из EDMS API."""
+
     model_config = ConfigDict(
         populate_by_name=True,
         alias_generator=to_camel,
@@ -21,6 +22,7 @@ T = TypeVar("T")
 
 class SpringPage[T](EdmsBaseDto):
     """Модель Spring Data Page<T>."""
+
     content: list[T]
     total_elements: int = 0
     total_pages: int = 0
@@ -28,5 +30,6 @@ class SpringPage[T](EdmsBaseDto):
 
 class SpringSlice[T](EdmsBaseDto):
     """Модель Spring Data Slice<T>."""
+
     content: list[T]
     has_next: bool = False

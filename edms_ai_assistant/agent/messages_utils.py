@@ -42,11 +42,14 @@ def trim_pairwise(messages: list[BaseMessage], max_count: int) -> list[BaseMessa
 
     trimmed = list(messages[-max_count:])
 
-    while trimmed and isinstance(trimmed[0], ToolMessage):
+    while trimmed:
+        first_tool_msg = trimmed[0]
+        if not isinstance(first_tool_msg, ToolMessage):
+            break
         has_parent = any(
             isinstance(m, AIMessage)
             and any(
-                tc.get("id") == trimmed[0].tool_call_id
+                tc.get("id") == first_tool_msg.tool_call_id
                 for tc in getattr(m, "tool_calls", []) or []
             )
             for m in trimmed
@@ -55,8 +58,9 @@ def trim_pairwise(messages: list[BaseMessage], max_count: int) -> list[BaseMessa
             break
         trimmed.pop(0)
 
-    if trimmed and isinstance(trimmed[0], AIMessage) and getattr(trimmed[0], "tool_calls", None):
-        tool_call_ids = {tc.get("id") for tc in trimmed[0].tool_calls}
+    first_msg = trimmed[0] if trimmed else None
+    if isinstance(first_msg, AIMessage) and first_msg.tool_calls:
+        tool_call_ids = {tc.get("id") for tc in first_msg.tool_calls}
         present_ids = {
             m.tool_call_id
             for m in trimmed[1:]
@@ -74,7 +78,9 @@ def trim_pairwise(messages: list[BaseMessage], max_count: int) -> list[BaseMessa
     return trimmed
 
 
-def validate_no_dangling_tool_calls(messages: list[BaseMessage], *, fail_loud: bool = False) -> bool:
+def validate_no_dangling_tool_calls(
+    messages: list[BaseMessage], *, fail_loud: bool = False
+) -> bool:
     """Check that every ``AIMessage.tool_calls`` has matching ``ToolMessage`` s.
 
     Args:
@@ -98,7 +104,10 @@ def validate_no_dangling_tool_calls(messages: list[BaseMessage], *, fail_loud: b
 
         for j in range(i + 1, len(messages)):
             candidate = messages[j]
-            if isinstance(candidate, ToolMessage) and candidate.tool_call_id in expected_ids:
+            if (
+                isinstance(candidate, ToolMessage)
+                and candidate.tool_call_id in expected_ids
+            ):
                 found_ids.add(candidate.tool_call_id)
             elif isinstance(candidate, AIMessage):
                 break  # next turn — stop looking

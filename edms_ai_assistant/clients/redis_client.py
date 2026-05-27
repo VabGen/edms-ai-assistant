@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
+
 from edms_ai_assistant.config import settings
 
 if TYPE_CHECKING:
@@ -51,16 +52,21 @@ class RedisClient:
 
 _global_client = RedisClient(str(settings.REDIS_URL))
 
+
 async def init_redis() -> None:
     await _global_client.connect()
+
 
 async def close_redis() -> None:
     await _global_client.close()
 
+
 def get_redis_client() -> aioredis.Redis:
     return _global_client.get_client()
 
+
 # ── FastAPI Dependencies ───────────────────────────────────────────────────
+
 
 async def get_redis() -> AsyncGenerator[aioredis.Redis]:
     """FastAPI dependency: предоставляет активное соединение Redis."""

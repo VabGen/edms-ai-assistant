@@ -1,10 +1,11 @@
 # edms_ai_assistant/db/database.py
 import asyncio
+import contextlib
 import logging
 import subprocess
 import sys
-from pathlib import Path
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -15,7 +16,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from edms_ai_assistant.config import settings
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ async def _run_async_migrations() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Database Initialization
+# Database Initialization  DELETE FROM alembic_version;
 # ---------------------------------------------------------------------------
 
 

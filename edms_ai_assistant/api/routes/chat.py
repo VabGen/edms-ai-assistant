@@ -26,15 +26,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langgraph.types import Command, Interrupt
-from pydantic import BaseModel, Field, ValidationError, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
     ResumeValueAdapter,
@@ -43,14 +44,12 @@ from edms_ai_assistant.api.deps import get_agent, get_deps
 from edms_ai_assistant.api.helpers import resolve_user_context
 from edms_ai_assistant.api.sse import SSE_KEEPALIVE, format_sse
 from edms_ai_assistant.api.sse_events import (
+    _parse_tool_content,
     build_compliance_sse_event,
     build_navigate_sse_event,
     extract_compliance_from_tool_message,
     extract_navigate_url_from_tool_message,
-    _parse_tool_content,
 )
-
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.model import NewChatRequest, UserInput
@@ -116,6 +115,7 @@ class ChatStateResponse(BaseModel):
 
 # ── Internal helpers ──────────────────────────────────────────────────────
 
+
 async def _ensure_clean_state(
     agent: EdmsDocumentAgent,
     config: dict[str, Any],
@@ -172,11 +172,12 @@ async def _ensure_clean_state(
         [tc["id"] for tc in last_msg.tool_calls],
     )
 
+
 def _make_config(
-        thread_id: str,
-        user_token: str,
-        user_id: str,
-        document_id: str | None = None,
+    thread_id: str,
+    user_token: str,
+    user_id: str,
+    document_id: str | None = None,
 ) -> dict[str, Any]:
     """Build the RunnableConfig consumed by graph nodes and tools.
 
@@ -219,19 +220,21 @@ def _extract_pending_interrupts(snapshot: Any) -> list[dict[str, Any]]:
         for itr in getattr(task, "interrupts", []) or []:
             if not isinstance(itr, Interrupt):
                 continue
-            results.append({
-                "interrupt_id": getattr(itr, "id", None)
-                                or getattr(itr, "ns", [""])[-1],
-                "payload": itr.value,
-            })
+            results.append(
+                {
+                    "interrupt_id": getattr(itr, "id", None)
+                    or getattr(itr, "ns", [""])[-1],
+                    "payload": itr.value,
+                }
+            )
     return results
 
 
 async def _validate_resume_kind(
-        graph: Any,
-        config: dict[str, Any],
-        interrupt_id: str | None,
-        resume_kind: str,
+    graph: Any,
+    config: dict[str, Any],
+    interrupt_id: str | None,
+    resume_kind: str,
 ) -> None:
     """Return silently on match, raise 409 on mismatch."""
     if not interrupt_id:
@@ -251,6 +254,7 @@ async def _validate_resume_kind(
 
 
 # ── Streaming core ────────────────────────────────────────────────────────
+
 
 async def _stream_graph_events(
     agent: EdmsDocumentAgent,
@@ -318,6 +322,8 @@ async def _stream_graph_events(
             # ── Interrupts ──────────────────────────────────────────────
             interrupts = chunk.get("__interrupt__")
             if interrupts:
+                if _pending_task is not None and not _pending_task.done():
+                    _pending_task.cancel()
                 for itr in interrupts:
                     value = getattr(itr, "value", itr)
                     interrupt_id = getattr(itr, "id", None)
@@ -372,7 +378,10 @@ async def _stream_graph_events(
                             logger.info("Navigate UI event sent: %s", nav_url)
                         else:
                             data = _parse_tool_content(msg.content)
-                            if isinstance(data, dict) and data.get("status") == "success":
+                            if (
+                                isinstance(data, dict)
+                                and data.get("status") == "success"
+                            ):
                                 logger.debug(
                                     "ToolMessage success but no navigate derived: "
                                     "keys=%s document_id=%s has_overall=%s has_fields=%s",
@@ -449,9 +458,9 @@ async def _stream_graph_events(
     response_class=StreamingResponse,
 )
 async def chat_stream(
-        body: ChatStreamRequest,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
-        deps: Annotated[AppDeps, Depends(get_deps)],
+    body: ChatStreamRequest,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    deps: Annotated[AppDeps, Depends(get_deps)],
 ) -> StreamingResponse:
     try:
         user_id = extract_user_id_from_token(body.user_token)
@@ -459,20 +468,18 @@ async def chat_stream(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     thread_id = (
-            body.thread_id
-            or f"user_{user_id}_doc_{body.context_ui_id or 'general'}"
+        body.thread_id or f"user_{user_id}_doc_{body.context_ui_id or 'general'}"
     )
 
     if body.context is not None:
         user_context = body.context.model_dump(exclude_none=True)
     else:
         bridged = UserInput(message=body.message, user_token=body.user_token)
-        user_context = await resolve_user_context(bridged, user_id, deps.employee_client)
+        user_context = await resolve_user_context(
+            bridged, user_id, deps.employee_client
+        )
 
-    if (
-            body.preferred_summary_format
-            and body.preferred_summary_format != "ask"
-    ):
+    if body.preferred_summary_format and body.preferred_summary_format != "ask":
         user_context["preferred_summary_format"] = body.preferred_summary_format
 
     inputs, _ctx = agent.build_initial_inputs(
@@ -504,8 +511,8 @@ async def chat_stream(
     response_class=StreamingResponse,
 )
 async def chat_resume(
-        body: ChatResumeRequest,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    body: ChatResumeRequest,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> StreamingResponse:
     try:
         validated = ResumeValueAdapter.validate_python(body.resume_value)
@@ -530,9 +537,7 @@ async def chat_resume(
 
     config = _make_config(body.thread_id, body.user_token, str(user_id), document_id)
 
-    await _validate_resume_kind(
-        agent.graph, config, body.interrupt_id, validated.kind
-    )
+    await _validate_resume_kind(agent.graph, config, body.interrupt_id, validated.kind)
 
     resume_value = validated.model_dump(mode="json")
 
@@ -559,8 +564,8 @@ async def chat_resume(
     summary="Get current thread snapshot (for reconnect)",
 )
 async def chat_state(
-        thread_id: str,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    thread_id: str,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> ChatStateResponse:
     """Return the latest state for ``thread_id``.
 
@@ -590,14 +595,11 @@ async def chat_state(
             InterruptPayloadAdapter.validate_python(p["payload"])
             valid_pending.append(p)
         except ValidationError:
-            logger.warning(
-                "stale interrupt payload on thread=%s — dropping", thread_id
-            )
+            logger.warning("stale interrupt payload on thread=%s — dropping", thread_id)
 
     raw_directives = (snapshot.values or {}).get("last_ui_directives") or {}
     active_ui = [
-        {"directive_id": did, "component": comp}
-        for did, comp in raw_directives.items()
+        {"directive_id": did, "component": comp} for did, comp in raw_directives.items()
     ]
 
     return ChatStateResponse(
@@ -613,8 +615,8 @@ async def chat_state(
     summary="Get conversation history for a thread (flat list)",
 )
 async def get_history(
-        thread_id: str,
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    thread_id: str,
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> dict:
     try:
         snapshot = await agent.graph.aget_state(

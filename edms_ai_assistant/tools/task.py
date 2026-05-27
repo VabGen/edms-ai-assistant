@@ -5,31 +5,35 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
-from typing import Annotated, Any, TYPE_CHECKING
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field
 
-from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
     CardSelectInterrupt,
     CardSelectResume,
     InterruptCard,
 )
-from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.domain.task_models import TaskType
 
 if TYPE_CHECKING:
     from edms_ai_assistant.core.deps import AppDeps
-    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
 
 class TaskCreateInput(BaseModel):
     """Схема входных данных инструмента создания поручения."""
+
     task_text: str = Field(..., description="Текст поручения (обязательно)")
 
     executor_last_names: list[str] | None = Field(
@@ -97,17 +101,17 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
     task_service = deps.task_service
 
     async def task_create_tool(
-            task_text: str,
-            executor_last_names: list[str] | None = None,
-            responsible_last_name: str | None = None,
-            department_names: list[str] | None = None,
-            group_names: list[str] | None = None,
-            personal_group_names: list[str] | None = None,
-            include_subordinates: bool | None = None,
-            planed_date_end: str | None = None,
-            task_type: TaskType | None = None,
-            selected_employee_ids: list[str] | None = None,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        task_text: str,
+        executor_last_names: list[str] | None = None,
+        responsible_last_name: str | None = None,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool | None = None,
+        planed_date_end: str | None = None,
+        task_type: TaskType | None = None,
+        selected_employee_ids: list[str] | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Создает поручение с поддержкой различных типов исполнителей.
 
@@ -133,12 +137,17 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
             return {"status": "error", "message": str(exc)}
 
         if not task_text or not task_text.strip():
-            return {"status": "error", "message": "Текст поручения не может быть пустым."}
+            return {
+                "status": "error",
+                "message": "Текст поручения не может быть пустым.",
+            }
 
         deadline = None
         if planed_date_end:
             try:
-                deadline = datetime.fromisoformat(planed_date_end.replace("Z", "+00:00"))
+                deadline = datetime.fromisoformat(
+                    planed_date_end.replace("Z", "+00:00")
+                )
                 if deadline.tzinfo is None:
                     deadline = deadline.replace(tzinfo=UTC)
             except ValueError as e:
@@ -197,33 +206,44 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
                             InterruptCard(
                                 id=m.get("id", ""),
                                 label=m.get("full_name", "Не указано"),
-                                description=m.get('post', '') or "Сотрудник",
+                                description=m.get("post", "") or "Сотрудник",
                                 badges=["Сотрудник"],
                                 primary_attrs={
-                                    "Подразделение": m.get('department', '') or "—",
-                                }
-                            ) for m in matches
+                                    "Подразделение": m.get("department", "") or "—",
+                                },
+                            )
+                            for m in matches
                         ]
 
                         prompt_msg = f"Уточните исполнителя для «{search_term}» ({len(matches)} совпадений)."
 
                         try:
-                            resume = ask_human(CardSelectInterrupt(
-                                prompt=prompt_msg,
-                                cards=cards,
-                                multiple=False,
-                            ))
+                            resume = ask_human(
+                                CardSelectInterrupt(
+                                    prompt=prompt_msg,
+                                    cards=cards,
+                                    multiple=False,
+                                )
+                            )
                             if not isinstance(resume, CardSelectResume):
                                 raise ToolAborted("Expected CardSelectResume")
                             selected_id = resume.selected_ids[0]
                             all_uuids.append(UUID(selected_id))
                         except ToolAborted:
-                            return {"status": "cancelled", "message": "Выбор исполнителя отменён."}
+                            return {
+                                "status": "cancelled",
+                                "message": "Выбор исполнителя отменён.",
+                            }
                         except GraphInterrupt:
                             raise
                         except Exception as exc:
-                            logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
-                            return {"status": "error", "message": f"Ошибка выбора исполнителя: {exc}"}
+                            logger.error(
+                                "HITL disambiguation failed: %s", exc, exc_info=True
+                            )
+                            return {
+                                "status": "error",
+                                "message": f"Ошибка выбора исполнителя: {exc}",
+                            }
 
             seen: set[UUID] = set()
             unique_uuids: list[UUID] = []
@@ -282,7 +302,7 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
             return {"status": "error", "message": f"Произошла ошибка: {e!s}"}
 
     return StructuredTool.from_function(
-        func=task_create_tool,
+        coroutine=task_create_tool,
         name="task_create_tool",
         description=(
             "Создает поручение с поддержкой различных типов исполнителей.\n"

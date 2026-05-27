@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.employee import EmployeeDto, GroupDto
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.clients.transport import IAsyncTransport
     from uuid import UUID
+
+    from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class GroupClient(EdmsBaseClient):
             return None
 
     async def get_employees_by_group_ids(
-            self, token: str, group_ids: list[UUID] | list[str]
+        self, token: str, group_ids: list[UUID] | list[str]
     ) -> list[EmployeeDto]:
         """Получает сотрудников из общих групп."""
         if not group_ids:
@@ -44,7 +45,7 @@ class GroupClient(EdmsBaseClient):
                 "GET",
                 "api/group/employee/all",
                 token,
-                params={"ids": [str(gid) for gid in group_ids]}
+                params={"ids": [str(gid) for gid in group_ids]},
             )
             if not isinstance(raw_data, list):
                 return []
@@ -58,14 +59,16 @@ class GroupClient(EdmsBaseClient):
             return []
 
     async def find_personal_by_name(
-            self, token: str, group_name: str
+        self, token: str, group_name: str
     ) -> dict[str, Any] | None:
         """Поиск личной группы по названию."""
         params = {"query": group_name, "page": 0, "size": 20}
 
         try:
             # Личные группы пока возвращают сырой dict, так как DTO может быть сложным
-            result = await self.make_request("GET", "api/personal-group", token, params=params)
+            result = await self.make_request(
+                "GET", "api/personal-group", token, params=params
+            )
 
             items = []
             if isinstance(result, dict) and "content" in result:
@@ -80,7 +83,7 @@ class GroupClient(EdmsBaseClient):
             return None
 
     async def get_employees_by_personal_group_ids(
-            self, token: str, group_ids: list[UUID] | list[str]
+        self, token: str, group_ids: list[UUID] | list[str]
     ) -> list[EmployeeDto]:
         """Получает сотрудников из личных групп."""
         if not group_ids:
@@ -91,7 +94,7 @@ class GroupClient(EdmsBaseClient):
                 "GET",
                 "api/personal-group/employee/all",
                 token,
-                params={"ids": [str(gid) for gid in group_ids]}
+                params={"ids": [str(gid) for gid in group_ids]},
             )
             if not isinstance(raw_data, list):
                 return []
@@ -110,8 +113,8 @@ class GroupClient(EdmsBaseClient):
 
 
 def _find_best_personal_group_match(
-        groups: list[dict[str, Any]],
-        search_name: str,
+    groups: list[dict[str, Any]],
+    search_name: str,
 ) -> dict[str, Any] | None:
     search_lower = search_name.strip().lower()
     for g in groups:

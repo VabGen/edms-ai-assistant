@@ -9,15 +9,18 @@ EDMS AI Assistant — Document Versions Tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Annotated, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel
 
-from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
@@ -46,7 +49,7 @@ def _att_name(attachment: Any) -> str:
         )
     return (
         getattr(attachment, "name", None)
-        or getattr(attachment, "original_name", None) # Поддержка snake_case из DTO
+        or getattr(attachment, "original_name", None)  # Поддержка snake_case из DTO
         or getattr(attachment, "originalName", None)
         or ""
     )
@@ -83,6 +86,7 @@ def _compare_attachments(doc1: dict[str, Any], doc2: dict[str, Any]) -> dict[str
 
 class DocumentVersionsInput(BaseModel):
     """Схема входных данных для получения и сравнения всех версий документа."""
+
     pass
 
 
@@ -100,7 +104,7 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
     """
 
     async def doc_get_versions(
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Retrieve all document versions and compare each consecutive pair automatically.
 
@@ -150,12 +154,15 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
             for v in sorted_versions:
                 vnum = v.version or (len(versions_info) + 1)
                 doc_uuid = v.document_id
+                created_dt = (
+                    getattr(v.document, "create_date", None) if v.document else None
+                )
                 if doc_uuid:
                     version_ids[str(vnum)] = str(doc_uuid)
                 versions_info.append(
                     {
                         "version_number": vnum,
-                        "created_date": str(v.create_date or ""),
+                        "created_date": str(created_dt or ""),
                     }
                 )
 
@@ -180,8 +187,12 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
                 to_id = version_ids[to_vnum]
 
                 try:
-                    doc_from_dto = await document_client.get_document_metadata(token, from_id)
-                    doc_to_dto = await document_client.get_document_metadata(token, to_id)
+                    doc_from_dto = await document_client.get_document_metadata(
+                        token, from_id
+                    )
+                    doc_to_dto = await document_client.get_document_metadata(
+                        token, to_id
+                    )
 
                     if not doc_from_dto or not doc_to_dto:
                         errors.append(
@@ -191,7 +202,9 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
 
                     # Конвертируем DTO в dict с camelCase ключами для переиспользования
                     # логики сравнения, которая опирается на ключи API СЭД
-                    dict_from = doc_from_dto.model_dump(by_alias=True, exclude_none=True)
+                    dict_from = doc_from_dto.model_dump(
+                        by_alias=True, exclude_none=True
+                    )
                     dict_to = doc_to_dto.model_dump(by_alias=True, exclude_none=True)
 
                     meta_diff = _compare_metadata(dict_from, dict_to)
@@ -223,7 +236,9 @@ def create_doc_get_versions_tool(document_client: DocumentClient) -> StructuredT
                 for c in comparisons
             )
 
-            logger.info("doc_get_versions completed: total=%d pairs=%d", total, len(comparisons))
+            logger.info(
+                "doc_get_versions completed: total=%d pairs=%d", total, len(comparisons)
+            )
 
             return {
                 "status": "success",

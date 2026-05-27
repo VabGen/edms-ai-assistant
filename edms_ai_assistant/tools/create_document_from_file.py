@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -27,9 +28,8 @@ from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.clients.document_creator_client import DocumentCreatorClient
-    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +151,11 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
     autofill_service = deps.appeal_autofill_service
 
     async def create_document_from_file(
-            file_path: str,
-            doc_category: str = "APPEAL",
-            file_name: str | None = None,
-            autofill: bool = True,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        file_path: str,
+        doc_category: str = "APPEAL",
+        file_name: str | None = None,
+        autofill: bool = True,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Create a new EDMS document from a local file and open it in the browser.
 
@@ -177,9 +177,19 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
         try:
             token = get_token_from_config(config)
         except Exception as e:
-            logger.error("Failed to get token from config: %s | config keys: %s", e,
-                         list((config or {}).get("configurable", {}).keys()) if config else "None")
-            return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
+            logger.error(
+                "Failed to get token from config: %s | config keys: %s",
+                e,
+                (
+                    list((config or {}).get("configurable", {}).keys())
+                    if config
+                    else "None"
+                ),
+            )
+            return {
+                "status": "error",
+                "message": f"Ошибка авторизации: токен не найден. {e}",
+            }
 
         # ── Авто-определение категории из текста сообщения ───────────────────────
         _explicit_category = doc_category
@@ -306,7 +316,9 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
                     logger.info("Autofill completed for document %s…", document_id[:8])
                 else:
                     autofill_status = "failed"
-                    warnings.append(f"Автозаполнение завершилось с ошибкой: {autofill_result.message}")
+                    warnings.append(
+                        f"Автозаполнение завершилось с ошибкой: {autofill_result.message}"
+                    )
                     logger.warning(
                         "Autofill failed for document %s: %s",
                         document_id[:8],
@@ -325,7 +337,9 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
 
         elif autofill and doc_category not in _AUTOFILL_SUPPORTED:
             autofill_status = "not_supported"
-            logger.info("Autofill not supported for category '%s' — skipped", doc_category)
+            logger.info(
+                "Autofill not supported for category '%s' — skipped", doc_category
+            )
 
         # ── 6. Формируем ответ ────────────────────────────────────────────────
         navigate_url = f"/document-form/{document_id}"
@@ -361,7 +375,7 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
         }
 
     return StructuredTool.from_function(
-        func=create_document_from_file,
+        coroutine=create_document_from_file,
         name="create_document_from_file",
         description=(
             "Создает новый документ EDMS из локального файла и открывает его в браузере.\n"

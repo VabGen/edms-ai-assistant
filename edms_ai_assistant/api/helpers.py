@@ -8,10 +8,10 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from edms_ai_assistant.clients.employee_client import EmployeeClient
 from edms_ai_assistant.utils.regex_utils import UUID_RE
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from edms_ai_assistant.model import UserInput
@@ -38,7 +38,9 @@ def cleanup_file(file_path: str) -> None:
         )
 
 
-async def resolve_user_context(user_input: UserInput, user_id: str, employee_client: EmployeeClient | None = None) -> dict:
+async def resolve_user_context(
+    user_input: UserInput, user_id: str, employee_client: EmployeeClient | None = None
+) -> dict:
     """Resolve user context dict from request or EDMS employee API."""
     if user_input.context:
         return user_input.context.model_dump(exclude_none=True)

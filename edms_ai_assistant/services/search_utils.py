@@ -28,16 +28,16 @@ DEFAULT_PAGEABLE: dict[str, Any] = {
 
 
 def build_employee_filter(
-        *,
-        name_query: str | None = None,
-        last_name: str | None = None,
-        first_name: str | None = None,
-        middle_name: str | None = None,
-        full_post_name: str | None = None,
-        post_id: int | None = None,
-        active: bool | None = None,
-        fired: bool | None = None,
-        includes: list[str] | None = None,
+    *,
+    name_query: str | None = None,
+    last_name: str | None = None,
+    first_name: str | None = None,
+    middle_name: str | None = None,
+    full_post_name: str | None = None,
+    post_id: int | None = None,
+    active: bool | None = None,
+    fired: bool | None = None,
+    includes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Строит EmployeeFilter для POST /api/employee/search.
 
@@ -80,11 +80,11 @@ def build_employee_filter(
 
 
 def get_merged_name_parts(
-        *,
-        name_query: str | None = None,
-        last_name: str | None = None,
-        first_name: str | None = None,
-        middle_name: str | None = None,
+    *,
+    name_query: str | None = None,
+    last_name: str | None = None,
+    first_name: str | None = None,
+    middle_name: str | None = None,
 ) -> NameParts:
     """Возвращает объединённые NameParts для scoring engine.
 

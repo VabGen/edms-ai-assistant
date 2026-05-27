@@ -13,25 +13,27 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Annotated, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langgraph.errors import GraphInterrupt
-
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
+from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
     CardSelectInterrupt,
     CardSelectResume,
     InterruptCard,
 )
-from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
     from edms_ai_assistant.clients.document_client import DocumentClient
 
@@ -57,6 +59,7 @@ _PATH_PLACEHOLDERS: frozenset[str] = frozenset(
 
 class FileCompareInput(BaseModel):
     """Validated input for the doc_compare_attachment_with_local tool."""
+
     local_file_path: str = Field(
         ...,
         description=(
@@ -97,7 +100,9 @@ def _att_name(attachment: Any) -> str:
     # Поддержка как dict, так и Pydantic объектов с extra='allow'
     if isinstance(attachment, dict):
         return attachment.get("name") or attachment.get("fileName") or ""
-    return getattr(attachment, "name", None) or getattr(attachment, "fileName", None) or ""
+    return (
+        getattr(attachment, "name", None) or getattr(attachment, "fileName", None) or ""
+    )
 
 
 def _att_id(attachment: Any) -> str:
@@ -156,10 +161,10 @@ def _normalise(text: str) -> str:
 
 
 def _compute_diff(
-        local_text: str,
-        att_text: str,
-        local_label: str,
-        att_label: str,
+    local_text: str,
+    att_text: str,
+    local_label: str,
+    att_label: str,
 ) -> list[dict[str, str]]:
     raw_diff = difflib.unified_diff(
         local_text.splitlines(keepends=True),
@@ -184,13 +189,13 @@ def _compute_diff(
 
 
 def _build_summary(
-        are_identical: bool,
-        similarity: float,
-        local_name: str,
-        att_name: str,
-        local_stats: dict[str, int],
-        att_stats: dict[str, int],
-        diff_result: list[dict[str, str]],
+    are_identical: bool,
+    similarity: float,
+    local_name: str,
+    att_name: str,
+    local_stats: dict[str, int],
+    att_stats: dict[str, int],
+    diff_result: list[dict[str, str]],
 ) -> str:
     if are_identical:
         return (
@@ -213,8 +218,8 @@ def _build_summary(
 
 
 def create_file_compare_tool(
-        document_client: DocumentClient,
-        attachment_client: AttachmentClient,
+    document_client: DocumentClient,
+    attachment_client: AttachmentClient,
 ) -> StructuredTool:
     """Фабрика для создания инструмента сравнения файлов.
 
@@ -227,10 +232,10 @@ def create_file_compare_tool(
     """
 
     async def doc_compare_attachment_with_local(
-            local_file_path: str,
-            attachment_id: str | None = None,
-            original_filename: str | None = None,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        local_file_path: str,
+        attachment_id: str | None = None,
+        original_filename: str | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """СРАВНИТЬ локальный файл с вложением документа в СЭД.
 
@@ -332,9 +337,10 @@ def create_file_compare_tool(
                     label=_att_name(a) or "без имени",
                     description="Вложение документа",
                     badges=["Документ"],
-                    metadata={"id": _att_id(a), "name": _att_name(a)}
+                    metadata={"id": _att_id(a), "name": _att_name(a)},
                 )
-                for a in attachments if _att_id(a)
+                for a in attachments
+                if _att_id(a)
             ]
 
             hint = attachment_id or display_name
@@ -343,20 +349,24 @@ def create_file_compare_tool(
                 f"Уточните, какое вложение сравнить с «{display_name}»:"
                 if attachment_id
                 else f"Не удалось автоматически определить вложение для сравнения "
-                     f"с «{display_name}». Выберите нужное:"
+                f"с «{display_name}». Выберите нужное:"
             )
 
             try:
-                resume = ask_human(CardSelectInterrupt(
-                    prompt=prompt_msg,
-                    cards=cards,
-                    multiple=False,
-                ))
+                resume = ask_human(
+                    CardSelectInterrupt(
+                        prompt=prompt_msg,
+                        cards=cards,
+                        multiple=False,
+                    )
+                )
                 if not isinstance(resume, CardSelectResume):
                     raise ToolAborted("Expected CardSelectResume")
 
                 selected_id = resume.selected_ids[0]
-                target = next((a for a in attachments if _att_id(a) == selected_id), None)
+                target = next(
+                    (a for a in attachments if _att_id(a) == selected_id), None
+                )
 
             except ToolAborted:
                 return {"status": "cancelled", "message": "Выбор вложения отменён."}
@@ -404,7 +414,9 @@ def create_file_compare_tool(
             }
 
         # ── 5. Извлечение текста локального файла ────────────────────────────────
-        local_text_raw: str = await FileProcessorService.extract_text_async(str(local_path))
+        local_text_raw: str = await FileProcessorService.extract_text_async(
+            str(local_path)
+        )
         if not local_text_raw or local_text_raw.startswith(("Ошибка:", "Формат файла")):
             return {
                 "status": "error",

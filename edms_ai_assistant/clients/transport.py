@@ -29,17 +29,16 @@ class IAsyncTransport(Protocol):
     """Контракт для асинхронного HTTP-транспорта."""
 
     async def request(
-            self,
-            method: str,
-            url: str,
-            *,
-            token: str,
-            params: dict[str, Any] | None = None,
-            json: Any = None,
-            files: dict[str, Any] | None = None,
-            timeout: int | None = None,
-    ) -> httpx.Response:
-        ...
+        self,
+        method: str,
+        url: str,
+        *,
+        token: str,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        files: dict[str, Any] | None = None,
+        timeout: int | None = None,
+    ) -> httpx.Response: ...
 
 
 class HttpxTransport(IAsyncTransport):
@@ -58,15 +57,15 @@ class HttpxTransport(IAsyncTransport):
         return {"Authorization": f"Bearer {token}"}
 
     async def request(
-            self,
-            method: str,
-            url: str,
-            *,
-            token: str,
-            params: dict[str, Any] | None = None,
-            json: Any = None,
-            files: dict[str, Any] | None = None,
-            timeout: int | None = None,
+        self,
+        method: str,
+        url: str,
+        *,
+        token: str,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        files: dict[str, Any] | None = None,
+        timeout: int | None = None,
     ) -> httpx.Response:
         """Публичный метод, удовлетворяющий контракту IAsyncTransport без декораторов."""
         response: httpx.Response = await self._request_with_retry(
@@ -87,15 +86,15 @@ class HttpxTransport(IAsyncTransport):
         reraise=True,
     )
     async def _request_with_retry(
-            self,
-            method: str,
-            url: str,
-            *,
-            token: str,
-            params: dict[str, Any] | None = None,
-            json: Any = None,
-            files: dict[str, Any] | None = None,
-            timeout: int | None = None,
+        self,
+        method: str,
+        url: str,
+        *,
+        token: str,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        files: dict[str, Any] | None = None,
+        timeout: int | None = None,
     ) -> httpx.Response:
         """Внутренняя реализация с ретраями"""
         headers = self._get_headers(token)
@@ -135,16 +134,27 @@ class HttpxTransport(IAsyncTransport):
         }
 
         if status_code == 404:
-            raise EdmsNotFoundError("Resource not found", status_code=status_code, context=context)
+            raise EdmsNotFoundError(
+                "Resource not found", status_code=status_code, context=context
+            )
         if status_code in (401, 403):
-            raise EdmsAuthenticationError("Authentication/Authorization failed", status_code=status_code,
-                                          context=context)
+            raise EdmsAuthenticationError(
+                "Authentication/Authorization failed",
+                status_code=status_code,
+                context=context,
+            )
         if status_code == 422:
-            raise EdmsValidationError("Validation error", status_code=status_code, context=context)
+            raise EdmsValidationError(
+                "Validation error", status_code=status_code, context=context
+            )
         if 400 <= status_code < 500:
-            raise EdmsClientError("Client error", status_code=status_code, context=context)
+            raise EdmsClientError(
+                "Client error", status_code=status_code, context=context
+            )
         if status_code >= 500:
-            raise EdmsServerError("Server error", status_code=status_code, context=context)
+            raise EdmsServerError(
+                "Server error", status_code=status_code, context=context
+            )
 
     async def close(self) -> None:
         await self._client.aclose()

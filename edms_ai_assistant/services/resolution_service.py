@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
@@ -10,13 +11,12 @@ from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,
     build_employee_filter,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.domain.employee import EmployeeDto
-    from edms_ai_assistant.clients.group_client import GroupClient
-    from edms_ai_assistant.clients.employee_client import EmployeeClient
     from edms_ai_assistant.clients.department_client import DepartmentClient
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
+    from edms_ai_assistant.clients.group_client import GroupClient
+    from edms_ai_assistant.domain.employee import EmployeeDto
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ResolutionResult:
     """Результат массового резолвинга исполнителей."""
+
     employee_ids: set[UUID] = field(default_factory=set)
     not_found: list[str] = field(default_factory=list)
     resolved_summary: list[str] = field(default_factory=list)
@@ -32,6 +33,7 @@ class ResolutionResult:
 @dataclass(frozen=True)
 class AmbiguousMatch:
     """Структура для неоднозначного совпадения при поиске сотрудника."""
+
     search_query: str
     matches: list[dict]
 
@@ -40,19 +42,19 @@ class ResolutionService:
     """Единая точка входа для резолвинга сотрудников, отделов и групп."""
 
     def __init__(
-            self,
-            employee_client: EmployeeClient,
-            department_client: DepartmentClient,
-            group_client: GroupClient,
+        self,
+        employee_client: EmployeeClient,
+        department_client: DepartmentClient,
+        group_client: GroupClient,
     ):
         self._employee_client = employee_client
         self._department_client = department_client
         self._group_client = group_client
 
     async def resolve_employees(
-            self,
-            token: str,
-            last_names: list[str],
+        self,
+        token: str,
+        last_names: list[str],
     ) -> tuple[set[UUID], list[str], list[AmbiguousMatch]]:
         """Резолвит сотрудников по фамилиям или ФИО."""
         found_ids: set[UUID] = set()
@@ -63,10 +65,14 @@ class ResolutionService:
             search_filter = build_employee_filter(name_query=name_query)
             try:
                 employees = await self._employee_client.search_employees_post(
-                    token=token, employee_filter=search_filter, pageable=DEFAULT_PAGEABLE
+                    token=token,
+                    employee_filter=search_filter,
+                    pageable=DEFAULT_PAGEABLE,
                 )
             except Exception:
-                logger.warning("Employee search failed for '%s'", name_query, exc_info=True)
+                logger.warning(
+                    "Employee search failed for '%s'", name_query, exc_info=True
+                )
                 not_found.append(name_query)
                 continue
 
@@ -85,7 +91,7 @@ class ResolutionService:
         return found_ids, not_found, ambiguous
 
     async def resolve_departments(
-            self, token: str, department_names: list[str]
+        self, token: str, department_names: list[str]
     ) -> tuple[set[UUID], list[str], int]:
         """Резолвит сотрудников по названиям отделов."""
         found_ids: set[UUID] = set()
@@ -102,7 +108,11 @@ class ResolutionService:
                     not_found.append(f"Департамент: {ns}")
                     continue
 
-                employees = await self._department_client.get_employees_by_department_id(token, dept.id)
+                employees = (
+                    await self._department_client.get_employees_by_department_id(
+                        token, dept.id
+                    )
+                )
                 for emp in employees:
                     if emp.id:
                         found_ids.add(emp.id)
@@ -116,7 +126,7 @@ class ResolutionService:
         return found_ids, not_found, total
 
     async def resolve_groups(
-            self, token: str, group_names: list[str], *, personal: bool = False
+        self, token: str, group_names: list[str], *, personal: bool = False
     ) -> tuple[set[UUID], list[str], int]:
         """Резолвит группы (обычные или личные) по названиям."""
         found_ids: set[UUID] = set()
@@ -144,22 +154,32 @@ class ResolutionService:
             except EdmsNotFoundError:
                 not_found.append(f"{label}: {ns}")
             except Exception:
-                logger.warning("Failed to resolve %s '%s'", label.lower(), ns, exc_info=True)
+                logger.warning(
+                    "Failed to resolve %s '%s'", label.lower(), ns, exc_info=True
+                )
                 not_found.append(f"{label}: {ns}")
 
         total = 0
         if group_ids:
             try:
                 if personal:
-                    employees = await self._group_client.get_employees_by_personal_group_ids(token, group_ids)
+                    employees = (
+                        await self._group_client.get_employees_by_personal_group_ids(
+                            token, group_ids
+                        )
+                    )
                 else:
-                    employees = await self._group_client.get_employees_by_group_ids(token, group_ids)
+                    employees = await self._group_client.get_employees_by_group_ids(
+                        token, group_ids
+                    )
                 for emp in employees:
                     if emp.id:
                         found_ids.add(emp.id)
                 total = len(employees)
             except Exception:
-                logger.warning("Failed to get employees for %ss", label.lower(), exc_info=True)
+                logger.warning(
+                    "Failed to get employees for %ss", label.lower(), exc_info=True
+                )
 
         return found_ids, not_found, total
 
@@ -172,28 +192,41 @@ class ResolutionService:
 
             user_id = current_user.employee.id
 
-            dept_id = current_user.employee.department.id if current_user.employee.department else None
+            dept_id = (
+                current_user.employee.department.id
+                if current_user.employee.department
+                else None
+            )
             if not dept_id:
                 return set(), 0
 
-            search_filter = {"departmentId": [str(dept_id)], "includes": ["POST", "DEPARTMENT"]}
+            search_filter = {
+                "departmentId": [str(dept_id)],
+                "includes": ["POST", "DEPARTMENT"],
+            }
             employees = await self._employee_client.search_employees_post(
-                token=token, employee_filter=search_filter, pageable={"page": 0, "size": 100, "sort": "lastName,ASC"}
+                token=token,
+                employee_filter=search_filter,
+                pageable={"page": 0, "size": 100, "sort": "lastName,ASC"},
             )
 
-            found_ids = {UUID(str(emp.id)) for emp in employees if emp.id and str(emp.id) != str(user_id)}
+            found_ids = {
+                UUID(str(emp.id))
+                for emp in employees
+                if emp.id and str(emp.id) != str(user_id)
+            }
             return found_ids, len(found_ids)
         except Exception:
             logger.warning("Failed to resolve subordinates", exc_info=True)
             return set(), 0
 
     async def resolve_bulk(
-            self,
-            token: str,
-            department_names: list[str] | None = None,
-            group_names: list[str] | None = None,
-            personal_group_names: list[str] | None = None,
-            include_subordinates: bool = False,
+        self,
+        token: str,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool = False,
     ) -> ResolutionResult:
         """Единый метод массового резолвинга по всем критериям."""
         found_ids: set[UUID] = set()
@@ -204,24 +237,30 @@ class ResolutionService:
             ids, nf, cnt = await self.resolve_departments(token, department_names)
             found_ids.update(ids)
             not_found.extend(nf)
-            if cnt: summary.append(f"подразделения: {cnt} сотр.")
+            if cnt:
+                summary.append(f"подразделения: {cnt} сотр.")
 
         if group_names:
             ids, nf, cnt = await self.resolve_groups(token, group_names, personal=False)
             found_ids.update(ids)
             not_found.extend(nf)
-            if cnt: summary.append(f"группы: {cnt} сотр.")
+            if cnt:
+                summary.append(f"группы: {cnt} сотр.")
 
         if personal_group_names:
-            ids, nf, cnt = await self.resolve_groups(token, personal_group_names, personal=True)
+            ids, nf, cnt = await self.resolve_groups(
+                token, personal_group_names, personal=True
+            )
             found_ids.update(ids)
             not_found.extend(nf)
-            if cnt: summary.append(f"личные группы: {cnt} сотр.")
+            if cnt:
+                summary.append(f"личные группы: {cnt} сотр.")
 
         if include_subordinates:
             ids, cnt = await self.resolve_subordinates(token)
             found_ids.update(ids)
-            if cnt: summary.append(f"подчинённые: {cnt} сотр.")
+            if cnt:
+                summary.append(f"подчинённые: {cnt} сотр.")
 
         return ResolutionResult(
             employee_ids=found_ids, not_found=not_found, resolved_summary=summary
@@ -230,8 +269,16 @@ class ResolutionService:
     @staticmethod
     def _format_employee_match(employee: EmployeeDto) -> dict:
         """Форматирует данные сотрудника для disambiguation response."""
-        post_name = employee.post.post_name if employee.post and employee.post.post_name else "Не указана"
-        dept_name = employee.department.name if employee.department and employee.department.name else "Не указан"
+        post_name = (
+            employee.post.post_name
+            if employee.post and employee.post.post_name
+            else "Не указана"
+        )
+        dept_name = (
+            employee.department.name
+            if employee.department and employee.department.name
+            else "Не указан"
+        )
 
         return {
             "id": str(employee.id),

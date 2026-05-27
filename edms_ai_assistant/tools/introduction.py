@@ -4,31 +4,35 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
-from typing import Annotated, Any, TYPE_CHECKING
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
     CardSelectInterrupt,
     CardSelectResume,
     InterruptCard,
 )
-from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.services.introduction_service import IntroductionService
-    from langchain_core.runnables import RunnableConfig
     from edms_ai_assistant.core.deps import AppDeps
+    from edms_ai_assistant.services.introduction_service import IntroductionService
 
 logger = logging.getLogger(__name__)
 
 
 class IntroductionInput(BaseModel):
     """Валидированная схема входных данных для создания ознакомления."""
+
     last_names: list[str] | None = Field(
         None,
         description="Фамилии сотрудников для поиска (например: ['Иванов', 'Петров'])",
@@ -105,11 +109,11 @@ class IntroductionInput(BaseModel):
 
 
 async def _handle_direct_addition(
-        service: IntroductionService,
-        token: str,
-        document_id: str,
-        employee_ids: list[str],
-        comment: str | None,
+    service: IntroductionService,
+    token: str,
+    document_id: str,
+    employee_ids: list[str],
+    comment: str | None,
 ) -> dict[str, Any]:
     """Обработка прямого добавления сотрудников по UUID."""
     logger.info("Direct addition of %d employees", len(employee_ids))
@@ -140,23 +144,23 @@ async def _handle_direct_addition(
     return {
         "status": "error",
         "message": (
-                result.error_message
-                or "❌ Не удалось создать ознакомление. "
-                   "Проверьте права доступа или корректность данных."
+            result.error_message
+            or "❌ Не удалось создать ознакомление. "
+            "Проверьте права доступа или корректность данных."
         ),
     }
 
 
 async def _handle_search_and_create(
-        service: IntroductionService,
-        token: str,
-        document_id: str,
-        last_names: list[str] | None,
-        department_names: list[str] | None,
-        group_names: list[str] | None,
-        personal_group_names: list[str] | None,
-        include_subordinates: bool,
-        comment: str | None,
+    service: IntroductionService,
+    token: str,
+    document_id: str,
+    last_names: list[str] | None,
+    department_names: list[str] | None,
+    group_names: list[str] | None,
+    personal_group_names: list[str] | None,
+    include_subordinates: bool,
+    comment: str | None,
 ) -> dict[str, Any]:
     """Обработка поиска сотрудников с native HITL disambiguation."""
     resolution_result = await service.resolve_employees(
@@ -185,22 +189,27 @@ async def _handle_search_and_create(
                 InterruptCard(
                     id=m.get("id", ""),
                     label=m.get("full_name", "Не указано"),
-                    description=m.get('post', '') or "Сотрудник",
+                    description=m.get("post", "") or "Сотрудник",
                     badges=["Сотрудник"],
                     primary_attrs={
-                        "Подразделение": m.get('department', '') or "—",
-                    }
-                ) for m in matches
+                        "Подразделение": m.get("department", "") or "—",
+                    },
+                )
+                for m in matches
             ]
 
-            prompt_msg = f"Уточните сотрудника для «{search_term}» ({len(matches)} совпадений)."
+            prompt_msg = (
+                f"Уточните сотрудника для «{search_term}» ({len(matches)} совпадений)."
+            )
 
             try:
-                resume = ask_human(CardSelectInterrupt(
-                    prompt=prompt_msg,
-                    cards=cards,
-                    multiple=False,
-                ))
+                resume = ask_human(
+                    CardSelectInterrupt(
+                        prompt=prompt_msg,
+                        cards=cards,
+                        multiple=False,
+                    )
+                )
                 if not isinstance(resume, CardSelectResume):
                     raise ToolAborted("Expected CardSelectResume")
                 selected_id = resume.selected_ids[0]
@@ -211,7 +220,10 @@ async def _handle_search_and_create(
                 raise
             except Exception as exc:
                 logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
-                return {"status": "error", "message": f"Ошибка выбора сотрудника: {exc}"}
+                return {
+                    "status": "error",
+                    "message": f"Ошибка выбора сотрудника: {exc}",
+                }
 
     if not employee_ids:
         not_found_str = (
@@ -266,14 +278,14 @@ def create_introduction_tool(deps: AppDeps) -> StructuredTool:
     introduction_service = deps.introduction_service
 
     async def introduction_create_tool(
-            last_names: list[str] | None = None,
-            department_names: list[str] | None = None,
-            group_names: list[str] | None = None,
-            personal_group_names: list[str] | None = None,
-            include_subordinates: bool | None = None,
-            comment: str | None = None,
-            selected_employee_ids: list[str] | None = None,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        last_names: list[str] | None = None,
+        department_names: list[str] | None = None,
+        group_names: list[str] | None = None,
+        personal_group_names: list[str] | None = None,
+        include_subordinates: bool | None = None,
+        comment: str | None = None,
+        selected_employee_ids: list[str] | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Создает список ознакомления с документом.
 
@@ -337,7 +349,8 @@ def create_introduction_tool(deps: AppDeps) -> StructuredTool:
             raise
         except Exception as e:
             logger.error(
-                "Introduction creation failed: %s", e,
+                "Introduction creation failed: %s",
+                e,
                 exc_info=True,
                 extra={"document_id": document_id},
             )
@@ -347,7 +360,7 @@ def create_introduction_tool(deps: AppDeps) -> StructuredTool:
             }
 
     return StructuredTool.from_function(
-        func=introduction_create_tool,
+        coroutine=introduction_create_tool,
         name="introduction_create_tool",
         description=(
             "Создает список ознакомления с документом.\n"

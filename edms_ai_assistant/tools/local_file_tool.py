@@ -4,11 +4,10 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator
-
 
 if TYPE_CHECKING:
     from edms_ai_assistant.services.file_processor import FileProcessorService
@@ -77,7 +76,7 @@ def _split_text_to_pages(text: str) -> dict[int, str]:
 
 
 def create_local_file_reader_tool(
-        file_processor_service: FileProcessorService,
+    file_processor_service: FileProcessorService,
 ) -> StructuredTool:
     """Фабрика для создания инструмента чтения локальных файлов.
 
@@ -89,9 +88,9 @@ def create_local_file_reader_tool(
     """
 
     async def read_local_file_content(
-            file_path: str,
-            target_pages: list[int] | None = None,
-            search_keywords: list[str] | None = None,
+        file_path: str,
+        target_pages: list[int] | None = None,
+        search_keywords: list[str] | None = None,
     ) -> dict[str, Any]:
         """Extract text and metadata from a local file on disk.
 
@@ -131,9 +130,9 @@ def create_local_file_reader_tool(
         full_text = await file_processor_service.extract_text_async(str(path))
 
         if (
-                not full_text
-                or full_text.startswith("Ошибка:")
-                or full_text.startswith("Формат файла")
+            not full_text
+            or full_text.startswith("Ошибка:")
+            or full_text.startswith("Формат файла")
         ):
             return {
                 "status": "error",
@@ -222,7 +221,9 @@ def create_local_file_reader_tool(
 
                 # Формируем Мини-Индекс для пропущенных страниц
                 middle_pages = [
-                    p for p in all_page_nums if p not in head_pages and p not in tail_pages
+                    p
+                    for p in all_page_nums
+                    if p not in head_pages and p not in tail_pages
                 ]
                 index_text = "... [ПРОПУЩЕННЫЕ СТРАНИЦЫ. Краткое содержание пропущенных частей для навигации]:\n"
 
@@ -257,7 +258,7 @@ def create_local_file_reader_tool(
         coroutine=read_local_file_content,
         name="read_local_file_content",
         description="Extract text and metadata from a local file on disk. "
-                    "Supports Smart Truncation (Head + Mini-Index + Tail) for large docs, "
-                    "Targeted Page Extraction, and Keyword Search.",
+        "Supports Smart Truncation (Head + Mini-Index + Tail) for large docs, "
+        "Targeted Page Extraction, and Keyword Search.",
         args_schema=LocalFileInput,
     )

@@ -9,15 +9,15 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from edms_ai_assistant.config import settings
 from edms_ai_assistant.summarizer.cache.cache import CacheEntry, TwoLevelCache
-from edms_ai_assistant.summarizer.errors import PipelineError, TextExtractionError
 from edms_ai_assistant.summarizer.chunking.structural import SmartChunker
 from edms_ai_assistant.summarizer.chunking.token_aware import count_tokens
+from edms_ai_assistant.summarizer.errors import PipelineError, TextExtractionError
 from edms_ai_assistant.summarizer.observability.logging_ctx import request_id_var
 from edms_ai_assistant.summarizer.observability.tracing import (
     RequestCostAccumulator,
@@ -233,7 +233,9 @@ def format_output_as_markdown(resp: SummarizationResponse) -> str:
         lines = [f"**Найдено задач: {len(items)}**", ""]
         for i, item in enumerate(items, 1):
             priority = item.get("priority", "medium")
-            priority_label = {"high": "[!]", "medium": "[*]", "low": "[-]"}.get(priority, "•")
+            priority_label = {"high": "[!]", "medium": "[*]", "low": "[-]"}.get(
+                priority, "•"
+            )
             task = item.get("task", "")
             owner = item.get("owner")
             deadline = item.get("deadline")
@@ -445,7 +447,9 @@ class SummarizationService:
             )
 
         if not text.strip():
-            raise TextExtractionError(f"Не удалось извлечь текст из '{request.file_name}'")
+            raise TextExtractionError(
+                f"Не удалось извлечь текст из '{request.file_name}'"
+            )
 
         doc_tokens = count_tokens(text)
         logger.info(
@@ -648,7 +652,9 @@ class SummarizationService:
                 request.file_content, request.file_name
             )
         if not text.strip():
-            raise TextExtractionError(f"Не удалось извлечь текст из '{request.file_name}'")
+            raise TextExtractionError(
+                f"Не удалось извлечь текст из '{request.file_name}'"
+            )
 
         needs_map_reduce = self._chunker.needs_map_reduce(
             text, context_window=self._context_window
@@ -677,7 +683,9 @@ class SummarizationService:
                 else:
                     yield event
             if pipeline_result is None:
-                raise PipelineError("Pipeline.run_stream did not yield a PipelineResult")
+                raise PipelineError(
+                    "Pipeline.run_stream did not yield a PipelineResult"
+                )
 
         total_latency = sw_total.elapsed_ms()
         response = SummarizationResponse(

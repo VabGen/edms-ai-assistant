@@ -2,27 +2,27 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.employee import SliceDto
+from edms_ai_assistant.domain.enums import ReportTaskControlField
 from edms_ai_assistant.domain.report import (
+    CountOfExecutedAndUnexecutedControlTaskFilter,
+    DocumentOnControlReportFilter,
+    DocumentOnRegistrationReportFilter,
+    DocumentOnStatusReportFilter,
+    IdsDto,
+    PerformingDisciplineReportFilter,
+    ReceivedAppealsReportFilter,
+    ReportConstructRequest,
     ReportTaskDto,
     ReportTaskFilter,
-    ReportConstructRequest,
-    CountOfExecutedAndUnexecutedControlTaskFilter,
-    DocumentOnRegistrationReportFilter,
-    DocumentOnControlReportFilter,
-    DocumentOnStatusReportFilter,
-    TaskOnStatusReportFilter,
     TaskOnControlReportFilter,
+    TaskOnStatusReportFilter,
     VolumeOfDocumentFlowReportFilter,
-    ReceivedAppealsReportFilter,
-    PerformingDisciplineReportFilter,
-    IdsDto,
 )
-from edms_ai_assistant.domain.enums import ReportTaskControlField
 
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
@@ -38,11 +38,19 @@ class ReportClient(EdmsBaseClient):
         super().__init__(transport, settings)
 
     async def find_all(
-        self, token: str, filter_params: ReportTaskFilter | None = None, page: int = 0, size: int = 20
+        self,
+        token: str,
+        filter_params: ReportTaskFilter | None = None,
+        page: int = 0,
+        size: int = 20,
     ) -> SliceDto[ReportTaskDto]:
         """GET api/report/v2 - Получить отчеты пользователя."""
         logger.info("Fetching user reports (V2)")
-        params = filter_params.model_dump(exclude_none=True, by_alias=True) if filter_params else {}
+        params = (
+            filter_params.model_dump(exclude_none=True, by_alias=True)
+            if filter_params
+            else {}
+        )
         params.update({"page": page, "size": size, "sort": "createDate,desc"})
         return await self._request_dto(
             "GET", "api/report/v2", token, SliceDto[ReportTaskDto], params=params
@@ -51,7 +59,9 @@ class ReportClient(EdmsBaseClient):
     async def find_by_id(self, token: str, report_id: UUID) -> ReportTaskDto:
         """GET api/report/v2/{id} - Получить отчет по id."""
         logger.info(f"Fetching report V2 by id: {report_id}")
-        return await self._request_dto("GET", f"api/report/v2/{report_id}", token, ReportTaskDto)
+        return await self._request_dto(
+            "GET", f"api/report/v2/{report_id}", token, ReportTaskDto
+        )
 
     async def create_construct_report(
         self, token: str, report_type: str, request: ReportConstructRequest
@@ -210,7 +220,9 @@ class ReportClient(EdmsBaseClient):
     async def delete_report(self, token: str, report_id: UUID) -> None:
         """DELETE api/report/v2/{id} - Удалить отчет по id."""
         logger.info(f"Deleting report V2: {report_id}")
-        await self.make_request("DELETE", f"api/report/v2/{report_id}", token, is_json_response=False)
+        await self.make_request(
+            "DELETE", f"api/report/v2/{report_id}", token, is_json_response=False
+        )
 
     async def delete_reports_batch(self, token: str, ids: list[UUID]) -> None:
         """DELETE api/report/v2 - Удалить отчеты по списку id."""

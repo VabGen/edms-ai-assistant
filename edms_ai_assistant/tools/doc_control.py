@@ -34,11 +34,20 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
+from edms_ai_assistant.agent.interrupt_contract import (
+    InterruptOption,
+    SelectInterrupt,
+    SelectResume,
+    TextInputInterrupt,
+    TextInputResume,
+)
 from edms_ai_assistant.agent.runnable_utils import (
     get_document_id_from_config,
     get_token_from_config,
@@ -46,9 +55,8 @@ from edms_ai_assistant.agent.runnable_utils import (
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.clients.employee_client import EmployeeClient
     from edms_ai_assistant.clients.control_client import ControlClient
-    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.clients.employee_client import EmployeeClient
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +204,7 @@ class DocControlInput(BaseModel):
         else:
             self.control_term_days = _DEFAULT_CONTROL_DAYS
             self.date_control_end = (
-                    today + timedelta(days=_DEFAULT_CONTROL_DAYS)
+                today + timedelta(days=_DEFAULT_CONTROL_DAYS)
             ).strftime("%Y-%m-%d")
 
         return self
@@ -218,8 +226,8 @@ def _format_control_types(types: list[dict[str, Any]]) -> str:
 
 
 def _need_input(
-        message: str,
-        missing_fields: list[dict[str, Any]] | None = None,
+    message: str,
+    missing_fields: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a standard 'need_input' response so the agent asks the user.
 
@@ -240,9 +248,9 @@ def _need_input(
 
 
 async def _resolve_control_type(
-        control_client: ControlClient,
-        token: str,
-        control_type_name: str | None,
+    control_client: ControlClient,
+    token: str,
+    control_type_name: str | None,
 ) -> tuple[str | None, str | None, dict[str, Any] | None]:
     """Resolve control type with pre-validation.
 
@@ -266,35 +274,40 @@ async def _resolve_control_type(
     if control_type_name:
         name_lower = control_type_name.lower()
         for ct in ctrl_types:
-            ct_name = str(ct.get("name", "")).lower()
+            ct_name = str(ct["name"]) if "name" in ct else "".lower()
             if name_lower in ct_name or ct_name in name_lower:
-                return str(ct["id"]), str(ct.get("name", "")), None
+                return str(ct["id"]), str(ct["name"]) if "name" in ct else "", None
 
-        return (
-            None,
-            None,
-            _need_input(
-                message=(
-                        f"Тип контроля «{control_type_name}» не найден. "
-                        f"Доступные типы контроля:\n" + _format_control_types(ctrl_types)
+        options = [
+            InterruptOption(
+                id=str(ct["id"]), label=str(ct["name"]) if "name" in ct else ""
+            )
+            for ct in ctrl_types
+        ]
+        resume = ask_human(
+            SelectInterrupt(
+                prompt=(
+                    f"Тип контроля «{control_type_name}» не найден. "
+                    "Выберите из доступных:"
                 ),
-                missing_fields=[
-                    {
-                        "field": "control_type_name",
-                        "description": "Название типа контроля",
-                        "available_options": [
-                            {"id": str(ct["id"]), "name": str(ct.get("name", ""))}
-                            for ct in ctrl_types
-                        ],
-                    }
-                ],
-            ),
+                options=options,
+            )
         )
+        if not isinstance(resume, SelectResume):
+            raise ToolAborted("Тип контроля не выбран")
+        ct = next((c for c in ctrl_types if str(c["id"]) == resume.selected_id), None)
+        if not ct:
+            return (
+                None,
+                None,
+                {"status": "error", "message": "Выбранный тип контроля не найден."},
+            )
+        return str(ct["id"]), str(ct["name"]) if "name" in ct else "", None
 
     # ── No type specified ──────────────────────────────────────────────────
     if len(ctrl_types) == 1:
         ct = ctrl_types[0]
-        ct_id, ct_name = str(ct["id"]), str(ct.get("name", ""))
+        ct_id, ct_name = str(ct["id"]), str(ct["name"]) if "name" in ct else ""
         logger.info(
             "Control type auto-selected (single): id=%s... name=%s",
             ct_id[:8],
@@ -302,26 +315,23 @@ async def _resolve_control_type(
         )
         return ct_id, ct_name, None
 
-    return (
-        None,
-        None,
-        _need_input(
-            message=(
-                    "Укажите тип контроля. Доступные типы:\n"
-                    + _format_control_types(ctrl_types)
-            ),
-            missing_fields=[
-                {
-                    "field": "control_type_name",
-                    "description": "Название типа контроля",
-                    "available_options": [
-                        {"id": str(ct["id"]), "name": str(ct.get("name", ""))}
-                        for ct in ctrl_types
-                    ],
-                }
-            ],
-        ),
+    options = [
+        InterruptOption(id=str(ct["id"]), label=str(ct["name"]) if "name" in ct else "")
+        for ct in ctrl_types
+    ]
+    resume = ask_human(
+        SelectInterrupt(prompt="Выберите тип контроля:", options=options)
     )
+    if not isinstance(resume, SelectResume):
+        raise ToolAborted("Тип контроля не выбран")
+    ct = next((c for c in ctrl_types if str(c["id"]) == resume.selected_id), None)
+    if not ct:
+        return (
+            None,
+            None,
+            {"status": "error", "message": "Выбранный тип контроля не найден."},
+        )
+    return str(ct["id"]), str(ct["name"]) if "name" in ct else "", None
 
 
 def _is_uuid(value: str) -> bool:
@@ -329,9 +339,9 @@ def _is_uuid(value: str) -> bool:
 
 
 async def _find_employee(
-        employee_client: EmployeeClient,
-        token: str,
-        last_name: str,
+    employee_client: EmployeeClient,
+    token: str,
+    last_name: str,
 ) -> str | None:
     """Resolve employee UUID by last name via FTS (top-1 result).
 
@@ -347,12 +357,12 @@ async def _find_employee(
 
 
 async def _resolve_employee(
-        employee_client: EmployeeClient,
-        token: str,
-        control_employee_id: str | None,
-        *,
-        required: bool = True,
-        current_employee_id: str | None = None,
+    employee_client: EmployeeClient,
+    token: str,
+    control_employee_id: str | None,
+    *,
+    required: bool = True,
+    current_employee_id: str | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Resolve controller employee with pre-validation.
 
@@ -394,20 +404,29 @@ async def _resolve_employee(
         return current_employee_id, None
 
     if required:
-        return None, _need_input(
-            message=(
-                "Для постановки на контроль необходимо указать контролёра — "
-                "сотрудника, ответственного за контроль документа. "
-                "Укажите ФИО (например «Иванов») или UUID сотрудника "
-                "в параметре control_employee_id."
-            ),
-            missing_fields=[
-                {
-                    "field": "control_employee_id",
-                    "description": "ФИО или UUID сотрудника-контролёра",
-                }
-            ],
+        resume = ask_human(
+            TextInputInterrupt(
+                prompt=(
+                    "Укажите контролёра — ФИО или UUID сотрудника, "
+                    "ответственного за контроль документа:"
+                ),
+                placeholder="Например: Иванов",
+            )
         )
+        if not isinstance(resume, TextInputResume):
+            raise ToolAborted("Контролёр не указан")
+        employee_name = resume.value.strip()
+        if _is_uuid(employee_name):
+            return employee_name, None
+        found = await _find_employee(employee_client, token, employee_name)
+        if found:
+            return found, None
+        return None, {
+            "status": "error",
+            "message": (
+                f"Сотрудник «{employee_name}» не найден. " "Уточните ФИО контролёра."
+            ),
+        }
 
     return None, None
 
@@ -447,8 +466,8 @@ def _handle_control_error(exc: Exception) -> dict[str, Any]:
 
 
 def create_doc_control_tool(
-        control_client: ControlClient,
-        employee_client: EmployeeClient,
+    control_client: ControlClient,
+    employee_client: EmployeeClient,
 ) -> StructuredTool:
     """Фабрика инструмента управления контролем с внедрением зависимостей.
 
@@ -461,13 +480,13 @@ def create_doc_control_tool(
     """
 
     async def doc_control(
-            action: str = "set",
-            date_control_end: str | None = None,
-            control_term_days: int | None = None,
-            control_type_name: str | None = None,
-            control_employee_id: str | None = None,
-            comment: str | None = None,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        action: str = "set",
+        date_control_end: str | None = None,
+        control_term_days: int | None = None,
+        control_type_name: str | None = None,
+        control_employee_id: str | None = None,
+        comment: str | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Управляет контролем документа.
 
@@ -496,7 +515,11 @@ def create_doc_control_tool(
             logger.error(
                 "Failed to get token from config: %s | config keys: %s",
                 e,
-                list((config or {}).get("configurable", {}).keys()) if config else "None",
+                (
+                    list((config or {}).get("configurable", {}).keys())
+                    if config
+                    else "None"
+                ),
             )
             return {
                 "status": "error",
@@ -557,8 +580,8 @@ def create_doc_control_tool(
 
                 payload: dict[str, Any] = {}
 
-                if current.id:
-                    payload["id"] = current.id
+                if current.control_type_id:
+                    payload["id"] = current.control_type_id
 
                 # ── Тип контроля ───────────────────────────────────────────────
                 if control_type_name:
@@ -573,7 +596,6 @@ def create_doc_control_tool(
                         payload["controlTypeId"] = current.control_type_id
 
                 # ── Контролёр ──────────────────────────────────────────────────
-                # Note: ControlDto might need to be checked for controlEmployeeId attribute
                 current_emp_id = getattr(current, "control_employee_id", None)
                 emp_id, need_input = await _resolve_employee(
                     employee_client,
@@ -597,18 +619,22 @@ def create_doc_control_tool(
                         end_d = datetime.strptime(end_date_only, "%Y-%m-%d").date()
                         payload["controlTermDays"] = max((end_d - today).days, 1)
                     except ValueError:
-                        payload["controlTermDays"] = getattr(current, "control_term_days", _DEFAULT_CONTROL_DAYS)
+                        payload["controlTermDays"] = getattr(
+                            current, "control_term_days", _DEFAULT_CONTROL_DAYS
+                        )
                 elif control_term_days and control_term_days >= 1:
                     payload["controlTermDays"] = control_term_days
                     end_date_only = (
-                            today + timedelta(days=control_term_days)
+                        today + timedelta(days=control_term_days)
                     ).strftime("%Y-%m-%d")
                     payload["controlPlanDateEnd"] = _to_iso_end(end_date_only)
                 else:
-                    if current.date_control_end:
-                        payload["controlPlanDateEnd"] = current.date_control_end.isoformat()
-                    if current.control_days:
-                        payload["controlTermDays"] = current.control_days
+                    if current.control_plan_date_end:
+                        payload["controlPlanDateEnd"] = (
+                            current.control_plan_date_end.isoformat()
+                        )
+                    if current.control_term_days:
+                        payload["controlTermDays"] = current.control_term_days
 
                 # ── Дата постановки ────────────────────────────────────────────
                 current_start = getattr(current, "control_date_start", None)
@@ -713,12 +739,14 @@ def create_doc_control_tool(
                 "requires_reload": True,
             }
 
+        except ToolAborted:
+            raise
         except Exception as exc:
             logger.error("doc_control error: %s", exc, exc_info=True)
             return _handle_control_error(exc)
 
     return StructuredTool.from_function(
-        func=doc_control,
+        coroutine=doc_control,
         name="doc_control",
         description=(
             "Управляет контролем документа.\n"
@@ -731,8 +759,8 @@ def create_doc_control_tool(
             "ОБЯЗАТЕЛЬНЫЕ параметры для set:\n"
             "- control_employee_id — ФИО или UUID контролёра\n"
             "- control_type_name   — тип контроля (авто-выбор если единственный)\n\n"
-            "Если обязательный параметр не указан, инструмент вернёт status='need_input' "
-            "со списком доступных вариантов — уточните у пользователя и вызовите повторно.\n"
+            "Если тип контроля или контролёр не указаны, инструмент запросит их "
+            "напрямую у пользователя через интерактивный диалог.\n"
             "При ошибке 403 проверьте права DOCUMENT_CONTROL_CREATE.\n"
             "ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ. "
             "Тебе НЕ НУЖНО запрашивать их у пользователя."

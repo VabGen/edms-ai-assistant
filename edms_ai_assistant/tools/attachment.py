@@ -11,8 +11,10 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
+from uuid import UUID
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,11 +32,10 @@ from edms_ai_assistant.domain.document import DocumentDto
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.services.file_processor import FileProcessorService
-    from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
     from edms_ai_assistant.clients.document_client import DocumentClient
-    from langchain_core.runnables import RunnableConfig
+    from edms_ai_assistant.core.deps import AppDeps
+    from edms_ai_assistant.services.file_processor import FileProcessorService
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,15 @@ def _get_attachment_name(attachment: Any) -> str:
 
 def _get_attachment_id(attachment: Any) -> str:
     return str(getattr(attachment, "id", "") or "")
+
+
+def _ensure_uuid(value: Any, *, field: str) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} должен быть корректным UUID") from exc
 
 
 def _resolve_attachment(attachments: list[Any], hint: str) -> Any | None:
@@ -226,7 +236,10 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
             document_id = get_document_id_from_config(config)
         except Exception as e:
             logger.error("Failed to get token/document_id from config: %s", e)
-            return {"status": "error", "message": f"Ошибка авторизации или контекста документа: {e}"}
+            return {
+                "status": "error",
+                "message": f"Ошибка авторизации или контекста документа: {e}",
+            }
 
         logger.info(
             "doc_get_file_content called",
@@ -242,7 +255,7 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
         try:
             raw_data = await doc_client.get_document_metadata(token, document_id)
             doc = DocumentDto.model_validate(raw_data)
-            attachments: list[Any] = doc.attachmentDocument or []
+            attachments: list[Any] = doc.attachment_document or []
         except Exception as exc:
             logger.error("Failed to fetch document metadata: %s", exc, exc_info=True)
             return {
@@ -260,36 +273,50 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
 
         # ── Разрешение целевого вложения ──────────────────────────────────────────
         target = None
+        resolved_id: str | None = None
         if attachment_id:
             target = _resolve_attachment(attachments, attachment_id)
             if target is None:
                 cards = []
                 for a in attachments:
                     meta = _build_attachment_meta(a)
-                    cards.append(InterruptCard(
-                        id=meta["id"],
-                        label=meta["название"],
-                        description=f"{meta['тип_вложения'] or 'Файл'} • {meta['размер_кб']} КБ",
-                        primary_attrs={
-                            "Дата": meta["дата_загрузки"] or "—",
-                            "ЭЦП": "Да" if meta["есть_эцп"] else "Нет"
-                        },
-                        metadata={"url": f"/attachment/{meta['название']}"}
-                    ))
+                    cards.append(
+                        InterruptCard(
+                            id=meta["id"],
+                            label=meta["название"],
+                            description=f"{meta['тип_вложения'] or 'Файл'} • {meta['размер_кб']} КБ",
+                            primary_attrs={
+                                "Дата": meta["дата_загрузки"] or "—",
+                                "ЭЦП": "Да" if meta["есть_эцп"] else "Нет",
+                            },
+                            metadata={"url": f"/attachment/{meta['название']}"},
+                        )
+                    )
 
-                resume = ask_human(CardSelectInterrupt(
-                    prompt=f"Вложение «{attachment_id}» не найдено. Выберите вложение для анализа:",
-                    cards=cards
-                ))
+                resume = ask_human(
+                    CardSelectInterrupt(
+                        prompt=f"Вложение «{attachment_id}» не найдено. Выберите вложение для анализа:",
+                        cards=cards,
+                    )
+                )
                 if isinstance(resume, CardSelectResume):
                     resolved_id = resume.selected_ids[0]
-                    target = next((a for a in attachments if _get_attachment_id(a) == resolved_id), None)
+                    target = next(
+                        (
+                            a
+                            for a in attachments
+                            if _get_attachment_id(a) == resolved_id
+                        ),
+                        None,
+                    )
                 else:
                     return {"status": "error", "message": "Выбор вложения отменён."}
 
             if target:
                 resolved_id = _get_attachment_id(target)
-                logger.info("Attachment resolved: '%s' -> %s...", attachment_id, resolved_id[:8])
+                logger.info(
+                    "Attachment resolved: '%s' -> %s...", attachment_id, resolved_id[:8]
+                )
         else:
             if len(attachments) == 1:
                 target = attachments[0]
@@ -299,29 +326,43 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
                 cards = []
                 for a in attachments:
                     meta = _build_attachment_meta(a)
-                    cards.append(InterruptCard(
-                        id=meta["id"],
-                        label=meta["название"],
-                        description=f"{meta['тип_вложения'] or 'Файл'} • {meta['размер_кб']} КБ",
-                        primary_attrs={
-                            "Дата": meta["дата_загрузки"] or "—",
-                            "ЭЦП": "Да" if meta["есть_эцп"] else "Нет"
-                        },
-                        metadata={"url": f"/attachment/{meta['название']}"}
-                    ))
+                    cards.append(
+                        InterruptCard(
+                            id=meta["id"],
+                            label=meta["название"],
+                            description=f"{meta['тип_вложения'] or 'Файл'} • {meta['размер_кб']} КБ",
+                            primary_attrs={
+                                "Дата": meta["дата_загрузки"] or "—",
+                                "ЭЦП": "Да" if meta["есть_эцп"] else "Нет",
+                            },
+                            metadata={"url": f"/attachment/{meta['название']}"},
+                        )
+                    )
 
-                resume = ask_human(CardSelectInterrupt(
-                    prompt="В документе несколько вложений. Какое из них проанализировать?",
-                    cards=cards
-                ))
+                resume = ask_human(
+                    CardSelectInterrupt(
+                        prompt="В документе несколько вложений. Какое из них проанализировать?",
+                        cards=cards,
+                    )
+                )
                 if isinstance(resume, CardSelectResume):
                     resolved_id = resume.selected_ids[0]
-                    target = next((a for a in attachments if _get_attachment_id(a) == resolved_id), None)
+                    target = next(
+                        (
+                            a
+                            for a in attachments
+                            if _get_attachment_id(a) == resolved_id
+                        ),
+                        None,
+                    )
                 else:
                     return {"status": "error", "message": "Выбор вложения отменён."}
 
         if not target:
-             return {"status": "error", "message": "Не удалось определить вложение."}
+            return {"status": "error", "message": "Не удалось определить вложение."}
+
+        if resolved_id is None:
+            resolved_id = _get_attachment_id(target)
 
         file_info = _build_attachment_meta(target)
         file_name: str = file_info["название"]
@@ -339,8 +380,19 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
         # ── Скачивание вложения ───────────────────────────────────────────────────
         att_doc_id: str = str(getattr(target, "documentId", None) or document_id)
         try:
+            att_doc_uuid = _ensure_uuid(att_doc_id, field="document_id")
+            attachment_uuid = _ensure_uuid(resolved_id, field="attachment_id")
+        except ValueError as exc:
+            logger.error("Invalid UUID for attachment download: %s", exc)
+            return {
+                "status": "error",
+                "message": f"Некорректный идентификатор вложения: {exc}",
+                "file_info": file_info,
+                "summary_type": summary_type,
+            }
+        try:
             content_bytes = await attach_client.get_attachment_content(
-                token, att_doc_id, resolved_id
+                token, att_doc_uuid, attachment_uuid
             )
         except Exception as exc:
             logger.error(
@@ -469,7 +521,7 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
                     )
 
     return StructuredTool.from_function(
-        func=doc_get_file_content,
+        coroutine=doc_get_file_content,
         name="doc_get_file_content",
         description=(
             "Извлекает и анализирует содержимое вложения документа из EDMS.\n"

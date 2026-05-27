@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
-
 from edms_ai_assistant.domain.enums import (
     GroupByStoragePeriod,
     ReminderType,
     StoragePeriodType,
-    YearPostfix,
     WorkDaysRoundPolicy,
+    YearPostfix,
 )
 
 if TYPE_CHECKING:
-    from uuid import UUID
     from datetime import datetime
+    from uuid import UUID
+
     from edms_ai_assistant.domain.document import DocumentProfileDto
     from edms_ai_assistant.domain.employee import EmployeeDto, GroupDto
 
@@ -42,7 +42,9 @@ class SubjectDto(EdmsBaseDto):
     id: UUID | None = Field(None, description="Идентификатор тематики")
     name: str | None = Field(None, description="Наименование тематики")
     code: int | None = Field(None, description="Код тематики")
-    parent_subject_id: UUID | None = Field(None, description="Идентификатор родительской тематики")
+    parent_subject_id: UUID | None = Field(
+        None, description="Идентификатор родительской тематики"
+    )
     parent_subject: Any | None = Field(None, description="Родительская тематика")
     active: bool | None = None
     deleted: bool | None = None
@@ -200,10 +202,15 @@ class UnifiedDocumentationSystemDto(EdmsBaseDto):
 
 class OrgDto(EdmsBaseDto):
     """Organization model."""
+
     id: str | None = Field(None, description="Идентификатор организации")
     name: str | None = Field(None, description="Наименование организации")
-    current_count: int | None = Field(None, description="Текущее кол-во активных учетных записей в СЭД")
-    max_count: int | None = Field(None, description="Максимально кол-во активных учетных записей")
+    current_count: int | None = Field(
+        None, description="Текущее кол-во активных учетных записей в СЭД"
+    )
+    max_count: int | None = Field(
+        None, description="Максимально кол-во активных учетных записей"
+    )
     active: bool | None = Field(None, description="Признак активена ли организация")
 
 

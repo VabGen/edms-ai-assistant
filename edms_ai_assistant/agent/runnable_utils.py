@@ -47,8 +47,7 @@ def get_document_id_from_config(config: RunnableConfig) -> str:
     """
     if not config or not isinstance(config, dict):
         raise RuntimeError(
-            "RunnableConfig is missing or invalid. "
-            "Cannot extract document_id."
+            "RunnableConfig is missing or invalid. " "Cannot extract document_id."
         )
 
     doc_id = config.get("configurable", {}).get("document_id")

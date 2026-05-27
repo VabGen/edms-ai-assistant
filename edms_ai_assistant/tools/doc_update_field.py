@@ -7,17 +7,20 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Annotated, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.tools import StructuredTool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.runnable_utils import get_document_id_from_config, get_token_from_config
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
 
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.document_client import DocumentClient
-    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,7 @@ _ALLOWED_APPEAL_FIELDS: dict[str, str] = {
 
 class UpdateDocumentFieldInput(BaseModel):
     """Validated input for updating a single document field."""
+
     field_name: str = Field(
         ...,
         description=(
@@ -84,7 +88,7 @@ def _enum_value(val: Any) -> Any:
 
 
 async def _fetch_main_required_fields(
-        client: DocumentClient, token: str, document_id: str
+    client: DocumentClient, token: str, document_id: str
 ) -> dict[str, Any]:
     """
     Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_UPDATE.
@@ -119,7 +123,7 @@ async def _fetch_main_required_fields(
 
 
 async def _fetch_appeal_required_fields(
-        client: DocumentClient, token: str, document_id: str
+    client: DocumentClient, token: str, document_id: str
 ) -> dict[str, Any]:
     """
     Загружает обязательные поля для DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE.
@@ -200,9 +204,7 @@ async def _fetch_appeal_required_fields(
     for attr, key in _date_fields.items():
         val = getattr(appeal, attr, None)
         if val is not None:
-            result[key] = (
-                str(val) if not hasattr(val, "isoformat") else val.isoformat()
-            )
+            result[key] = str(val) if not hasattr(val, "isoformat") else val.isoformat()
 
     return result
 
@@ -211,7 +213,7 @@ async def _fetch_appeal_required_fields(
 
 
 def create_doc_update_field_tool(
-        document_client: DocumentClient,
+    document_client: DocumentClient,
 ) -> StructuredTool:
     """Фабрика для создания инструмента обновления поля документа.
 
@@ -223,9 +225,9 @@ def create_doc_update_field_tool(
     """
 
     async def doc_update_field(
-            field_name: str,
-            field_value: str,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        field_name: str,
+        field_value: str,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Обновляет одно поле документа через API EDMS.
 
@@ -314,9 +316,9 @@ def create_doc_update_field_tool(
                 }
 
             field_label = (
-                    _ALLOWED_FIELDS.get(field_name)
-                    or _ALLOWED_APPEAL_FIELDS.get(field_name)
-                    or field_name
+                _ALLOWED_FIELDS.get(field_name)
+                or _ALLOWED_APPEAL_FIELDS.get(field_name)
+                or field_name
             )
 
             logger.info("doc_update_field success: %s = %r", field_name, value)

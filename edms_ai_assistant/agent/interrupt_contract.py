@@ -169,7 +169,12 @@ class FilePickerInterrupt(_BasePayload):
 
 
 InterruptPayload = Annotated[
-    DisambiguationInterrupt | ConfirmationInterrupt | TextInputInterrupt | SelectInterrupt | CardSelectInterrupt | FilePickerInterrupt,
+    DisambiguationInterrupt
+    | ConfirmationInterrupt
+    | TextInputInterrupt
+    | SelectInterrupt
+    | CardSelectInterrupt
+    | FilePickerInterrupt,
     Field(discriminator="kind"),
 ]
 InterruptPayloadAdapter: TypeAdapter[InterruptPayload] = TypeAdapter(InterruptPayload)
@@ -220,7 +225,13 @@ class AbortResume(_BaseResume):
 
 
 ResumeValue = Annotated[
-    DisambiguationResume | ConfirmationResume | TextInputResume | SelectResume | CardSelectResume | FilePickerResume | AbortResume,
+    DisambiguationResume
+    | ConfirmationResume
+    | TextInputResume
+    | SelectResume
+    | CardSelectResume
+    | FilePickerResume
+    | AbortResume,
     Field(discriminator="kind"),
 ]
 ResumeValueAdapter: TypeAdapter[ResumeValue] = TypeAdapter(ResumeValue)

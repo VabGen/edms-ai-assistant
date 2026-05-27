@@ -7,29 +7,28 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Annotated, TYPE_CHECKING
+from typing import Annotated, Any
 
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field
 
-from edms_ai_assistant.agent.hitl_primitives import ask_human, ToolAborted
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
-    SelectInterrupt,
-    InterruptOption,
-    SelectResume,
     CardSelectInterrupt,
-    InterruptCard,
     CardSelectResume,
+    InterruptCard,
+    InterruptOption,
+    SelectInterrupt,
+    SelectResume,
 )
-
-if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
 
 class AskUserSelectInput(BaseModel):
     """Схема ввода для инструмента выбора."""
+
     prompt: str = Field(
         ...,
         description="Вопрос или пояснение для пользователя (заголовок карточек)",
@@ -62,10 +61,10 @@ class AskUserSelectInput(BaseModel):
 
 @tool("ask_user_to_select", args_schema=AskUserSelectInput)
 async def ask_user_to_select(
-        prompt: str,
-        options: list[str],
-        style: str = "cards",
-        config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    prompt: str,
+    options: list[str],
+    style: str = "cards",
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
     Показывает пользователю кликабельные карточки для выбора из списка вариантов.

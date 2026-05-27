@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.document import DocumentWithPermissions
@@ -23,9 +23,9 @@ class DocumentCreatorClient(EdmsBaseClient):
         super().__init__(transport, settings)
 
     async def find_profile_by_category(
-            self,
-            token: str,
-            doc_category: str,
+        self,
+        token: str,
+        doc_category: str,
     ) -> dict[str, Any] | None:
         """Find the first active accessible DocumentProfile for the given category."""
         normalized = doc_category.strip().upper()
@@ -47,25 +47,29 @@ class DocumentCreatorClient(EdmsBaseClient):
         return None
 
     async def create_document(
-            self,
-            token: str,
-            profile_id: str,
+        self,
+        token: str,
+        profile_id: str,
     ) -> DocumentWithPermissions | None:
         """Create a new document from the given profile."""
         try:
             return await self._request_dto(
-                "POST", "api/document", token, DocumentWithPermissions, json_data={"id": profile_id}
+                "POST",
+                "api/document",
+                token,
+                DocumentWithPermissions,
+                json_data={"id": profile_id},
             )
         except Exception:
             logger.error("Document creation failed", exc_info=True)
             return None
 
     async def upload_attachment(
-            self,
-            token: str,
-            document_id: str,
-            file_path: str,
-            file_name: str | None = None,
+        self,
+        token: str,
+        document_id: str,
+        file_path: str,
+        file_name: str | None = None,
     ) -> dict[str, Any] | None:
         """Upload a local file as MAIN_ATTACHMENT to the document."""
         path = Path(file_path)

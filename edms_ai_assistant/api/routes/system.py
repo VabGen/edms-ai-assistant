@@ -13,13 +13,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from time import monotonic
-from typing import Annotated, Any, Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from opentelemetry import trace
 from pydantic import BaseModel
 
-from edms_ai_assistant.api.deps import get_agent, get_admin_user
+from edms_ai_assistant.api.deps import get_admin_user, get_agent
 from edms_ai_assistant.config import settings
 
 if TYPE_CHECKING:
@@ -35,8 +35,10 @@ router = APIRouter(tags=["System"])
 # OpenAPI Contract (Pydantic Models)
 # ---------------------------------------------------------------------------
 
+
 class ComponentStatus(BaseModel):
     """Статус отдельных компонентов агента."""
+
     llm: bool = False
     graph: bool = False
     tools: bool = False
@@ -44,6 +46,7 @@ class ComponentStatus(BaseModel):
 
 class HealthResponse(BaseModel):
     """Стандартизированный ответ для health-эндпоинтов."""
+
     status: Literal["alive", "ready", "degraded", "not_ready"]
     version: str
     build: str | None = None
@@ -53,6 +56,7 @@ class HealthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Liveness Probe
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/health/live",
@@ -96,7 +100,7 @@ def _get_readiness_lock() -> asyncio.Lock:
     response_model=HealthResponse,
 )
 async def readiness_probe(
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> HealthResponse:
     """Kubernetes readiness probe.
 
@@ -114,7 +118,9 @@ async def readiness_probe(
         if health_data is None or (now - _readiness_cache["ts"] > READINESS_CACHE_TTL):
             async with _get_readiness_lock():
                 now = monotonic()
-                if _readiness_cache["result"] is None or (now - _readiness_cache["ts"] > READINESS_CACHE_TTL):
+                if _readiness_cache["result"] is None or (
+                    now - _readiness_cache["ts"] > READINESS_CACHE_TTL
+                ):
                     health_data = await agent.health_check()
                     _readiness_cache["result"] = health_data
                     _readiness_cache["ts"] = now
@@ -139,7 +145,9 @@ async def readiness_probe(
                 ).model_dump(),
             )
 
-        status: Literal["degraded", "ready"] = "degraded" if not components.tools else "ready"
+        status: Literal["degraded", "ready"] = (
+            "degraded" if not components.tools else "ready"
+        )
 
         return HealthResponse(
             status=status,
@@ -153,6 +161,7 @@ async def readiness_probe(
 # Legacy Health Check
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/health",
     summary="Health check (legacy)",
@@ -160,7 +169,7 @@ async def readiness_probe(
     deprecated=True,
 )
 async def health_check(
-        agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
 ) -> HealthResponse:
     """Deprecated. Use /health/live for liveness and /health/ready for readiness."""
     return await readiness_probe(agent)
@@ -169,6 +178,7 @@ async def health_check(
 # ---------------------------------------------------------------------------
 # Secured Diagnostics
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/health/ocr",
@@ -184,4 +194,5 @@ async def ocr_diagnostics() -> dict[str, Any]:
     """
     with tracer.start_as_current_span("diagnostics.ocr"):
         from edms_ai_assistant.services.file_processor import FileProcessorService
+
         return FileProcessorService.get_ocr_diagnostic()

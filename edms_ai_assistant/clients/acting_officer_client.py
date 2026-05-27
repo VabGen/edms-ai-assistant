@@ -8,8 +8,8 @@ from uuid import UUID
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.employee import (
     EmployeeIoDto,
-    SecretaryRequest,
     EmployeeIoRequest,
+    SecretaryRequest,
 )
 
 if TYPE_CHECKING:
@@ -18,25 +18,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class EmployeeActingClient(EdmsBaseClient):
     """Клиент для работы с ИО (исполняющими обязанности) и секретарями."""
 
     def __init__(self, transport: IAsyncTransport, settings: EdmsSettings):
         super().__init__(transport, settings)
 
-    async def get_acting_for_target(self, token: str, target_id: UUID) -> list[EmployeeIoDto]:
+    async def get_acting_for_target(
+        self, token: str, target_id: UUID
+    ) -> list[EmployeeIoDto]:
         """
         Получить список сотрудников ИО для конкретного сотрудника.
         GET api/employee/io/{id}
         """
-        return await self._request_list("GET", f"api/employee/io/{target_id}", token, EmployeeIoDto)
+        return await self._request_list(
+            "GET", f"api/employee/io/{target_id}", token, EmployeeIoDto
+        )
 
     async def get_acting_targets(self, token: str, io_id: UUID) -> list[EmployeeIoDto]:
         """
         Получить список сотрудников, за которых текущий пользователь исполняет обязанности.
         GET api/employee/io/{id}/target
         """
-        return await self._request_list("GET", f"api/employee/io/{io_id}/target", token, EmployeeIoDto)
+        return await self._request_list(
+            "GET", f"api/employee/io/{io_id}/target", token, EmployeeIoDto
+        )
 
     async def add_acting_officer(self, token: str, emp: EmployeeIoDto) -> EmployeeIoDto:
         """
@@ -44,16 +51,26 @@ class EmployeeActingClient(EdmsBaseClient):
         POST api/employee/io
         """
         return await self._request_dto(
-            "POST", "api/employee/io", token, EmployeeIoDto, json_data=emp.model_dump(exclude_none=True)
+            "POST",
+            "api/employee/io",
+            token,
+            EmployeeIoDto,
+            json_data=emp.model_dump(exclude_none=True),
         )
 
-    async def add_secretaries(self, token: str, request: SecretaryRequest) -> list[EmployeeIoDto]:
+    async def add_secretaries(
+        self, token: str, request: SecretaryRequest
+    ) -> list[EmployeeIoDto]:
         """
         Добавить список секретарей.
         POST api/employee/io/secretary
         """
         return await self._request_list(
-            "POST", "api/employee/io/secretary", token, EmployeeIoDto, json_data=request.model_dump(exclude_none=True)
+            "POST",
+            "api/employee/io/secretary",
+            token,
+            EmployeeIoDto,
+            json_data=request.model_dump(exclude_none=True),
         )
 
     async def delete_acting_officer(self, token: str, request: EmployeeIoRequest):
@@ -62,7 +79,11 @@ class EmployeeActingClient(EdmsBaseClient):
         DELETE api/employee/io
         """
         await self.make_request(
-            "DELETE", "api/employee/io", token=token, json_data=request.model_dump(exclude_none=True), is_json_response=False
+            "DELETE",
+            "api/employee/io",
+            token=token,
+            json_data=request.model_dump(exclude_none=True),
+            is_json_response=False,
         )
 
     async def delete_secretaries(self, token: str, request: SecretaryRequest):
@@ -71,5 +92,9 @@ class EmployeeActingClient(EdmsBaseClient):
         DELETE api/employee/io/secretary
         """
         await self.make_request(
-            "DELETE", "api/employee/io/secretary", token=token, json_data=request.model_dump(exclude_none=True), is_json_response=False
+            "DELETE",
+            "api/employee/io/secretary",
+            token=token,
+            json_data=request.model_dump(exclude_none=True),
+            is_json_response=False,
         )

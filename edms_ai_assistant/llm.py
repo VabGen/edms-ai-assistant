@@ -6,19 +6,19 @@ LLM and Embedding model initialization.
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from edms_ai_assistant.config import settings
 
 if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
-    from langchain_core.language_models import BaseLanguageModel
+    from langchain_core.language_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_API_KEY = "placeholder-key"
 
-_chat_model_instance: BaseLanguageModel[Any] | None = None
+_chat_model_instance: BaseChatModel | None = None
 _embedding_model_instance: Embeddings | None = None
 
 
@@ -79,7 +79,7 @@ def _detect_backend(base_url: str, model_name: str) -> str:
     return "openai"
 
 
-def get_chat_model() -> BaseLanguageModel[Any]:
+def get_chat_model() -> BaseChatModel:
     """Create or return cached chat model instance from current runtime settings.
 
     Бэкенды:
@@ -232,6 +232,7 @@ def get_embedding_model() -> Embeddings:
 
     try:
         from pydantic import SecretStr
+
         _embedding_model_instance = OpenAIEmbeddings(
             base_url=base_url,
             api_key=SecretStr(api_key),

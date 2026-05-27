@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -33,9 +33,9 @@ from edms_ai_assistant.config import settings
 from edms_ai_assistant.model import AgentState
 
 if TYPE_CHECKING:
-    from langgraph.graph.state import CompiledStateGraph
+    from langchain_core.runnables import Runnable
     from langgraph.checkpoint.base import BaseCheckpointSaver
-    from langchain_core.language_models import BaseLanguageModel
+    from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -51,7 +51,7 @@ class GraphBuilder:
     ) -> None:
         self._tools = tools
         self._checkpointer = checkpointer
-        self._model: BaseLanguageModel[Any] | None = None
+        self._model: Runnable[Any, BaseMessage] | None = None
         self._model_lock: asyncio.Lock | None = None
 
     def _get_lock(self) -> asyncio.Lock:
@@ -60,11 +60,11 @@ class GraphBuilder:
             self._model_lock = asyncio.Lock()
         return self._model_lock
 
-    async def set_model_async(self, model: BaseLanguageModel[Any]) -> None:
+    async def set_model_async(self, model: Runnable[Any, BaseMessage]) -> None:
         async with self._get_lock():
             self._model = model
 
-    def set_model(self, model: BaseLanguageModel[Any]) -> None:
+    def set_model(self, model: Runnable[Any, BaseMessage]) -> None:
         self._model = model
 
     def compile(self) -> CompiledStateGraph[AgentState, Any, Any]:
@@ -97,9 +97,7 @@ class GraphBuilder:
                 ]
 
                 # Pair-aware trim
-                non_sys = trim_pairwise(
-                    non_sys, settings.AGENT_MAX_CONTEXT_MESSAGES
-                )
+                non_sys = trim_pairwise(non_sys, settings.AGENT_MAX_CONTEXT_MESSAGES)
 
                 sys_msgs: list[BaseMessage] = all_sys[-1:] if all_sys else []
                 candidate: list[BaseMessage] = sys_msgs + non_sys
@@ -107,9 +105,7 @@ class GraphBuilder:
                 # validate_no_dangling_tool_calls(
                 #     candidate, fail_loud=getattr(settings, "DEBUG", False)
                 # )
-                validate_no_dangling_tool_calls(
-                    candidate, fail_loud=False
-                )
+                validate_no_dangling_tool_calls(candidate, fail_loud=False)
 
                 if not candidate:
                     logger.error(

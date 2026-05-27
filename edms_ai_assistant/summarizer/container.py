@@ -67,6 +67,7 @@ async def build_summarization_service(settings: object) -> SummarizationService:
 
     try:
         from edms_ai_assistant.tools.summarization import set_summarization_service
+
         set_summarization_service(service)
     except ImportError:
         logger.warning("Could not set summarization service in tools (ImportError)")

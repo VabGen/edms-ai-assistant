@@ -201,6 +201,8 @@ class AgentRequest(BaseModel):
                 return stripped
             if re.match(r"^[^/\\]+[\\/]", stripped):
                 return stripped
+            if not re.search(r"[/\\]", stripped):
+                return stripped
         raise ValueError(f"Invalid file_path format: {v!r}")
 
 

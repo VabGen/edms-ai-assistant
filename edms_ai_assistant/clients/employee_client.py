@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
@@ -10,18 +10,18 @@ from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.employee import (
     CurrentUserDto,
     EmployeeAccessGriefDto,
-    EmployeeDto,
-    RoleDto,
-    UserLoginHistoryEntryDto,
-    SliceDto,
     EmployeeAddRequest,
+    EmployeeDto,
+    EmployeeFilter,
     EmployeeUpdateRequest,
-    EmployeeFilter
+    RoleDto,
+    SliceDto,
+    UserLoginHistoryEntryDto,
 )
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.config import EdmsSettings
     from edms_ai_assistant.clients.transport import IAsyncTransport
+    from edms_ai_assistant.config import EdmsSettings
 
 logger = logging.getLogger(__name__)
 
@@ -39,23 +39,25 @@ class EmployeeClient(EdmsBaseClient):
         super().__init__(transport, settings)
 
     async def search_employees(
-            self,
-            token: str,
-            employee_filter: EmployeeFilter | dict[str, Any] | None = None,
-            pageable: dict[str, Any] | None = None,
+        self,
+        token: str,
+        employee_filter: EmployeeFilter | dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
     ) -> list[EmployeeDto]:
         """Searches for employees using GET request."""
         logger.info("Searching employees via GET")
         params = {
             "page": _DEFAULT_PAGE,
             "size": _DEFAULT_SIZE,
-            "includes": _DEFAULT_INCLUDES
+            "includes": _DEFAULT_INCLUDES,
         }
         if pageable:
             params.update(pageable)
         if employee_filter:
             if isinstance(employee_filter, EmployeeFilter):
-                params.update(employee_filter.model_dump(exclude_none=True, by_alias=True))
+                params.update(
+                    employee_filter.model_dump(exclude_none=True, by_alias=True)
+                )
             else:
                 params.update(employee_filter)
 
@@ -64,10 +66,10 @@ class EmployeeClient(EdmsBaseClient):
         )
 
     async def search_employees_post(
-            self,
-            token: str,
-            employee_filter: EmployeeFilter | dict[str, Any] | None = None,
-            pageable: dict[str, Any] | None = None,
+        self,
+        token: str,
+        employee_filter: EmployeeFilter | dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
     ) -> list[EmployeeDto]:
         """Searches for employees using POST request with filter body."""
         logger.info("Searching employees via POST")
@@ -92,7 +94,9 @@ class EmployeeClient(EdmsBaseClient):
             json_data=eff_filter,
         )
 
-    async def get_employee(self, token: str, employee_id: str | UUID) -> EmployeeDto | None:
+    async def get_employee(
+        self, token: str, employee_id: str | UUID
+    ) -> EmployeeDto | None:
         """Fetches a single employee by ID."""
         logger.info(f"Fetching employee {employee_id}")
         try:
@@ -103,38 +107,56 @@ class EmployeeClient(EdmsBaseClient):
             logger.error(f"Employee {employee_id} not found")
             return None
 
-    async def create_employee(self, token: str, request: EmployeeAddRequest) -> EmployeeDto:
+    async def create_employee(
+        self, token: str, request: EmployeeAddRequest
+    ) -> EmployeeDto:
         """Creates a new employee."""
         logger.info("Creating new employee")
         return await self._request_dto(
-            "POST", "api/employee", token, EmployeeDto, json_data=request.model_dump(by_alias=True)
+            "POST",
+            "api/employee",
+            token,
+            EmployeeDto,
+            json_data=request.model_dump(by_alias=True),
         )
 
-    async def update_employee(self, token: str, request: EmployeeUpdateRequest) -> EmployeeDto:
+    async def update_employee(
+        self, token: str, request: EmployeeUpdateRequest
+    ) -> EmployeeDto:
         """Updates an existing employee."""
         logger.info(f"Updating employee {request.employee.id}")
         return await self._request_dto(
-            "PUT", "api/employee", token, EmployeeDto, json_data=request.model_dump(by_alias=True)
+            "PUT",
+            "api/employee",
+            token,
+            EmployeeDto,
+            json_data=request.model_dump(by_alias=True),
         )
 
     async def delete_employees(self, token: str, employee_ids: list[UUID]) -> None:
         """Deletes employees by IDs."""
         logger.info(f"Deleting employees: {employee_ids}")
         await self.make_request(
-            "DELETE", "api/employee", token, json_data={"ids": employee_ids}, is_json_response=False
+            "DELETE",
+            "api/employee",
+            token,
+            json_data={"ids": employee_ids},
+            is_json_response=False,
         )
 
     async def get_current_user(self, token: str) -> CurrentUserDto | None:
         """Fetches information about the current authenticated user."""
         logger.info("Fetching current user info")
         try:
-            return await self._request_dto("GET", "api/employee/me", token, CurrentUserDto)
+            return await self._request_dto(
+                "GET", "api/employee/me", token, CurrentUserDto
+            )
         except EdmsNotFoundError:
             logger.error("Current user information not found")
             return None
 
     async def find_by_last_name_fts(
-            self, token: str, last_name: str
+        self, token: str, last_name: str
     ) -> EmployeeDto | None:
         """Full-text search for employee by last name."""
         logger.info(f"Searching employee by last name (FTS): {last_name}")
@@ -150,7 +172,7 @@ class EmployeeClient(EdmsBaseClient):
             return None
 
     async def get_employee_roles(
-            self, token: str, employee_id: str | UUID
+        self, token: str, employee_id: str | UUID
     ) -> list[RoleDto]:
         """Fetches roles for an employee."""
         logger.info(f"Fetching roles for employee {employee_id}")
@@ -162,31 +184,44 @@ class EmployeeClient(EdmsBaseClient):
             return []
 
     async def get_employee_griefs(
-            self, token: str, employee_id: str | UUID
+        self, token: str, employee_id: str | UUID
     ) -> list[EmployeeAccessGriefDto]:
         """Fetches access griefs for an employee."""
         logger.info(f"Fetching access griefs for employee {employee_id}")
         try:
             return await self._request_list(
-                "GET", f"api/employee/{employee_id}/griefs", token, EmployeeAccessGriefDto
+                "GET",
+                f"api/employee/{employee_id}/griefs",
+                token,
+                EmployeeAccessGriefDto,
             )
         except EdmsNotFoundError:
             return []
 
     async def dismiss_employee(
-            self, token: str, employee_id: str | UUID, delegate_to_id: str | UUID
+        self, token: str, employee_id: str | UUID, delegate_to_id: str | UUID
     ) -> None:
         """Dismisses an employee and delegates their tasks."""
-        logger.info(f"Dismissing employee {employee_id}, delegating to {delegate_to_id}")
+        logger.info(
+            f"Dismissing employee {employee_id}, delegating to {delegate_to_id}"
+        )
         await self.make_request(
-            "POST", "api/employee/dismiss", token, json_data={"id": str(employee_id), "to": str(delegate_to_id)}, is_json_response=False
+            "POST",
+            "api/employee/dismiss",
+            token,
+            json_data={"id": str(employee_id), "to": str(delegate_to_id)},
+            is_json_response=False,
         )
 
     async def recover_employee(self, token: str, employee_id: str | UUID) -> None:
         """Recovers a dismissed employee."""
         logger.info(f"Recovering employee {employee_id}")
         await self.make_request(
-            "POST", "api/employee/recover", token, json_data={"id": str(employee_id)}, is_json_response=False
+            "POST",
+            "api/employee/recover",
+            token,
+            json_data={"id": str(employee_id)},
+            is_json_response=False,
         )
 
     async def get_login_history(
@@ -199,7 +234,7 @@ class EmployeeClient(EdmsBaseClient):
             "api/employee/login-history",
             token,
             SliceDto[UserLoginHistoryEntryDto],
-            params={"page": page, "size": size}
+            params={"page": page, "size": size},
         )
 
     async def get_user_actions(
@@ -220,38 +255,67 @@ class EmployeeClient(EdmsBaseClient):
         """GET api/employee/fts-post"""
         logger.info(f"Searching employee by post (FTS): {post_name}")
         return await self._request_list(
-            "GET", "api/employee/fts-post", token, EmployeeDto, params={"fts": post_name.strip()}
+            "GET",
+            "api/employee/fts-post",
+            token,
+            EmployeeDto,
+            params={"fts": post_name.strip()},
         )
 
-    async def find_by_full_post_name_fts(self, token: str, full_post_name: str) -> list[EmployeeDto]:
+    async def find_by_full_post_name_fts(
+        self, token: str, full_post_name: str
+    ) -> list[EmployeeDto]:
         """GET api/employee/fts-full-post-name"""
         logger.info(f"Searching employee by full post name (FTS): {full_post_name}")
         return await self._request_list(
-            "GET", "api/employee/fts-full-post-name", token, EmployeeDto, params={"fts": full_post_name.strip()}
+            "GET",
+            "api/employee/fts-full-post-name",
+            token,
+            EmployeeDto,
+            params={"fts": full_post_name.strip()},
         )
 
-    async def get_employee_groups(self, token: str, employee_id: UUID | str) -> list[Any]:
+    async def get_employee_groups(
+        self, token: str, employee_id: UUID | str
+    ) -> list[Any]:
         """GET api/employee/{id}/group"""
         logger.info(f"Fetching groups for employee {employee_id}")
-        return await self.make_request("GET", f"api/employee/{employee_id}/group", token=token)
+        return await self.make_request(
+            "GET", f"api/employee/{employee_id}/group", token=token
+        )
 
     async def get_avatar(self, token: str, employee_id: UUID | str) -> bytes | None:
         """GET api/employee/{id}/avatar"""
         logger.info(f"Fetching avatar for employee {employee_id}")
         try:
-            return await self.make_request("GET", f"api/employee/{employee_id}/avatar", token=token, is_json_response=False)
+            return await self.make_request(
+                "GET",
+                f"api/employee/{employee_id}/avatar",
+                token=token,
+                is_json_response=False,
+            )
         except EdmsNotFoundError:
             return None
 
-    async def upload_avatar(self, token: str, employee_id: UUID | str, file_name: str, file_content: bytes) -> None:
+    async def upload_avatar(
+        self, token: str, employee_id: UUID | str, file_name: str, file_content: bytes
+    ) -> None:
         """POST api/employee/{id}/avatar"""
         logger.info(f"Uploading avatar for employee {employee_id}")
-        await self._upload_file(f"api/employee/{employee_id}/avatar", token, file_name, file_content, "image/jpeg")
+        await self._upload_file(
+            f"api/employee/{employee_id}/avatar",
+            token,
+            file_name,
+            file_content,
+            "image/jpeg",
+        )
 
     async def get_my_avatar(self, token: str) -> bytes | None:
         """GET api/employee/me/avatar"""
         logger.info("Fetching current user avatar")
         try:
-            return await self.make_request("GET", "api/employee/me/avatar", token=token, is_json_response=False)
+            return await self.make_request(
+                "GET", "api/employee/me/avatar", token=token, is_json_response=False
+            )
         except EdmsNotFoundError:
             return None

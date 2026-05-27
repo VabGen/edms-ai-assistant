@@ -24,6 +24,7 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 # ── Agent Dependencies ───────────────────────────────────────────────────────
 
+
 def get_agent(request: Request) -> EdmsDocumentAgent:
     """FastAPI dependency: return the agent from app.state.
 
@@ -43,7 +44,9 @@ def get_deps(request: Request) -> AppDeps:
     """FastAPI dependency: return the AppDeps container from app.state."""
     deps = getattr(request.app.state, "deps", None)
     if deps is None:
-        raise HTTPException(status_code=503, detail="Зависимости приложения не инициализированы.")
+        raise HTTPException(
+            status_code=503, detail="Зависимости приложения не инициализированы."
+        )
     return deps
 
 
@@ -51,6 +54,7 @@ DepsDep = Annotated[AppDeps, Depends(get_deps)]
 
 
 # ── Auth Dependencies ────────────────────────────────────────────────────────
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -72,7 +76,6 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
 
     # TODO: Заменить на реальную логику декодирования JWT
     # from edms_ai_assistant.core.security import decode_access_token
@@ -97,7 +100,9 @@ async def get_admin_user(
     Raises:
         HTTPException 403: Пользователь авторизован, но не имеет роли 'admin'.
     """
-    user_role = user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
+    user_role = (
+        user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
+    )
 
     if user_role != "admin":
         raise HTTPException(

@@ -1,8 +1,8 @@
 # edms_ai_assistant/core/exceptions.py
 
 from typing import Any
-from fastapi import HTTPException
 
+from fastapi import HTTPException
 
 # ── API / HTTP Exceptions ────────────────────────────────────────────────────
 
@@ -11,7 +11,7 @@ class AppException(HTTPException):
     """Базовое исключение для бизнес-логики приложения."""
 
     def __init__(
-            self, status_code: int, detail: str, error_code: str = "GENERIC_ERROR"
+        self, status_code: int, detail: str, error_code: str = "GENERIC_ERROR"
     ):
         super().__init__(status_code=status_code, detail=detail)
         self.error_code = error_code
@@ -51,36 +51,44 @@ class EdmsError(Exception):
 
 class EdmsConnectionError(EdmsError):
     """Ошибки сети (DNS, Timeout, Connection refused)."""
+
     pass
 
 
 class EdmsClientError(EdmsError):
     """Ошибки 4xx (клиентские)."""
 
-    def __init__(self, message: str, status_code: int, context: dict[str, Any] | None = None):
+    def __init__(
+        self, message: str, status_code: int, context: dict[str, Any] | None = None
+    ):
         self.status_code = status_code
         super().__init__(message, context)
 
 
 class EdmsNotFoundError(EdmsClientError):
     """Специфичный 404."""
+
     pass
 
 
 class EdmsAuthenticationError(EdmsClientError):
     """Ошибки 401/403."""
+
     pass
 
 
 class EdmsValidationError(EdmsClientError):
     """Ошибка валидации 422."""
+
     pass
 
 
 class EdmsServerError(EdmsError):
     """Ошибки 5xx (серверные)."""
 
-    def __init__(self, message: str, status_code: int, context: dict[str, Any] | None = None):
+    def __init__(
+        self, message: str, status_code: int, context: dict[str, Any] | None = None
+    ):
         self.status_code = status_code
         super().__init__(message, context)
 

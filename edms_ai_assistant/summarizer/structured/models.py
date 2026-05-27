@@ -8,7 +8,7 @@ JSON Schema is passed to LLM response_format for type safety at API boundary.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 # Auto-truncation infrastructure
 # ---------------------------------------------------------------------------
 
-_TRUNCATE_CACHE: dict[type, dict[str, int]] = {}
+_TRUNCATE_CACHE: dict[type[BaseModel], dict[str, int]] = {}
 """Cache: model class -> {field_name: max_length} to avoid re-computing schemas."""
 
 
@@ -39,7 +39,7 @@ def _extract_max_length(schema: dict) -> int | None:
     return None
 
 
-def _max_lengths_for(cls: type) -> dict[str, int]:
+def _max_lengths_for(cls: type[BaseModel]) -> dict[str, int]:
     """Return ``{field_name: maxLength}`` for *cls*, cached after first call."""
     if cls not in _TRUNCATE_CACHE:
         try:
@@ -216,9 +216,7 @@ class ActionItem(LLMBaseModel):
 
 
 class ActionItemsOutput(LLMBaseModel):
-    action_items: Annotated[
-        list[ActionItem], Field(max_length=50)
-    ] = []
+    action_items: Annotated[list[ActionItem], Field(max_length=50)] = []
     document_context: Annotated[str, Field(max_length=200)] = ""
 
     @computed_field  # type: ignore[prop-decorator]

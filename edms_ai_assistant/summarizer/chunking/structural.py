@@ -190,9 +190,8 @@ def _split_sentences(text: str) -> list[str]:
         if merged:
             prev = merged[-1].rstrip()
             tail = prev[:-1] if prev.endswith((".", "!", "?")) else prev
-            last_token = re.split(r"[\s\(\[\"']", tail)[-1] if tail else ""
+            last_token = re.split(r"[\s([\"']", tail)[-1] if tail else ""
             last_lower = last_token.lower()
-            # Инициал: одна заглавная буква перед точкой ("И.")
             is_initial = (
                 len(last_token) == 1 and last_token.isalpha() and last_token.isupper()
             )

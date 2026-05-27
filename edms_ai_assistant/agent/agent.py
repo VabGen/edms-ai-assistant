@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -21,10 +21,11 @@ from edms_ai_assistant.services.nlp_service import UserIntent
 from edms_ai_assistant.tools import init_tools
 
 if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
     from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.domain.document import DocumentDto
-    from langgraph.checkpoint.base import BaseCheckpointSaver
-    from langchain_core.language_models import BaseLanguageModel
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +48,12 @@ class EdmsDocumentAgent:
         self,
         deps: AppDeps,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
-        llm: BaseLanguageModel[Any] | None = None,
+        llm: BaseChatModel | None = None,
     ) -> None:
         """Инициализация агента с DI."""
         self.deps = deps
         self._checkpointer: BaseCheckpointSaver[Any] = checkpointer or MemorySaver()
-        self._model: BaseLanguageModel[Any] = llm or self._init_model()
+        self._model: BaseChatModel = llm or self._init_model()
 
         self.tools = init_tools(deps, self._model)
         self._graph_builder = GraphBuilder(
@@ -62,11 +63,14 @@ class EdmsDocumentAgent:
         self._graph_builder.set_model(self._model.bind_tools(self.tools))
         self._graph = self._graph_builder.compile()
 
-        logger.info("EdmsDocumentAgent initialized with %d DI-powered tools.", len(self.tools))
+        logger.info(
+            "EdmsDocumentAgent initialized with %d DI-powered tools.", len(self.tools)
+        )
 
     @staticmethod
-    def _init_model() -> BaseLanguageModel[Any]:
+    def _init_model() -> BaseChatModel:
         from edms_ai_assistant.llm import get_chat_model
+
         return get_chat_model()
 
     @property
@@ -113,7 +117,7 @@ class EdmsDocumentAgent:
         return {
             "llm": self._model is not None,
             "graph": self._graph is not None,
-            "tools": bool(self.tools)
+            "tools": bool(self.tools),
         }
 
     def _build_inputs(
@@ -124,7 +128,11 @@ class EdmsDocumentAgent:
     ) -> dict[str, Any]:
         semantic_xml = self._build_semantic_xml(doc_info=doc_info)
         fp = context.file_path
-        intent = UserIntent.FILE_ANALYSIS if fp and not is_valid_uuid(fp) else UserIntent.UNKNOWN
+        intent = (
+            UserIntent.FILE_ANALYSIS
+            if fp and not is_valid_uuid(fp)
+            else UserIntent.UNKNOWN
+        )
 
         system_prompt = PromptBuilder.build(
             context=context,
@@ -180,8 +188,10 @@ class EdmsDocumentAgent:
             lines.append(f"  <reg_number>{esc(doc_info.reg_number)}</reg_number>")
         if doc_info.status:
             lines.append(f"  <status>{esc(doc_info.status)}</status>")
-        if doc_info.doc_category_const:
-            lines.append(f"  <category>{esc(doc_info.doc_category_const)}</category>")
+        if doc_info.doc_category_constant:
+            lines.append(
+                f"  <category>{esc(doc_info.doc_category_constant)}</category>"
+            )
 
         lines.append("</semantic_context>")
         return "\n".join(lines)

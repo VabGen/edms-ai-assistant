@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Annotated, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import (
-    ReportTaskStatus,
-    ReportType,
-    ReportFormatType,
-    DocCategory,
-    TaskStatus,
-    DeclarantType,
     AppealTypeReport,
+    DeclarantType,
+    DocCategory,
     DocumentStatus,
     ReportColumns,
     ReportField,
+    ReportFormatType,
     ReportTaskControlField,
+    ReportTaskStatus,
+    ReportType,
+    TaskStatus,
 )
 
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 class ReportTaskDto(EdmsBaseDto):
     """DTO для задачи на формирование отчета V2."""
+
     id: UUID | None = None
     employee_id: UUID | None = None
     employee_org_id: str | None = None
@@ -43,16 +44,19 @@ class ReportTaskDto(EdmsBaseDto):
 
 class ReportTaskFilter(EdmsBaseDto):
     """Фильтр для поиска отчетов пользователя."""
+
     status: ReportTaskStatus | None = None
 
 
 class AbstractReportFilter(EdmsBaseDto):
     """Базовый фильтр для всех отчетов V2."""
+
     type: ReportFormatType
 
 
 class CountOfExecutedAndUnexecutedControlTaskFilter(EdmsBaseDto):
     """Фильтр для отчета 'Данные о количестве исполненных и не исполненных контрольных поручений'."""
+
     in_archive: bool | None = None
     date_reg_start: datetime
     date_reg_end: datetime
@@ -69,6 +73,7 @@ class CountOfExecutedAndUnexecutedControlTaskFilter(EdmsBaseDto):
 
 class PerformingDisciplineReportFilter(EdmsBaseDto):
     """Фильтр для отчета 'Исполнительская дисциплина'."""
+
     in_archive: bool | None = None
     date_reg_start: datetime
     date_reg_end: datetime
@@ -84,6 +89,7 @@ class PerformingDisciplineReportFilter(EdmsBaseDto):
 
 class ReceivedAppealsReportFilter(EdmsBaseDto):
     """Фильтр для отчета 'Поступившие обращения'."""
+
     in_archive: bool | None = None
     date_reg_start: datetime
     date_reg_end: datetime
@@ -102,6 +108,7 @@ class ReceivedAppealsReportFilter(EdmsBaseDto):
 
 class VolumeOfDocumentFlowReportFilter(EdmsBaseDto):
     """Фильтр для отчета 'Объем документооборота'."""
+
     in_archive: bool | None = None
     date_reg_start: datetime
     date_reg_end: datetime
@@ -111,6 +118,7 @@ class VolumeOfDocumentFlowReportFilter(EdmsBaseDto):
 
 class TaskOnControlReportFilter(AbstractReportFilter):
     """Фильтр для отчета 'Контроль поручений'."""
+
     in_archive: bool | None = None
     date_control_start: datetime
     date_control_end: datetime
@@ -119,6 +127,7 @@ class TaskOnControlReportFilter(AbstractReportFilter):
 
 class TaskOnStatusReportFilter(AbstractReportFilter):
     """Фильтр для отчета по поручениям."""
+
     in_archive: bool | None = None
     date_task_start: datetime
     date_task_end: datetime
@@ -131,6 +140,7 @@ class TaskOnStatusReportFilter(AbstractReportFilter):
 
 class DocumentOnStatusReportFilter(AbstractReportFilter):
     """Фильтр для отчета по статусам документов."""
+
     in_archive: bool | None = None
     doc_category_constants: list[DocCategory]
     status: list[DocumentStatus]
@@ -140,6 +150,7 @@ class DocumentOnStatusReportFilter(AbstractReportFilter):
 
 class DocumentOnControlReportFilter(AbstractReportFilter):
     """Фильтр для отчета по всем контрольным документам."""
+
     in_archive: bool | None = None
     date_control_start: datetime
     date_control_end: datetime
@@ -149,6 +160,7 @@ class DocumentOnControlReportFilter(AbstractReportFilter):
 
 class DocumentOnRegistrationReportFilter(AbstractReportFilter):
     """Фильтр для отчета по всем зарегистрированным документам."""
+
     in_archive: bool | None = None
     date_reg_start: datetime
     date_reg_end: datetime
@@ -157,12 +169,14 @@ class DocumentOnRegistrationReportFilter(AbstractReportFilter):
 
 class ReportConstructRequest(EdmsBaseDto):
     """Запрос на формирование отчета через конструктор."""
+
     fields: dict[ReportField, str] | None = None
     columns: list[ReportColumns] | None = None
 
 
 class IdsDto[T](EdmsBaseDto):
     """Общая модель для передачи списка идентификаторов."""
+
     ids: Annotated[list[T], Field(min_length=1)]
 
 

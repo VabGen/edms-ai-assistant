@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import logging
 from enum import StrEnum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from edms_ai_assistant.utils.edms_formatter import EdmsFormatter
 from edms_ai_assistant.utils.format_utils import clean_dict
 
 if TYPE_CHECKING:
-    from edms_ai_assistant.services.entity_extractor import EntityExtractor
     from edms_ai_assistant.domain.document import DocumentDto
     from edms_ai_assistant.domain.employee import EmployeeDto
+    from edms_ai_assistant.services.entity_extractor import EntityExtractor
     from edms_ai_assistant.services.query_refiner import QueryRefiner
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class UserIntent(StrEnum):
     """Enumeration of recognized user intents."""
+
     UNKNOWN = "UNKNOWN"
     FILE_ANALYSIS = "FILE_ANALYSIS"
     DOCUMENT_SUMMARY = "DOCUMENT_SUMMARY"
@@ -54,9 +55,11 @@ class EDMSNaturalLanguageService:
             # 1. Базовая информация
             base_info = {
                 "id": str(doc.id) if doc.id else None,
-                "категория": str(doc.doc_category_const or ""),
+                "категория": str(doc.doc_category_constant or ""),
                 "краткое_содержание": doc.short_summary,
-                "вид_документа": doc.document_type.type_name if doc.document_type else None,
+                "вид_документа": (
+                    doc.document_type.type_name if doc.document_type else None
+                ),
                 "способ_создания": str(doc.create_type or ""),
                 "_reg_date_iso": EdmsFormatter.format_date_iso(doc.reg_date),
                 "_create_date_iso": EdmsFormatter.format_date_iso(doc.create_date),
@@ -67,15 +70,19 @@ class EDMSNaturalLanguageService:
                 "рег_номер": doc.reg_number,
                 "дата_регистрации": EdmsFormatter.format_date(doc.reg_date),
                 "дата_создания": EdmsFormatter.format_datetime(doc.create_date),
-                "исходящий_номер": doc.out_number,
-                "исходящая_дата": EdmsFormatter.format_date(doc.out_date),
+                "исходящий_номер": getattr(doc, "out_reg_number", None),
+                "исходящая_дата": EdmsFormatter.format_date(
+                    getattr(doc, "out_reg_date", None)
+                ),
             }
 
             # 3. Участники (пример доступа к полям через модель)
             participants = {
                 "автор": EdmsFormatter.format_user(getattr(doc, "author", None)),
                 "инициатор": EdmsFormatter.format_user(getattr(doc, "initiator", None)),
-                "ответственный_исполнитель": EdmsFormatter.format_user(getattr(doc, "responsible_executor", None)),
+                "ответственный_исполнитель": EdmsFormatter.format_user(
+                    getattr(doc, "responsible_executor", None)
+                ),
             }
 
             # 4. Жизненный цикл
@@ -85,7 +92,7 @@ class EDMSNaturalLanguageService:
 
             # 5. Контроль
             control_info = {
-                "на_контроле": doc.on_control,
+                "на_контроле": doc.control,
             }
 
             # Собираем все блоки
@@ -100,14 +107,16 @@ class EDMSNaturalLanguageService:
             # Добавляем инфо по обращению если есть
             if doc.document_appeal:
                 appeal = doc.document_appeal
-                result["информация_об_обращении"] = clean_dict({
-                    "тип_заявителя": str(appeal.declarant_type or ""),
-                    "фио_заявителя": appeal.fio_applicant,
-                    "организация": appeal.organization_name,
-                    "адрес": appeal.full_address,
-                    "email": appeal.email,
-                    "телефон": appeal.phone,
-                })
+                result["информация_об_обращении"] = clean_dict(
+                    {
+                        "тип_заявителя": str(appeal.declarant_type or ""),
+                        "фио_заявителя": appeal.fio_applicant,
+                        "организация": appeal.organization_name,
+                        "адрес": appeal.full_address,
+                        "email": appeal.email,
+                        "телефон": appeal.phone,
+                    }
+                )
 
             return result
 
@@ -118,7 +127,8 @@ class EDMSNaturalLanguageService:
     @staticmethod
     def process_employee_info(emp: EmployeeDto) -> dict[str, Any]:
         """Build an analytical employee card from an EmployeeDto."""
-        if not emp: return {}
+        if not emp:
+            return {}
         try:
             return {
                 "основное": {

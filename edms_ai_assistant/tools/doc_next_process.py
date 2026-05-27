@@ -21,18 +21,29 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Annotated, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
-from langchain_core.tools import StructuredTool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
-from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
+from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
+from edms_ai_assistant.agent.interrupt_contract import (
+    InterruptOption,
+    SelectInterrupt,
+    SelectResume,
+    TextInputInterrupt,
+    TextInputResume,
+)
+from edms_ai_assistant.agent.runnable_utils import (
+    get_document_id_from_config,
+    get_token_from_config,
+)
 from edms_ai_assistant.domain.document import DocumentNextProcessRequest
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
@@ -123,7 +134,7 @@ def _get_next_available(steps: list[ProcessStep]) -> list[ProcessStep]:
             break
     if current_idx == -1:
         return [s for s in steps if not s.is_completed and not s.is_current]
-    return [s for s in steps[current_idx + 1:] if not s.is_completed]
+    return [s for s in steps[current_idx + 1 :] if not s.is_completed]
 
 
 def _format_step_list(steps: list[ProcessStep], show_status: bool = True) -> str:
@@ -145,7 +156,7 @@ def _format_step_list(steps: list[ProcessStep], show_status: bool = True) -> str
 
 
 def _resolve_step_selection(
-        steps: list[ProcessStep], selection: str
+    steps: list[ProcessStep], selection: str
 ) -> ProcessStep | None:
     """Разрешает выбор этапа по номеру, названию или типу."""
     selection = selection.strip()
@@ -202,8 +213,8 @@ class DocNextProcessInput(BaseModel):
 
 
 def _resolve_next_id(
-        process_data: dict[str, Any] | None,
-        doc_data: dict[str, Any] | None,
+    process_data: dict[str, Any] | None,
+    doc_data: dict[str, Any] | None,
 ) -> str | None:
     """Определяет nextId для POST /process/next."""
     if process_data:
@@ -214,10 +225,10 @@ def _resolve_next_id(
             return cid
 
         items = (
-                process_data.get("items")
-                or process_data.get("processItems")
-                or process_data.get("stages")
-                or []
+            process_data.get("items")
+            or process_data.get("processItems")
+            or process_data.get("stages")
+            or []
         )
         for item in items:
             if not isinstance(item, dict):
@@ -312,7 +323,7 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
         return None
 
     async def _resolve_employees(
-            token: str, employees: list[str]
+        token: str, employees: list[str]
     ) -> tuple[list[str], list[str]]:
         """Разрешает список сотрудников: UUID -> как есть, ФИО -> поиск."""
         resolved: list[str] = []
@@ -330,9 +341,9 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
         return resolved, unresolved
 
     async def doc_next_process(
-            next_step: str | None = None,
-            employees: list[str] | None = None,
-            config: Annotated[RunnableConfig, InjectedToolArg] = None,
+        next_step: str | None = None,
+        employees: list[str] | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Переводит документ на следующий этап бизнес-процесса.
 
@@ -361,7 +372,10 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
             token = get_token_from_config(config)
         except Exception as e:
             logger.error("Failed to get token from config: %s", e)
-            return {"status": "error", "message": f"Ошибка авторизации: токен не найден. {e}"}
+            return {
+                "status": "error",
+                "message": f"Ошибка авторизации: токен не найден. {e}",
+            }
 
         logger.info(
             "doc_next_process: doc=%s next_step=%s employees=%s",
@@ -377,7 +391,7 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
                 deps.document_client.get_process_activity(token, document_id),
                 deps.document_client.get_document_metadata(token, document_id),
                 deps.document_process_client.get_process(token, UUID(document_id)),
-                return_exceptions=True
+                return_exceptions=True,
             )
 
             # Обработка ошибок сбора данных
@@ -402,7 +416,9 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
 
             # ── Шаг 2: Парсим BPMN ────────────────────────────────────────
             # Конвертируем DTO в dict для существующей логики парсинга (или адаптируем логику)
-            bpmn_data_dict = bpmn_activity.model_dump(by_alias=True) if bpmn_activity else {}
+            bpmn_data_dict = (
+                bpmn_activity.model_dump(by_alias=True) if bpmn_activity else {}
+            )
             bpmn_steps = _parse_bpmn_parsed(bpmn_data_dict)
 
             logger.info(
@@ -440,37 +456,46 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
                         "message": "Этапы процесса не найдены.",
                     }
 
-                full_list = _format_step_list(bpmn_steps, show_status=True)
-                next_list = ""
-                if next_available:
-                    next_list = "\n\nДоступные для перехода:\n" + _format_step_list(
-                        next_available, show_status=False
+                available_for_selection = next_available or [
+                    s for s in bpmn_steps if not s.is_completed
+                ]
+                if not available_for_selection:
+                    return {
+                        "status": "error",
+                        "message": "Нет доступных этапов для перехода.",
+                    }
+
+                current_info = (
+                    f"Сейчас документ на этапе: «{current_step.name}»."
+                    if current_step
+                    else ""
+                )
+                options = [
+                    InterruptOption(
+                        id=str(i),
+                        label=s.name,
+                        description=(
+                            s.action_label
+                            if s.process_type and s.action_label != s.name
+                            else None
+                        ),
                     )
-
-                current_info = ""
-                if current_step:
-                    current_info = f"\nСейчас документ на этапе: «{current_step.name}»."
-
-                return {
-                    "status": "need_input",
-                    "message": (
-                        f"Маршрут документа:{current_info}\n\n"
-                        f"Все этапы:\n{full_list}"
-                        f"{next_list}\n\n"
-                        "Напишите название или номер этапа, на который "
-                        "нужно перейти. Для большинства этапов также "
-                        "потребуется указать исполнителя (ФИО)."
-                    ),
-                    "available_steps": [
-                        {
-                            "number": i + 1,
-                            "name": s.name,
-                            "process_type": s.process_type,
-                            "action": s.action_label,
-                        }
-                        for i, s in enumerate(next_available)
-                    ],
-                }
+                    for i, s in enumerate(available_for_selection)
+                ]
+                prompt = "Выберите этап для перехода."
+                if current_info:
+                    prompt += f" {current_info}"
+                resume = ask_human(SelectInterrupt(prompt=prompt, options=options))
+                if not isinstance(resume, SelectResume):
+                    raise ToolAborted("Этап не выбран")
+                try:
+                    selected_idx = int(resume.selected_id)
+                    next_step = available_for_selection[selected_idx].name
+                except (ValueError, IndexError):
+                    return {
+                        "status": "error",
+                        "message": "Не удалось определить выбранный этап.",
+                    }
 
             # ── Шаг 6: Разрешить выбор этапа ─────────────────────────────
             selected = _resolve_step_selection(next_available, next_step)
@@ -534,9 +559,9 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
                     return {
                         "status": "need_input",
                         "message": (
-                                "Не удалось найти сотрудников: "
-                                + ", ".join(f"«{u}»" for u in unresolved)
-                                + ". Уточните ФИО."
+                            "Не удалось найти сотрудников: "
+                            + ", ".join(f"«{u}»" for u in unresolved)
+                            + ". Уточните ФИО."
                         ),
                     }
                 resolved_employees = resolved
@@ -545,7 +570,11 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
             request = DocumentNextProcessRequest(
                 id=UUID(document_id),
                 next_id=UUID(next_id),
-                employees=[UUID(e) for e in resolved_employees] if resolved_employees else None
+                employees=(
+                    [UUID(e) for e in resolved_employees]
+                    if resolved_employees
+                    else None
+                ),
             )
 
             logger.info(
@@ -565,27 +594,42 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
                 # ── Ошибка: нужны исполнители ──────────────────────────
                 if post_error["is_employee_empty"]:
                     step_label = post_error["target_step_name"] or selected.name
-                    step_type = (
-                            post_error["target_step_type"] or selected.process_type or ""
-                    )
 
+                    resume = ask_human(
+                        TextInputInterrupt(
+                            prompt=(
+                                f"Для перехода на «{step_label}» укажите ФИО исполнителя:"
+                            ),
+                            placeholder="Например: Иванов И.И.",
+                        )
+                    )
+                    if not isinstance(resume, TextInputResume):
+                        raise ToolAborted("Исполнитель не указан")
+
+                    employee_name = resume.value.strip()
+                    found = await _find_employee(token, employee_name)
+                    if not found:
+                        return {
+                            "status": "error",
+                            "message": (
+                                f"Сотрудник «{employee_name}» не найден. "
+                                "Уточните ФИО и попробуйте снова."
+                            ),
+                        }
+
+                    retry_request = DocumentNextProcessRequest(
+                        id=UUID(document_id),
+                        next_id=UUID(next_id),
+                        employees=[UUID(found)],
+                    )
+                    await deps.document_client.next_process(token, retry_request)
                     return {
-                        "status": "need_input",
+                        "status": "success",
                         "message": (
-                            f"⚠ Для перехода на этап «{step_label}» "
-                            f"необходимо указать исполнителя.\n\n"
-                            "Напишите ФИО сотрудника, которого нужно "
-                            "назначить исполнителем на этом этапе. "
-                            "Можно указать нескольких через запятую.\n\n"
-                            "Пример: «Иванов И.И.» или "
-                            "«Иванов И.И., Петров П.П.»"
+                            f"✅ Документ переведён на этап «{selected.name}». "
+                            f"Назначен исполнитель: {employee_name}."
                         ),
-                        "need_employees_for": {
-                            "step_name": step_label,
-                            "step_type": step_type,
-                            "document_id": document_id,
-                            "next_step": next_step,
-                        },
+                        "requires_reload": True,
                     }
 
                 # ── Ошибка: процесс изменён ────────────────────────────
@@ -623,6 +667,8 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
                 "requires_reload": True,
             }
 
+        except ToolAborted:
+            raise
         except Exception as exc:
             logger.error("doc_next_process error: %s", exc, exc_info=True)
 
@@ -641,7 +687,9 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
             if error_info["is_process_changed"]:
                 return {
                     "status": "error",
-                    "message": ("Процесс документа был изменён. " "Попробуйте ещё раз."),
+                    "message": (
+                        "Процесс документа был изменён. " "Попробуйте ещё раз."
+                    ),
                 }
             if error_info["is_forbidden"]:
                 return {

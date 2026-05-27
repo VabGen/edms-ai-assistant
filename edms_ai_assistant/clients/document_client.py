@@ -2,44 +2,45 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
-from uuid import UUID
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.domain.document import (
     BpmnProcessActivityDto,
+    ContractControlPointAttachmentDto,
+    ContractControlPointDto,
+    ContractControlPointFilter,
+    ContractControlPointLinkDto,
+    ContractControlPointResponsibleDto,
+    ContractVersionInfoDto,
     ControlDto,
+    ControlPointMainFields,
+    ControlPointRevisionRequest,
+    ControlPointWithPermission,
+    CountResult,
     DocPermissionContainer,
+    DocumentAccessEntryDto,
+    DocumentAismvRecreateRequest,
+    DocumentBasedExistingBody,
+    DocumentCancelAction,
     DocumentDto,
     DocumentHistoryDto,
+    DocumentNextProcessRequest,
+    DocumentPreNomenclatureDto,
     DocumentPropertiesDto,
+    DocumentRecipientDeliveryHistoryDto,
     DocumentRecipientDto,
+    DocumentUserColorDto,
     DocumentVersionDto,
     DocumentWithPermissions,
     ExecutionDocumentStatCount,
+    NomenclatureAffairDto,
+    RepeatIdenticalAppealDto,
     TasksAndProjectsDto,
     UserSmdoStat,
-    DocumentUserColorDto,
-    DocumentAccessEntryDto,
-    CountResult,
-    DocumentNextProcessRequest,
-    DocumentCancelAction,
-    RepeatIdenticalAppealDto,
-    ContractVersionInfoDto,
-    NomenclatureAffairDto,
-    DocumentAismvRecreateRequest,
-    DocumentBasedExistingBody,
-    DocumentRecipientDeliveryHistoryDto,
-    ContractControlPointDto,
-    ContractControlPointFilter,
-    ContractControlPointResponsibleDto,
-    ContractControlPointLinkDto,
-    ContractControlPointAttachmentDto,
-    ControlPointMainFields,
-    ControlPointRevisionRequest,
-    ControlPointWithPermission, DocumentPreNomenclatureDto,
 )
 
 if TYPE_CHECKING:
@@ -79,18 +80,18 @@ class DocumentClient(EdmsBaseClient):
         super().__init__(transport, settings)
 
     async def search_documents(
-            self,
-            token: str,
-            doc_filter: dict[str, Any] | None = None,
-            pageable: dict[str, Any] | None = None,
-            includes: list[str] | None = None,
+        self,
+        token: str,
+        doc_filter: dict[str, Any] | None = None,
+        pageable: dict[str, Any] | None = None,
+        includes: list[str] | None = None,
     ) -> list[DocumentDto]:
         """Searches documents. Returns list of DocumentDto."""
         logger.info("Searching documents with filter: %s", doc_filter)
         params: dict[str, Any] = {
             "page": _DEFAULT_PAGE,
             "size": _DEFAULT_SIZE,
-            "includes": includes or SEARCH_DOC_INCLUDES
+            "includes": includes or SEARCH_DOC_INCLUDES,
         }
         if pageable:
             params.update(pageable)
@@ -102,10 +103,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def get_document_metadata(
-            self,
-            token: str,
-            document_id: UUID | str,
-            includes: list[str] | None = None,
+        self,
+        token: str,
+        document_id: UUID | str,
+        includes: list[str] | None = None,
     ) -> DocumentDto | None:
         """Fetches full document metadata by UUID."""
         logger.info("Fetching document metadata for: %s", document_id)
@@ -120,45 +121,55 @@ class DocumentClient(EdmsBaseClient):
             return None
 
     async def get_document_with_permissions(
-            self,
-            token: str,
-            document_id: UUID | str,
-            includes: list[str] | None = None,
+        self,
+        token: str,
+        document_id: UUID | str,
+        includes: list[str] | None = None,
     ) -> DocumentWithPermissions | None:
         """Fetches document and its permissions in a single request."""
         params = {"includes": includes or FULL_DOC_INCLUDES}
 
         try:
             return await self._request_dto(
-                "GET", f"api/document/{document_id}/all", token, DocumentWithPermissions, params=params
+                "GET",
+                f"api/document/{document_id}/all",
+                token,
+                DocumentWithPermissions,
+                params=params,
             )
         except EdmsNotFoundError:
             return None
 
     async def get_document_permissions(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> DocPermissionContainer | None:
         """Fetches DocPermissionContainer for a document."""
         try:
             return await self._request_dto(
-                "GET", f"api/document/{document_id}/permission", token, DocPermissionContainer
+                "GET",
+                f"api/document/{document_id}/permission",
+                token,
+                DocPermissionContainer,
             )
         except EdmsNotFoundError:
             return None
 
     async def get_document_properties(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> DocumentPropertiesDto | None:
         """Fetches extended document properties."""
         try:
             return await self._request_dto(
-                "GET", f"api/document/{document_id}/properties", token, DocumentPropertiesDto
+                "GET",
+                f"api/document/{document_id}/properties",
+                token,
+                DocumentPropertiesDto,
             )
         except EdmsNotFoundError:
             return None
 
     async def get_document_history(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> list[DocumentHistoryDto]:
         """Fetches document processing protocol (history v1)."""
         try:
@@ -169,18 +180,21 @@ class DocumentClient(EdmsBaseClient):
             return []
 
     async def get_document_history_v2(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> list[DocumentHistoryDto]:
         """Fetches document processing protocol (history v2, preferred)."""
         try:
             return await self._request_list(
-                "GET", f"api/document/{document_id}/history/v2", token, DocumentHistoryDto
+                "GET",
+                f"api/document/{document_id}/history/v2",
+                token,
+                DocumentHistoryDto,
             )
         except EdmsNotFoundError:
             return []
 
     async def get_process_activity(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> BpmnProcessActivityDto | None:
         """Fetches current BPMN process with active activities."""
         try:
@@ -191,18 +205,21 @@ class DocumentClient(EdmsBaseClient):
             return None
 
     async def get_tasks_and_projects(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> TasksAndProjectsDto | None:
         """Fetches tasks and task-projects linked to a document."""
         try:
             return await self._request_dto(
-                "GET", f"api/document/{document_id}/task-task-project", token, TasksAndProjectsDto
+                "GET",
+                f"api/document/{document_id}/task-task-project",
+                token,
+                TasksAndProjectsDto,
             )
         except EdmsNotFoundError:
             return None
 
     async def get_document_control(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> ControlDto | None:
         """Fetches current control record (ControlDto) for a document."""
         try:
@@ -213,10 +230,10 @@ class DocumentClient(EdmsBaseClient):
             return None
 
     async def set_document_control(
-            self,
-            token: str,
-            document_id: UUID | str,
-            control_request: dict[str, Any],
+        self,
+        token: str,
+        document_id: UUID | str,
+        control_request: dict[str, Any],
     ) -> ControlDto:
         """Sets a document on control."""
         return await self._request_dto(
@@ -228,10 +245,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def change_document_control(
-            self,
-            token: str,
-            document_id: UUID | str,
-            control_request: dict[str, Any],
+        self,
+        token: str,
+        document_id: UUID | str,
+        control_request: dict[str, Any],
     ) -> ControlDto:
         """Updates document control settings."""
         return await self._request_dto(
@@ -242,7 +259,9 @@ class DocumentClient(EdmsBaseClient):
             json_data=control_request,
         )
 
-    async def remove_document_control(self, token: str, document_id: UUID | str) -> None:
+    async def remove_document_control(
+        self, token: str, document_id: UUID | str
+    ) -> None:
         """Removes control mark. Raises on failure."""
         await self.make_request(
             "PUT",
@@ -252,7 +271,9 @@ class DocumentClient(EdmsBaseClient):
             is_json_response=False,
         )
 
-    async def delete_document_control(self, token: str, document_id: UUID | str) -> None:
+    async def delete_document_control(
+        self, token: str, document_id: UUID | str
+    ) -> None:
         """Deletes control record. Raises on failure."""
         await self.make_request(
             "DELETE",
@@ -266,18 +287,30 @@ class DocumentClient(EdmsBaseClient):
     # ══════════════════════════════════════════════════════════════════════════════
 
     async def get_control_points(
-        self, token: str, document_id: UUID, filter: ContractControlPointFilter | None = None
+        self,
+        token: str,
+        document_id: UUID,
+        filter: ContractControlPointFilter | None = None,
     ) -> list[ContractControlPointDto]:
         """GET api/document/{documentId}/control-point"""
         params = filter.model_dump(exclude_none=True) if filter else {}
         return await self._request_list(
-            "GET", f"api/document/{document_id}/control-point", token, ContractControlPointDto, params=params
+            "GET",
+            f"api/document/{document_id}/control-point",
+            token,
+            ContractControlPointDto,
+            params=params,
         )
 
-    async def get_control_point(self, token: str, document_id: UUID, point_id: UUID) -> ContractControlPointDto:
+    async def get_control_point(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> ContractControlPointDto:
         """GET api/document/{documentId}/control-point/{id}"""
         return await self._request_dto(
-            "GET", f"api/document/{document_id}/control-point/{point_id}", token, ContractControlPointDto
+            "GET",
+            f"api/document/{document_id}/control-point/{point_id}",
+            token,
+            ContractControlPointDto,
         )
 
     async def get_control_point_with_permission(
@@ -285,13 +318,20 @@ class DocumentClient(EdmsBaseClient):
     ) -> ControlPointWithPermission:
         """GET api/document/{documentId}/control-point/{id}/all"""
         return await self._request_dto(
-            "GET", f"api/document/{document_id}/control-point/{point_id}/all", token, ControlPointWithPermission
+            "GET",
+            f"api/document/{document_id}/control-point/{point_id}/all",
+            token,
+            ControlPointWithPermission,
         )
 
-    async def get_control_point_permissions(self, token: str, document_id: UUID, point_id: UUID) -> list[Any]:
+    async def get_control_point_permissions(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> list[Any]:
         """GET api/document/{documentId}/control-point/{id}/permission"""
         return await self.make_request(
-            "GET", f"api/document/{document_id}/control-point/{point_id}/permission", token
+            "GET",
+            f"api/document/{document_id}/control-point/{point_id}/permission",
+            token,
         )
 
     async def create_control_point(
@@ -307,21 +347,38 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def execute_control_point_operations(
-        self, token: str, document_id: UUID, point_id: UUID, operations: list[dict[str, Any]]
+        self,
+        token: str,
+        document_id: UUID,
+        point_id: UUID,
+        operations: list[dict[str, Any]],
     ) -> None:
         """POST api/document/{documentId}/control-point/{id}"""
         await self.make_request(
-            "POST", f"api/document/{document_id}/control-point/{point_id}", token, json_data=operations, is_json_response=False
+            "POST",
+            f"api/document/{document_id}/control-point/{point_id}",
+            token,
+            json_data=operations,
+            is_json_response=False,
         )
 
-    async def complete_control_point(self, token: str, document_id: UUID, point_id: UUID) -> ContractControlPointDto:
+    async def complete_control_point(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> ContractControlPointDto:
         """PUT api/document/{documentId}/control-point/{id}/complete"""
         return await self._request_dto(
-            "PUT", f"api/document/{document_id}/control-point/{point_id}/complete", token, ContractControlPointDto
+            "PUT",
+            f"api/document/{document_id}/control-point/{point_id}/complete",
+            token,
+            ContractControlPointDto,
         )
 
     async def revision_control_point(
-        self, token: str, document_id: UUID, point_id: UUID, request: ControlPointRevisionRequest
+        self,
+        token: str,
+        document_id: UUID,
+        point_id: UUID,
+        request: ControlPointRevisionRequest,
     ) -> ContractControlPointDto:
         """PUT api/document/{documentId}/control-point/{id}/revision"""
         return await self._request_dto(
@@ -332,10 +389,15 @@ class DocumentClient(EdmsBaseClient):
             json_data=request.model_dump(exclude_none=True),
         )
 
-    async def delete_control_point(self, token: str, document_id: UUID, point_id: UUID) -> None:
+    async def delete_control_point(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> None:
         """DELETE api/document/{documentId}/control-point/{id}"""
         await self.make_request(
-            "DELETE", f"api/document/{document_id}/control-point/{point_id}", token, is_json_response=False
+            "DELETE",
+            f"api/document/{document_id}/control-point/{point_id}",
+            token,
+            is_json_response=False,
         )
 
     async def move_control_point(
@@ -360,10 +422,15 @@ class DocumentClient(EdmsBaseClient):
             ContractControlPointResponsibleDto,
         )
 
-    async def get_control_point_links(self, token: str, document_id: UUID, point_id: UUID) -> list[ContractControlPointLinkDto]:
+    async def get_control_point_links(
+        self, token: str, document_id: UUID, point_id: UUID
+    ) -> list[ContractControlPointLinkDto]:
         """GET api/document/{documentId}/control-point/{id}/link"""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/control-point/{point_id}/link", token, ContractControlPointLinkDto
+            "GET",
+            f"api/document/{document_id}/control-point/{point_id}/link",
+            token,
+            ContractControlPointLinkDto,
         )
 
     async def get_control_point_attachments(
@@ -371,10 +438,15 @@ class DocumentClient(EdmsBaseClient):
     ) -> list[ContractControlPointAttachmentDto]:
         """GET api/document/{documentId}/control-point/{id}/attachment"""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/control-point/{point_id}/attachment", token, ContractControlPointAttachmentDto
+            "GET",
+            f"api/document/{document_id}/control-point/{point_id}/attachment",
+            token,
+            ContractControlPointAttachmentDto,
         )
 
-    async def download_control_point_attachment(self, token: str, document_id: UUID, attach_id: UUID) -> bytes:
+    async def download_control_point_attachment(
+        self, token: str, document_id: UUID, attach_id: UUID
+    ) -> bytes:
         """GET api/document/{documentId}/control-point/attachment/{attachId}/download"""
         return await self.make_request(
             "GET",
@@ -384,7 +456,9 @@ class DocumentClient(EdmsBaseClient):
             long_timeout=True,
         )
 
-    async def delete_control_point_attachment(self, token: str, document_id: UUID, point_id: UUID, attach_id: UUID) -> None:
+    async def delete_control_point_attachment(
+        self, token: str, document_id: UUID, point_id: UUID, attach_id: UUID
+    ) -> None:
         """DELETE api/document/{documentId}/control-point/{pointId}/attachment/{attachId}"""
         await self.make_request(
             "DELETE",
@@ -395,13 +469,15 @@ class DocumentClient(EdmsBaseClient):
 
     async def get_document_colors(self, token: str) -> list[DocumentUserColorDto]:
         """Fetches all document colors."""
-        return await self._request_list("GET", "api/document/color", token, DocumentUserColorDto)
+        return await self._request_list(
+            "GET", "api/document/color", token, DocumentUserColorDto
+        )
 
     async def create_document_color(
-            self,
-            token: str,
-            document_id: UUID | str,
-            color: str,
+        self,
+        token: str,
+        document_id: UUID | str,
+        color: str,
     ) -> DocumentUserColorDto:
         """Sets a color for a document."""
         return await self._request_dto(
@@ -413,11 +489,11 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def update_document_color(
-            self,
-            token: str,
-            document_id: UUID | str,
-            color_id: UUID | str,
-            color: str,
+        self,
+        token: str,
+        document_id: UUID | str,
+        color_id: UUID | str,
+        color: str,
     ) -> DocumentUserColorDto:
         """Updates a document color."""
         return await self._request_dto(
@@ -425,13 +501,17 @@ class DocumentClient(EdmsBaseClient):
             f"api/document/{document_id}/color",
             token,
             DocumentUserColorDto,
-            json_data={"id": str(color_id), "color": color, "documentId": str(document_id)},
+            json_data={
+                "id": str(color_id),
+                "color": color,
+                "documentId": str(document_id),
+            },
         )
 
     async def create_document_colors_batch(
-            self,
-            token: str,
-            colors: list[DocumentUserColorDto],
+        self,
+        token: str,
+        colors: list[DocumentUserColorDto],
     ) -> list[DocumentUserColorDto]:
         """Creates or updates document colors in batch."""
         return await self._request_list(
@@ -442,7 +522,9 @@ class DocumentClient(EdmsBaseClient):
             json_data=[c.model_dump(by_alias=True) for c in colors],
         )
 
-    async def delete_document_colors(self, token: str, color_ids: list[UUID | str]) -> None:
+    async def delete_document_colors(
+        self, token: str, color_ids: list[UUID | str]
+    ) -> None:
         """Deletes specified colors."""
         await self.make_request(
             "DELETE",
@@ -452,17 +534,22 @@ class DocumentClient(EdmsBaseClient):
             is_json_response=False,
         )
 
-    async def get_access_entries(self, token: str, document_id: UUID | str) -> list[DocumentAccessEntryDto]:
+    async def get_access_entries(
+        self, token: str, document_id: UUID | str
+    ) -> list[DocumentAccessEntryDto]:
         """Fetches access list entries for a document."""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/access-entry", token, DocumentAccessEntryDto
+            "GET",
+            f"api/document/{document_id}/access-entry",
+            token,
+            DocumentAccessEntryDto,
         )
 
     async def add_access_entries(
-            self,
-            token: str,
-            document_id: UUID | str,
-            entries: list[DocumentAccessEntryDto],
+        self,
+        token: str,
+        document_id: UUID | str,
+        entries: list[DocumentAccessEntryDto],
     ) -> None:
         """Adds access list entries."""
         await self.make_request(
@@ -474,10 +561,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def delete_access_entries(
-            self,
-            token: str,
-            document_id: UUID | str,
-            entry_ids: list[UUID | str],
+        self,
+        token: str,
+        document_id: UUID | str,
+        entry_ids: list[UUID | str],
     ) -> None:
         """Deletes access list entries."""
         await self.make_request(
@@ -497,7 +584,9 @@ class DocumentClient(EdmsBaseClient):
             is_json_response=False,
         )
 
-    async def delete_documents_batch(self, token: str, document_ids: list[UUID | str]) -> CountResult:
+    async def delete_documents_batch(
+        self, token: str, document_ids: list[UUID | str]
+    ) -> CountResult:
         """Deletes documents in batch."""
         return await self._request_dto(
             "DELETE",
@@ -507,7 +596,9 @@ class DocumentClient(EdmsBaseClient):
             json_data={"ids": [str(did) for did in document_ids]},
         )
 
-    async def create_document(self, token: str, profile_id: UUID | str) -> DocumentWithPermissions:
+    async def create_document(
+        self, token: str, profile_id: UUID | str
+    ) -> DocumentWithPermissions:
         """Creates a new document from profile."""
         return await self._request_dto(
             "POST",
@@ -518,10 +609,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def create_new_version(
-            self,
-            token: str,
-            doc_id: UUID | str,
-            body: DocumentBasedExistingBody,
+        self,
+        token: str,
+        doc_id: UUID | str,
+        body: DocumentBasedExistingBody,
     ) -> DocumentDto:
         """Creates a new version of an existing document."""
         return await self._request_dto(
@@ -532,21 +623,28 @@ class DocumentClient(EdmsBaseClient):
             json_data=body.model_dump(by_alias=True),
         )
 
-    async def get_document_nomenclatures(self, token: str, document_id: UUID | str) -> list[NomenclatureAffairDto]:
+    async def get_document_nomenclatures(
+        self, token: str, document_id: UUID | str
+    ) -> list[NomenclatureAffairDto]:
         """Fetches affairs where document is added (affairs)."""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/nomenclature-affair", token, NomenclatureAffairDto
+            "GET",
+            f"api/document/{document_id}/nomenclature-affair",
+            token,
+            NomenclatureAffairDto,
         )
 
     async def get_nomenclature(self, token: str, document_id: UUID | str) -> list[Any]:
         """Fetches nomenclature list for a document."""
-        return await self.make_request("GET", f"api/document/{document_id}/nomenclature", token)
+        return await self.make_request(
+            "GET", f"api/document/{document_id}/nomenclature", token
+        )
 
     async def write_off_document(
-            self,
-            token: str,
-            document_id: UUID | str,
-            affair_ids: list[UUID | str],
+        self,
+        token: str,
+        document_id: UUID | str,
+        affair_ids: list[UUID | str],
     ) -> list[Any]:
         """Writes off document to nomenclature affairs."""
         return await self.make_request(
@@ -557,10 +655,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def extract_nomenclature(
-            self,
-            token: str,
-            document_id: UUID | str,
-            affair_ids: list[UUID | str],
+        self,
+        token: str,
+        document_id: UUID | str,
+        affair_ids: list[UUID | str],
     ) -> None:
         """Extracts document from nomenclature affairs."""
         await self.make_request(
@@ -572,10 +670,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def set_archive_state(
-            self,
-            token: str,
-            document_id: UUID | str,
-            in_archive: bool,
+        self,
+        token: str,
+        document_id: UUID | str,
+        in_archive: bool,
     ) -> None:
         """Sets document archive state."""
         await self.make_request(
@@ -586,7 +684,9 @@ class DocumentClient(EdmsBaseClient):
             is_json_response=False,
         )
 
-    async def archive_documents_batch(self, token: str, document_ids: list[UUID | str]) -> CountResult:
+    async def archive_documents_batch(
+        self, token: str, document_ids: list[UUID | str]
+    ) -> CountResult:
         """Moves documents to archive in batch."""
         return await self._request_dto(
             "PUT",
@@ -596,7 +696,9 @@ class DocumentClient(EdmsBaseClient):
             json_data={"ids": [str(did) for did in document_ids]},
         )
 
-    async def extract_archive_batch(self, token: str, document_ids: list[UUID | str]) -> CountResult:
+    async def extract_archive_batch(
+        self, token: str, document_ids: list[UUID | str]
+    ) -> CountResult:
         """Extracts documents from archive in batch."""
         return await self._request_dto(
             "DELETE",
@@ -606,18 +708,23 @@ class DocumentClient(EdmsBaseClient):
             json_data={"ids": [str(did) for did in document_ids]},
         )
 
-    async def get_contract_version_info(self, token: str, document_id: UUID | str) -> list[ContractVersionInfoDto]:
+    async def get_contract_version_info(
+        self, token: str, document_id: UUID | str
+    ) -> list[ContractVersionInfoDto]:
         """Fetches contract version info."""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/contract-version-info", token, ContractVersionInfoDto
+            "GET",
+            f"api/document/{document_id}/contract-version-info",
+            token,
+            ContractVersionInfoDto,
         )
 
     async def get_view_documents(
-            self,
-            token: str,
-            view_id: UUID | str,
-            pageable: dict[str, Any] | None = None,
-            doc_filter: dict[str, Any] | None = None,
+        self,
+        token: str,
+        view_id: UUID | str,
+        pageable: dict[str, Any] | None = None,
+        doc_filter: dict[str, Any] | None = None,
     ) -> list[DocumentDto]:
         """Fetches documents for a custom view."""
         params = pageable or {}
@@ -630,110 +737,169 @@ class DocumentClient(EdmsBaseClient):
             return [DocumentDto.model_validate(item) for item in result["content"]]
         return [DocumentDto.model_validate(item) for item in result]
 
-    async def get_document_years(self, token: str, doc_filter: dict[str, Any] | None = None) -> list[int]:
+    async def get_document_years(
+        self, token: str, doc_filter: dict[str, Any] | None = None
+    ) -> list[int]:
         """Fetches years for which documents exist."""
-        return await self.make_request("GET", "api/document/year", token, params=doc_filter)
-
-    async def find_recipients(self, token: str, doc_filter: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        """Searches for document recipients."""
-        return await self.make_request("GET", "api/document/recipient", token, params=doc_filter)
-
-    async def find_statuses(self, token: str, doc_filter: dict[str, Any] | None = None) -> list[str]:
-        """Searches for document statuses."""
-        return await self.make_request("GET", "api/document/status", token, params=doc_filter)
-
-    async def get_nomenclature_affair_v2(self, token: str, document_id: UUID | str) -> list[NomenclatureAffairDto]:
-        """Fetches nomenclature affairs for a document (v2)."""
-        return await self._request_list(
-            "GET", f"api/document/{document_id}/nomenclature/v2", token, NomenclatureAffairDto
+        return await self.make_request(
+            "GET", "api/document/year", token, params=doc_filter
         )
 
-    async def get_contract_responsibles(self, token: str, document_id: UUID | str) -> list[Any]:
+    async def find_recipients(
+        self, token: str, doc_filter: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        """Searches for document recipients."""
+        return await self.make_request(
+            "GET", "api/document/recipient", token, params=doc_filter
+        )
+
+    async def find_statuses(
+        self, token: str, doc_filter: dict[str, Any] | None = None
+    ) -> list[str]:
+        """Searches for document statuses."""
+        return await self.make_request(
+            "GET", "api/document/status", token, params=doc_filter
+        )
+
+    async def get_nomenclature_affair_v2(
+        self, token: str, document_id: UUID | str
+    ) -> list[NomenclatureAffairDto]:
+        """Fetches nomenclature affairs for a document (v2)."""
+        return await self._request_list(
+            "GET",
+            f"api/document/{document_id}/nomenclature/v2",
+            token,
+            NomenclatureAffairDto,
+        )
+
+    async def get_contract_responsibles(
+        self, token: str, document_id: UUID | str
+    ) -> list[Any]:
         """Fetches responsible persons for a contract."""
-        return await self.make_request("GET", f"api/document/{document_id}/responsible", token)
+        return await self.make_request(
+            "GET", f"api/document/{document_id}/responsible", token
+        )
 
     async def get_online_users(self, token: str, document_id: UUID | str) -> list[UUID]:
         """Fetches IDs of users currently viewing the document."""
-        data = await self.make_request("GET", f"api/document/{document_id}/online-user", token)
+        data = await self.make_request(
+            "GET", f"api/document/{document_id}/online-user", token
+        )
         return [UUID(uid) for uid in data]
 
-    async def get_nomenclature_affair_with_links(self, token: str, document_id: UUID | str) -> dict[str, Any]:
+    async def get_nomenclature_affair_with_links(
+        self, token: str, document_id: UUID | str
+    ) -> dict[str, Any]:
         """Fetches nomenclature affairs and document links."""
-        return await self.make_request("GET", f"api/document/{document_id}/nomenclature-affair-document-link", token)
+        return await self.make_request(
+            "GET",
+            f"api/document/{document_id}/nomenclature-affair-document-link",
+            token,
+        )
 
-    async def get_aismv_ack_delivery(self, token: str, document_id: UUID | str) -> list[Any]:
+    async def get_aismv_ack_delivery(
+        self, token: str, document_id: UUID | str
+    ) -> list[Any]:
         """Fetches AISMV acknowledgement delivery history."""
-        return await self.make_request("GET", f"api/document/{document_id}/aismv-ack-delivery", token)
+        return await self.make_request(
+            "GET", f"api/document/{document_id}/aismv-ack-delivery", token
+        )
 
-    async def retry_aismv_ack_delivery(self, token: str, document_id: UUID | str, delivery_id: UUID | str) -> None:
+    async def retry_aismv_ack_delivery(
+        self, token: str, document_id: UUID | str, delivery_id: UUID | str
+    ) -> None:
         """Retries AISMV acknowledgement delivery."""
         await self.make_request(
-            "POST", f"api/document/{document_id}/aismv-ack-delivery/{delivery_id}/retry", token, is_json_response=False
+            "POST",
+            f"api/document/{document_id}/aismv-ack-delivery/{delivery_id}/retry",
+            token,
+            is_json_response=False,
         )
 
     async def get_recipient_aismv_delivery_history(
-            self, token: str, document_id: UUID | str, recipient_id: UUID | str
+        self, token: str, document_id: UUID | str, recipient_id: UUID | str
     ) -> list[DocumentRecipientDeliveryHistoryDto]:
         """Fetches AISMV delivery history for a specific recipient."""
         return await self._request_list(
             "GET",
             f"api/document/{document_id}/recipient/{recipient_id}/aismv-delivery-history",
             token,
-            DocumentRecipientDeliveryHistoryDto
+            DocumentRecipientDeliveryHistoryDto,
         )
 
     async def cancel_recipient_aismv_delivery(
-            self, token: str, document_id: UUID | str, recipient_id: UUID | str, delivery_id: UUID | str
+        self,
+        token: str,
+        document_id: UUID | str,
+        recipient_id: UUID | str,
+        delivery_id: UUID | str,
     ) -> None:
         """Cancels AISMV delivery for a recipient."""
         await self.make_request(
             "POST",
             f"api/document/{document_id}/recipient/{recipient_id}/aismv-delivery-history/{delivery_id}/cancel",
             token,
-            is_json_response=False
+            is_json_response=False,
         )
 
     async def confirm_recipient_aismv_delivery(
-            self, token: str, document_id: UUID | str, recipient_id: UUID | str, delivery_id: UUID | str
+        self,
+        token: str,
+        document_id: UUID | str,
+        recipient_id: UUID | str,
+        delivery_id: UUID | str,
     ) -> None:
         """Confirms AISMV delivery for a recipient."""
         await self.make_request(
             "POST",
             f"api/document/{document_id}/recipient/{recipient_id}/aismv-delivery-history/{delivery_id}/confirm",
             token,
-            is_json_response=False
+            is_json_response=False,
         )
 
     async def retry_recipient_aismv_delivery(
-            self, token: str, document_id: UUID | str, recipient_id: UUID | str, delivery_id: UUID | str
+        self,
+        token: str,
+        document_id: UUID | str,
+        recipient_id: UUID | str,
+        delivery_id: UUID | str,
     ) -> None:
         """Retries AISMV delivery for a recipient."""
         await self.make_request(
             "POST",
             f"api/document/{document_id}/recipient/{recipient_id}/aismv-delivery-history/{delivery_id}/retry",
             token,
-            is_json_response=False
+            is_json_response=False,
         )
 
-    async def get_not_sent_recipients(self, token: str, document_id: UUID | str) -> list[DocumentRecipientDto]:
+    async def get_not_sent_recipients(
+        self, token: str, document_id: UUID | str
+    ) -> list[DocumentRecipientDto]:
         """Fetches recipients to whom the document has not been sent yet."""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/not-sent-recipient", token, DocumentRecipientDto
+            "GET",
+            f"api/document/{document_id}/not-sent-recipient",
+            token,
+            DocumentRecipientDto,
         )
 
     async def get_recipient_history(
-            self, token: str, document_id: UUID | str, recipient_id: UUID | str
+        self, token: str, document_id: UUID | str, recipient_id: UUID | str
     ) -> list[DocumentRecipientDeliveryHistoryDto]:
         """Fetches delivery history for a recipient."""
         return await self._request_list(
             "GET",
             f"api/document/{document_id}/recipient/{recipient_id}/history",
             token,
-            DocumentRecipientDeliveryHistoryDto
+            DocumentRecipientDeliveryHistoryDto,
         )
 
     async def recipient_add_documents(
-            self, token: str, document_id: UUID | str, recipient_id: UUID | str, attachment_ids: list[UUID | str]
+        self,
+        token: str,
+        document_id: UUID | str,
+        recipient_id: UUID | str,
+        attachment_ids: list[UUID | str],
     ) -> None:
         """Sends additional documents to a recipient."""
         await self.make_request(
@@ -741,22 +907,34 @@ class DocumentClient(EdmsBaseClient):
             f"api/document/{document_id}/recipient/{recipient_id}/add-documents",
             token,
             json_data={"ids": [str(aid) for aid in attachment_ids]},
-            is_json_response=False
+            is_json_response=False,
         )
 
-    async def get_repeat_identical_appeals(self, token: str, document_id: UUID | str) -> list[RepeatIdenticalAppealDto]:
+    async def get_repeat_identical_appeals(
+        self, token: str, document_id: UUID | str
+    ) -> list[RepeatIdenticalAppealDto]:
         """Fetches repeat and identical appeals linked to a document."""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/repeat-identical", token, RepeatIdenticalAppealDto
+            "GET",
+            f"api/document/{document_id}/repeat-identical",
+            token,
+            RepeatIdenticalAppealDto,
         )
 
-    async def get_pre_nomenclature(self, token: str, document_id: UUID | str) -> list[DocumentPreNomenclatureDto]:
+    async def get_pre_nomenclature(
+        self, token: str, document_id: UUID | str
+    ) -> list[DocumentPreNomenclatureDto]:
         """Fetches preliminary nomenclature for a document."""
         return await self._request_list(
-            "GET", f"api/document/{document_id}/pre-nomenclature", token, DocumentPreNomenclatureDto
+            "GET",
+            f"api/document/{document_id}/pre-nomenclature",
+            token,
+            DocumentPreNomenclatureDto,
         )
 
-    async def change_document_author(self, token: str, document_id: UUID | str, author_id: UUID | str) -> DocumentDto:
+    async def change_document_author(
+        self, token: str, document_id: UUID | str, author_id: UUID | str
+    ) -> DocumentDto:
         """Changes document author."""
         return await self._request_dto(
             "PUT",
@@ -766,28 +944,40 @@ class DocumentClient(EdmsBaseClient):
             json_data={"id": str(author_id)},
         )
 
-    async def notify_to_preparation(self, token: str, document_id: UUID | str, employee_id: UUID | str) -> None:
+    async def notify_to_preparation(
+        self, token: str, document_id: UUID | str, employee_id: UUID | str
+    ) -> None:
         """Notifies and moves document to preparation stage (Meeting)."""
         await self.make_request(
             "POST",
             f"api/document/{document_id}/notify-to-preparation",
             token,
             json_data={"id": str(employee_id)},
-            is_json_response=False
+            is_json_response=False,
         )
 
-    async def get_employees_for_notify(self, token: str, document_id: UUID | str) -> list[Any]:
+    async def get_employees_for_notify(
+        self, token: str, document_id: UUID | str
+    ) -> list[Any]:
         """Fetches employees eligible for notification."""
-        return await self.make_request("GET", f"api/document/{document_id}/employees-for-notify", token)
+        return await self.make_request(
+            "GET", f"api/document/{document_id}/employees-for-notify", token
+        )
 
-    async def notify_meeting(self, token: str, document_id: UUID | str, body: dict[str, Any]) -> None:
+    async def notify_meeting(
+        self, token: str, document_id: UUID | str, body: dict[str, Any]
+    ) -> None:
         """Sends meeting notification."""
         await self.make_request(
-            "POST", f"api/document/{document_id}/notify-meeting", token, json_data=body, is_json_response=False
+            "POST",
+            f"api/document/{document_id}/notify-meeting",
+            token,
+            json_data=body,
+            is_json_response=False,
         )
 
     async def create_based_existing(
-            self, token: str, document_id: UUID | str, body: DocumentBasedExistingBody
+        self, token: str, document_id: UUID | str, body: DocumentBasedExistingBody
     ) -> DocumentDto:
         """Creates a new document based on an existing one."""
         return await self._request_dto(
@@ -798,29 +988,43 @@ class DocumentClient(EdmsBaseClient):
             json_data=body.model_dump(by_alias=True),
         )
 
-    async def get_status_group_count(self, token: str, doc_filter: dict[str, Any] | None = None) -> list[Any]:
+    async def get_status_group_count(
+        self, token: str, doc_filter: dict[str, Any] | None = None
+    ) -> list[Any]:
         """Fetches document counts grouped by status."""
-        return await self.make_request("GET", "api/document/status-group", token, params=doc_filter)
-
-    async def retry_bpmn_incident(self, token: str, document_id: UUID | str, incident_id: str) -> None:
-        """Retries a BPMN incident."""
-        await self.make_request(
-            "POST", f"api/document/{document_id}/bpmn/incident/{incident_id}/retry", token, is_json_response=False
+        return await self.make_request(
+            "GET", "api/document/status-group", token, params=doc_filter
         )
 
-    async def skip_bpmn_incident(self, token: str, document_id: UUID | str, incident_id: str) -> None:
+    async def retry_bpmn_incident(
+        self, token: str, document_id: UUID | str, incident_id: str
+    ) -> None:
+        """Retries a BPMN incident."""
+        await self.make_request(
+            "POST",
+            f"api/document/{document_id}/bpmn/incident/{incident_id}/retry",
+            token,
+            is_json_response=False,
+        )
+
+    async def skip_bpmn_incident(
+        self, token: str, document_id: UUID | str, incident_id: str
+    ) -> None:
         """Skips a BPMN incident."""
         await self.make_request(
-            "POST", f"api/document/{document_id}/bpmn/incident/{incident_id}/skip", token, is_json_response=False
+            "POST",
+            f"api/document/{document_id}/bpmn/incident/{incident_id}/skip",
+            token,
+            is_json_response=False,
         )
 
     async def update_reg_number(
-            self,
-            token: str,
-            document_id: UUID | str,
-            reg_num: str,
-            reg_date: datetime,
-            journal_number: int | None = None,
+        self,
+        token: str,
+        document_id: UUID | str,
+        reg_num: str,
+        reg_date: datetime,
+        journal_number: int | None = None,
     ) -> DocumentDto:
         """Updates document registration number."""
         payload: dict[str, Any] = {
@@ -839,18 +1043,21 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def get_document_recipients(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> list[DocumentRecipientDto]:
         """Fetches list of document recipients."""
         try:
             return await self._request_list(
-                "GET", f"api/document/{document_id}/recipient", token, DocumentRecipientDto
+                "GET",
+                f"api/document/{document_id}/recipient",
+                token,
+                DocumentRecipientDto,
             )
         except EdmsNotFoundError:
             return []
 
     async def get_document_versions(
-            self, token: str, document_id: UUID | str
+        self, token: str, document_id: UUID | str
     ) -> list[DocumentVersionDto]:
         """Fetches all versions of a document."""
         try:
@@ -871,13 +1078,15 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def cancel_document(
-            self,
-            token: str,
-            document_id: UUID | str,
-            comment: str | None = None,
+        self,
+        token: str,
+        document_id: UUID | str,
+        comment: str | None = None,
     ) -> None:
         """Cancels a document. Raises on failure."""
-        payload = DocumentCancelAction(id=UUID(str(document_id)), comment=comment.strip() if comment else None)
+        payload = DocumentCancelAction(
+            id=UUID(str(document_id)), comment=comment.strip() if comment else None
+        )
 
         await self.make_request(
             "POST",
@@ -888,10 +1097,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def execute_document_operations(
-            self,
-            token: str,
-            document_id: UUID | str,
-            operations: list[dict[str, Any]],
+        self,
+        token: str,
+        document_id: UUID | str,
+        operations: list[dict[str, Any]],
     ) -> None:
         """Executes a list of operations on a document. Raises on failure."""
         await self.make_request(
@@ -902,38 +1111,61 @@ class DocumentClient(EdmsBaseClient):
             is_json_response=False,
         )
 
-    async def get_stat_user_executor(self, token: str) -> ExecutionDocumentStatCount | None:
+    async def get_stat_user_executor(
+        self, token: str
+    ) -> ExecutionDocumentStatCount | None:
         """Fetches document execution statistics for the current user."""
         try:
-            return await self._request_dto("GET", "api/document/stat/user-executor", token, ExecutionDocumentStatCount)
+            return await self._request_dto(
+                "GET",
+                "api/document/stat/user-executor",
+                token,
+                ExecutionDocumentStatCount,
+            )
         except EdmsNotFoundError:
             return None
 
-    async def get_stat_user_control(self, token: str) -> ExecutionDocumentStatCount | None:
+    async def get_stat_user_control(
+        self, token: str
+    ) -> ExecutionDocumentStatCount | None:
         """Fetches document control statistics for the current user."""
         try:
-            return await self._request_dto("GET", "api/document/stat/user-control", token, ExecutionDocumentStatCount)
+            return await self._request_dto(
+                "GET",
+                "api/document/stat/user-control",
+                token,
+                ExecutionDocumentStatCount,
+            )
         except EdmsNotFoundError:
             return None
 
-    async def get_stat_user_author(self, token: str) -> ExecutionDocumentStatCount | None:
+    async def get_stat_user_author(
+        self, token: str
+    ) -> ExecutionDocumentStatCount | None:
         """Fetches document authoring statistics for the current user."""
         try:
-            return await self._request_dto("GET", "api/document/stat/user-author", token, ExecutionDocumentStatCount)
+            return await self._request_dto(
+                "GET",
+                "api/document/stat/user-author",
+                token,
+                ExecutionDocumentStatCount,
+            )
         except EdmsNotFoundError:
             return None
 
     async def get_user_smdo_stat(self, token: str) -> UserSmdoStat | None:
         """Fetches SMDO delivery statistics for the current user."""
         try:
-            return await self._request_dto("GET", "api/document/stat/user-smdo", token, UserSmdoStat)
+            return await self._request_dto(
+                "GET", "api/document/stat/user-smdo", token, UserSmdoStat
+            )
         except EdmsNotFoundError:
             return None
 
     async def next_process(
-            self,
-            token: str,
-            request: DocumentNextProcessRequest,
+        self,
+        token: str,
+        request: DocumentNextProcessRequest,
     ) -> None:
         """Moves document to the next process stage."""
         await self.make_request(
@@ -945,10 +1177,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def create_document_answer(
-            self,
-            token: str,
-            doc_id: UUID | str,
-            profile_id: UUID | str,
+        self,
+        token: str,
+        doc_id: UUID | str,
+        profile_id: UUID | str,
     ) -> DocumentDto:
         """Creates a document answer."""
         return await self._request_dto(
@@ -960,10 +1192,10 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def create_document_smdo_answer(
-            self,
-            token: str,
-            doc_id: UUID | str,
-            profile_id: UUID | str,
+        self,
+        token: str,
+        doc_id: UUID | str,
+        profile_id: UUID | str,
     ) -> DocumentDto:
         """Creates an SMDO document answer."""
         return await self._request_dto(
@@ -975,12 +1207,14 @@ class DocumentClient(EdmsBaseClient):
         )
 
     async def recreate_aismv_document(
-            self,
-            token: str,
-            request: DocumentAismvRecreateRequest,
+        self,
+        token: str,
+        request: DocumentAismvRecreateRequest,
     ) -> UUID:
         """Recreates an AISMV document with a different profile."""
-        logger.info(f"Recreating AISMV document {request.id} with profile {request.profile_id}")
+        logger.info(
+            f"Recreating AISMV document {request.id} with profile {request.profile_id}"
+        )
         data = await self.make_request(
             "POST",
             "api/document/aismv-recreate",
@@ -990,10 +1224,10 @@ class DocumentClient(EdmsBaseClient):
         return UUID(data["id"])
 
     async def redo_protocol(
-            self,
-            token: str,
-            document_id: UUID | str,
-            profile_id: UUID | str,
+        self,
+        token: str,
+        document_id: UUID | str,
+        profile_id: UUID | str,
     ) -> DocumentDto:
         """Redoes the meeting protocol."""
         return await self._request_dto(
@@ -1004,7 +1238,9 @@ class DocumentClient(EdmsBaseClient):
             json_data={"profileId": str(profile_id)},
         )
 
-    async def notify_meeting_question(self, token: str, document_id: UUID | str) -> None:
+    async def notify_meeting_question(
+        self, token: str, document_id: UUID | str
+    ) -> None:
         """Sends notification for a meeting question."""
         await self.make_request(
             "POST",

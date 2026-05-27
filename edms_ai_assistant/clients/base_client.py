@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, TypeVar, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
-
 
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
@@ -25,21 +24,23 @@ class EdmsBaseClient:
         self._settings = settings
 
     async def make_request(
-            self,
-            method: str,
-            endpoint: str,
-            token: str,
-            *,
-            params: dict[str, Any] | None = None,
-            json_data: Any = None,
-            is_json_response: bool = True,
-            long_timeout: bool = False,
-            **kwargs: Any,
+        self,
+        method: str,
+        endpoint: str,
+        token: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_data: Any = None,
+        is_json_response: bool = True,
+        long_timeout: bool = False,
+        **kwargs: Any,
     ) -> Any:
         """
         Выполняет запрос через транспорт и извлекает полезную нагрузку.
         """
-        timeout = self._settings.long_timeout if long_timeout else self._settings.timeout
+        timeout = (
+            self._settings.long_timeout if long_timeout else self._settings.timeout
+        )
 
         response = await self._transport.request(
             method,
@@ -69,16 +70,16 @@ class EdmsBaseClient:
             return {}
 
     async def _request_dto(
-            self,
-            method: str,
-            endpoint: str,
-            token: str,
-            response_model: type[T],
-            *,
-            params: dict[str, Any] | None = None,
-            json_data: Any = None,
-            long_timeout: bool = False,
-            **kwargs: Any,
+        self,
+        method: str,
+        endpoint: str,
+        token: str,
+        response_model: type[T],
+        *,
+        params: dict[str, Any] | None = None,
+        json_data: Any = None,
+        long_timeout: bool = False,
+        **kwargs: Any,
     ) -> T:
         """Выполняет запрос и валидирует ответ в Pydantic модель."""
         data = await self.make_request(
@@ -88,21 +89,21 @@ class EdmsBaseClient:
             params=params,
             json_data=json_data,
             long_timeout=long_timeout,
-            **kwargs
+            **kwargs,
         )
         return response_model.model_validate(data)
 
     async def _request_list(
-            self,
-            method: str,
-            endpoint: str,
-            token: str,
-            item_model: type[T],
-            *,
-            params: dict[str, Any] | None = None,
-            json_data: Any = None,
-            long_timeout: bool = False,
-            **kwargs: Any,
+        self,
+        method: str,
+        endpoint: str,
+        token: str,
+        item_model: type[T],
+        *,
+        params: dict[str, Any] | None = None,
+        json_data: Any = None,
+        long_timeout: bool = False,
+        **kwargs: Any,
     ) -> list[T]:
         """Выполняет запрос и валидирует ответ в список Pydantic моделей."""
         data = await self.make_request(
@@ -112,7 +113,7 @@ class EdmsBaseClient:
             params=params,
             json_data=json_data,
             long_timeout=long_timeout,
-            **kwargs
+            **kwargs,
         )
         if not isinstance(data, list):
             # Обработка Spring Page/Slice если нужно, или просто падение валидации
@@ -125,12 +126,12 @@ class EdmsBaseClient:
         return [item_model.model_validate(item) for item in data]
 
     async def _upload_file(
-            self,
-            endpoint: str,
-            token: str,
-            file_name: str,
-            file_content: bytes,
-            content_type: str = "application/octet-stream",
+        self,
+        endpoint: str,
+        token: str,
+        file_name: str,
+        file_content: bytes,
+        content_type: str = "application/octet-stream",
     ) -> dict[str, Any]:
         """Хелпер для загрузки файлов (multipart/form-data)."""
         response = await self._transport.request(
