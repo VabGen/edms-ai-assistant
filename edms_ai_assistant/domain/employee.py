@@ -5,7 +5,7 @@ from pydantic import Field
 from uuid import UUID
 from datetime import datetime
 
-from edms_ai_assistant.domain.base import EdmsBaseDto
+from edms_ai_assistant.domain.base import EdmsBaseDto, SliceDto
 from edms_ai_assistant.domain.enums import (
     GroupType,
     RoleType,
@@ -18,16 +18,6 @@ from edms_ai_assistant.domain.reference import OrgDto
 if TYPE_CHECKING:
     from edms_ai_assistant.domain.reference import OrgDto
 
-T = TypeVar("T")
-
-
-class SliceDto(EdmsBaseDto, Generic[T]):
-    """DTO for Slice (pagination)."""
-    number: int = Field(0, description="Номер страницы")
-    size: int = Field(20, description="Размер страницы")
-    number_of_elements: int = Field(0, description="Кол-во элементов в странице")
-    has_next: bool = Field(False, description="Есть ли следующая страница")
-    content: list[T] = Field(default_factory=list)
 
 
 class PostDto(EdmsBaseDto):

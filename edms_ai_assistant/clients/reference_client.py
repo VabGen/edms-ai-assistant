@@ -48,12 +48,13 @@ class ReferenceClient(EdmsBaseClient):
             token: str,
             endpoint: str,
             search_name: str,
-            entity_label: str,
+            entity_label: str | None = None,
     ) -> ReferenceItemDto | None:
         if not search_name or not search_name.strip():
             return None
 
         search_query = search_name.strip()
+        logger.info("Searching %s with name: %s", entity_label or endpoint, search_query)
 
         try:
             fts_result = await self.make_request(

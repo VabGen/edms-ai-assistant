@@ -144,11 +144,32 @@ class EntityExtractor:
 
     def extract_all(self, text: str, base_date: datetime | None = None) -> dict[str, list[Entity]]:
         entities: dict[str, list[Entity]] = {}
-        for key, extractor in [("dates", lambda: self.extract_dates(text, base_date)),
-                               ("persons", lambda: self.extract_persons(text)),
-                               ("numbers", lambda: self.extract_numbers(text)),
-                               ("money", lambda: self.extract_money(text)),
-                               ("document_ids", lambda: self.extract_document_ids(text))]:
+
+        def _get_dates() -> list[Entity]:
+            return self.extract_dates(text, base_date)
+
+        def _get_persons() -> list[Entity]:
+            return self.extract_persons(text)
+
+        def _get_numbers() -> list[Entity]:
+            return self.extract_numbers(text)
+
+        def _get_money() -> list[Entity]:
+            return self.extract_money(text)
+
+        def _get_document_ids() -> list[Entity]:
+            return self.extract_document_ids(text)
+
+        extractors = [
+            ("dates", _get_dates),
+            ("persons", _get_persons),
+            ("numbers", _get_numbers),
+            ("money", _get_money),
+            ("document_ids", _get_document_ids),
+        ]
+
+        for key, extractor in extractors:
             result = extractor()
-            if result: entities[key] = result
+            if result:
+                entities[key] = result
         return entities

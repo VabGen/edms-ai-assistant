@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.domain.document import DocumentWithPermissions
+from edms_ai_assistant.domain.document import DocumentWithPermissions, AttachmentDocumentDto
 
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
@@ -66,7 +66,7 @@ class DocumentCreatorClient(EdmsBaseClient):
             document_id: str,
             file_path: str,
             file_name: str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> AttachmentDocumentDto | None:
         """Upload a local file as MAIN_ATTACHMENT to the document."""
         path = Path(file_path)
         if not path.exists():
@@ -77,10 +77,11 @@ class DocumentCreatorClient(EdmsBaseClient):
         content_type = content_type or "application/octet-stream"
 
         file_content = path.read_bytes()
-        return await self._upload_file(
+        result = await self._upload_file(
             endpoint=f"api/document/{document_id}/attachment",
             token=token,
             file_name=display_name,
             file_content=file_content,
             content_type=content_type,
         )
+        return AttachmentDocumentDto.model_validate(result) if result else None

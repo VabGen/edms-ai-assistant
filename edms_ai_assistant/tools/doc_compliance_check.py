@@ -221,7 +221,7 @@ def _extract_card_fields(
         doc: DocumentDto,
         category: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    appeal = getattr(doc, "documentAppeal", None)
+    appeal = doc.document_appeal
     field_defs = _get_field_defs(category)
 
     text_fields: list[dict[str, Any]] = []
@@ -238,8 +238,6 @@ def _extract_card_fields(
                 raw = getattr(doc, fk, None)
         else:
             raw = getattr(doc, fk, None)
-            if hasattr(raw, "value"):
-                raw = raw.value
 
         formatted = _format_value(raw)
         if not formatted:
@@ -510,12 +508,12 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
         except Exception as exc:
             return {"status": "error", "message": f"Не удалось получить документ: {exc}"}
 
-        cat_raw = getattr(doc, "docCategoryConstant", None)
+        cat_raw = doc.doc_category_constant or doc.doc_category_const
         category = (
             cat_raw.value if hasattr(cat_raw, "value") else str(cat_raw or "CUSTOM")
         ).upper()
 
-        attachments = list(getattr(doc, "attachmentDocument", None) or [])
+        attachments = doc.attachment_document or []
         if not attachments:
             return {"status": "error", "message": "В документе нет вложений для проверки."}
 
@@ -593,9 +591,9 @@ def create_doc_compliance_check_tool(deps: AppDeps) -> StructuredTool:
 
         # ── 5. Скачиваем текст ────────────────────────────────────────────────
         async def _process_one(att: Any) -> tuple[str, str | None]:
-            att_id = _get_attachment_id(att)
-            att_name = _get_attachment_name(att) or "attachment"
-            att_doc_id = str(getattr(att, "documentId", None) or document_id)
+            att_id = str(att.id) if att.id else ""
+            att_name = att.name or "attachment"
+            att_doc_id = str(att.document_id or document_id)
             text = await _extract_text(
                 token, att_doc_id, att_id, att_name, attach_client, file_processor
             )

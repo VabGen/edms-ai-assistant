@@ -14,6 +14,7 @@ from edms_ai_assistant.domain.enums import TaskType, PeriodTaskInterval
 class CreateTaskRequestExecutor(EdmsBaseDto):
     """Исполнитель поручения."""
     employee_id: Annotated[UUID | None, Field(description="UUID сотрудника-исполнителя")] = None
+    employeeId: Annotated[UUID | None, Field(description="Alias for employee_id", alias="employeeId")] = None
     responsible: Annotated[bool | None, Field(description="Является ли сотрудник ответственным")] = None
     stamp_text: str | None = None
     create_date: datetime | None = None

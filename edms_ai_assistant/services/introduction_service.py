@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from edms_ai_assistant.clients.document_client import DocumentClient
     from edms_ai_assistant.services.resolution_service import ResolutionService
     from edms_ai_assistant.clients.transport import IAsyncTransport
 

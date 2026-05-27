@@ -29,4 +29,14 @@ class SpringPage[T](EdmsBaseDto):
 class SpringSlice[T](EdmsBaseDto):
     """Модель Spring Data Slice<T>."""
     content: list[T]
+    number: int = 0
+    size: int = 20
+    number_of_elements: int = 0
     has_next: bool = False
+
+    @property
+    def hasNext(self) -> bool:
+        return self.has_next
+
+
+SliceDto = SpringSlice

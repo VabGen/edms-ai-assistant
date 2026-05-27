@@ -260,6 +260,7 @@ def create_attachment_fetch_tool(deps: AppDeps) -> StructuredTool:
 
         # ── Разрешение целевого вложения ──────────────────────────────────────────
         target = None
+        resolved_id = None
         if attachment_id:
             target = _resolve_attachment(attachments, attachment_id)
             if target is None:

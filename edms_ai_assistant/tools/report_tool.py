@@ -20,7 +20,13 @@ from edms_ai_assistant.domain.report import (
     VolumeOfDocumentFlowReportFilter,
     ReceivedAppealsReportFilter,
 )
-from edms_ai_assistant.domain.enums import ReportTaskStatus, ReportFormatType, DocCategory, DeclarantType
+from edms_ai_assistant.domain.enums import (
+    ReportTaskStatus,
+    ReportFormatType,
+    DocCategory,
+    DeclarantType,
+    DocumentStatus,
+)
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig

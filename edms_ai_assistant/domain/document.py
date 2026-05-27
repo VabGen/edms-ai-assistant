@@ -51,6 +51,7 @@ from edms_ai_assistant.domain.employee import (
     DepartmentDto,
     RoleDto,
     GroupDto,
+    SliceDto,
 )
 from edms_ai_assistant.domain.reference import (
     DeliveryMethodDto,
@@ -260,7 +261,8 @@ class SimpleCmsDto(EdmsBaseDto):
 class DocumentDto(EdmsBaseDto):
     id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
     organization_id: str | None = None
-    doc_category_constant: DocCategory | None = None
+    doc_category_constant: DocCategory | None = Field(None, alias="docCategoryConstant")
+    doc_category_const: DocCategory | None = Field(None, alias="docCategoryConst")
     create_date: Annotated[datetime | None, Field(description="Дата создания")] = None
     days_execution: Annotated[int | None, Field(description="Кол-во дней исполнения")] = None
     profile_name: str | None = None
@@ -280,6 +282,8 @@ class DocumentDto(EdmsBaseDto):
     short_summary: Annotated[str | None, Field(description="Краткое содержание")] = None
     summary: Annotated[str | None, Field(description="Текст документа")] = None
     correspondent_name: Annotated[str | None, Field(description="Наименование корреспондента")] = None
+    out_reg_number: Annotated[str | None, Field(description="Исходящий регистрационный номер")] = None
+    out_reg_date: Annotated[datetime | None, Field(description="Исходящая дата регистрации")] = None
     recipients: Annotated[bool | None, Field(description="Есть ли в документе адресаты")] = None
     profile_id: Annotated[UUID | None, Field(description="Идентификатор профиля")] = None
     document_version_id: Annotated[UUID | None, Field(description="Идентификатор версии")] = None
@@ -296,8 +300,6 @@ class DocumentDto(EdmsBaseDto):
     delivery_method: Annotated[DeliveryMethodDto | None, Field(description="Способ получения")] = None
     delivery_method_id: int | None = None
     correspondent_id: Annotated[UUID | None, Field(description="Идентификатор корреспондент")] = None
-    out_reg_number: Annotated[str | None, Field(description="Исходящий регистрационный номер")] = None
-    out_reg_date: Annotated[datetime | None, Field(description="Исходящая дата регистрации")] = None
     additional_pages: Annotated[str | None, Field(description="Кол-во листов приложений")] = None
     exemplar_count: Annotated[int | None, Field(description="Кол-во экземлпяров")] = None
     invest_program_id: Annotated[UUID | None, Field(description="Ид инвест программы")] = None
@@ -418,6 +420,7 @@ class DocumentHistoryDto(EdmsBaseDto):
 
 
 class ControlDto(EdmsBaseDto):
+    id: UUID | None = None
     control_type_id: Annotated[UUID | None, Field(description="Идентификатор типа контроля")] = None
     control_type_org_id: str | None = None
     control_type: Annotated[ControlTypeDto | None, Field(description="Тип контроля")] = None
@@ -480,6 +483,7 @@ class TasksAndProjectsDto(EdmsBaseDto):
 class DocumentVersionDto(EdmsBaseDto):
     id: UUID | None = Field(None, description="Идентификатор версии")
     version: int | None = Field(None, description="Номер версии")
+    create_date: datetime | None = None
     document_id: UUID | None = Field(None, description="Идентификатор документа")
     document: DocumentDto | None = Field(None, description="Документ")
     deleted: bool | None = None

@@ -71,12 +71,14 @@ class ReportClient(EdmsBaseClient):
     ) -> ReportTaskDto:
         """POST api/report/v2/task-control - Формирование отчета по контролю поручений через конструктор."""
         logger.info("Creating task control construct report V2")
+        # Ensure enum keys are converted to strings for the JSON body
+        json_body = {str(k): v for k, v in fields.items()} if fields else {}
         return await self._request_dto(
             "POST",
             "api/report/v2/task-control",
             token,
             ReportTaskDto,
-            json_data=fields if fields else {},
+            json_data=json_body,
         )
 
     async def create_document_on_registration_report(

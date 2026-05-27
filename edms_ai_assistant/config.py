@@ -75,6 +75,56 @@ class Settings(BaseSettings):
             return ["*"]
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
+    @property
+    def edms_base_url(self) -> str:
+        return str(edms_settings.base_url)
+
+    @property
+    def edms_timeout(self) -> int:
+        return edms_settings.timeout
+
+    @property
+    def edms_api_version(self) -> str:
+        return edms_settings.api_version
+
+    @property
+    def chancellor_next_base_url(self) -> str:
+        """Alias for backward compatibility with existing clients."""
+        return str(edms_settings.base_url)
+
+    @property
+    def edms_mcp_url(self) -> HttpUrl | None:
+        return edms_settings.mcp_url
+
+    @property
+    def edms_mcp_port(self) -> int:
+        return edms_settings.mcp_port
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:"
+            f"{self.POSTGRES_PASSWORD.get_secret_value()}@"
+            f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
+    @property
+    def redis_url(self) -> str:
+        if self.REDIS_PASSWORD:
+            return (
+                f"redis://:{self.REDIS_PASSWORD.get_secret_value()}@"
+                f"{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            )
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @property
+    def allowed_extensions_list(self) -> set[str]:
+        return {ext.strip().lower() for ext in self.ALLOWED_FILE_EXTENSIONS.split(",")}
+
+    @property
+    def max_file_size_bytes(self) -> int:
+        return self.MAX_FILE_SIZE_MB * 1024 * 1024
+
     # ── LLM Configuration ────────────────────────────────────────────────────
     LLM_GENERATIVE_URL: HttpUrl = Field(default="http://model-generative.shared.du.iba/v1")
     LLM_GENERATIVE_MODEL: str = Field(default="generative-model")
@@ -105,34 +155,47 @@ class Settings(BaseSettings):
     EMBEDDING_MAX_RETRIES_PER_REQUEST: int = 6
     EMBEDDING_DIM: int = Field(default=1536, description="Vector dimensions for Qdrant")
 
-    # ── EDMS Configuration (Aliases for backward compatibility) ───────────────
-    # Оригинальные поля EDMS вынесены в EdmsSettings, здесь оставлены свойства
-    # для совместимости со старым кодом, где используется settings.EDMS_BASE_URL
+    # ── Legacy properties (Aliases for backward compatibility) ────────────────
 
     @property
     def EDMS_BASE_URL(self) -> str:
-        return str(edms_settings.base_url)
+        return self.edms_base_url
 
     @property
     def EDMS_TIMEOUT(self) -> int:
-        return edms_settings.timeout
+        return self.edms_timeout
 
     @property
     def EDMS_API_VERSION(self) -> str:
-        return edms_settings.api_version
+        return self.edms_api_version
 
     @property
     def CHANCELLOR_NEXT_BASE_URL(self) -> str:
-        """Alias for backward compatibility with existing clients."""
-        return str(edms_settings.base_url)
+        return self.chancellor_next_base_url
 
     @property
     def EDMS_MCP_URL(self) -> HttpUrl | None:
-        return edms_settings.mcp_url
+        return self.edms_mcp_url
 
     @property
     def EDMS_MCP_PORT(self) -> int:
-        return edms_settings.mcp_port
+        return self.edms_mcp_port
+
+    @property
+    def DATABASE_URL(self) -> str:
+        return self.database_url
+
+    @property
+    def REDIS_URL(self) -> str:
+        return self.redis_url
+
+    @property
+    def ALLOWED_EXTENSIONS_LIST(self) -> set[str]:
+        return self.allowed_extensions_list
+
+    @property
+    def MAX_FILE_SIZE_BYTES(self) -> int:
+        return self.max_file_size_bytes
 
     # ── Vector DB ────────────────────────────────────────────────────────────
     QDRANT_URL: HttpUrl = Field(default="http://qdrant:6333")
@@ -144,14 +207,6 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "ai_assistant"
 
-    @property
-    def DATABASE_URL(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.POSTGRES_USER}:"
-            f"{self.POSTGRES_PASSWORD.get_secret_value()}@"
-            f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        )
-
     CHECKPOINT_DB_URL: str | None = None
     SQL_DB_URL: str | None = None
 
@@ -162,27 +217,10 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: SecretStr | None = None
     CACHE_TTL_SECONDS: int = Field(default=300, ge=30, le=86400)
 
-    @property
-    def REDIS_URL(self) -> str:
-        if self.REDIS_PASSWORD:
-            return (
-                f"redis://:{self.REDIS_PASSWORD.get_secret_value()}@"
-                f"{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-            )
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-
     # ── File Upload Configuration ────────────────────────────────────────────
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = Field(default=50, ge=1, le=500)
     ALLOWED_FILE_EXTENSIONS: str = ".docx,.doc,.pdf,.txt,.rtf,.xlsx,.xls,.pptx"
-
-    @property
-    def ALLOWED_EXTENSIONS_LIST(self) -> set[str]:
-        return {ext.strip().lower() for ext in self.ALLOWED_FILE_EXTENSIONS.split(",")}
-
-    @property
-    def MAX_FILE_SIZE_BYTES(self) -> int:
-        return self.MAX_FILE_SIZE_MB * 1024 * 1024
 
     # ── Agent Configuration ──────────────────────────────────────────────────
     AGENT_MAX_ITERATIONS: int = Field(default=10, ge=1, le=50)
