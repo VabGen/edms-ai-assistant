@@ -40,9 +40,9 @@ class IntroductionResult:
 class IntroductionService:
     """Сервисный слой для управления списками ознакомления."""
 
-    def __init__(self, resolution_service: ResolutionService, transport: IAsyncTransport):
+    def __init__(self, resolution_service: ResolutionService, document_client: DocumentClient):
         self._resolution = resolution_service
-        self._transport = transport
+        self._client = document_client
 
     async def resolve_employees(
             self, token: str, last_names: list[str], department_names: list[str],
@@ -86,14 +86,21 @@ class IntroductionService:
                                       error_message="Не указаны сотрудники для добавления")
 
         normalized_comment = self._normalize_comment(comment)
-        request = PostIntroductionRequest(executorListIds=employee_ids, comment=normalized_comment)
+
+        # Подготавливаем операции для DOCUMENT_INTRODUCTION_CREATE
+        operations = [
+            {
+                "operationType": "DOCUMENT_INTRODUCTION_CREATE",
+                "body": {
+                    "executorListIds": [str(eid) for eid in employee_ids],
+                    "comment": normalized_comment
+                }
+            }
+        ]
 
         try:
-            endpoint = f"api/document/{document_id}/introduction"
-            payload = request.model_dump(mode="json")
-
-            await self._transport.request("POST", endpoint, token=token, json=payload)
-            logger.info("Introduction created successfully",
+            await self._client.execute_document_operations(token, document_id, operations)
+            logger.info("Introduction created successfully via execute operations",
                         extra={"document_id": document_id, "added_count": len(employee_ids)})
             return IntroductionResult(success=True, added_count=len(employee_ids))
 

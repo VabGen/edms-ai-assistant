@@ -148,7 +148,7 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
         chat_model=llm
     )
     task_service = TaskService(resolution_service=resolution_service, task_client=task_client)
-    introduction_service = IntroductionService(resolution_service=resolution_service, transport=transport)
+    introduction_service = IntroductionService(resolution_service=resolution_service, document_client=document_client)
     file_processor_service = FileProcessorService()
 
     return AppDeps(

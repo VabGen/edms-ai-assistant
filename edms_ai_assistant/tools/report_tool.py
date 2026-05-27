@@ -42,6 +42,28 @@ class PerformingDisciplineInput(BaseModel):
     in_archive: bool | None = Field(None, description="Включать архивные.")
 
 
+class VolumeDocumentFlowInput(BaseModel):
+    date_reg_start: str = Field(..., description="Начальная дата (ISO).")
+    date_reg_end: str = Field(..., description="Конечная дата (ISO).")
+    flag_diagram_circular: bool = Field(True, description="Круговая диаграмма.")
+    flag_diagram_by_type: bool = Field(True, description="Диаграмма по типам.")
+    in_archive: bool | None = Field(None, description="Включать архивные.")
+
+
+class ReceivedAppealsInput(BaseModel):
+    date_reg_start: str = Field(..., description="Начальная дата (ISO).")
+    date_reg_end: str = Field(..., description="Конечная дата (ISO).")
+    declarant_types: list[DeclarantType] = Field(default_factory=list, description="Типы заявителей (INDIVIDUAL/ENTITY).")
+    in_archive: bool | None = Field(None, description="Включать архивные.")
+
+
+class DocumentStatusReportInput(BaseModel):
+    doc_categories: list[DocCategory] = Field(..., description="Категории документов.")
+    statuses: list[DocumentStatus] = Field(..., description="Статусы документов.")
+    in_archive: bool | None = Field(None, description="Включать архивные.")
+    type: ReportFormatType = Field(ReportFormatType.XLSX, description="Формат отчета.")
+
+
 def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
     """Фабрика инструментов для работы с отчетами."""
 
@@ -89,6 +111,83 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             "report": result.model_dump(by_alias=True)
         }
 
+    async def report_volume_flow_tool(
+        date_reg_start: str,
+        date_reg_end: str,
+        flag_diagram_circular: bool = True,
+        flag_diagram_by_type: bool = True,
+        in_archive: bool | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Создает отчет об объеме документооборота."""
+        token = get_token_from_config(config)
+        from datetime import datetime
+
+        filter_data = VolumeOfDocumentFlowReportFilter(
+            date_reg_start=datetime.fromisoformat(date_reg_start),
+            date_reg_end=datetime.fromisoformat(date_reg_end),
+            flag_diagram_circular=flag_diagram_circular,
+            flag_diagram_by_type=flag_diagram_by_type,
+            in_archive=in_archive
+        )
+
+        result = await deps.report_client.create_volume_of_document_flow_report(token, filter_data)
+        return {
+            "status": "success",
+            "message": f"Задача на формирование отчета создана. ID: {result.id}",
+            "report": result.model_dump(by_alias=True)
+        }
+
+    async def report_received_appeals_tool(
+        date_reg_start: str,
+        date_reg_end: str,
+        declarant_types: list[DeclarantType],
+        in_archive: bool | None = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Создает отчет о поступивших обращениях."""
+        token = get_token_from_config(config)
+        from datetime import datetime
+
+        filter_data = ReceivedAppealsReportFilter(
+            date_reg_start=datetime.fromisoformat(date_reg_start),
+            date_reg_end=datetime.fromisoformat(date_reg_end),
+            declarant_types=declarant_types,
+            in_archive=in_archive
+        )
+
+        result = await deps.report_client.create_received_appeals_report(token, filter_data)
+        return {
+            "status": "success",
+            "message": f"Задача на формирование отчета создана. ID: {result.id}",
+            "report": result.model_dump(by_alias=True)
+        }
+
+    async def report_document_status_tool(
+        doc_categories: list[DocCategory],
+        statuses: list[DocumentStatus],
+        in_archive: bool | None = None,
+        report_type: ReportFormatType = ReportFormatType.XLSX,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
+    ) -> dict[str, Any]:
+        """Создает отчет по статусам документов."""
+        token = get_token_from_config(config)
+        from edms_ai_assistant.domain.report import DocumentOnStatusReportFilter
+
+        filter_data = DocumentOnStatusReportFilter(
+            type=report_type,
+            doc_category_constants=doc_categories,
+            status=statuses,
+            in_archive=in_archive
+        )
+
+        result = await deps.report_client.create_document_on_status_report(token, filter_data)
+        return {
+            "status": "success",
+            "message": f"Задача на формирование отчета по статусам создана. ID: {result.id}",
+            "report": result.model_dump(by_alias=True)
+        }
+
     return [
         StructuredTool.from_function(
             coroutine=report_list_tool,
@@ -101,5 +200,23 @@ def create_report_tools(deps: AppDeps) -> list[StructuredTool]:
             name="report_create_performing_discipline",
             description="Создает отчет об исполнительской дисциплине за указанный период.",
             args_schema=PerformingDisciplineInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=report_volume_flow_tool,
+            name="report_create_volume_flow",
+            description="Создает отчет об объеме документооборота.",
+            args_schema=VolumeDocumentFlowInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=report_received_appeals_tool,
+            name="report_create_received_appeals",
+            description="Создает отчет о поступивших обращениях граждан.",
+            args_schema=ReceivedAppealsInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=report_document_status_tool,
+            name="report_create_document_status",
+            description="Создает отчет по статусам документов.",
+            args_schema=DocumentStatusReportInput,
         ),
     ]

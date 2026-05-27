@@ -19,26 +19,26 @@ API:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from typing import Any, Annotated, TYPE_CHECKING
+from uuid import UUID
 
 from langchain_core.tools import StructuredTool, InjectedToolArg
 from pydantic import BaseModel, Field, field_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config, get_document_id_from_config
+from edms_ai_assistant.domain.document import DocumentNextProcessRequest
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
-    from edms_ai_assistant.clients.employee_client import EmployeeClient
-    from edms_ai_assistant.clients.base_client import EdmsBaseClient
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
 
-def _is_uuid(value: str) -> bool:
+def _is_uuid(value: str | UUID | None) -> bool:
     return bool(UUID_RE.match(str(value).strip()))
 
 
@@ -292,15 +292,11 @@ def _parse_api_error(exc: Exception) -> dict[str, Any]:
 # ─── Tool Factory ─────────────────────────────────────────────────────────────
 
 
-def create_doc_next_process_tool(
-        base_client: EdmsBaseClient,
-        employee_client: EmployeeClient,
-) -> StructuredTool:
+def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
     """Фабрика для создания инструмента перевода документа на следующий этап.
 
     Args:
-        base_client: Базовый HTTP-клиент для запросов к СЭД.
-        employee_client: Клиент для поиска сотрудников.
+        deps: Контейнер зависимостей приложения.
 
     Returns:
         Настроенный StructuredTool, готовый к регистрации в агенте.
@@ -308,7 +304,7 @@ def create_doc_next_process_tool(
 
     async def _find_employee(token: str, last_name: str) -> str | None:
         try:
-            emp_dto = await employee_client.find_by_last_name_fts(token, last_name)
+            emp_dto = await deps.employee_client.find_by_last_name_fts(token, last_name)
             if emp_dto and emp_dto.id:
                 return str(emp_dto.id)
         except Exception as exc:
@@ -376,18 +372,26 @@ def create_doc_next_process_tool(
 
         try:
             # ── Шаг 1: Получить BPMN, документ и процесс параллельно ─────
-            bpmn_data, doc_data, process_data = await asyncio.gather(
-                base_client.make_request("GET", f"api/document/{document_id}/bpmn", token=token),
-                base_client.make_request("GET", f"api/document/{document_id}", token=token),
-                base_client.make_request("GET", f"api/document/{document_id}/process", token=token),
+            # Используем типизированные клиенты
+            bpmn_activity, doc, process = await asyncio.gather(
+                deps.document_client.get_process_activity(token, document_id),
+                deps.document_client.get_document_metadata(token, document_id),
+                deps.document_process_client.get_process(token, UUID(document_id)),
+                return_exceptions=True
             )
 
-            # Приводим к dict | None для унификации логики парсинга
-            bpmn_data = bpmn_data if isinstance(bpmn_data, dict) and bpmn_data else None
-            doc_data = doc_data if isinstance(doc_data, dict) and doc_data else None
-            process_data = process_data if isinstance(process_data, dict) and process_data else None
+            # Обработка ошибок сбора данных
+            if isinstance(bpmn_activity, Exception):
+                logger.error(f"Failed to fetch BPMN activity: {bpmn_activity}")
+                bpmn_activity = None
+            if isinstance(doc, Exception):
+                logger.error(f"Failed to fetch document: {doc}")
+                doc = None
+            if isinstance(process, Exception):
+                logger.error(f"Failed to fetch process: {process}")
+                process = None
 
-            if not bpmn_data:
+            if not bpmn_activity:
                 return {
                     "status": "error",
                     "message": (
@@ -397,16 +401,9 @@ def create_doc_next_process_tool(
                 }
 
             # ── Шаг 2: Парсим BPMN ────────────────────────────────────────
-            bpmn_steps = _parse_bpmn_parsed(bpmn_data)
-
-            for k, v in bpmn_data.items():
-                if k == "xml":
-                    continue
-                try:
-                    s = json.dumps(v, ensure_ascii=False, default=str)
-                    logger.info("BPMN '%s': %s", k, s[:500])
-                except Exception:
-                    pass
+            # Конвертируем DTO в dict для существующей логики парсинга (или адаптируем логику)
+            bpmn_data_dict = bpmn_activity.model_dump(by_alias=True) if bpmn_activity else {}
+            bpmn_steps = _parse_bpmn_parsed(bpmn_data_dict)
 
             logger.info(
                 "BPMN steps: %s",
@@ -414,22 +411,17 @@ def create_doc_next_process_tool(
             )
 
             # ── Шаг 3: Логируем данные процесса ───────────────────────────
-            if process_data:
-                current_id = process_data.get("currentId")
-                next_id_dto = process_data.get("nextId")
-                proc_id = process_data.get("id")
-                items = process_data.get("items") or []
-
+            if process:
                 logger.info(
                     "Process: id=%s currentId=%s nextId=%s items_count=%d",
-                    str(proc_id)[:8] if proc_id else None,
-                    str(current_id)[:8] if current_id else None,
-                    str(next_id_dto)[:8] if next_id_dto else None,
-                    len(items),
+                    str(process.id)[:8] if process.id else None,
+                    str(process.current_id)[:8] if process.current_id else None,
+                    str(process.next_id)[:8] if process.next_id else None,
+                    len(process.items) if process.items else 0,
                 )
             else:
                 logger.warning(
-                    "GET /process returned no data for document %s",
+                    "Process data is missing for document %s",
                     document_id[:8],
                 )
 
@@ -516,7 +508,10 @@ def create_doc_next_process_tool(
                 }
 
             # ── Шаг 7: Определить nextId (optimistic lock) ────────────────
-            next_id = _resolve_next_id(process_data, doc_data)
+            # Используем типизированные данные для разрешения ID
+            process_dict = process.model_dump(by_alias=True) if process else None
+            doc_dict = doc.model_dump(by_alias=True) if doc else None
+            next_id = _resolve_next_id(process_dict, doc_dict)
 
             if not next_id:
                 return {
@@ -547,12 +542,11 @@ def create_doc_next_process_tool(
                 resolved_employees = resolved
 
             # ── Шаг 9: Выполнить переход ──────────────────────────────────
-            payload: dict[str, Any] = {
-                "id": document_id,
-                "nextId": next_id,
-            }
-            if resolved_employees:
-                payload["employees"] = resolved_employees
+            request = DocumentNextProcessRequest(
+                id=UUID(document_id),
+                next_id=UUID(next_id),
+                employees=[UUID(e) for e in resolved_employees] if resolved_employees else None
+            )
 
             logger.info(
                 "POST /process/next: doc=%s nextId=%s target='%s' type=%s employees=%d",
@@ -564,13 +558,7 @@ def create_doc_next_process_tool(
             )
 
             try:
-                await base_client.make_request(
-                    "POST",
-                    "api/document/process/next",
-                    token=token,
-                    json=payload,
-                    is_json_response=False,
-                )
+                await deps.document_client.next_process(token, request)
             except Exception as post_exc:
                 post_error = _parse_api_error(post_exc)
 

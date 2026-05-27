@@ -79,7 +79,7 @@ def init_tools(deps: AppDeps, llm: Any) -> list[StructuredTool]:
         create_doc_get_versions_tool(deps.document_client),
         create_introduction_tool(deps),
         create_doc_update_field_tool(deps.document_client),
-        create_doc_next_process_tool(deps.base_client, deps.employee_client),
+        create_doc_next_process_tool(deps),
         create_doc_control_tool(deps.control_client, deps.employee_client),
         create_local_file_reader_tool(deps.file_processor_service),
         create_doc_summarize_text_tool(deps.summarization_service, llm),
