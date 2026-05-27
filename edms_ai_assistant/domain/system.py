@@ -13,8 +13,8 @@ if TYPE_CHECKING:
         Period,
         RecognitionFileTypeEnum,
         RecognitionLanguageEnum,
-        ReportColumn,
-        ReportType,
+        ReportColumnV1,
+        ReportTypeV1,
     )
     from uuid import UUID
     from datetime import datetime
@@ -76,12 +76,12 @@ class ReportUserField(EdmsBaseDto):
 
 class ReportUserConfigDto(EdmsBaseDto):
     id: UUID | None = None
-    type: ReportType | None = None
+    type: ReportTypeV1 | None = None
     name: str | None = None
     employee_id: UUID | None = None
     fields: dict[str, str] | None = None
     user_fields: ReportUserField | None = None
-    columns: list[ReportColumn] | None = None
+    columns: list[ReportColumnV1] | None = None
 
 
 class TaskKanbanColumnDto(EdmsBaseDto):

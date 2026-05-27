@@ -15,6 +15,7 @@ from edms_ai_assistant.clients.attachment_client import AttachmentClient
 from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
 from edms_ai_assistant.clients.control_client import ControlClient
 from edms_ai_assistant.clients.task_client import TaskClient
+from edms_ai_assistant.clients.report_client import ReportClient
 
 from edms_ai_assistant.services.document_service import DocumentService
 from edms_ai_assistant.services.document_enricher import DocumentEnricher
@@ -53,6 +54,7 @@ class AppDeps(BaseModel):
     control_client: ControlClient
     document_creator_client: DocumentCreatorClient
     task_client: TaskClient
+    report_client: ReportClient
 
     # Сервисы
     document_service: DocumentService
@@ -97,6 +99,7 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
     control_client = ControlClient(transport, edms_settings)
     document_creator_client = DocumentCreatorClient(transport, edms_settings)
     task_client = TaskClient(transport, edms_settings)
+    report_client = ReportClient(transport, edms_settings)
 
     # ── Инициализация сервисов ───────────────────────────────────────────────
     entity_extractor = EntityExtractor()
@@ -144,6 +147,7 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
         control_client=control_client,
         document_creator_client=document_creator_client,
         task_client=task_client,
+        report_client=report_client,
         document_service=document_service,
         appeal_extraction_service=appeal_extraction_service,
         appeal_autofill_service=appeal_autofill_service,
