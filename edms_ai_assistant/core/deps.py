@@ -16,6 +16,12 @@ from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
 from edms_ai_assistant.clients.control_client import ControlClient
 from edms_ai_assistant.clients.task_client import TaskClient
 from edms_ai_assistant.clients.report_client import ReportClient
+from edms_ai_assistant.clients.document_process_client import DocumentProcessClient
+from edms_ai_assistant.clients.acting_officer_client import EmployeeActingClient
+from edms_ai_assistant.clients.bpmn_client import BpmnClient
+from edms_ai_assistant.clients.document_profile_client import DocumentProfileClient
+from edms_ai_assistant.clients.permission_client import PermissionClient
+from edms_ai_assistant.clients.correspondent_client import CorrespondentClient
 
 from edms_ai_assistant.services.document_service import DocumentService
 from edms_ai_assistant.services.document_enricher import DocumentEnricher
@@ -55,6 +61,12 @@ class AppDeps(BaseModel):
     document_creator_client: DocumentCreatorClient
     task_client: TaskClient
     report_client: ReportClient
+    document_process_client: DocumentProcessClient
+    employee_acting_client: EmployeeActingClient
+    bpmn_client: BpmnClient
+    document_profile_client: DocumentProfileClient
+    permission_client: PermissionClient
+    correspondent_client: CorrespondentClient
 
     # Сервисы
     document_service: DocumentService
@@ -100,6 +112,12 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
     document_creator_client = DocumentCreatorClient(transport, edms_settings)
     task_client = TaskClient(transport, edms_settings)
     report_client = ReportClient(transport, edms_settings)
+    document_process_client = DocumentProcessClient(transport, edms_settings)
+    employee_acting_client = EmployeeActingClient(transport, edms_settings)
+    bpmn_client = BpmnClient(transport, edms_settings)
+    document_profile_client = DocumentProfileClient(transport, edms_settings)
+    permission_client = PermissionClient(transport, edms_settings)
+    correspondent_client = CorrespondentClient(transport, edms_settings)
 
     # ── Инициализация сервисов ───────────────────────────────────────────────
     entity_extractor = EntityExtractor()
@@ -148,6 +166,12 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
         document_creator_client=document_creator_client,
         task_client=task_client,
         report_client=report_client,
+        document_process_client=document_process_client,
+        employee_acting_client=employee_acting_client,
+        bpmn_client=bpmn_client,
+        document_profile_client=document_profile_client,
+        permission_client=permission_client,
+        correspondent_client=correspondent_client,
         document_service=document_service,
         appeal_extraction_service=appeal_extraction_service,
         appeal_autofill_service=appeal_autofill_service,
