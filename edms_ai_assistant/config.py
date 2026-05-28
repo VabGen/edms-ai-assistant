@@ -233,7 +233,7 @@ class Settings(BaseSettings):
     ALLOWED_FILE_EXTENSIONS: str = ".docx,.doc,.pdf,.txt,.rtf,.xlsx,.xls,.pptx"
 
     # ── Agent Configuration ──────────────────────────────────────────────────
-    AGENT_MAX_ITERATIONS: int = Field(default=10, ge=1, le=50)
+    AGENT_MAX_ITERATIONS: int = Field(default=15, ge=1, le=50)
     AGENT_MAX_CONTEXT_MESSAGES: int = Field(default=20, ge=5, le=100)
     AGENT_TIMEOUT: float = Field(default=120.0, ge=10.0, le=600.0)
     AGENT_LLM_TIMEOUT: float = Field(default=120.0, ge=10.0, le=600.0)

@@ -128,11 +128,21 @@ class EdmsDocumentAgent:
     ) -> dict[str, Any]:
         semantic_xml = self._build_semantic_xml(doc_info=doc_info)
         fp = context.file_path
-        intent = (
-            UserIntent.FILE_ANALYSIS
-            if fp and not is_valid_uuid(fp)
-            else UserIntent.UNKNOWN
-        )
+        msg_lower = message.lower()
+
+        # Keyword-based intent classification
+        if fp and not is_valid_uuid(fp):
+            intent = UserIntent.FILE_ANALYSIS
+        elif any(kw in msg_lower for kw in ["суммаризируй", "кратко", "тезисы", "суть", "разбор"]):
+            intent = UserIntent.SUMMARIZE
+        elif any(kw in msg_lower for kw in ["детали", "информация", "реквизиты", "покажи", "что за"]):
+            intent = UserIntent.QUESTION
+        elif any(kw in msg_lower for kw in ["проверь", "соответствие", "комплаенс", "ошибки"]):
+            intent = UserIntent.COMPLIANCE_CHECK
+        elif any(kw in msg_lower for kw in ["поиск", "найди", "найти"]):
+            intent = UserIntent.SEARCH
+        else:
+            intent = UserIntent.UNKNOWN
 
         system_prompt = PromptBuilder.build(
             context=context,

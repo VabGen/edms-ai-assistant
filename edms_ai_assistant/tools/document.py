@@ -24,6 +24,18 @@ from edms_ai_assistant.services.document_service import (
 )
 from edms_ai_assistant.utils.format_utils import clean_dict
 
+def _truncate_analytics(data: Any, max_list_items: int = 5) -> Any:
+    """Рекурсивно обрезает длинные списки в аналитике документа для LLM."""
+    if isinstance(data, dict):
+        return {k: _truncate_analytics(v, max_list_items) for k, v in data.items()}
+    if isinstance(data, list):
+        if len(data) > max_list_items:
+            truncated = [_truncate_analytics(i, max_list_items) for i in data[:max_list_items]]
+            truncated.append(f"... и еще {len(data) - max_list_items} элементов")
+            return truncated
+        return [_truncate_analytics(i, max_list_items) for i in data]
+    return data
+
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
@@ -74,7 +86,10 @@ def create_doc_get_details_tool(doc_service: DocumentService) -> StructuredTool:
                 token=token,
                 document_id=document_id,
             )
-            return {"status": "success", "document_analytics": clean_dict(analysis)}
+            cleaned = clean_dict(analysis)
+            # Truncate to avoid context window overflow
+            truncated = _truncate_analytics(cleaned)
+            return {"status": "success", "document_analytics": truncated}
 
         except DocumentNotFoundError:
             logger.warning(

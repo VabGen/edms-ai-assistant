@@ -308,9 +308,13 @@ async def _stream_graph_events(
                 next_chunk_task = None
                 break
             except Exception:
-                next_chunk_task = None
                 # The task itself failed; we'll catch it in the outer try block
-                raise
+                # but we MUST NOT leave next_chunk_task pointing to it if we want
+                # to avoid re-raising the same exception in finally.
+                task_to_raise = next_chunk_task
+                next_chunk_task = None
+                await task_to_raise  # Actually raises the error
+                raise # Fallback
 
             logger.info("Chat Stream Event: mode=%s nodes=%s", mode, list(chunk.keys()) if isinstance(chunk, dict) else type(chunk))
 
