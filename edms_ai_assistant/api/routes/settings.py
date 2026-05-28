@@ -12,7 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any, ClassVar
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -149,7 +149,7 @@ class SettingsResponse(BaseModel):
 class _RuntimeSettingsStore:
     """In-memory store that mirrors patches to the global ``settings`` object."""
 
-    _SETTINGS_MAP: dict[str, dict[str, str]] = {
+    _SETTINGS_MAP: ClassVar[dict[str, dict[str, str]]] = {
         "llm": {
             "generative_url": "LLM_GENERATIVE_URL",
             "generative_model": "LLM_GENERATIVE_MODEL",
@@ -303,7 +303,7 @@ def get_settings_store() -> _RuntimeSettingsStore:
     summary="Get current effective technical settings",
 )
 async def get_settings(
-    store: _RuntimeSettingsStore = Depends(get_settings_store),
+    store: Annotated[_RuntimeSettingsStore, Depends(get_settings_store)],
 ) -> SettingsResponse:
     """Return current effective technical settings.
 
@@ -325,7 +325,7 @@ async def get_settings(
 )
 async def patch_settings(
     body: UpdateSettingsRequest,
-    store: _RuntimeSettingsStore = Depends(get_settings_store),
+    store: Annotated[_RuntimeSettingsStore, Depends(get_settings_store)],
 ) -> SettingsResponse:
     """Apply partial technical settings patch immediately to runtime.
 
@@ -387,7 +387,7 @@ async def patch_settings(
     summary="Reset technical settings to .env defaults",
 )
 async def reset_settings(
-    store: _RuntimeSettingsStore = Depends(get_settings_store),
+    store: Annotated[_RuntimeSettingsStore, Depends(get_settings_store)],
 ) -> None:
     """Reset all runtime overrides, restore .env defaults.
 

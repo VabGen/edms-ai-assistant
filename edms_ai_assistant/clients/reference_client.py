@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.core.exceptions import EdmsNotFoundError
@@ -19,6 +18,8 @@ from edms_ai_assistant.domain.reference import (
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
 
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 class ReferenceClient(EdmsBaseClient):
     """Client for EDMS reference book API."""
 
-    _CANONICAL_NAME_FIELDS: dict[str, tuple[str, ...]] = {
+    _CANONICAL_NAME_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
         "country": ("fullName", "name", "shortName"),
         "region": ("nameRegion", "name", "shortName"),
         "district": ("nameDistrict", "name", "shortName"),

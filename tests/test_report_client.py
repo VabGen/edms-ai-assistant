@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from edms_ai_assistant.clients.report_client import ReportClient
-from edms_ai_assistant.domain.report import ReportTaskDto, ReportTaskFilter
+from edms_ai_assistant.domain.report import ReportTaskFilter
 from edms_ai_assistant.domain.enums import ReportTaskStatus, ReportType
 from edms_ai_assistant.config import EdmsSettings
 

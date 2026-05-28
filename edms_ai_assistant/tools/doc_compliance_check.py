@@ -16,7 +16,6 @@ from uuid import UUID
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -33,6 +32,7 @@ from edms_ai_assistant.tools.attachment import (
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
 
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
     from edms_ai_assistant.clients.document_client import DocumentClient

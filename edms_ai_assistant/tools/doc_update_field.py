@@ -9,7 +9,6 @@ import json
 import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,6 +19,8 @@ from edms_ai_assistant.agent.runnable_utils import (
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)

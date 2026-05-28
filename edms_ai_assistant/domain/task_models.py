@@ -1,14 +1,16 @@
 # edms_ai_assistant/domain/task_models.py
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Annotated, Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import PeriodTaskInterval, TaskType
+
+if TYPE_CHECKING:
+    from datetime import datetime
+    from uuid import UUID
 
 
 class CreateTaskRequestExecutor(EdmsBaseDto):

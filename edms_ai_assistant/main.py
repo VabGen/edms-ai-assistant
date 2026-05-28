@@ -11,7 +11,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
-from starlette.datastructures import State as _AppState
 from starlette.middleware.cors import CORSMiddleware
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
@@ -36,6 +35,8 @@ from edms_ai_assistant.summarizer.observability.logging_ctx import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+    from starlette.datastructures import State as _AppState
 
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
@@ -82,7 +83,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     )
     llm = get_chat_model()
 
-    state: _AppState = getattr(_app, "state")
+    state: _AppState = _app.state
     deps = init_deps(transport, redis, llm)
     state.deps = deps
 

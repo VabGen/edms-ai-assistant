@@ -47,7 +47,7 @@ def extract_user_id_from_token(user_token: str) -> str:
 
     except (ValueError, IndexError, json.JSONDecodeError) as e:
         logger.error(f"Ошибка декодирования/парсинга JWT: {e}")
-        raise ValueError(f"Ошибка декодирования токена: {e}")
+        raise ValueError(f"Ошибка декодирования токена: {e}") from e
     except Exception as e:
         logger.error(f"Непредвиденная ошибка в декодировании JWT: {e}")
-        raise ValueError("Внутренняя ошибка при обработке токена.")
+        raise ValueError("Внутренняя ошибка при обработке токена.") from e

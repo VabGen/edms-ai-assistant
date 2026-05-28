@@ -5,7 +5,7 @@ Typed Prompt Registry — version-controlled prompts.
 from __future__ import annotations
 
 import json
-from typing import Final
+from typing import ClassVar, Final
 
 from pydantic import BaseModel
 
@@ -386,7 +386,7 @@ PROMPT_REDUCE_EXECUTIVE = PromptTemplate(
 
 
 class PromptRegistry:
-    _DIRECT: dict[SummaryMode, PromptTemplate] = {
+    _DIRECT: ClassVar[dict[SummaryMode, PromptTemplate]] = {
         SummaryMode.EXECUTIVE: PROMPT_EXECUTIVE,
         SummaryMode.DETAILED_NOTES: PROMPT_DETAILED_NOTES,
         SummaryMode.ACTION_ITEMS: PROMPT_ACTION_ITEMS,
@@ -396,7 +396,7 @@ class PromptRegistry:
         SummaryMode.MULTILINGUAL: PROMPT_MULTILINGUAL,
     }
 
-    _MAP: dict[SummaryMode, PromptTemplate] = {
+    _MAP: ClassVar[dict[SummaryMode, PromptTemplate]] = {
         SummaryMode.EXTRACTIVE: PROMPT_MAP_EXTRACTIVE,
         SummaryMode.ABSTRACTIVE: PROMPT_MAP_GENERIC,
         SummaryMode.EXECUTIVE: PROMPT_MAP_GENERIC,
@@ -406,7 +406,7 @@ class PromptRegistry:
         SummaryMode.MULTILINGUAL: PROMPT_MAP_GENERIC,
     }
 
-    _REDUCE: dict[SummaryMode, PromptTemplate] = {
+    _REDUCE: ClassVar[dict[SummaryMode, PromptTemplate]] = {
         SummaryMode.EXECUTIVE: PROMPT_REDUCE_EXECUTIVE,
     }
 

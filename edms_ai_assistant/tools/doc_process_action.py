@@ -10,7 +10,6 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field
 
@@ -22,6 +21,8 @@ from edms_ai_assistant.domain.document import ProcessActionWithSign, SimpleProce
 from edms_ai_assistant.domain.enums import DocumentProcessType
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)

@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
@@ -35,6 +34,8 @@ from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
     from edms_ai_assistant.clients.document_client import DocumentClient
 
@@ -426,21 +427,17 @@ def create_file_compare_tool(
 
         # ── 6. Извлечение текста вложения через temp-файл ─────────────────────────
         att_text_raw: str = ""
-        tmp_path: str | None = None
 
         try:
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=resolved_suffix)
-            tmp_path = tmp_file.name
-
-            try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=resolved_suffix) as tmp_file:
+                tmp_path = tmp_file.name
                 tmp_file.write(att_bytes)
                 tmp_file.flush()
-                tmp_file.close()
 
+            try:
                 att_text_raw = await FileProcessorService.extract_text_async(tmp_path)
-
             finally:
-                if tmp_path and os.path.exists(tmp_path):
+                if os.path.exists(tmp_path):
                     try:
                         os.unlink(tmp_path)
                     except PermissionError:

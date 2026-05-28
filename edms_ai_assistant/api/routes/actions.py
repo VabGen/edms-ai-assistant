@@ -16,7 +16,6 @@ import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.api.deps import DepsDep, get_agent, get_deps
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
@@ -24,7 +23,6 @@ from edms_ai_assistant.api.helpers import (
     resolve_user_context,
     unwrap_text_from_agent_result,
 )
-from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.model import AssistantResponse, SummarizeInput, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.summarizer.errors import SummarizerError
@@ -41,6 +39,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from langchain_core.runnables import RunnableConfig
+
+    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ def _make_tool_config(
     }
     if document_id:
         cfg["configurable"]["document_id"] = document_id
-    return cast("RunnableConfig", cast(object, cfg))
+    return cast("RunnableConfig", cast("object", cfg))
 
 
 async def _run_agent_once(

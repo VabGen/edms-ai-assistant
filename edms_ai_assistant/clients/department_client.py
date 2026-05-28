@@ -13,10 +13,11 @@ from edms_ai_assistant.domain.employee import (
     DeputyLeaderDepartmentDto,
     EmployeeDto,
 )
-from edms_ai_assistant.domain.reference import BasicSearchRequest
+
+from uuid import UUID
 
 if TYPE_CHECKING:
-    from uuid import UUID
+    from edms_ai_assistant.domain.reference import BasicSearchRequest
 
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings

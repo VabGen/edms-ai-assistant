@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.document import (
-    ChildTaskInfo,
     ExecutionTaskStatCount,
     KanbanBoard,
     OrgKey,
@@ -20,17 +17,19 @@ from edms_ai_assistant.domain.document import (
 )
 from edms_ai_assistant.domain.employee import SliceDto
 from edms_ai_assistant.domain.system import TaskKanbanColumnDto
-from edms_ai_assistant.domain.task_models import (
-    ChangeResponsibleStatus,
-    CreateTaskRequest,
-    ExecuteTaskRequest,
-    TaskRevisionRequest,
-    UpdateTaskRequest,
-)
 
 if TYPE_CHECKING:
+    from datetime import datetime
+    from uuid import UUID
+
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
+    from edms_ai_assistant.domain.task_models import (
+        CreateTaskRequest,
+        ExecuteTaskRequest,
+        TaskRevisionRequest,
+        UpdateTaskRequest,
+    )
 
 logger = logging.getLogger(__name__)
 

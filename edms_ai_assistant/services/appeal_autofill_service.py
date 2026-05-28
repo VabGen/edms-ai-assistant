@@ -11,7 +11,7 @@ import re as _re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -64,7 +64,7 @@ class AutofillResult:
 
 
 class ValueSanitizer:
-    EMPTY_PLACEHOLDERS = {
+    EMPTY_PLACEHOLDERS: ClassVar[set[str]] = {
         "none",
         "null",
         "nil",

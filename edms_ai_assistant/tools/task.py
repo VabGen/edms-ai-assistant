@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field
@@ -26,6 +25,8 @@ from edms_ai_assistant.agent.runnable_utils import (
 from edms_ai_assistant.domain.task_models import TaskType
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)

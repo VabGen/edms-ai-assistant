@@ -54,10 +54,10 @@ def format_document_response(text_content: str) -> str:
     for line in lines:
         is_unwanted = False
 
-        is_junk_header = False
-        if line.strip().startswith("## Информация о Документе"):
-            if any(phrase in line for phrase in ["Похоже", "ошибка"]):
-                is_junk_header = True
+        is_junk_header = (
+            line.strip().startswith("## Информация о Документе")
+            and any(phrase in line for phrase in ["Похоже", "ошибка"])
+        )
 
         if is_junk_header:
             continue

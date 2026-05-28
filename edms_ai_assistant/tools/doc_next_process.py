@@ -24,7 +24,6 @@ import re
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -44,6 +43,8 @@ from edms_ai_assistant.domain.document import DocumentNextProcessRequest
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
@@ -604,7 +605,7 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
                         )
                     )
                     if not isinstance(resume, TextInputResume):
-                        raise ToolAborted("Исполнитель не указан")
+                        raise ToolAborted("Исполнитель не указан") from None
 
                     employee_name = resume.value.strip()
                     found = await _find_employee(token, employee_name)

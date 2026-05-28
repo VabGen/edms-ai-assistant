@@ -57,7 +57,9 @@ DepsDep = Annotated[AppDeps, Depends(get_deps)]
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)
+    ] = None,
 ) -> dict[str, Any]:
     """FastAPI dependency: extract and validate current user from JWT.
 
@@ -91,7 +93,7 @@ async def get_current_user(
 
 
 async def get_admin_user(
-    user: dict[str, Any] = Depends(get_current_user),
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> dict[str, Any]:
     """FastAPI dependency: ensure the current user has admin privileges.
 

@@ -8,13 +8,10 @@ from __future__ import annotations
 from operator import or_
 from typing import Annotated, Any, Literal
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage  # noqa: TC002
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import TypedDict
-
-# if TYPE_CHECKING:
-#     from langchain_core.messages import BaseMessage
 
 # ─────────────────────────────────────────────────────────────
 # LangGraph state

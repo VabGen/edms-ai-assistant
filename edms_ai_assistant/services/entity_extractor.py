@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 from edms_ai_assistant.utils.datetime_utils import (
     LOCAL_TZ,
@@ -41,7 +41,7 @@ class Entity:
 class EntityExtractor:
     """Rule-based named entity extractor for EDMS domain text."""
 
-    DATE_PATTERNS: list[tuple[str, Any]] = [
+    DATE_PATTERNS: ClassVar[list[tuple[str, Any]]] = [
         (
             r"(\d{1,2})\.(\d{1,2})\.(\d{4})",
             lambda m: f"{m[2]}-{int(m[1]):02d}-{int(m[0]):02d}",
@@ -58,7 +58,7 @@ class EntityExtractor:
         (r"до\s+(\d{1,2})\.(\d{1,2})", "deadline"),
     ]
 
-    MONTH_NAMES: dict[str, int] = {
+    MONTH_NAMES: ClassVar[dict[str, int]] = {
         "января": 1,
         "февраля": 2,
         "марта": 3,
@@ -73,7 +73,7 @@ class EntityExtractor:
         "декабря": 12,
     }
 
-    _PERSON_STOP_WORDS = {
+    _PERSON_STOP_WORDS: ClassVar[set[str]] = {
         "через",
         "после",
         "перед",
@@ -294,14 +294,6 @@ class EntityExtractor:
 
         def _get_document_ids() -> list[Entity]:
             return self.extract_document_ids(text)
-
-        extractors = [
-            ("dates", _get_dates),
-            ("persons", _get_persons),
-            ("numbers", _get_numbers),
-            ("money", _get_money),
-            ("document_ids", _get_document_ids),
-        ]
 
         for key, extractor in [
             ("dates", lambda: self.extract_dates(text, base_date)),

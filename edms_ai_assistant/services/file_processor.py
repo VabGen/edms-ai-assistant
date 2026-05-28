@@ -17,7 +17,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from langchain_community.document_loaders import TextLoader
 
@@ -216,11 +216,11 @@ def _convert_doc_to_docx(doc_path: str) -> str:
         raise RuntimeError(f"Converted file not found: {converted_path}")
 
     except FileNotFoundError as e:
-        raise RuntimeError(f"LibreOffice not found or failed to start: {e}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"LibreOffice conversion timed out for: {doc_path}")
+        raise RuntimeError(f"LibreOffice not found or failed to start: {e}") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"LibreOffice conversion timed out for: {doc_path}") from e
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Conversion failed: {e.stderr or e}")
+        raise RuntimeError(f"Conversion failed: {e.stderr or e}") from e
 
 
 # ── Main Service ────────────────────────────────────────────────
@@ -238,7 +238,7 @@ class FileProcessorService:
         .xls    -> xlrd
     """
 
-    SUPPORTED_EXTENSIONS = {
+    SUPPORTED_EXTENSIONS: ClassVar[set[str]] = {
         ".pdf",
         ".docx",
         ".doc",

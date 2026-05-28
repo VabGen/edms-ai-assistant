@@ -20,13 +20,6 @@ async def test_doc_process_action_agreement(mock_deps):
     token = "test-token"
     user_id = uuid4()
 
-    config = {
-        "configurable": {
-            "user_token": token,
-            "document_id": doc_id
-        }
-    }
-
     # Mock process
     mock_process = MagicMock()
     mock_process.current_id = uuid4()

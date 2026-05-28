@@ -1,35 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Any, Generic, TypeVar
-from uuid import UUID
+from typing import Annotated, Any, TypeVar
 
 from pydantic import Field
 
-from edms_ai_assistant.domain.base import EdmsBaseDto, SliceDto
-from edms_ai_assistant.domain.enums import (
+from edms_ai_assistant.domain.base import EdmsBaseDto, SliceDto  # noqa: F401
+from edms_ai_assistant.domain.enums import (  # noqa: TC001
     BlockedField,
     EmployeeCreateType,
     EmployeeIoType,
     GroupType,
     RoleType,
+    TaskStatus,  # noqa: F401
+    TaskType,    # noqa: F401
 )
-from edms_ai_assistant.domain.reference import OrgDto
 
-if TYPE_CHECKING:
-    from edms_ai_assistant.domain.reference import OrgDto
+from datetime import datetime  # noqa: TC003
+from uuid import UUID  # noqa: TC003
+
+from edms_ai_assistant.domain.reference import OrgDto  # noqa: TC001
 
 T = TypeVar("T")
-
-
-class SliceDto(EdmsBaseDto, Generic[T]):
-    """DTO for Slice (pagination)."""
-
-    number: int = Field(0, description="Номер страницы")
-    size: int = Field(20, description="Размер страницы")
-    number_of_elements: int = Field(0, description="Кол-во элементов в странице")
-    has_next: bool = Field(False, description="Есть ли следующая страница")
-    content: list[T] = Field(default_factory=list)
 
 
 class PostDto(EdmsBaseDto):

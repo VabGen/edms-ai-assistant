@@ -143,13 +143,16 @@ class AppealExtractionService:
         """Иммутабельное обновление полей через model_copy (Pydantic V2)."""
         updates: dict[str, Any] = {}
 
-        if fields.declarantType == "ENTITY":
-            if not fields.dateDocCorrespondentOrg and fields.correspondentOrgNumber:
-                parsed_date = AppealExtractionService._parse_date_from_number(
-                    fields.correspondentOrgNumber
-                )
-                if parsed_date:
-                    updates["dateDocCorrespondentOrg"] = parsed_date
+        if (
+            fields.declarantType == "ENTITY"
+            and not fields.dateDocCorrespondentOrg
+            and fields.correspondentOrgNumber
+        ):
+            parsed_date = AppealExtractionService._parse_date_from_number(
+                fields.correspondentOrgNumber
+            )
+            if parsed_date:
+                updates["dateDocCorrespondentOrg"] = parsed_date
 
         if not fields.cityName and fields.fullAddress:
             extracted_city = AppealExtractionService._extract_city_from_address(
@@ -673,7 +676,7 @@ class AppealExtractionService:
    (система определит область и район по городу)
 
    📝 "г. Молодечно, Минская область"
-   -> cityName="Молодечно", regionName="Минская область", districtName=null
+   -> cityName="Минсловецкая область", regionName="Минская область", districtName=null
 
    📝 "проживающего по адресу: Гомельский район, г. Гомель, ул. Пушкина 1"
    -> cityName="Гомель", regionName=null, districtName="Гомельский"
@@ -681,6 +684,9 @@ class AppealExtractionService:
    📝 "В производстве суда Октябрьского района г. Гомель находится дело..."
    -> cityName="Гомель", regionName=null, districtName=null
    (Октябрьский — район суда в тексте, не адрес заявителя)
+
+   📝 "г. Молодечно, Минская область"
+   -> cityName="Молодечно", regionName="Минская область", districtName=null
 
 🔟 **submissionForm (Форма подачи обращения)**:
 

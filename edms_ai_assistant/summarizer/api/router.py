@@ -129,12 +129,12 @@ ServiceDep = Annotated[SummarizationService, Depends(get_summarization_service)]
 def _parse_mode(mode: str) -> SummaryMode:
     try:
         return SummaryMode(mode)
-    except ValueError:
+    except ValueError as e:
         valid = sorted([str(m) for m in SummaryMode])
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Неверный режим '{mode}'. Допустимые: {valid}",
-        )
+        ) from e
 
 
 def _http_status_for(exc: SummarizerError) -> int:
@@ -233,7 +233,7 @@ async def summarize_document(
         else:
             logger.error("Summarization failed: %s", exc, exc_info=True)
         detail = str(exc) if code < 500 else "Ошибка суммаризации. См. логи сервиса."
-        raise HTTPException(status_code=code, detail=detail)
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @router.post(

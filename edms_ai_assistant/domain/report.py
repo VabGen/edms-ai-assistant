@@ -1,28 +1,39 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any
-from uuid import UUID
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import (
-    AppealTypeReport,
     DeclarantType,
     DocCategory,
     DocumentStatus,
     ReportColumns,
     ReportField,
     ReportFormatType,
-    ReportTaskControlField,
     ReportTaskStatus,
     ReportType,
     TaskStatus,
 )
 
+from datetime import datetime  # noqa: TC003
+from uuid import UUID  # noqa: TC003
+
 if TYPE_CHECKING:
     from edms_ai_assistant.domain.document import AttachmentDto
+    from edms_ai_assistant.domain.enums import (
+        AppealTypeReport,
+        DeclarantType,
+        DocCategory,
+        DocumentStatus,
+        ReportColumns,
+        ReportField,
+        ReportFormatType,
+        ReportTaskStatus,
+        ReportType,
+        TaskStatus,
+    )
 
 
 class ReportTaskDto(EdmsBaseDto):
@@ -180,6 +191,6 @@ class IdsDto[T](EdmsBaseDto):
     ids: Annotated[list[T], Field(min_length=1)]
 
 
-from edms_ai_assistant.domain.document import AttachmentDto
+from edms_ai_assistant.domain.document import AttachmentDto  # noqa: E402, TC001
 
 ReportTaskDto.model_rebuild()

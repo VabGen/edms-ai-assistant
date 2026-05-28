@@ -7,10 +7,11 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import contextlib
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import ValidationError
@@ -28,12 +29,11 @@ from edms_ai_assistant.summarizer.errors import (
     ValidationError as SummarizerValidationError,
 )
 
-# Lazy probe для опционального json_repair
-_repair_json: Callable[[str], str] | None = None
-try:
-    from json_repair import repair_json as _repair_json  # type: ignore[import]
-except Exception:  # pragma: no cover
-    pass
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
+
 from edms_ai_assistant.summarizer.observability.tracing import (
     Stopwatch,
     record_llm_call,
@@ -45,10 +45,10 @@ from edms_ai_assistant.summarizer.structured.models import (
     SummaryMode,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
-    from edms_ai_assistant.summarizer.prompts.registry import PromptRegistry
+# Lazy probe для опционального json_repair
+_repair_json: Any | None = None
+with contextlib.suppress(Exception):
+    from json_repair import repair_json as _repair_json  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ class LLMClient(ABC):
         """
         ...
 
+    @abstractmethod
     async def aclose(self) -> None:
         pass
 

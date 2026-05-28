@@ -22,13 +22,14 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 import httpx
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, model_validator
 
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
     from edms_ai_assistant.clients.employee_client import EmployeeClient
     from edms_ai_assistant.domain.employee import AccessGriefDto, EmployeeAccessGriefDto

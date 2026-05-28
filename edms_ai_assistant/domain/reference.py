@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from pydantic import Field
 
@@ -14,10 +13,10 @@ from edms_ai_assistant.domain.enums import (
     YearPostfix,
 )
 
-if TYPE_CHECKING:
-    from datetime import datetime
-    from uuid import UUID
+from datetime import datetime  # noqa: TC003
+from uuid import UUID  # noqa: TC003
 
+if TYPE_CHECKING:
     from edms_ai_assistant.domain.document import DocumentProfileDto
     from edms_ai_assistant.domain.employee import EmployeeDto, GroupDto
 

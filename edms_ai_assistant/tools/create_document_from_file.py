@@ -20,7 +20,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator
 
@@ -28,6 +27,8 @@ from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.document_creator_client import DocumentCreatorClient
     from edms_ai_assistant.core.deps import AppDeps
 

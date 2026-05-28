@@ -9,14 +9,13 @@ from pydantic import Field
 
 from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
 from edms_ai_assistant.domain.base import EdmsBaseDto
-from edms_ai_assistant.domain.employee import (
+from edms_ai_assistant.domain.employee import (  # noqa: TC001
     AccessGriefDto,
     DepartmentDto,
     EmployeeDto,
     GroupDto,
     MiniUserInfoDto,
     RoleDto,
-    SliceDto,
     TaskStatus,
     TaskType,
     UserInfoDto,
@@ -72,7 +71,6 @@ if TYPE_CHECKING:
 
     from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
     from edms_ai_assistant.domain.enums import (
-        AttachmentDocumentType,
         CreateType,
         DeclarantType,
         DocCategory,
@@ -2058,7 +2056,7 @@ class IntroductionDto(EdmsBaseDto):
     comment: str | None = None
 
 
-from edms_ai_assistant.domain.reference import GeneralSetupDto
+from edms_ai_assistant.domain.reference import GeneralSetupDto  # noqa: E402
 
 DocumentTypeDto.model_rebuild()
 AttachmentDocumentDto.model_rebuild()

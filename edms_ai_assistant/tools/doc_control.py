@@ -36,15 +36,11 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
 from edms_ai_assistant.agent.interrupt_contract import (
-    InterruptOption,
-    SelectInterrupt,
-    SelectResume,
     TextInputInterrupt,
     TextInputResume,
 )
@@ -55,6 +51,8 @@ from edms_ai_assistant.agent.runnable_utils import (
 from edms_ai_assistant.utils.regex_utils import UUID_RE
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.control_client import ControlClient
     from edms_ai_assistant.clients.employee_client import EmployeeClient
 

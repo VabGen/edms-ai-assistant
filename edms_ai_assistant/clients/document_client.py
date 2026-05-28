@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -44,6 +43,8 @@ from edms_ai_assistant.domain.document import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
 

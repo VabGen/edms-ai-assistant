@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.document import (
@@ -24,11 +23,13 @@ from edms_ai_assistant.domain.document import (
     SmdoRegistrationReject,
     SwapExecutorRequest,
 )
-from edms_ai_assistant.domain.enums import DocumentProcessType
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
+    from edms_ai_assistant.domain.enums import DocumentProcessType
 
 logger = logging.getLogger(__name__)
 

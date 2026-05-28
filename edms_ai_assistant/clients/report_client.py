@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
 from edms_ai_assistant.domain.employee import SliceDto
-from edms_ai_assistant.domain.enums import ReportTaskControlField
 from edms_ai_assistant.domain.report import (
     CountOfExecutedAndUnexecutedControlTaskFilter,
     DocumentOnControlReportFilter,
@@ -25,8 +23,11 @@ from edms_ai_assistant.domain.report import (
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
+    from edms_ai_assistant.domain.enums import ReportTaskControlField
 
 logger = logging.getLogger(__name__)
 

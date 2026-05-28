@@ -7,7 +7,6 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator
@@ -24,6 +23,8 @@ from edms_ai_assistant.agent.runnable_utils import (
 )
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.services.introduction_service import IntroductionService
 

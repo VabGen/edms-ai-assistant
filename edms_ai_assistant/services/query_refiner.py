@@ -5,7 +5,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from edms_ai_assistant.services.entity_extractor import Entity
@@ -65,7 +65,7 @@ class SemanticContext:
 class QueryRefiner:
     """Normalises and enriches raw user queries before LLM dispatch."""
 
-    ABBREVIATIONS: dict[str, str] = {
+    ABBREVIATIONS: ClassVar[dict[str, str]] = {
         "doc": "документ",
         "dok": "документ",
         "доки": "документы",
@@ -81,7 +81,7 @@ class QueryRefiner:
         "резол": "резолюция",
     }
 
-    ACTION_SYNONYMS: dict[str, str] = {
+    ACTION_SYNONYMS: ClassVar[dict[str, str]] = {
         "покажи": "найди",
         "выведи": "найди",
         "дай": "найди",
@@ -90,7 +90,7 @@ class QueryRefiner:
         "объясни": "опиши",
     }
 
-    CONTROL_DOMAIN_SYNONYMS = {
+    CONTROL_DOMAIN_SYNONYMS: ClassVar[dict[str, str]] = {
         "поставь контроль": "управление контролем документа поставить",
         "поставить контроль": "управление контролем документа поставить",
         "сними с контроля": "управление контролем документа снять",
@@ -103,7 +103,7 @@ class QueryRefiner:
         "статус контроля": "управление контролем документа посмотреть",
     }
 
-    EDMS_DOMAIN_SYNONYMS: dict[str, str] = {
+    EDMS_DOMAIN_SYNONYMS: ClassVar[dict[str, str]] = {
         "история документа": "сравни версии документа",
         "историю документа": "сравни версии документа",
         "что менялось": "сравни версии документа",

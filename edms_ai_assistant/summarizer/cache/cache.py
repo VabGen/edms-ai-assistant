@@ -21,7 +21,7 @@ import asyncio
 import hashlib
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 from sqlalchemy import text as sa_text
@@ -251,6 +251,8 @@ class TwoLevelCache:
     L1 miss + L2 hit: backfills L1 automatically
     """
 
+    _background_tasks: ClassVar[set[asyncio.Task]] = set()
+
     def __init__(
         self,
         l1: RedisL1Cache,
@@ -282,7 +284,9 @@ class TwoLevelCache:
         if entry is not None:
             self._hits_l2 += 1
             # Backfill L1 в фоне — не задерживаем ответ на RTT Redis
-            asyncio.create_task(self._safe_backfill(entry))
+            task = asyncio.create_task(self._safe_backfill(entry))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             return entry, "l2"
 
         self._misses += 1

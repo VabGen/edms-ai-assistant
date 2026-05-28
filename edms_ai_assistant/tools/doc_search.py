@@ -30,7 +30,6 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -43,6 +42,8 @@ from edms_ai_assistant.agent.interrupt_contract import (
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.document_client import DocumentClient
     from edms_ai_assistant.domain.document import DocumentDto
 

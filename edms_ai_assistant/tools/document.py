@@ -9,9 +9,8 @@ EDMS AI Assistant — doc_get_details tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel
 
@@ -24,6 +23,9 @@ from edms_ai_assistant.services.document_service import (
     DocumentService,
 )
 from edms_ai_assistant.utils.format_utils import clean_dict
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

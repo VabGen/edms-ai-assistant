@@ -10,10 +10,11 @@ the agent independently testable without a running EDMS server.
 from __future__ import annotations
 
 import logging
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from edms_ai_assistant.clients.document_client import DocumentClient
-from edms_ai_assistant.domain.document import DocumentDto
+if TYPE_CHECKING:
+    from edms_ai_assistant.clients.document_client import DocumentClient
+    from edms_ai_assistant.domain.document import DocumentDto
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -16,7 +15,6 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
-from edms_ai_assistant.domain.employee import EmployeeDto
 from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,
     build_employee_filter,
@@ -25,7 +23,10 @@ from edms_ai_assistant.services.search_utils import (
 )
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.department_client import DepartmentClient
+    from edms_ai_assistant.domain.employee import EmployeeDto
     from edms_ai_assistant.clients.employee_client import EmployeeClient
     from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.services.nlp_service import EDMSNaturalLanguageService

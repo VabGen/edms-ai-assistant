@@ -276,7 +276,7 @@ class StructuralChunker(ChunkingStrategy):
             if preamble:
                 sections.append(Section(title=None, body=preamble, depth=0))
 
-        for i, (start, end, depth, title) in enumerate(deduped):
+        for i, (_start, end, depth, title) in enumerate(deduped):
             next_start = deduped[i + 1][0] if i + 1 < len(deduped) else len(text)
             body = text[end:next_start].strip()
             sections.append(Section(title=title, body=body, depth=depth))

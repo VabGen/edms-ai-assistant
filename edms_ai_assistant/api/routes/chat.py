@@ -35,7 +35,6 @@ from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langgraph.types import Command, Interrupt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
     ResumeValueAdapter,
@@ -51,12 +50,14 @@ from edms_ai_assistant.api.sse_events import (
     extract_navigate_url_from_tool_message,
 )
 from edms_ai_assistant.config import settings
-from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.model import NewChatRequest, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
