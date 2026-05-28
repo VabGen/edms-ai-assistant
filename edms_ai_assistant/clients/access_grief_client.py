@@ -96,7 +96,7 @@ class AccessGriefClient(EdmsBaseClient):
             "api/access-grief",
             token,
             AccessGriefDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def update_grief(
@@ -109,7 +109,7 @@ class AccessGriefClient(EdmsBaseClient):
             f"api/access-grief/{grief_id}",
             token,
             AccessGriefDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def delete_grief(self, token: str, grief_id: str | UUID) -> None:

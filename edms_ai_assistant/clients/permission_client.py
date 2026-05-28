@@ -140,7 +140,7 @@ class PermissionClient(EdmsBaseClient):
             "api/permission",
             token,
             PermissionDto,
-            json_data=permission.model_dump(by_alias=True),
+            json_data=permission.model_dump(by_alias=True, mode="json"),
         )
 
     async def get_by_system_name(

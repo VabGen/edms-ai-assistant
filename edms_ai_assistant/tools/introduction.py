@@ -325,39 +325,48 @@ def create_introduction_tool(deps: AppDeps) -> StructuredTool:
         )
 
         try:
-            if selected_employee_ids:
-                return await _handle_direct_addition(
+            try:
+                if selected_employee_ids:
+                    return await _handle_direct_addition(
+                        service=introduction_service,
+                        token=token,
+                        document_id=document_id,
+                        employee_ids=selected_employee_ids,
+                        comment=comment,
+                    )
+
+                return await _handle_search_and_create(
                     service=introduction_service,
                     token=token,
                     document_id=document_id,
-                    employee_ids=selected_employee_ids,
+                    last_names=last_names,
+                    department_names=department_names,
+                    group_names=group_names,
+                    personal_group_names=personal_group_names,
+                    include_subordinates=bool(include_subordinates),
                     comment=comment,
                 )
 
-            return await _handle_search_and_create(
-                service=introduction_service,
-                token=token,
-                document_id=document_id,
-                last_names=last_names,
-                department_names=department_names,
-                group_names=group_names,
-                personal_group_names=personal_group_names,
-                include_subordinates=bool(include_subordinates),
-                comment=comment,
-            )
-
+            except GraphInterrupt:
+                raise
+            except Exception as e:
+                logger.error(
+                    "Introduction creation failed: %s",
+                    e,
+                    exc_info=True,
+                    extra={"document_id": document_id},
+                )
+                return {
+                    "status": "error",
+                    "message": f"❌ Произошла ошибка при создании ознакомления: {e!s}",
+                }
         except GraphInterrupt:
             raise
         except Exception as e:
-            logger.error(
-                "Introduction creation failed: %s",
-                e,
-                exc_info=True,
-                extra={"document_id": document_id},
-            )
+            logger.critical("Introduction tool fatal error: %s", e, exc_info=True)
             return {
                 "status": "error",
-                "message": f"❌ Произошла ошибка при создании ознакомления: {e!s}",
+                "message": f"❌ Критическая ошибка в инструменте ознакомления: {e!s}",
             }
 
     return StructuredTool.from_function(

@@ -386,321 +386,330 @@ def create_doc_next_process_tool(deps: AppDeps) -> StructuredTool:
         )
 
         try:
-            # ── Шаг 1: Получить BPMN, документ и процесс параллельно ─────
-            # Используем типизированные клиенты
-            bpmn_activity, doc, process = await asyncio.gather(
-                deps.document_client.get_process_activity(token, document_id),
-                deps.document_client.get_document_metadata(token, document_id),
-                deps.document_process_client.get_process(token, UUID(document_id)),
-                return_exceptions=True,
-            )
-
-            # Обработка ошибок сбора данных
-            if isinstance(bpmn_activity, Exception):
-                logger.error(f"Failed to fetch BPMN activity: {bpmn_activity}")
-                bpmn_activity = None
-            if isinstance(doc, Exception):
-                logger.error(f"Failed to fetch document: {doc}")
-                doc = None
-            if isinstance(process, Exception):
-                logger.error(f"Failed to fetch process: {process}")
-                process = None
-
-            if not bpmn_activity:
-                return {
-                    "status": "error",
-                    "message": (
-                        "Не удалось получить информацию о процессе документа. "
-                        "Возможно, документ ещё не запущен в работу."
-                    ),
-                }
-
-            # ── Шаг 2: Парсим BPMN ────────────────────────────────────────
-            # Конвертируем DTO в dict для существующей логики парсинга (или адаптируем логику)
-            bpmn_data_dict = (
-                bpmn_activity.model_dump(by_alias=True) if bpmn_activity else {}
-            )
-            bpmn_steps = _parse_bpmn_parsed(bpmn_data_dict)
-
-            logger.info(
-                "BPMN steps: %s",
-                [(s.name, s.process_type, s.is_current) for s in bpmn_steps],
-            )
-
-            # ── Шаг 3: Логируем данные процесса ───────────────────────────
-            if process:
-                logger.info(
-                    "Process: id=%s currentId=%s nextId=%s items_count=%d",
-                    str(process.id)[:8] if process.id else None,
-                    str(process.current_id)[:8] if process.current_id else None,
-                    str(process.next_id)[:8] if process.next_id else None,
-                    len(process.items) if process.items else 0,
-                )
-            else:
-                logger.warning(
-                    "Process data is missing for document %s",
-                    document_id[:8],
+            try:
+                # ── Шаг 1: Получить BPMN, документ и процесс параллельно ─────
+                # Используем типизированные клиенты
+                bpmn_activity, doc, process = await asyncio.gather(
+                    deps.document_client.get_process_activity(token, document_id),
+                    deps.document_client.get_document_metadata(token, document_id),
+                    deps.document_process_client.get_process(token, UUID(document_id)),
+                    return_exceptions=True,
                 )
 
-            # ── Шаг 4: Определяем текущий и следующие этапы ───────────────
-            current_step = next(
-                (s for s in bpmn_steps if s.is_current),
-                None,
-            )
-            next_available = _get_next_available(bpmn_steps)
+                # Обработка ошибок сбора данных
+                if isinstance(bpmn_activity, Exception):
+                    logger.error(f"Failed to fetch BPMN activity: {bpmn_activity}")
+                    bpmn_activity = None
+                if isinstance(doc, Exception):
+                    logger.error(f"Failed to fetch document: {doc}")
+                    doc = None
+                if isinstance(process, Exception):
+                    logger.error(f"Failed to fetch process: {process}")
+                    process = None
 
-            # ── Шаг 5: Показать список (если шаг не выбран) ──────────────
-            if not next_step:
-                if not bpmn_steps:
+                if not bpmn_activity:
                     return {
                         "status": "error",
-                        "message": "Этапы процесса не найдены.",
-                    }
-
-                available_for_selection = next_available or [
-                    s for s in bpmn_steps if not s.is_completed
-                ]
-                if not available_for_selection:
-                    return {
-                        "status": "error",
-                        "message": "Нет доступных этапов для перехода.",
-                    }
-
-                current_info = (
-                    f"Сейчас документ на этапе: «{current_step.name}»."
-                    if current_step
-                    else ""
-                )
-                options = [
-                    InterruptOption(
-                        id=str(i),
-                        label=s.name,
-                        description=(
-                            s.action_label
-                            if s.process_type and s.action_label != s.name
-                            else None
+                        "message": (
+                            "Не удалось получить информацию о процессе документа. "
+                            "Возможно, документ ещё не запущен в работу."
                         ),
-                    )
-                    for i, s in enumerate(available_for_selection)
-                ]
-                prompt = "Выберите этап для перехода."
-                if current_info:
-                    prompt += f" {current_info}"
-                resume = ask_human(SelectInterrupt(prompt=prompt, options=options))
-                if not isinstance(resume, SelectResume):
-                    raise ToolAborted("Этап не выбран")
-                try:
-                    selected_idx = int(resume.selected_id)
-                    next_step = available_for_selection[selected_idx].name
-                except (ValueError, IndexError):
-                    return {
-                        "status": "error",
-                        "message": "Не удалось определить выбранный этап.",
                     }
 
-            # ── Шаг 6: Разрешить выбор этапа ─────────────────────────────
-            selected = _resolve_step_selection(next_available, next_step)
-            if not selected:
-                selected = _resolve_step_selection(bpmn_steps, next_step)
-
-            if not selected:
-                next_list = _format_step_list(next_available, show_status=False)
-                return {
-                    "status": "need_input",
-                    "message": (
-                        f"Этап «{next_step}» не найден.\n\n"
-                        f"Доступные этапы:\n{next_list}\n\n"
-                        "Напишите название или номер этапа."
-                    ),
-                    "available_steps": [
-                        {
-                            "number": i + 1,
-                            "name": s.name,
-                            "process_type": s.process_type,
-                        }
-                        for i, s in enumerate(next_available)
-                    ],
-                }
-
-            if selected.is_current:
-                return {
-                    "status": "error",
-                    "message": f"Документ уже на этапе «{selected.name}».",
-                }
-            if selected.is_completed:
-                return {
-                    "status": "error",
-                    "message": f"Этап «{selected.name}» уже пройден.",
-                }
-
-            # ── Шаг 7: Определить nextId (optimistic lock) ────────────────
-            # Используем типизированные данные для разрешения ID
-            process_dict = process.model_dump(by_alias=True) if process else None
-            doc_dict = doc.model_dump(by_alias=True) if doc else None
-            next_id = _resolve_next_id(process_dict, doc_dict)
-
-            if not next_id:
-                return {
-                    "status": "error",
-                    "message": (
-                        f"Не удалось перейти на этап «{selected.name}». "
-                        "Не найден идентификатор текущего этапа процесса. "
-                        "Попробуйте через основной интерфейс EDMS."
-                    ),
-                }
-
-            # ── Шаг 8: Резолв сотрудников ─────────────────────────────────
-            resolved_employees: list[str] | None = None
-            if employees:
-                resolved, unresolved = await _resolve_employees(
-                    token,
-                    employees,
+                # ── Шаг 2: Парсим BPMN ────────────────────────────────────────
+                # Конвертируем DTO в dict для существующей логики парсинга (или адаптируем логику)
+                bpmn_data_dict = (
+                    bpmn_activity.model_dump(by_alias=True) if bpmn_activity else {}
                 )
-                if unresolved:
+                bpmn_steps = _parse_bpmn_parsed(bpmn_data_dict)
+
+                logger.info(
+                    "BPMN steps: %s",
+                    [(s.name, s.process_type, s.is_current) for s in bpmn_steps],
+                )
+
+                # ── Шаг 3: Логируем данные процесса ───────────────────────────
+                if process:
+                    logger.info(
+                        "Process: id=%s currentId=%s nextId=%s items_count=%d",
+                        str(process.id)[:8] if process.id else None,
+                        str(process.current_id)[:8] if process.current_id else None,
+                        str(process.next_id)[:8] if process.next_id else None,
+                        len(process.items) if process.items else 0,
+                    )
+                else:
+                    logger.warning(
+                        "Process data is missing for document %s",
+                        document_id[:8],
+                    )
+
+                # ── Шаг 4: Определяем текущий и следующие этапы ───────────────
+                current_step = next(
+                    (s for s in bpmn_steps if s.is_current),
+                    None,
+                )
+                next_available = _get_next_available(bpmn_steps)
+
+                # ── Шаг 5: Показать список (если шаг не выбран) ──────────────
+                if not next_step:
+                    if not bpmn_steps:
+                        return {
+                            "status": "error",
+                            "message": "Этапы процесса не найдены.",
+                        }
+
+                    available_for_selection = next_available or [
+                        s for s in bpmn_steps if not s.is_completed
+                    ]
+                    if not available_for_selection:
+                        return {
+                            "status": "error",
+                            "message": "Нет доступных этапов для перехода.",
+                        }
+
+                    current_info = (
+                        f"Сейчас документ на этапе: «{current_step.name}»."
+                        if current_step
+                        else ""
+                    )
+                    options = [
+                        InterruptOption(
+                            id=str(i),
+                            label=s.name,
+                            description=(
+                                s.action_label
+                                if s.process_type and s.action_label != s.name
+                                else None
+                            ),
+                        )
+                        for i, s in enumerate(available_for_selection)
+                    ]
+                    prompt = "Выберите этап для перехода."
+                    if current_info:
+                        prompt += f" {current_info}"
+                    resume = ask_human(SelectInterrupt(prompt=prompt, options=options))
+                    if not isinstance(resume, SelectResume):
+                        raise ToolAborted("Этап не выбран")
+                    try:
+                        selected_idx = int(resume.selected_id)
+                        next_step = available_for_selection[selected_idx].name
+                    except (ValueError, IndexError):
+                        return {
+                            "status": "error",
+                            "message": "Не удалось определить выбранный этап.",
+                        }
+
+                # ── Шаг 6: Разрешить выбор этапа ─────────────────────────────
+                selected = _resolve_step_selection(next_available, next_step)
+                if not selected:
+                    selected = _resolve_step_selection(bpmn_steps, next_step)
+
+                if not selected:
+                    next_list = _format_step_list(next_available, show_status=False)
                     return {
                         "status": "need_input",
                         "message": (
-                            "Не удалось найти сотрудников: "
-                            + ", ".join(f"«{u}»" for u in unresolved)
-                            + ". Уточните ФИО."
+                            f"Этап «{next_step}» не найден.\n\n"
+                            f"Доступные этапы:\n{next_list}\n\n"
+                            "Напишите название или номер этапа."
+                        ),
+                        "available_steps": [
+                            {
+                                "number": i + 1,
+                                "name": s.name,
+                                "process_type": s.process_type,
+                            }
+                            for i, s in enumerate(next_available)
+                        ],
+                    }
+
+                if selected.is_current:
+                    return {
+                        "status": "error",
+                        "message": f"Документ уже на этапе «{selected.name}».",
+                    }
+                if selected.is_completed:
+                    return {
+                        "status": "error",
+                        "message": f"Этап «{selected.name}» уже пройден.",
+                    }
+
+                # ── Шаг 7: Определить nextId (optimistic lock) ────────────────
+                # Используем типизированные данные для разрешения ID
+                process_dict = process.model_dump(by_alias=True) if process else None
+                doc_dict = doc.model_dump(by_alias=True) if doc else None
+                next_id = _resolve_next_id(process_dict, doc_dict)
+
+                if not next_id:
+                    return {
+                        "status": "error",
+                        "message": (
+                            f"Не удалось перейти на этап «{selected.name}». "
+                            "Не найден идентификатор текущего этапа процесса. "
+                            "Попробуйте через основной интерфейс EDMS."
                         ),
                     }
-                resolved_employees = resolved
 
-            # ── Шаг 9: Выполнить переход ──────────────────────────────────
-            request = DocumentNextProcessRequest(
-                id=UUID(document_id),
-                next_id=UUID(next_id),
-                employees=(
-                    [UUID(e) for e in resolved_employees]
-                    if resolved_employees
-                    else None
-                ),
-            )
-
-            logger.info(
-                "POST /process/next: doc=%s nextId=%s target='%s' type=%s employees=%d",
-                document_id[:8],
-                next_id[:8],
-                selected.name,
-                selected.process_type,
-                len(resolved_employees) if resolved_employees else 0,
-            )
-
-            try:
-                await deps.document_client.next_process(token, request)
-            except Exception as post_exc:
-                post_error = _parse_api_error(post_exc)
-
-                # ── Ошибка: нужны исполнители ──────────────────────────
-                if post_error["is_employee_empty"]:
-                    step_label = post_error["target_step_name"] or selected.name
-
-                    resume = ask_human(
-                        TextInputInterrupt(
-                            prompt=(
-                                f"Для перехода на «{step_label}» укажите ФИО исполнителя:"
-                            ),
-                            placeholder="Например: Иванов И.И.",
-                        )
+                # ── Шаг 8: Резолв сотрудников ─────────────────────────────────
+                resolved_employees: list[str] | None = None
+                if employees:
+                    resolved, unresolved = await _resolve_employees(
+                        token,
+                        employees,
                     )
-                    if not isinstance(resume, TextInputResume):
-                        raise ToolAborted("Исполнитель не указан") from None
+                    if unresolved:
+                        return {
+                            "status": "need_input",
+                            "message": (
+                                "Не удалось найти сотрудников: "
+                                + ", ".join(f"«{u}»" for u in unresolved)
+                                + ". Уточните ФИО."
+                            ),
+                        }
+                    resolved_employees = resolved
 
-                    employee_name = resume.value.strip()
-                    found = await _find_employee(token, employee_name)
-                    if not found:
+                # ── Шаг 9: Выполнить переход ──────────────────────────────────
+                request = DocumentNextProcessRequest(
+                    id=UUID(document_id),
+                    next_id=UUID(next_id),
+                    employees=(
+                        [UUID(e) for e in resolved_employees]
+                        if resolved_employees
+                        else None
+                    ),
+                )
+
+                logger.info(
+                    "POST /process/next: doc=%s nextId=%s target='%s' type=%s employees=%d",
+                    document_id[:8],
+                    next_id[:8],
+                    selected.name,
+                    selected.process_type,
+                    len(resolved_employees) if resolved_employees else 0,
+                )
+
+                try:
+                    await deps.document_client.next_process(token, request)
+                except Exception as post_exc:
+                    post_error = _parse_api_error(post_exc)
+
+                    # ── Ошибка: нужны исполнители ──────────────────────────
+                    if post_error["is_employee_empty"]:
+                        step_label = post_error["target_step_name"] or selected.name
+
+                        resume = ask_human(
+                            TextInputInterrupt(
+                                prompt=(
+                                    f"Для перехода на «{step_label}» укажите ФИО исполнителя:"
+                                ),
+                                placeholder="Например: Иванов И.И.",
+                            )
+                        )
+                        if not isinstance(resume, TextInputResume):
+                            raise ToolAborted("Исполнитель не указан") from None
+
+                        employee_name = resume.value.strip()
+                        found = await _find_employee(token, employee_name)
+                        if not found:
+                            return {
+                                "status": "error",
+                                "message": (
+                                    f"Сотрудник «{employee_name}» не найден. "
+                                    "Уточните ФИО и попробуйте снова."
+                                ),
+                            }
+
+                        retry_request = DocumentNextProcessRequest(
+                            id=UUID(document_id),
+                            next_id=UUID(next_id),
+                            employees=[UUID(found)],
+                        )
+                        await deps.document_client.next_process(token, retry_request)
+                        return {
+                            "status": "success",
+                            "message": (
+                                f"✅ Документ переведён на этап «{selected.name}». "
+                                f"Назначен исполнитель: {employee_name}."
+                            ),
+                            "requires_reload": True,
+                        }
+
+                    # ── Ошибка: процесс изменён ────────────────────────────
+                    if post_error["is_process_changed"]:
                         return {
                             "status": "error",
                             "message": (
-                                f"Сотрудник «{employee_name}» не найден. "
-                                "Уточните ФИО и попробуйте снова."
+                                "Процесс документа был изменён с момента "
+                                "последней загрузки. Попробуйте ещё раз — "
+                                "данные обновятся автоматически."
                             ),
                         }
 
-                    retry_request = DocumentNextProcessRequest(
-                        id=UUID(document_id),
-                        next_id=UUID(next_id),
-                        employees=[UUID(found)],
-                    )
-                    await deps.document_client.next_process(token, retry_request)
-                    return {
-                        "status": "success",
-                        "message": (
-                            f"✅ Документ переведён на этап «{selected.name}». "
-                            f"Назначен исполнитель: {employee_name}."
-                        ),
-                        "requires_reload": True,
-                    }
+                    # ── Ошибка: нет прав ────────────────────────────────────
+                    if post_error["is_forbidden"]:
+                        return {
+                            "status": "error",
+                            "message": ("У вас нет прав для перехода на следующий этап."),
+                        }
 
-                # ── Ошибка: процесс изменён ────────────────────────────
-                if post_error["is_process_changed"]:
-                    return {
-                        "status": "error",
-                        "message": (
-                            "Процесс документа был изменён с момента "
-                            "последней загрузки. Попробуйте ещё раз — "
-                            "данные обновятся автоматически."
-                        ),
-                    }
+                    # ── Другая ошибка ───────────────────────────────────────
+                    raise
 
-                # ── Ошибка: нет прав ────────────────────────────────────
-                if post_error["is_forbidden"]:
-                    return {
-                        "status": "error",
-                        "message": ("У вас нет прав для перехода на следующий этап."),
-                    }
+                # ── Успех ──────────────────────────────────────────────────────
+                emp_info = ""
+                if resolved_employees:
+                    emp_info = f" Назначены исполнители: {len(resolved_employees)} чел."
 
-                # ── Другая ошибка ───────────────────────────────────────
+                return {
+                    "status": "success",
+                    "message": (
+                        f"✅ Документ переведён на этап «{selected.name}» "
+                        f"({selected.action_label}).{emp_info}"
+                    ),
+                    "requires_reload": True,
+                }
+
+            except ToolAborted:
                 raise
+            except Exception as exc:
+                logger.error("doc_next_process error: %s", exc, exc_info=True)
 
-            # ── Успех ──────────────────────────────────────────────────────
-            emp_info = ""
-            if resolved_employees:
-                emp_info = f" Назначены исполнители: {len(resolved_employees)} чел."
+                error_info = _parse_api_error(exc)
+                if error_info["is_employee_empty"]:
+                    step_label = error_info["target_step_name"] or "следующий"
+                    return {
+                        "status": "need_input",
+                        "message": (
+                            f"⚠ Для перехода на этап «{step_label}» "
+                            f"необходимо указать исполнителя.\n\n"
+                            "Напишите ФИО сотрудника, которого нужно "
+                            "назначить исполнителем на этом этапе."
+                        ),
+                    }
+                if error_info["is_process_changed"]:
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Процесс документа был изменён. " "Попробуйте ещё раз."
+                        ),
+                    }
+                if error_info["is_forbidden"]:
+                    return {
+                        "status": "error",
+                        "message": "У вас нет прав для перехода на следующий этап.",
+                    }
 
-            return {
-                "status": "success",
-                "message": (
-                    f"✅ Документ переведён на этап «{selected.name}» "
-                    f"({selected.action_label}).{emp_info}"
-                ),
-                "requires_reload": True,
-            }
-
+                return {
+                    "status": "error",
+                    "message": f"❌ Произошла неожиданная ошибка при переходе: {exc!s}",
+                }
         except ToolAborted:
             raise
         except Exception as exc:
-            logger.error("doc_next_process error: %s", exc, exc_info=True)
-
-            error_info = _parse_api_error(exc)
-            if error_info["is_employee_empty"]:
-                step_label = error_info["target_step_name"] or "следующий"
-                return {
-                    "status": "need_input",
-                    "message": (
-                        f"⚠ Для перехода на этап «{step_label}» "
-                        f"необходимо указать исполнителя.\n\n"
-                        "Напишите ФИО сотрудника, которого нужно "
-                        "назначить исполнителем на этом этапе."
-                    ),
-                }
-            if error_info["is_process_changed"]:
-                return {
-                    "status": "error",
-                    "message": (
-                        "Процесс документа был изменён. " "Попробуйте ещё раз."
-                    ),
-                }
-            if error_info["is_forbidden"]:
-                return {
-                    "status": "error",
-                    "message": "У вас нет прав для перехода на следующий этап.",
-                }
-
+            logger.critical("doc_next_process fatal error: %s", exc, exc_info=True)
             return {
                 "status": "error",
-                "message": "❌ Произошла неожиданная ошибка при переходе.",
+                "message": f"❌ Критическая ошибка в инструменте перевода процесса: {exc!s}",
             }
 
     return StructuredTool.from_function(

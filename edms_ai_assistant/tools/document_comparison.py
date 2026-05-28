@@ -131,62 +131,66 @@ def create_doc_compare_documents_tool(
             }
 
         try:
-            doc1_dto = await document_client.get_document_metadata(token, document_id_1)
-            doc2_dto = await document_client.get_document_metadata(token, document_id_2)
+            try:
+                doc1_dto = await document_client.get_document_metadata(token, document_id_1)
+                doc2_dto = await document_client.get_document_metadata(token, document_id_2)
 
-            if not doc1_dto or not doc2_dto:
-                return {
-                    "status": "error",
-                    "message": "Один или оба документа не найдены",
+                if not doc1_dto or not doc2_dto:
+                    return {
+                        "status": "error",
+                        "message": "Один или оба документа не найдены",
+                    }
+
+                # Конвертируем DTO в dict с camelCase ключами для переиспользования
+                # логики сравнения, которая опирается на ключи API СЭД
+                doc1 = doc1_dto.model_dump(by_alias=True, exclude_none=True)
+                doc2 = doc2_dto.model_dump(by_alias=True, exclude_none=True)
+
+                comparison_result = {
+                    "status": "success",
+                    "document_1_id": document_id_1,
+                    "document_2_id": document_id_2,
+                    "differences": {},
                 }
 
-            # Конвертируем DTO в dict с camelCase ключами для переиспользования
-            # логики сравнения, которая опирается на ключи API СЭД
-            doc1 = doc1_dto.model_dump(by_alias=True, exclude_none=True)
-            doc2 = doc2_dto.model_dump(by_alias=True, exclude_none=True)
+                # Сравнение метаданных
+                if comparison_focus in ["metadata", "all"]:
+                    metadata_diff = _compare_metadata(doc1, doc2)
+                    comparison_result["differences"]["metadata"] = metadata_diff
 
-            comparison_result = {
-                "status": "success",
-                "document_1_id": document_id_1,
-                "document_2_id": document_id_2,
-                "differences": {},
-            }
+                # Сравнение вложений
+                if comparison_focus in ["attachments", "all"]:
+                    attachments_diff = _compare_attachments(doc1, doc2)
+                    comparison_result["differences"]["attachments"] = attachments_diff
 
-            # Сравнение метаданных
-            if comparison_focus in ["metadata", "all"]:
-                metadata_diff = _compare_metadata(doc1, doc2)
-                comparison_result["differences"]["metadata"] = metadata_diff
+                summary_prompt = ChatPromptTemplate.from_messages(
+                    [
+                        (
+                            "system",
+                            "Ты — аналитик СЭД. Проанализируй различия между двумя документами и составь краткий отчет на русском языке.",
+                        ),
+                        (
+                            "user",
+                            "Различия между документами:\n{differences}\n\nСоставь структурированный отчет об основных изменениях:",
+                        ),
+                    ]
+                )
 
-            # Сравнение вложений
-            if comparison_focus in ["attachments", "all"]:
-                attachments_diff = _compare_attachments(doc1, doc2)
-                comparison_result["differences"]["attachments"] = attachments_diff
+                chain = summary_prompt | chat_model | StrOutputParser()
+                summary = await chain.ainvoke(
+                    {"differences": str(comparison_result["differences"])}
+                )
 
-            summary_prompt = ChatPromptTemplate.from_messages(
-                [
-                    (
-                        "system",
-                        "Ты — аналитик СЭД. Проанализируй различия между двумя документами и составь краткий отчет на русском языке.",
-                    ),
-                    (
-                        "user",
-                        "Различия между документами:\n{differences}\n\nСоставь структурированный отчет об основных изменениях:",
-                    ),
-                ]
-            )
+                comparison_result["summary"] = summary.strip()
 
-            chain = summary_prompt | chat_model | StrOutputParser()
-            summary = await chain.ainvoke(
-                {"differences": str(comparison_result["differences"])}
-            )
+                return comparison_result
 
-            comparison_result["summary"] = summary.strip()
-
-            return comparison_result
-
+            except Exception as e:
+                logger.error("[DOC-COMPARE-TOOL] Error: %s", e, exc_info=True)
+                return {"status": "error", "message": f"Ошибка сравнения: {e!s}"}
         except Exception as e:
-            logger.error("[DOC-COMPARE-TOOL] Error: %s", e, exc_info=True)
-            return {"status": "error", "message": f"Ошибка сравнения: {e!s}"}
+            logger.critical("[DOC-COMPARE-TOOL] Fatal error: %s", e, exc_info=True)
+            return {"status": "error", "message": f"Критическая ошибка при сравнении документов: {e!s}"}
 
     return StructuredTool.from_function(
         coroutine=doc_compare_documents,

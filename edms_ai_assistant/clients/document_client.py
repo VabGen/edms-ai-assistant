@@ -65,6 +65,7 @@ FULL_DOC_INCLUDES: list[str] = [
     "SOLUTION_RESULT",
     "PARENT_SUBJECT",
     "ADDITIONAL_DOCUMENT_AND_TYPE",
+    "ATTACHMENT",
 ]
 
 SEARCH_DOC_INCLUDES: list[str] = [
@@ -520,7 +521,7 @@ class DocumentClient(EdmsBaseClient):
             "api/document/color/batch",
             token,
             DocumentUserColorDto,
-            json_data=[c.model_dump(by_alias=True) for c in colors],
+            json_data=[c.model_dump(by_alias=True, mode="json") for c in colors],
         )
 
     async def delete_document_colors(
@@ -557,7 +558,7 @@ class DocumentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/access-entry/batch",
             token,
-            json_data=[e.model_dump(by_alias=True) for e in entries],
+            json_data=[e.model_dump(by_alias=True, mode="json") for e in entries],
             is_json_response=False,
         )
 
@@ -621,7 +622,7 @@ class DocumentClient(EdmsBaseClient):
             f"api/document/{doc_id}/version",
             token,
             DocumentDto,
-            json_data=body.model_dump(by_alias=True),
+            json_data=body.model_dump(by_alias=True, mode="json"),
         )
 
     async def get_document_nomenclatures(
@@ -986,7 +987,7 @@ class DocumentClient(EdmsBaseClient):
             f"api/document/{document_id}/creating-based-existing",
             token,
             DocumentDto,
-            json_data=body.model_dump(by_alias=True),
+            json_data=body.model_dump(by_alias=True, mode="json"),
         )
 
     async def get_status_group_count(
@@ -1093,7 +1094,7 @@ class DocumentClient(EdmsBaseClient):
             "POST",
             "api/document/cancel",
             token,
-            json_data=payload.model_dump(by_alias=True),
+            json_data=payload.model_dump(by_alias=True, mode="json"),
             is_json_response=False,
         )
 
@@ -1173,7 +1174,7 @@ class DocumentClient(EdmsBaseClient):
             "POST",
             "api/document/process/next",
             token,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
             is_json_response=False,
         )
 
@@ -1220,7 +1221,7 @@ class DocumentClient(EdmsBaseClient):
             "POST",
             "api/document/aismv-recreate",
             token,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
         return UUID(data["id"])
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING, Any, TypeVar, cast
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -41,6 +42,10 @@ class EdmsBaseClient:
         timeout = (
             self._settings.long_timeout if long_timeout else self._settings.timeout
         )
+
+        # Рекурсивно конвертируем UUID в строки, если json_data — это dict/list
+        if json_data is not None:
+            json_data = self._ensure_json_serializable(json_data)
 
         response = await self._transport.request(
             method,
@@ -124,6 +129,16 @@ class EdmsBaseClient:
                 return []
 
         return [item_model.model_validate(item) for item in data]
+
+    def _ensure_json_serializable(self, data: Any) -> Any:
+        """Рекурсивно преобразует UUID в строки."""
+        if isinstance(data, UUID):
+            return str(data)
+        if isinstance(data, dict):
+            return {k: self._ensure_json_serializable(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._ensure_json_serializable(i) for i in data]
+        return data
 
     async def _upload_file(
         self,

@@ -18,6 +18,7 @@ from edms_ai_assistant.agent.runnable_utils import get_token_from_config
 from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,
     build_employee_filter,
+    find_best_employee_match,
     get_merged_name_parts,
     merge_name_parts,
 )
@@ -178,81 +179,6 @@ class EmployeeSearchInput(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _score_result(
-    result: EmployeeDto,
-    last_name: str | None,
-    first_name: str | None,
-    middle_name: str | None,
-    full_post_name: str | None,
-) -> int:
-    score = 0
-    if last_name:
-        val = (result.last_name or "").lower()
-        term = last_name.lower()
-        if val == term:
-            score += 10
-        elif val.startswith(term):
-            score += 5
-    if first_name:
-        val = (result.first_name or "").lower()
-        term = first_name.lower()
-        if val == term:
-            score += 10
-        elif val.startswith(term):
-            score += 5
-    if middle_name:
-        val = (result.middle_name or "").lower()
-        term = middle_name.lower()
-        if val == term:
-            score += 10
-        elif val.startswith(term):
-            score += 5
-    if full_post_name:
-        post_name = (result.post.post_name if result.post else "").lower()
-        term = full_post_name.lower()
-        if post_name == term:
-            score += 10
-        elif post_name.startswith(term):
-            score += 7
-        elif term in post_name:
-            score += 3
-    return score
-
-
-def _find_best_match(
-    results: list[EmployeeDto],
-    last_name: str | None,
-    first_name: str | None,
-    middle_name: str | None,
-    full_post_name: str | None,
-) -> EmployeeDto | None:
-    has_criteria = any((last_name, first_name, middle_name, full_post_name))
-    if not has_criteria:
-        return None
-    scored = [
-        (r, _score_result(r, last_name, first_name, middle_name, full_post_name))
-        for r in results
-    ]
-    scored.sort(key=lambda x: x[1], reverse=True)
-    if not scored:
-        return None
-    top_result, top_score = scored[0]
-    if top_score < 5:
-        return None
-    if len(scored) == 1:
-        return top_result
-    _, second_score = scored[1]
-    if top_score - second_score >= _SCORE_GAP_THRESHOLD:
-        logger.info(
-            "Best match selected: score=%d vs %d (gap=%d)",
-            top_score,
-            second_score,
-            top_score - second_score,
-        )
-        return top_result
-    return None
-
-
 def _filter_by_post(
     results: list[EmployeeDto], full_post_name: str
 ) -> list[EmployeeDto]:
@@ -295,8 +221,8 @@ async def _resolve_department_names(
             continue
         try:
             dept = await dept_client.find_by_name(token, ns)
-            if dept and dept.get("id"):
-                resolved.append(str(dept["id"]))
+            if dept and dept.id:
+                resolved.append(str(dept.id))
             else:
                 unresolved.append(ns)
         except Exception:
@@ -623,79 +549,85 @@ def create_employee_search_tool(deps: AppDeps) -> StructuredTool:
         )
 
         try:
-            results = await employee_client.search_employees_post(
-                token=token, employee_filter=employee_filter, pageable=pageable
-            )
-
-            if not results:
-                return {
-                    "status": "not_found",
-                    "message": "Сотрудники по данным критериям не найдены.",
-                }
-            if len(results) == 1:
-                return {
-                    "status": "found",
-                    "total": 1,
-                    "employee_card": await _build_enriched_card(
-                        token, results[0], nlp_service, employee_client
-                    ),
-                }
-
-            best = _find_best_match(
-                results,
-                last_name=merged.last_name,
-                first_name=merged.first_name,
-                middle_name=merged.middle_name,
-                full_post_name=full_post_name,
-            )
-            if best:
-                logger.info(
-                    "Best match found via scoring", extra={"id": str(best.id or "")[:8]}
+            try:
+                results = await employee_client.search_employees_post(
+                    token=token, employee_filter=employee_filter, pageable=pageable
                 )
-                return {
-                    "status": "found",
-                    "total": 1,
-                    "employee_card": await _build_enriched_card(
-                        token, best, nlp_service, employee_client
-                    ),
-                }
 
-            display_results = results
-            if full_post_name:
-                display_results = _filter_by_post(results, full_post_name)
-                if len(display_results) == 1:
+                if not results:
+                    return {
+                        "status": "not_found",
+                        "message": "Сотрудники по данным критериям не найдены.",
+                    }
+                if len(results) == 1:
                     return {
                         "status": "found",
                         "total": 1,
                         "employee_card": await _build_enriched_card(
-                            token, display_results[0], nlp_service, employee_client
+                            token, results[0], nlp_service, employee_client
                         ),
                     }
 
-            choices = [
-                _serialize_employee_dto(r) for r in display_results[:effective_size]
-            ]
-            logger.info("Multiple employees found", extra={"count": len(choices)})
-            return await _resolve_via_ask_human(
-                token=token,
-                results=display_results,
-                choices=choices,
-                merged_last_name=merged.last_name,
-                nlp_service=nlp_service,
-                employee_client=employee_client,
-            )
+                best = find_best_employee_match(
+                    results,
+                    last_name=merged.last_name,
+                    first_name=merged.first_name,
+                    middle_name=merged.middle_name,
+                    full_post_name=full_post_name,
+                )
+                if best:
+                    logger.info(
+                        "Best match found via scoring", extra={"id": str(best.id or "")[:8]}
+                    )
+                    return {
+                        "status": "found",
+                        "total": 1,
+                        "employee_card": await _build_enriched_card(
+                            token, best, nlp_service, employee_client
+                        ),
+                    }
 
-        except ToolAborted as aborted:
-            logger.info("Employee disambiguation aborted: %s", aborted.reason)
-            return {
-                "status": "cancelled",
-                "message": "Выбор сотрудника отменён пользователем.",
-            }
+                display_results = results
+                if full_post_name:
+                    display_results = _filter_by_post(results, full_post_name)
+                    if len(display_results) == 1:
+                        return {
+                            "status": "found",
+                            "total": 1,
+                            "employee_card": await _build_enriched_card(
+                                token, display_results[0], nlp_service, employee_client
+                            ),
+                        }
+
+                choices = [
+                    _serialize_employee_dto(r) for r in display_results[:effective_size]
+                ]
+                logger.info("Multiple employees found", extra={"count": len(choices)})
+                return await _resolve_via_ask_human(
+                    token=token,
+                    results=display_results,
+                    choices=choices,
+                    merged_last_name=merged.last_name,
+                    nlp_service=nlp_service,
+                    employee_client=employee_client,
+                )
+
+            except ToolAborted as aborted:
+                logger.info("Employee disambiguation aborted: %s", aborted.reason)
+                return {
+                    "status": "cancelled",
+                    "message": "Выбор сотрудника отменён пользователем.",
+                }
+            except GraphInterrupt:
+                raise
+            except Exception as exc:
+                logger.error("Employee search failed", exc_info=True)
+                return {"status": "error", "message": f"Ошибка поиска: {exc}"}
         except GraphInterrupt:
             raise
         except Exception as exc:
-            logger.error("Employee search failed", exc_info=True)
-            return {"status": "error", "message": f"Ошибка поиска: {exc}"}
+            logger.critical("Employee search tool fatal error: %s", exc, exc_info=True)
+            return {"status": "error", "message": f"❌ Критическая ошибка при поиске сотрудника: {exc!s}"}
 
     return StructuredTool.from_function(
         coroutine=employee_search_tool,

@@ -158,149 +158,158 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
         preselected_ids: list[str] = list(selected_employee_ids or [])
 
         try:
-            # ================================================================
-            # Шаг 1: Резолвинг массовых исполнителей
-            # ================================================================
-            bulk_ids: list[UUID] = []
-            bulk_not_found: list[str] = []
+            try:
+                # ================================================================
+                # Шаг 1: Резолвинг массовых исполнителей
+                # ================================================================
+                bulk_ids: list[UUID] = []
+                bulk_not_found: list[str] = []
 
-            has_bulk = (
-                department_names
-                or group_names
-                or personal_group_names
-                or include_subordinates
-            )
-            if has_bulk:
-                bulk_result = await task_service.resolve_bulk_executors(
-                    token=token,
-                    department_names=department_names,
-                    group_names=group_names,
-                    personal_group_names=personal_group_names,
-                    include_subordinates=bool(include_subordinates),
+                has_bulk = (
+                    department_names
+                    or group_names
+                    or personal_group_names
+                    or include_subordinates
                 )
-                bulk_ids = list(bulk_result["employee_ids"])
-                bulk_not_found = bulk_result["not_found"]
+                if has_bulk:
+                    bulk_result = await task_service.resolve_bulk_executors(
+                        token=token,
+                        department_names=department_names,
+                        group_names=group_names,
+                        personal_group_names=personal_group_names,
+                        include_subordinates=bool(include_subordinates),
+                    )
+                    bulk_ids = list(bulk_result["employee_ids"])
+                    bulk_not_found = bulk_result["not_found"]
 
-            # ================================================================
-            # Шаг 2: Резолвинг индивидуальных исполнителей
-            # ================================================================
-            all_uuids: list[UUID] = [UUID(eid) for eid in preselected_ids]
-            all_uuids.extend(bulk_ids)
+                # ================================================================
+                # Шаг 2: Резолвинг индивидуальных исполнителей
+                # ================================================================
+                all_uuids: list[UUID] = [UUID(eid) for eid in preselected_ids]
+                all_uuids.extend(bulk_ids)
 
-            if executor_last_names:
-                executors, not_found, ambiguous = await task_service.collect_executors(
-                    token, executor_last_names, responsible_last_name
-                )
+                if executor_last_names:
+                    executors, not_found, ambiguous = await task_service.collect_executors(
+                        token, executor_last_names, responsible_last_name
+                    )
 
-                if executors:
-                    all_uuids.extend(e.employee_id for e in executors)
-                bulk_not_found.extend(not_found)
+                    if executors:
+                        all_uuids.extend(e.employee_id for e in executors)
+                    bulk_not_found.extend(not_found)
 
-                if ambiguous:
-                    for amb in ambiguous:
-                        search_term = amb.get("search_query", "Неизвестно")
-                        matches = amb.get("matches", [])
-                        if not matches:
-                            continue
+                    if ambiguous:
+                        for amb in ambiguous:
+                            search_term = amb.get("search_query", "Неизвестно")
+                            matches = amb.get("matches", [])
+                            if not matches:
+                                continue
 
-                        cards = [
-                            InterruptCard(
-                                id=m.get("id", ""),
-                                label=m.get("full_name", "Не указано"),
-                                description=m.get("post", "") or "Сотрудник",
-                                badges=["Сотрудник"],
-                                primary_attrs={
-                                    "Подразделение": m.get("department", "") or "—",
-                                },
-                            )
-                            for m in matches
-                        ]
-
-                        prompt_msg = f"Уточните исполнителя для «{search_term}» ({len(matches)} совпадений)."
-
-                        try:
-                            resume = ask_human(
-                                CardSelectInterrupt(
-                                    prompt=prompt_msg,
-                                    cards=cards,
-                                    multiple=False,
+                            cards = [
+                                InterruptCard(
+                                    id=m.get("id", ""),
+                                    label=m.get("full_name", "Не указано"),
+                                    description=m.get("post", "") or "Сотрудник",
+                                    badges=["Сотрудник"],
+                                    primary_attrs={
+                                        "Подразделение": m.get("department", "") or "—",
+                                    },
                                 )
-                            )
-                            if not isinstance(resume, CardSelectResume):
-                                raise ToolAborted("Expected CardSelectResume")
-                            selected_id = resume.selected_ids[0]
-                            all_uuids.append(UUID(selected_id))
-                        except ToolAborted:
-                            return {
-                                "status": "cancelled",
-                                "message": "Выбор исполнителя отменён.",
-                            }
-                        except GraphInterrupt:
-                            raise
-                        except Exception as exc:
-                            logger.error(
-                                "HITL disambiguation failed: %s", exc, exc_info=True
-                            )
-                            return {
-                                "status": "error",
-                                "message": f"Ошибка выбора исполнителя: {exc}",
-                            }
+                                for m in matches
+                            ]
 
-            seen: set[UUID] = set()
-            unique_uuids: list[UUID] = []
-            for uid in all_uuids:
-                if uid not in seen:
-                    seen.add(uid)
-                    unique_uuids.append(uid)
+                            prompt_msg = f"Уточните исполнителя для «{search_term}» ({len(matches)} совпадений)."
 
-            if not unique_uuids:
+                            try:
+                                resume = ask_human(
+                                    CardSelectInterrupt(
+                                        prompt=prompt_msg,
+                                        cards=cards,
+                                        multiple=False,
+                                    )
+                                )
+                                if not isinstance(resume, CardSelectResume):
+                                    raise ToolAborted("Expected CardSelectResume")
+                                selected_id = resume.selected_ids[0]
+                                all_uuids.append(UUID(selected_id))
+                            except ToolAborted:
+                                return {
+                                    "status": "cancelled",
+                                    "message": "Выбор исполнителя отменён.",
+                                }
+                            except GraphInterrupt:
+                                raise
+                            except Exception as exc:
+                                logger.error(
+                                    "HITL disambiguation failed: %s", exc, exc_info=True
+                                )
+                                return {
+                                    "status": "error",
+                                    "message": f"Ошибка выбора исполнителя: {exc}",
+                                }
+
+                seen: set[UUID] = set()
+                unique_uuids: list[UUID] = []
+                for uid in all_uuids:
+                    if uid not in seen:
+                        seen.add(uid)
+                        unique_uuids.append(uid)
+
+                if not unique_uuids:
+                    return {
+                        "status": "error",
+                        "message": "Не найдены исполнители."
+                        + (
+                            f" Не найдены: {', '.join(bulk_not_found)}"
+                            if bulk_not_found
+                            else ""
+                        ),
+                    }
+
+                # ================================================================
+                # Шаг 3: Создание поручения
+                # ================================================================
+                result = await task_service.create_task_by_employee_ids(
+                    token=token,
+                    document_id=document_id,
+                    task_text=task_text,
+                    employee_ids=unique_uuids,
+                    planed_date_end=deadline,
+                    task_type=effective_task_type,
+                )
+
+                if result.success:
+                    response: dict[str, Any] = {
+                        "status": "success",
+                        "message": (
+                            f"✅ Поручение успешно создано. "
+                            f"Исполнителей: {result.created_count}"
+                        ),
+                        "created_count": result.created_count,
+                    }
+                    if bulk_not_found:
+                        response["partial_success"] = True
+                        response["not_found"] = bulk_not_found
+                    return response
+
                 return {
                     "status": "error",
-                    "message": "Не найдены исполнители."
-                    + (
-                        f" Не найдены: {', '.join(bulk_not_found)}"
-                        if bulk_not_found
-                        else ""
-                    ),
+                    "message": result.error_message,
+                    "not_found_employees": result.not_found_employees,
                 }
 
-            # ================================================================
-            # Шаг 3: Создание поручения
-            # ================================================================
-            result = await task_service.create_task_by_employee_ids(
-                token=token,
-                document_id=document_id,
-                task_text=task_text,
-                employee_ids=unique_uuids,
-                planed_date_end=deadline,
-                task_type=effective_task_type,
-            )
-
-            if result.success:
-                response: dict[str, Any] = {
-                    "status": "success",
-                    "message": (
-                        f"✅ Поручение успешно создано. "
-                        f"Исполнителей: {result.created_count}"
-                    ),
-                    "created_count": result.created_count,
-                }
-                if bulk_not_found:
-                    response["partial_success"] = True
-                    response["not_found"] = bulk_not_found
-                return response
-
-            return {
-                "status": "error",
-                "message": result.error_message,
-                "not_found_employees": result.not_found_employees,
-            }
-
+            except GraphInterrupt:
+                raise
+            except Exception as e:
+                logger.error("[TASK-TOOL] Error: %s", e, exc_info=True)
+                return {"status": "error", "message": f"Произошла ошибка: {e!s}"}
         except GraphInterrupt:
             raise
         except Exception as e:
-            logger.error("[TASK-TOOL] Error: %s", e, exc_info=True)
-            return {"status": "error", "message": f"Произошла ошибка: {e!s}"}
+            logger.critical("[TASK-TOOL] Fatal error: %s", e, exc_info=True)
+            return {
+                "status": "error",
+                "message": f"❌ Критическая ошибка в инструменте задач: {e!s}",
+            }
 
     return StructuredTool.from_function(
         coroutine=task_create_tool,

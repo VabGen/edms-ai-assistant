@@ -114,7 +114,7 @@ class TaskClient(EdmsBaseClient):
             "api/task/kanban/column",
             token,
             TaskKanbanColumnDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def update_kanban_column(
@@ -127,7 +127,7 @@ class TaskClient(EdmsBaseClient):
             f"api/task/kanban/column/{column_id}",
             token,
             TaskKanbanColumnDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def delete_kanban_column(self, token: str, column_id: str | UUID) -> None:
@@ -161,7 +161,7 @@ class TaskClient(EdmsBaseClient):
             "POST",
             f"api/task/kanban/column/{column_id}/tasks/change-order",
             token,
-            json_data={"ids": [k.model_dump(by_alias=True) for k in task_keys]},
+            json_data={"ids": [k.model_dump(by_alias=True, mode="json") for k in task_keys]},
             is_json_response=False,
         )
 
@@ -188,7 +188,7 @@ class TaskClient(EdmsBaseClient):
             f"api/document/{document_id}/task",
             token,
             TaskDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def create_tasks_batch(
@@ -201,7 +201,7 @@ class TaskClient(EdmsBaseClient):
             f"api/document/{document_id}/task/batch",
             token,
             TaskDto,
-            json_data=[t.model_dump(by_alias=True) for t in tasks],
+            json_data=[t.model_dump(by_alias=True, mode="json") for t in tasks],
         )
 
     async def update_task(
@@ -214,7 +214,7 @@ class TaskClient(EdmsBaseClient):
             f"api/document/{document_id}/task",
             token,
             TaskDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def delete_task(
@@ -254,7 +254,7 @@ class TaskClient(EdmsBaseClient):
             f"api/document/{document_id}/task/{task_id}/executor/{executor_id}/execute",
             token,
             TaskExecutionResult,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def task_revision(
@@ -271,7 +271,7 @@ class TaskClient(EdmsBaseClient):
             f"api/document/{document_id}/task/{task_id}/revision",
             token,
             TaskDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def change_responsible(

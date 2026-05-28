@@ -74,7 +74,7 @@ class ReportClient(EdmsBaseClient):
             f"api/report/v2/construct-report/{report_type}",
             token,
             ReportTaskDto,
-            json_data=request.model_dump(exclude_none=True, by_alias=True),
+            json_data=request.model_dump(exclude_none=True, by_alias=True, mode="json"),
         )
 
     async def create_task_control_construct_report(
@@ -102,7 +102,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/document-on-registration",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_document_on_control_report(
@@ -115,7 +117,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/document-on-control",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_document_on_status_report(
@@ -128,7 +132,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/document-on-status",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_task_on_status_report(
@@ -141,7 +147,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/task-on-status",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_task_on_control_report(
@@ -154,7 +162,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/task-on-control",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_volume_of_document_flow_report(
@@ -167,7 +177,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/volume-of-document-flow",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_received_appeals_report(
@@ -180,7 +192,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/received-appeals",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_performing_discipline_report(
@@ -193,7 +207,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/performing-discipline",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def create_count_of_executed_and_unexecuted_control_task_report(
@@ -206,7 +222,9 @@ class ReportClient(EdmsBaseClient):
             "api/report/v2/count-of-executed-and-unexecuted-control-task",
             token,
             ReportTaskDto,
-            json_data=filter_data.model_dump(exclude_none=True, by_alias=True),
+            json_data=filter_data.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            ),
         )
 
     async def download_report(self, token: str, report_id: UUID) -> bytes:
@@ -234,6 +252,6 @@ class ReportClient(EdmsBaseClient):
             "DELETE",
             "api/report/v2",
             token,
-            json_data=IdsDto(ids=ids).model_dump(by_alias=True),
+            json_data=IdsDto(ids=ids).model_dump(by_alias=True, mode="json"),
             is_json_response=False,
         )

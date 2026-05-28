@@ -57,7 +57,7 @@ class EmployeeClient(EdmsBaseClient):
         if employee_filter:
             if isinstance(employee_filter, EmployeeFilter):
                 params.update(
-                    employee_filter.model_dump(exclude_none=True, by_alias=True)
+                    employee_filter.model_dump(exclude_none=True, by_alias=True, mode="json")
                 )
             else:
                 params.update(employee_filter)
@@ -79,7 +79,7 @@ class EmployeeClient(EdmsBaseClient):
             params.update(pageable)
 
         if isinstance(employee_filter, EmployeeFilter):
-            eff_filter = employee_filter.model_dump(exclude_none=True, by_alias=True)
+            eff_filter = employee_filter.model_dump(exclude_none=True, by_alias=True, mode="json")
         else:
             eff_filter = employee_filter or {}
 
@@ -118,7 +118,7 @@ class EmployeeClient(EdmsBaseClient):
             "api/employee",
             token,
             EmployeeDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def update_employee(
@@ -131,7 +131,7 @@ class EmployeeClient(EdmsBaseClient):
             "api/employee",
             token,
             EmployeeDto,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def delete_employees(self, token: str, employee_ids: list[UUID]) -> None:

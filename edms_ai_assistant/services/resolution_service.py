@@ -10,6 +10,8 @@ from edms_ai_assistant.core.exceptions import EdmsNotFoundError
 from edms_ai_assistant.services.search_utils import (
     DEFAULT_PAGEABLE,
     build_employee_filter,
+    find_best_employee_match,
+    get_merged_name_parts,
 )
 
 if TYPE_CHECKING:
@@ -63,6 +65,8 @@ class ResolutionService:
 
         for name_query in last_names:
             search_filter = build_employee_filter(name_query=name_query)
+            merged_parts = get_merged_name_parts(name_query=name_query)
+
             try:
                 employees = await self._employee_client.search_employees_post(
                     token=token,
@@ -82,12 +86,24 @@ class ResolutionService:
                 if employees[0].id:
                     found_ids.add(employees[0].id)
             else:
-                ambiguous.append(
-                    AmbiguousMatch(
-                        search_query=name_query,
-                        matches=[self._format_employee_match(emp) for emp in employees],
-                    )
+                # Пытаемся найти лучший вариант через скоринг
+                best = find_best_employee_match(
+                    employees,
+                    last_name=merged_parts.last_name,
+                    first_name=merged_parts.first_name,
+                    middle_name=merged_parts.middle_name,
                 )
+                if best and best.id:
+                    found_ids.add(best.id)
+                else:
+                    ambiguous.append(
+                        AmbiguousMatch(
+                            search_query=name_query,
+                            matches=[
+                                self._format_employee_match(emp) for emp in employees
+                            ],
+                        )
+                    )
         return found_ids, not_found, ambiguous
 
     async def resolve_departments(

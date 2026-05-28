@@ -158,7 +158,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/document/{document_id}/attachment/{attachment_id}/rename",
             token=token,
-            json_data=RenameFileRequest(name=name).model_dump(by_alias=True),
+            json_data=RenameFileRequest(name=name).model_dump(by_alias=True, mode="json"),
         )
         return AttachmentDocumentDto.model_validate(result)
 
@@ -174,7 +174,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/document/{document_id}/attachment/{attachment_id}/document-type",
             token=token,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
         return AttachmentDocumentDto.model_validate(result)
 
@@ -303,7 +303,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/create-empty",
             token=token,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
         return AttachmentDocumentDto.model_validate(result)
 
@@ -331,7 +331,7 @@ class AttachmentClient(EdmsBaseClient):
             "PUT",
             f"api/document/{document_id}/attachment/{attachment_id}/sign2",
             token=token,
-            json_data=SimpleCmsDto(cms=cms).model_dump(by_alias=True),
+            json_data=SimpleCmsDto(cms=cms).model_dump(by_alias=True, mode="json"),
         )
 
     async def remove_sign(
@@ -356,7 +356,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/document/{document_id}/attachment/{attachment_id}/verify-sign",
             token=token,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     # ══════════════════════════════════════════════════════════════════════════════
@@ -492,7 +492,7 @@ class AttachmentClient(EdmsBaseClient):
             "POST",
             f"api/temporary-attachment/{attachment_id}/mini-document/verify-sign",
             token=token,
-            json_data=request.model_dump(by_alias=True),
+            json_data=request.model_dump(by_alias=True, mode="json"),
         )
 
     async def remove_temporary_mini_doc_sign(
