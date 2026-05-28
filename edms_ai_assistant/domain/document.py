@@ -1407,7 +1407,7 @@ class PermissionDto(EdmsBaseDto):
         None, description="Статус нумераторы подразделения"
     )
     summary_nomenclature_department_status: (
-        SummaryNomenclatureDepartmentStatus | None
+            SummaryNomenclatureDepartmentStatus | None
     ) = Field(None, description="Сводный статус подразделения")
     destruction_act_status: DestructionActStatus | None = Field(
         None, description="Статус акта уничтожения"

@@ -14,6 +14,7 @@ from edms_ai_assistant.domain.enums import (  # noqa: TC001
     TaskStatus,  # noqa: F401
     TaskType,    # noqa: F401
 )
+from edms_ai_assistant.domain.reference import OrgDto
 
 from datetime import datetime  # noqa: TC003
 from uuid import UUID  # noqa: TC003
