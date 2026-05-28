@@ -52,16 +52,10 @@ class GraphBuilder:
         self._tools = tools
         self._checkpointer = checkpointer
         self._model: Runnable[Any, BaseMessage] | None = None
-        self._model_lock: asyncio.Lock | None = None
-
-    def _get_lock(self) -> asyncio.Lock:
-        """Lazy-init lock — avoids RuntimeError outside running event loop."""
-        if self._model_lock is None:
-            self._model_lock = asyncio.Lock()
-        return self._model_lock
+        self._model_lock = asyncio.Lock()
 
     async def set_model_async(self, model: Runnable[Any, BaseMessage]) -> None:
-        async with self._get_lock():
+        async with self._model_lock:
             self._model = model
 
     def set_model(self, model: Runnable[Any, BaseMessage]) -> None:

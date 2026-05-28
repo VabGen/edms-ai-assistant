@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal
 
 from langchain_core.messages import BaseMessage  # noqa: TC002
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import TypedDict
 
 # ─────────────────────────────────────────────────────────────
@@ -107,6 +107,8 @@ class AssistantResponse(BaseModel):
         requires_reload: True если EDMS нужно перезагрузить страницу
                          (после мутирующих операций: ознакомление, поручение и т.д.)
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     status: ResponseStatus = "success"
     response: str | None = None

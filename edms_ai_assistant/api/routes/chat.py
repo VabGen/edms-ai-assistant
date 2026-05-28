@@ -269,38 +269,32 @@ async def _stream_graph_events(
       - Always emits a terminal event (done/error) so the frontend
         never gets stuck in loading state.
       - Handles GraphInterrupt, GraphRecursionError, CancelledError, and unexpected exceptions.
-      - Sends keepalive every 5 s even during long LLM inference to prevent
-        proxy / browser service-worker idle timeouts.
+      - Sends keepalive periodically to prevent proxy / browser idle timeouts.
       - Sends ui_component events for compliance/navigate ToolMessages.
     """
     compliance_sent = False
     navigate_sent = False
-    _pending_task: asyncio.Future | None = None
 
-    try:
-        _ait = agent.graph.astream(
-            payload,
-            config=config,
-            stream_mode=["updates", "custom"],
-        ).__aiter__()
-        _pending_task = asyncio.ensure_future(_ait.__anext__())
-
+    async def _aiter_with_heartbeat(ait: AsyncIterator[Any]) -> AsyncIterator[tuple[str, Any]]:
         while True:
-            done_set, _ = await asyncio.wait({_pending_task}, timeout=5.0)
-            if not done_set:
-                # No graph event in the last 5 s — send keepalive
-                yield SSE_KEEPALIVE.decode()
-                continue
-
             try:
-                mode, chunk = _pending_task.result()
+                yield await asyncio.wait_for(ait.__anext__(), timeout=5.0)
+            except asyncio.TimeoutError:
+                yield "__heartbeat__", None
             except StopAsyncIteration:
                 break
 
-            _pending_task = asyncio.ensure_future(_ait.__anext__())
+    try:
+        astream = agent.graph.astream(
+            payload,
+            config=config,
+            stream_mode=["updates", "custom"],
+        )
 
-            # Send keepalive after every received chunk
-            yield SSE_KEEPALIVE.decode()
+        async for mode, chunk in _aiter_with_heartbeat(astream.__aiter__()):
+            if mode == "__heartbeat__":
+                yield SSE_KEEPALIVE.decode()
+                continue
 
             # ── Custom channel: UIDirective ──────────────────────────────
             if mode == "custom":
@@ -323,8 +317,6 @@ async def _stream_graph_events(
             # ── Interrupts ──────────────────────────────────────────────
             interrupts = chunk.get("__interrupt__")
             if interrupts:
-                if _pending_task is not None and not _pending_task.done():
-                    _pending_task.cancel()
                 for itr in interrupts:
                     value = getattr(itr, "value", itr)
                     interrupt_id = getattr(itr, "id", None)
@@ -351,13 +343,6 @@ async def _stream_graph_events(
                     if not isinstance(msg, ToolMessage):
                         continue
 
-                    logger.debug(
-                        "ToolMessage from node=%s name=%s content_type=%s",
-                        node_name,
-                        getattr(msg, "name", "?"),
-                        type(msg.content).__name__,
-                    )
-
                     # Compliance data
                     if not compliance_sent:
                         compliance_data = extract_compliance_from_tool_message(msg)
@@ -377,20 +362,6 @@ async def _stream_graph_events(
                             yield build_navigate_sse_event(nav_url)
                             navigate_sent = True
                             logger.info("Navigate UI event sent: %s", nav_url)
-                        else:
-                            data = _parse_tool_content(msg.content)
-                            if (
-                                isinstance(data, dict)
-                                and data.get("status") == "success"
-                            ):
-                                logger.debug(
-                                    "ToolMessage success but no navigate derived: "
-                                    "keys=%s document_id=%s has_overall=%s has_fields=%s",
-                                    list(data.keys()),
-                                    data.get("document_id"),
-                                    "overall" in data,
-                                    "fields" in data,
-                                )
 
             # ── Agent messages (text responses) ─────────────────────────
             agent_update = chunk.get("agent")
@@ -398,10 +369,6 @@ async def _stream_graph_events(
                 for msg in agent_update.get("messages", []) or []:
                     rendered = _serialise_message(msg)
                     if rendered is not None and rendered["role"] == "assistant":
-                        logger.debug(
-                            "Agent message sent: content_len=%d",
-                            len(rendered.get("content", "")),
-                        )
                         yield format_sse("message", rendered)
 
     except GraphInterrupt as exc:
@@ -432,14 +399,14 @@ async def _stream_graph_events(
         )
         return
     except asyncio.CancelledError:
-        if _pending_task is not None and not _pending_task.done():
-            _pending_task.cancel()
         logger.info("Stream cancelled for thread=%s", thread_id)
-        yield format_sse("done", {"thread_id": thread_id, "paused": False})
-        return
+        # Attempt to send terminal marker if possible
+        try:
+            yield format_sse("done", {"thread_id": thread_id, "paused": False})
+        except Exception:
+            pass
+        raise
     except Exception as exc:
-        if _pending_task is not None and not _pending_task.done():
-            _pending_task.cancel()
         logger.exception("chat stream failed for thread=%s", thread_id)
         yield format_sse(
             "error",

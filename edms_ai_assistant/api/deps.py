@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 from edms_ai_assistant.core.deps import AppDeps
+from edms_ai_assistant.security import decode_token
 
 UPLOAD_DIR: Path = Path(tempfile.gettempdir()) / "edms_ai_assistant_uploads"
 
@@ -62,15 +63,6 @@ async def get_current_user(
     ] = None,
 ) -> dict[str, Any]:
     """FastAPI dependency: extract and validate current user from JWT.
-
-    NOTE: Это структурный каркас. Замените логику декодирования токена
-    на вашу реальную реализацию (например, python-jose или PyJWT).
-
-    Returns:
-        Словарь с данными пользователя (например, {'id': '...', 'role': 'admin'}).
-
-    Raises:
-        HTTPException 401: Токен отсутствует или невалиден.
     """
     if credentials is None:
         raise HTTPException(
@@ -79,17 +71,15 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # TODO: Заменить на реальную логику декодирования JWT
-    # from edms_ai_assistant.core.security import decode_access_token
-    # user_data = decode_access_token(token)
-    # if not user_data:
-    #     raise HTTPException(status_code=401, detail="Invalid or expired token")
-    # return user_data
-
-    # ── Временный заглушка для компиляции (УДАЛИТЬ ПРИ РЕАЛИЗАЦИИ) ──
-    raise NotImplementedError(
-        "JWT token decoding is not implemented in edms_ai_assistant.api.deps"
-    )
+    try:
+        user_data = decode_token(credentials.credentials)
+        return user_data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {e}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from e
 
 
 async def get_admin_user(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
 
 from edms_ai_assistant.clients.access_grief_client import AccessGriefClient
@@ -79,19 +80,21 @@ class AppDeps(BaseModel):
     introduction_service: IntroductionService
     file_processor_service: FileProcessorService
     nlp_service: EDMSNaturalLanguageService
-    chat_model: Any  # BaseLanguageModel[Any]
+    chat_model: BaseChatModel
 
     # Опциональные сервисы (инициализируемые позже в lifespan)
     summarization_service: Any | None = None
 
 
-def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> AppDeps:
+def init_deps(
+    transport: IAsyncTransport, redis: aioredis.Redis, llm: BaseChatModel
+) -> AppDeps:
     """Фабрика для создания и связывания всех зависимостей приложения."""
 
     if not getattr(AppDeps, "_is_rebuilt", False):
         import redis.asyncio as _aioredis
         from langchain_core.language_models import (
-            BaseLanguageModel as _BaseLanguageModel,
+            BaseChatModel as _BaseChatModel,
         )
 
         from edms_ai_assistant.clients.transport import (
@@ -100,7 +103,7 @@ def init_deps(transport: IAsyncTransport, redis: aioredis.Redis, llm: Any) -> Ap
 
         globals()["IAsyncTransport"] = _IAsyncTransport
         globals()["aioredis"] = _aioredis
-        globals()["BaseLanguageModel"] = _BaseLanguageModel
+        globals()["BaseChatModel"] = _BaseChatModel
 
         AppDeps.model_rebuild()
         AppDeps._is_rebuilt = True

@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 import redis.asyncio as aioredis
+from langchain_core.language_models import BaseChatModel
 from edms_ai_assistant.core.deps import init_deps
 from edms_ai_assistant.clients.transport import IAsyncTransport
 from edms_ai_assistant.agent.agent import EdmsDocumentAgent
@@ -8,7 +9,7 @@ def test_deps_initialization():
     """Verify that AppDeps can be initialized with mocked transport and redis."""
     mock_transport = MagicMock(spec=IAsyncTransport)
     mock_redis = MagicMock(spec=aioredis.Redis)
-    mock_llm = MagicMock()
+    mock_llm = MagicMock(spec=BaseChatModel)
 
     deps = init_deps(mock_transport, mock_redis, mock_llm)
 
@@ -23,7 +24,7 @@ def test_agent_initialization():
     """Verify that EdmsDocumentAgent can be initialized with AppDeps."""
     mock_transport = MagicMock(spec=IAsyncTransport)
     mock_redis = MagicMock(spec=aioredis.Redis)
-    mock_llm = MagicMock()
+    mock_llm = MagicMock(spec=BaseChatModel)
 
     deps = init_deps(mock_transport, mock_redis, mock_llm)
     agent = EdmsDocumentAgent(deps=deps, llm=mock_llm)
