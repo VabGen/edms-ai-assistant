@@ -177,8 +177,8 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
                     personal_group_names=personal_group_names,
                     include_subordinates=bool(include_subordinates),
                 )
-                bulk_ids = list(bulk_result.employee_ids)
-                bulk_not_found = bulk_result.not_found
+                bulk_ids = list(bulk_result["employee_ids"])
+                bulk_not_found = bulk_result["not_found"]
 
             # ================================================================
             # Шаг 2: Резолвинг индивидуальных исполнителей
@@ -192,7 +192,7 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
                 )
 
                 if executors:
-                    all_uuids.extend(e.employeeId for e in executors)
+                    all_uuids.extend(e.employee_id for e in executors)
                 bulk_not_found.extend(not_found)
 
                 if ambiguous:

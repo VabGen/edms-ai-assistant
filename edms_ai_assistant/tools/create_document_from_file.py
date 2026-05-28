@@ -192,10 +192,10 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
             }
 
         # ── Авто-определение категории из текста сообщения ───────────────────────
-        _explicit_category = doc_category
+        _explicit_category: str = doc_category
         if doc_category == "APPEAL" and file_name:
-            _detected = _extract_category_from_message(file_name)
-            if _detected and _detected != "APPEAL":
+            _detected: str = _extract_category_from_message(file_name) or "APPEAL"
+            if _detected != "APPEAL":
                 doc_category = _detected
                 logger.info(
                     "doc_category refined from file_name '%s': %s -> %s",

@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from edms_ai_assistant.clients.base_client import EdmsBaseClient
-from edms_ai_assistant.domain.document import DocumentWithPermissions, AttachmentDocumentDto
+from edms_ai_assistant.domain.document import (
+    AttachmentDocumentDto,
+    DocumentWithPermissions,
+)
 
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
@@ -65,11 +68,11 @@ class DocumentCreatorClient(EdmsBaseClient):
             return None
 
     async def upload_attachment(
-            self,
-            token: str,
-            document_id: str,
-            file_path: str,
-            file_name: str | None = None,
+        self,
+        token: str,
+        document_id: str,
+        file_path: str,
+        file_name: str | None = None,
     ) -> AttachmentDocumentDto | None:
         """Upload a local file as MAIN_ATTACHMENT to the document."""
         path = Path(file_path)

@@ -19,7 +19,7 @@ EDMS AI Assistant — Access Grief Search Tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
 import httpx
 from langchain_core.runnables import RunnableConfig
@@ -163,7 +163,9 @@ async def _resolve_grief_name(
 ) -> str | None:
     """Ищет UUID грифа по названию через GET /api/access-grief?name=..."""
     try:
-        griefs = await grief_client.search_griefs(token, name=name.strip())
+        griefs = await grief_client.search_griefs(
+            token, filter={"search": name.strip()}
+        )
 
         if griefs:
             name_lower = name.strip().lower()
@@ -207,9 +209,7 @@ async def _get_grief_employees(
         )
 
         employees = [_format_grief_employee(e) for e in raw_employees_page.content]
-        grief_label = grief_name or (
-            grief_info.name if grief_info else grief_id[:8]
-        )
+        grief_label = grief_name or (grief_info.name if grief_info else grief_id[:8])
 
         if not employees:
             return {

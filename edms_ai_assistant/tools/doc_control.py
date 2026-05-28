@@ -283,15 +283,18 @@ async def _resolve_control_type(
             None,
             _need_input(
                 message=(
-                        f"Тип контроля «{control_type_name}» не найден. "
-                        f"Доступные типы контроля:\n" + _format_control_types(ctrl_types)
+                    f"Тип контроля «{control_type_name}» не найден. "
+                    f"Доступные типы контроля:\n" + _format_control_types(ctrl_types)
                 ),
                 missing_fields=[
                     {
                         "field": "control_type_name",
                         "description": "Название типа контроля",
                         "available_options": [
-                            {"id": str(getattr(ct, "id", "")), "name": str(getattr(ct, "name", ""))}
+                            {
+                                "id": str(getattr(ct, "id", "")),
+                                "name": str(getattr(ct, "name", "")),
+                            }
                             for ct in ctrl_types
                         ],
                     }
@@ -315,15 +318,18 @@ async def _resolve_control_type(
         None,
         _need_input(
             message=(
-                    "Укажите тип контроля. Доступные типы:\n"
-                    + _format_control_types(ctrl_types)
+                "Укажите тип контроля. Доступные типы:\n"
+                + _format_control_types(ctrl_types)
             ),
             missing_fields=[
                 {
                     "field": "control_type_name",
                     "description": "Название типа контроля",
                     "available_options": [
-                    {"id": str(getattr(ct, "id", "")), "name": str(getattr(ct, "name", ""))}
+                        {
+                            "id": str(getattr(ct, "id", "")),
+                            "name": str(getattr(ct, "name", "")),
+                        }
                         for ct in ctrl_types
                     ],
                 }

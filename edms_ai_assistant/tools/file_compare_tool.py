@@ -14,6 +14,7 @@ import re
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
+from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, StructuredTool
@@ -303,6 +304,7 @@ def create_file_compare_tool(
             if not doc_raw:
                 return {"status": "error", "message": "Документ не найден."}
             from edms_ai_assistant.domain.document import DocumentDto
+
             doc = DocumentDto.model_validate(doc_raw)
             attachments: list[Any] = doc.attachment_document or []
         except Exception as exc:
@@ -394,7 +396,7 @@ def create_file_compare_tool(
         # ── 4. Скачивание вложения ────────────────────────────────────────────────
         try:
             att_bytes: bytes = await attachment_client.get_attachment_content(
-                token, att_doc_id, resolved_id
+                token, UUID(att_doc_id), UUID(resolved_id)
             )
         except Exception as exc:
             logger.error("Attachment download failed '%s': %s", resolved_name, exc)

@@ -12,6 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
+from uuid import UUID
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -538,7 +539,7 @@ async def _extract_text(
 
     try:
         content_bytes = await attach_client.get_attachment_content(
-            token, document_id, attachment_id
+            token, UUID(document_id), UUID(attachment_id)
         )
     except Exception as exc:
         logger.error("Download failed for '%s': %s", attachment_name, exc)

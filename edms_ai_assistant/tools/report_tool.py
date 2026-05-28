@@ -27,13 +27,6 @@ from edms_ai_assistant.domain.report import (
     ReportTaskFilter,
     VolumeOfDocumentFlowReportFilter,
 )
-from edms_ai_assistant.domain.enums import (
-    ReportTaskStatus,
-    ReportFormatType,
-    DocCategory,
-    DeclarantType,
-    DocumentStatus,
-)
 
 if TYPE_CHECKING:
     from edms_ai_assistant.core.deps import AppDeps

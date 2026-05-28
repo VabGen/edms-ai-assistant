@@ -27,9 +27,6 @@ class DocumentEnricher:
         # Fetch attachments through the client instead of raw transport
         try:
             await self._client.get_document_recipients(token, str(doc_id))
-            # Recipients are already part of doc if includes were used,
-            # but this illustrates the pattern. For now we just return as is
-            # since DocumentClient.get_document_metadata now uses FULL_DOC_INCLUDES.
             pass
         except (EdmsNotFoundError, Exception):
             logger.warning("Failed to enrich document %s", doc_id)

@@ -408,7 +408,7 @@ class SummarizationService:
         finally:
             if future is not None:
                 async with self._inflight_lock:
-                    self._inflight.pop(cache_key, None)
+                    _ = self._inflight.pop(cache_key, None)
 
     async def _summarize_internal(
         self,
