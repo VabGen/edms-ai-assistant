@@ -312,7 +312,7 @@ async def _stream_graph_events(
                 # The task itself failed; we'll catch it in the outer try block
                 raise
 
-            logger.debug("Stream event: mode=%s chunk_keys=%s", mode, list(chunk.keys()) if isinstance(chunk, dict) else type(chunk))
+            logger.info("Chat Stream Event: mode=%s nodes=%s", mode, list(chunk.keys()) if isinstance(chunk, dict) else type(chunk))
 
             # ── Custom channel: UIDirective ──────────────────────────────
             if mode == "custom":
@@ -391,7 +391,7 @@ async def _stream_graph_events(
                 for msg in msgs:
                     rendered = _serialise_message(msg)
                     if rendered is not None and rendered["role"] == "assistant":
-                        logger.debug("Yielding assistant message from node=%s", node_name)
+                        logger.info("Yielding assistant message from node=%s (len=%d)", node_name, len(rendered.get("content", "")))
                         yield format_sse("message", rendered)
 
     except GraphInterrupt as exc:

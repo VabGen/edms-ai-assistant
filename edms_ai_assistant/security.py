@@ -20,37 +20,17 @@ def extract_user_id_from_token(user_token: str) -> str:
     Декодирует и валидирует JWT для извлечения ID пользователя ('id' или 'sub').
 
     Использует JWT_SECRET_KEY и JWT_ALGORITHM из настроек приложения.
-    В режиме DEBUG=True допускает использование невалидной подписи, если
-    валидация не удалась (для удобства локальной разработки с СЭД).
+    В режиме DEBUG=True допускает использование невалидной подписи.
     """
-    token = _sanitize_token(user_token)
-
     try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
-        )
+        payload = decode_token(user_token)
         return _extract_id_from_payload(payload)
-
     except jwt.ExpiredSignatureError:
         logger.error("Срок действия токена истек")
         raise ValueError("Срок действия токена истек") from None
-
     except jwt.InvalidTokenError as e:
-        if settings.DEBUG:
-            logger.warning(
-                f"JWT Validation failed ({e}), but DEBUG=True. Attempting unverified decode."
-            )
-            try:
-                payload = jwt.decode(token, options={"verify_signature": False})
-                return _extract_id_from_payload(payload)
-            except Exception as unv_err:
-                logger.error(f"Unverified decode also failed: {unv_err}")
-
         logger.error(f"Невалидный JWT токен: {e}")
         raise ValueError(f"Невалидный токен: {e}") from e
-
     except Exception as e:
         logger.error(f"Ошибка при обработке JWT: {e}")
         raise ValueError("Внутренняя ошибка при проверке токена.") from e

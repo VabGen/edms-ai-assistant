@@ -19,11 +19,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from opentelemetry import trace
 from pydantic import BaseModel
 
-from edms_ai_assistant.api.deps import get_admin_user, get_agent
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+from edms_ai_assistant.api.deps import AgentDep, get_admin_user, get_agent
 from edms_ai_assistant.config import settings
-
-if TYPE_CHECKING:
-    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -100,7 +98,7 @@ def _get_readiness_lock() -> asyncio.Lock:
     response_model=HealthResponse,
 )
 async def readiness_probe(
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: AgentDep,
 ) -> HealthResponse:
     """Kubernetes readiness probe.
 
@@ -169,7 +167,7 @@ async def readiness_probe(
     deprecated=True,
 )
 async def health_check(
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: AgentDep,
 ) -> HealthResponse:
     """Deprecated. Use /health/live for liveness and /health/ready for readiness."""
     return await readiness_probe(agent)

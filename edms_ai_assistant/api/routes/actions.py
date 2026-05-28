@@ -16,13 +16,15 @@ import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from edms_ai_assistant.api.deps import DepsDep, get_agent, get_deps
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent
+from edms_ai_assistant.api.deps import AgentDep, DepsDep, get_agent, get_deps
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
     is_system_attachment,
     resolve_user_context,
     unwrap_text_from_agent_result,
 )
+from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.model import AssistantResponse, SummarizeInput, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.summarizer.errors import SummarizerError
@@ -39,9 +41,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from langchain_core.runnables import RunnableConfig
-
-    from edms_ai_assistant.agent.agent import EdmsDocumentAgent
-    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -199,8 +198,8 @@ async def api_direct_summarize(
     request: Request,
     user_input: SummarizeInput,
     background_tasks: BackgroundTasks,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
-    deps: Annotated[AppDeps, Depends(get_deps)],
+    agent: AgentDep,
+    deps: DepsDep,
 ) -> AssistantResponse:
     current_path = (user_input.file_path or "").strip()
     is_uuid = is_system_attachment(current_path)
@@ -548,7 +547,7 @@ def _sse(payload: dict) -> str:
 async def api_direct_summarize_stream(
     request: Request,
     user_input: SummarizeInput,
-    deps: Annotated[AppDeps, Depends(get_deps)],
+    deps: DepsDep,
 ) -> StreamingResponse:
     """
     SSE-стриминг суммаризации с тем же JSON-контрактом, что /actions/summarize.
