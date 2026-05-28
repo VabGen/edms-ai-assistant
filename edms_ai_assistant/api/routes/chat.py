@@ -39,7 +39,7 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
     ResumeValueAdapter,
 )
-from edms_ai_assistant.api.deps import get_agent, get_deps
+from edms_ai_assistant.api.deps import AgentDep, DepsDep
 from edms_ai_assistant.api.helpers import resolve_user_context
 from edms_ai_assistant.api.sse import SSE_KEEPALIVE, format_sse
 from edms_ai_assistant.api.sse_events import (
@@ -460,8 +460,8 @@ async def _stream_graph_events(
 )
 async def chat_stream(
     body: ChatStreamRequest,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
-    deps: Annotated[AppDeps, Depends(get_deps)],
+    agent: AgentDep,
+    deps: DepsDep,
 ) -> StreamingResponse:
     try:
         user_id = extract_user_id_from_token(body.user_token)
@@ -513,7 +513,7 @@ async def chat_stream(
 )
 async def chat_resume(
     body: ChatResumeRequest,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: AgentDep,
 ) -> StreamingResponse:
     try:
         validated = ResumeValueAdapter.validate_python(body.resume_value)
@@ -566,7 +566,7 @@ async def chat_resume(
 )
 async def chat_state(
     thread_id: str,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: AgentDep,
 ) -> ChatStateResponse:
     """Return the latest state for ``thread_id``.
 
@@ -617,7 +617,7 @@ async def chat_state(
 )
 async def get_history(
     thread_id: str,
-    agent: Annotated[EdmsDocumentAgent, Depends(get_agent)],
+    agent: AgentDep,
 ) -> dict:
     try:
         snapshot = await agent.graph.aget_state(
