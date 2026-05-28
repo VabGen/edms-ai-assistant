@@ -94,7 +94,7 @@ class AppealExtractionService:
 
     def __init__(self, llm: BaseChatModel):
         """Внедряем LLM через DI вместо вызова глобального get_chat_model()."""
-        self.extraction_llm = llm.with_config({"temperature": 0.0})
+        self.extraction_llm = llm.bind(temperature=0.0)
         logger.info("AppealExtractionService initialized with temperature=0.0")
 
     async def extract_appeal_fields(self, text: str) -> AppealFields:

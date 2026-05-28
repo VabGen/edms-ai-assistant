@@ -17,8 +17,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from edms_ai_assistant.domain.appeal_fields import AppealFields, SubmissionFormAppeal
-from edms_ai_assistant.domain.document import DocumentAppealDto, DocumentDto
-from edms_ai_assistant.domain.enums import DeclarantType
+from edms_ai_assistant.domain.document import DocumentDto, DocumentAppealDto
+from edms_ai_assistant.domain.enums import DeclarantType, DocCategory
+from edms_ai_assistant.domain.document import AttachmentDocumentDto
 from edms_ai_assistant.utils.file_utils import extract_text_from_bytes
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
 
@@ -142,12 +143,9 @@ class AttachmentSelector:
     SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".txt", ".doc", ".rtf", ".odt", ".xlsx")
 
     @classmethod
-    def select(
-        cls, document: DocumentDto, attachment_id: str | None
-    ) -> tuple[Any, list[str]]:
+    def select(cls, document: DocumentDto, attachment_id: str | None) -> tuple[AttachmentDocumentDto, list[str]]:
         warnings = []
-        # attachments в DocumentDto нет явно, но может прийти от Enricher или getattr
-        attachments = getattr(document, "attachment_document", None) or []
+        attachments = document.attachment_document or []
 
         if not attachments:
             raise ValueError("В документе отсутствуют вложения")
@@ -155,28 +153,19 @@ class AttachmentSelector:
         target = None
         if attachment_id:
             target = next(
-                (a for a in attachments if str(getattr(a, "id", "")) == attachment_id),
-                None,
+                (a for a in attachments if str(a.id) == attachment_id), None,
             )
             if not target:
-                warnings.append(
-                    f"Вложение ID={attachment_id} не найдено, используется автоподбор"
-                )
+                warnings.append(f"Вложение ID={attachment_id} не найдено, используется автоподбор")
 
         if not target:
             target = next(
-                (
-                    a
-                    for a in attachments
-                    if getattr(a, "name", "")
-                    and str(getattr(a, "name", ""))
-                    .lower()
-                    .endswith(cls.SUPPORTED_EXTENSIONS)
-                ),
+                (a for a in attachments if
+                 a.name and a.name.lower().endswith(cls.SUPPORTED_EXTENSIONS)),
                 attachments[0],
             )
 
-        logger.info("Attachment selected: %s", getattr(target, "name", "unknown"))
+        logger.info("Attachment selected: %s", target.name or "unknown")
         return target, warnings
 
 
@@ -580,10 +569,8 @@ class AppealAutofillService:
         generate_summary_choices: bool = False,
     ) -> AutofillResult:
         document = await self._load_document(token, document_id)
-        if document.doc_category_const != "APPEAL":
-            raise ValueError(
-                f"Документ должен быть категории APPEAL, а не {document.doc_category_const}"
-            )
+        if document.doc_category_const != DocCategory.APPEAL:
+            raise ValueError(f"Документ должен быть категории APPEAL, а не {document.doc_category_const}")
 
         target_attachment, warnings = AttachmentSelector.select(document, attachment_id)
         extracted_text = await self._extract_text(token, document_id, target_attachment)
@@ -605,7 +592,7 @@ class AppealAutofillService:
             status="success",
             message="Документ успешно заполнен",
             warnings=warnings if warnings else None,
-            attachment_used=getattr(target_attachment, "name", "unknown"),
+            attachment_used=target_attachment.name or "unknown",
             last_extracted_text=extracted_text,
             last_short_summary=fields.shortSummary,
             summary_choices=summary_choices,
@@ -617,13 +604,13 @@ class AppealAutofillService:
             raise ValueError(f"Документ {document_id} не найден")
         return doc
 
-    async def _extract_text(self, token: str, document_id: str, attachment: Any) -> str:
-        file_bytes = await self.attach_client.get_attachment_content(
-            token, document_id, str(getattr(attachment, "id", ""))
-        )
+    async def _extract_text(self, token: str, document_id: str, attachment: AttachmentDocumentDto) -> str:
+        if not attachment.id:
+            return ""
+        file_bytes = await self.attach_client.get_attachment_content(token, document_id, attachment.id)
         if not file_bytes:
             return ""
-        return extract_text_from_bytes(file_bytes, getattr(attachment, "name", ""))
+        return extract_text_from_bytes(file_bytes, attachment.name or "")
 
     async def _update_document(
         self,

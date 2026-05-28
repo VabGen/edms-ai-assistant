@@ -48,6 +48,29 @@ from edms_ai_assistant.domain.enums import (
     RequiredFieldEnum,
     ResolvePolicy,
     SummaryNomenclatureDepartmentStatus,
+    DestructionActStatus,
+    AcceptanceInventoryStatus,
+    ContentType,
+    DocFileExtension,
+    ContractControlPointStatus,
+    DocumentLinkType,
+    RepeatExecutionPolicy,
+)
+from edms_ai_assistant.domain.appeal_fields import SubmissionFormAppeal
+
+from pydantic import Field
+
+from edms_ai_assistant.domain.base import EdmsBaseDto
+
+from edms_ai_assistant.domain.employee import (
+    EmployeeDto,
+    UserInfoDto,
+    MiniUserInfoDto,
+    AccessGriefDto,
+    DepartmentDto,
+    RoleDto,
+    GroupDto,
+    SliceDto,
     TaskStatus,
     TaskType,
 )
@@ -268,7 +291,8 @@ class SimpleCmsDto(EdmsBaseDto):
 class DocumentDto(EdmsBaseDto):
     id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
     organization_id: str | None = None
-    doc_category_constant: DocCategory | None = None
+    doc_category_constant: DocCategory | None = Field(None, alias="docCategoryConstant")
+    doc_category_const: DocCategory | None = Field(None, alias="docCategoryConst")
     create_date: Annotated[datetime | None, Field(description="Дата создания")] = None
     days_execution: Annotated[
         int | None, Field(description="Кол-во дней исполнения")
@@ -303,145 +327,61 @@ class DocumentDto(EdmsBaseDto):
     exemplar_number: Annotated[int | None, Field(description="Номер экземпляра")] = None
     short_summary: Annotated[str | None, Field(description="Краткое содержание")] = None
     summary: Annotated[str | None, Field(description="Текст документа")] = None
-    correspondent_name: Annotated[
-        str | None, Field(description="Наименование корреспондента")
-    ] = None
-    recipients: Annotated[
-        bool | None, Field(description="Есть ли в документе адресаты")
-    ] = None
-    profile_id: Annotated[UUID | None, Field(description="Идентификатор профиля")] = (
-        None
-    )
-    document_version_id: Annotated[
-        UUID | None, Field(description="Идентификатор версии")
-    ] = None
+    correspondent_name: Annotated[str | None, Field(description="Наименование корреспондента")] = None
+    out_reg_number: Annotated[str | None, Field(description="Исходящий регистрационный номер")] = None
+    out_reg_date: Annotated[datetime | None, Field(description="Исходящая дата регистрации")] = None
+    recipients: Annotated[bool | None, Field(description="Есть ли в документе адресаты")] = None
+    profile_id: Annotated[UUID | None, Field(description="Идентификатор профиля")] = None
+    document_version_id: Annotated[UUID | None, Field(description="Идентификатор версии")] = None
     control_flag: Annotated[bool | None, Field(description="Признак контроля")] = None
-    remove_control: Annotated[
-        bool | None, Field(description="Метка снятия с контроля")
-    ] = None
-    journal_id: Annotated[
-        UUID | None, Field(description="Идентификатор журнала регистрации")
-    ] = None
-    document_type: Annotated[
-        DocumentTypeDto | None, Field(description="Вид документа")
-    ] = None
-    document_type_id: Annotated[
-        int | None, Field(description="Идентификатор вида документа")
-    ] = None
+    remove_control: Annotated[bool | None, Field(description="Метка снятия с контроля")] = None
+    journal_id: Annotated[UUID | None, Field(description="Идентификатор журнала регистрации")] = None
+    document_type: Annotated[DocumentTypeDto | None, Field(description="Вид документа")] = None
+    document_type_id: Annotated[int | None, Field(description="Идентификатор вида документа")] = None
     ref_doc_id: UUID | None = None
     ref_doc_org_id: str | None = None
     version_flag: bool | None = None
-    formula: Annotated[list[str] | None, Field(description="Формула рег. номера")] = (
-        None
-    )
-    task_list: Annotated[
-        list[TaskDto] | None, Field(description="Список поручений")
-    ] = None
-    delivery_method: Annotated[
-        DeliveryMethodDto | None, Field(description="Способ получения")
-    ] = None
+    formula: Annotated[list[str] | None, Field(description="Формула рег. номера")] = None
+    task_list: Annotated[list[TaskDto] | None, Field(description="Список поручений")] = None
+    delivery_method: Annotated[DeliveryMethodDto | None, Field(description="Способ получения")] = None
     delivery_method_id: int | None = None
-    correspondent_id: Annotated[
-        UUID | None, Field(description="Идентификатор корреспондент")
-    ] = None
-    out_reg_number: Annotated[
-        str | None, Field(description="Исходящий регистрационный номер")
-    ] = None
-    out_reg_date: Annotated[
-        datetime | None, Field(description="Исходящая дата регистрации")
-    ] = None
-    additional_pages: Annotated[
-        str | None, Field(description="Кол-во листов приложений")
-    ] = None
-    exemplar_count: Annotated[int | None, Field(description="Кол-во экземлпяров")] = (
-        None
-    )
-    invest_program_id: Annotated[
-        UUID | None, Field(description="Ид инвест программы")
-    ] = None
-    investment_program: Annotated[
-        InvestmentProgramDto | None, Field(description="Инвест программа")
-    ] = None
-    received_doc_id: Annotated[
-        UUID | None, Field(description="Идентификатор полученного в ответ документа")
-    ] = None
-    answer_doc_id: Annotated[
-        UUID | None, Field(description="Идентификатор созданного в ответ документа")
-    ] = None
-    received_as_answer_by_doc: Annotated[
-        DocumentDto | None, Field(description="Документ получен в ответ")
-    ] = None
-    create_as_answer_by_doc: Annotated[
-        DocumentDto | None, Field(description="Документ создан в ответ")
-    ] = None
-    version: Annotated[
-        DocumentVersionDto | None, Field(description="Версия документа")
-    ] = None
-    process: Annotated[
-        DocumentProcessDto | None, Field(description="Процесс документа")
-    ] = None
+    correspondent_id: Annotated[UUID | None, Field(description="Идентификатор корреспондент")] = None
+    additional_pages: Annotated[str | None, Field(description="Кол-во листов приложений")] = None
+    exemplar_count: Annotated[int | None, Field(description="Кол-во экземлпяров")] = None
+    invest_program_id: Annotated[UUID | None, Field(description="Ид инвест программы")] = None
+    investment_program: Annotated[InvestmentProgramDto | None, Field(description="Инвест программа")] = None
+    received_doc_id: Annotated[UUID | None, Field(description="Идентификатор полученного в ответ документа")] = None
+    answer_doc_id: Annotated[UUID | None, Field(description="Идентификатор созданного в ответ документа")] = None
+    received_as_answer_by_doc: Annotated[DocumentDto | None, Field(description="Документ получен в ответ")] = None
+    create_as_answer_by_doc: Annotated[DocumentDto | None, Field(description="Документ создан в ответ")] = None
+    version: Annotated[DocumentVersionDto | None, Field(description="Версия документа")] = None
+    process: Annotated[DocumentProcessDto | None, Field(description="Процесс документа")] = None
     process_id: UUID | None = None
-    attachment_document: Annotated[
-        list[AttachmentDocumentDto] | None, Field(description="Список вложений")
-    ] = None
-    correspondent: Annotated[
-        DocumentRecipientDto | None, Field(description="Корреспондент")
-    ] = None
-    recipient_list: Annotated[
-        list[DocumentRecipientDto] | None, Field(description="Список адресатов")
-    ] = None
+    attachment_document: Annotated[list[AttachmentDocumentDto] | None, Field(description="Список вложений")] = None
+    correspondent: Annotated[DocumentRecipientDto | None, Field(description="Корреспондент")] = None
+    recipient_list: Annotated[list[DocumentRecipientDto] | None, Field(description="Список адресатов")] = None
     control: Annotated[ControlDto | None, Field(description="Контроль")] = None
     create_type: Annotated[CreateType | None, Field(description="Тип создания")] = None
     date_meeting: Annotated[datetime | None, Field(description="Дата совещания")] = None
-    date_meeting_question: Annotated[
-        datetime | None, Field(description="Дата заседания")
-    ] = None
-    start_meeting: Annotated[
-        datetime | None, Field(description="Время начала совещания")
-    ] = None
-    end_meeting: Annotated[
-        datetime | None, Field(description="Время завершения совещания")
-    ] = None
+    date_meeting_question: Annotated[datetime | None, Field(description="Дата заседания")] = None
+    start_meeting: Annotated[datetime | None, Field(description="Время начала совещания")] = None
+    end_meeting: Annotated[datetime | None, Field(description="Время завершения совещания")] = None
     place_meeting: Annotated[str | None, Field(description="Место совещания")] = None
     chairperson: Annotated[UserInfoDto | None, Field(description="Председатель")] = None
     secretary: Annotated[UserInfoDto | None, Field(description="Секретарь")] = None
-    external_invitees: Annotated[
-        str | None, Field(description="Внешние приглашенные")
-    ] = None
-    invitees_count: Annotated[
-        int | None, Field(description="Количество внутренних приглашенных")
-    ] = None
+    external_invitees: Annotated[str | None, Field(description="Внешние приглашенные")] = None
+    invitees_count: Annotated[int | None, Field(description="Количество внутренних приглашенных")] = None
     addition: Annotated[bool | None, Field(description="Признак дополнения")] = None
-    addition_meeting_question_id: Annotated[
-        UUID | None, Field(description="Ид доп. заседания")
-    ] = None
-    addition_meeting_question: Annotated[
-        DocumentDto | None, Field(description="Документ доп. заседания")
-    ] = None
-    form_meeting_type: Annotated[
-        FormMeetingType | None, Field(description="Форма заседания")
-    ] = None
-    number_question: Annotated[
-        int | None, Field(description="Порядковый номер вопроса")
-    ] = None
-    document_questions: Annotated[
-        list[DocumentQuestionDto] | None, Field(description="Список вопросов")
-    ] = None
-    has_question: Annotated[
-        bool | None, Field(description="Отметка о наличии вопросов")
-    ] = None
-    document_meeting_question_id: Annotated[
-        UUID | None, Field(description="Ид документа заседание по вопросам")
-    ] = None
-    document_meeting_question_org_id: Annotated[
-        str | None, Field(description="Ид организации документа заседание по вопросам")
-    ] = None
-    document_meeting_question: Annotated[
-        DocumentDto | None, Field(description="Документ заседание по вопросам")
-    ] = None
-    who_addressed: Annotated[
-        list[MiniUserInfoDto] | None, Field(description="Лист 'Кто подписал'")
-    ] = None
+    addition_meeting_question_id: Annotated[UUID | None, Field(description="Ид доп. заседания")] = None
+    addition_meeting_question: Annotated[DocumentDto | None, Field(description="Документ доп. заседания")] = None
+    form_meeting_type: Annotated[FormMeetingType | None, Field(description="Форма заседания")] = None
+    number_question: Annotated[int | None, Field(description="Порядковый номер вопроса")] = None
+    document_questions: Annotated[list[DocumentQuestionDto] | None, Field(description="Список вопросов")] = None
+    has_question: Annotated[bool | None, Field(description="Отметка о наличии вопросов")] = None
+    document_meeting_question_id: Annotated[UUID | None, Field(description="Ид документа заседание по вопросам")] = None
+    document_meeting_question_org_id: Annotated[str | None, Field(description="Ид организации документа заседание по вопросам")] = None
+    document_meeting_question: Annotated[DocumentDto | None, Field(description="Документ заседание по вопросам")] = None
+    who_addressed: Annotated[list[MiniUserInfoDto] | None, Field(description="Лист 'Кто подписал'")] = None
     write_off_affair_count: int | None = None
     pre_affair_count: int | None = None
     in_doc_signers: str | None = None
@@ -453,44 +393,22 @@ class DocumentDto(EdmsBaseDto):
     auto_control: AutoControl | None = None
     skip_registration: bool | None = None
     document_appeal: DocumentAppealDto | None = None
-    responsible_executors: Annotated[
-        list[DocumentResponsibleExecutorDto] | None,
-        Field(description="Список ответственных"),
-    ] = None
-    has_responsible_executor: Annotated[
-        bool | None, Field(description="Присутствие ответственных")
-    ] = None
-    responsible_executors_count: Annotated[
-        int | None, Field(description="количество ответственных")
-    ] = None
-    document_links_count: Annotated[int | None, Field(description="Кол-во связей")] = (
-        None
-    )
-    date_question: Annotated[
-        datetime | None, Field(description="Дата заседания для вопроса")
-    ] = None
-    comment_question: Annotated[
-        str | None, Field(description="Комментарии для руководителя")
-    ] = None
+    responsible_executors: Annotated[list[DocumentResponsibleExecutorDto] | None, Field(description="Список ответственных")] = None
+    has_responsible_executor: Annotated[bool | None, Field(description="Присутствие ответственных")] = None
+    responsible_executors_count: Annotated[int | None, Field(description="количество ответственных")] = None
+    document_links_count: Annotated[int | None, Field(description="Кол-во связей")] = None
+    date_question: Annotated[datetime | None, Field(description="Дата заседания для вопроса")] = None
+    comment_question: Annotated[str | None, Field(description="Комментарии для руководителя")] = None
     initiator: UserInfoDto | None = None
-    pre_nomenclature_affairs: Annotated[
-        list[DocumentPreNomenclatureDto] | None,
-        Field(description="Список предварительных номенклатур"),
-    ] = None
+    pre_nomenclature_affairs: Annotated[list[DocumentPreNomenclatureDto] | None, Field(description="Список предварительных номенклатур")] = None
     registration_journal: RegistrationJournalDto | None = None
     who_signed: Annotated[UserInfoDto | None, Field(description="Кем подписан")] = None
     meeting_question_notify_count: int | None = None
     user_props: DocumentUserPropsDto | None = None
     note: str | None = None
-    enable_access_grief: Annotated[
-        bool | None, Field(description="Включение грифа доступа")
-    ] = None
-    access_grief_id: Annotated[
-        UUID | None, Field(description="Идентификатор грифа доступа")
-    ] = None
-    access_grief: Annotated[
-        AccessGriefDto | None, Field(description="Гриф доступа")
-    ] = None
+    enable_access_grief: Annotated[bool | None, Field(description="Включение грифа доступа")] = None
+    access_grief_id: Annotated[UUID | None, Field(description="Идентификатор грифа доступа")] = None
+    access_grief: Annotated[AccessGriefDto | None, Field(description="Гриф доступа")] = None
     auto_routing: bool | None = None
     contract_sum: float | None = None
     contract_duration_start: datetime | None = None
@@ -510,20 +428,14 @@ class DocumentDto(EdmsBaseDto):
     document_inventory_data: Any | None = None
     current_bpmn_task_name: str | None = None
     document_form_definition: DocumentFormDto | None = None
-    custom_fields: Annotated[
-        dict[str, Any] | None, Field(description="Пользовательские поля")
-    ] = None
+    custom_fields: Annotated[dict[str, Any] | None, Field(description="Пользовательские поля")] = None
     additional_documents: list[AdditionalDocumentDto] | None = None
     document_form_id: UUID | None = None
-    journal_number: Annotated[
-        int | None, Field(description="Номер журнала регистрации")
-    ] = None
+    journal_number: Annotated[int | None, Field(description="Номер журнала регистрации")] = None
 
 
 class DocPermissionContainer(EdmsBaseDto):
-    permissions: Annotated[
-        list[Any] | None, Field(description="Список прав доступа")
-    ] = None
+    permissions: Annotated[list[Any] | None, Field(description="Список прав доступа")] = None
     context: Annotated[Any | None, Field(description="Контекст документа")] = None
 
 
@@ -554,45 +466,20 @@ class DocumentHistoryDto(EdmsBaseDto):
 
 
 class ControlDto(EdmsBaseDto):
-    control_type_id: Annotated[
-        UUID | None, Field(description="Идентификатор типа контроля")
-    ] = None
+    id: UUID | None = None
+    control_type_id: Annotated[UUID | None, Field(description="Идентификатор типа контроля")] = None
     control_type_org_id: str | None = None
-    control_type: Annotated[
-        ControlTypeDto | None, Field(description="Тип контроля")
-    ] = None
-    control_date_start: Annotated[
-        datetime | None, Field(description="Дата начала контроля")
-    ] = None
-    control_plan_date_end: Annotated[
-        datetime | None, Field(description="Планируемая дата окончания контроля")
-    ] = None
-    control_real_date_end: Annotated[
-        datetime | None, Field(description="Реальная дата окончания контроля")
-    ] = None
-    control_term_days: Annotated[
-        int | None, Field(description="Срок контроля в днях")
-    ] = None
-    control_initiator: Annotated[
-        EmployeeDto | None, Field(description="Сотрудник который поставил на контроль")
-    ] = None
-    control_initiator_id: Annotated[
-        UUID | None,
-        Field(description="Идентификатор сотрудника который поставил на контроль"),
-    ] = None
-    control_executor: Annotated[
-        EmployeeDto | None, Field(description="Сотрудник который снял с контроля")
-    ] = None
-    control_executor_id: Annotated[
-        UUID | None,
-        Field(description="Идентификатор сотрудника который снял с контроля"),
-    ] = None
-    on_control: Annotated[
-        bool | None, Field(description="Активен ли сейчас контроль")
-    ] = None
-    remove_control: Annotated[
-        bool | None, Field(description="Метка снятия с контроля")
-    ] = None
+    control_type: Annotated[ControlTypeDto | None, Field(description="Тип контроля")] = None
+    control_date_start: Annotated[datetime | None, Field(description="Дата начала контроля")] = None
+    control_plan_date_end: Annotated[datetime | None, Field(description="Планируемая дата окончания контроля")] = None
+    control_real_date_end: Annotated[datetime | None, Field(description="Реальная дата окончания контроля")] = None
+    control_term_days: Annotated[int | None, Field(description="Срок контроля в днях")] = None
+    control_initiator: Annotated[EmployeeDto | None, Field(description="Сотрудник который поставил на контроль")] = None
+    control_initiator_id: Annotated[UUID | None, Field(description="Идентификатор сотрудника который поставил на контроль")] = None
+    control_executor: Annotated[EmployeeDto | None, Field(description="Сотрудник который снял с контроля")] = None
+    control_executor_id: Annotated[UUID | None, Field(description="Идентификатор сотрудника который снял с контроля")] = None
+    on_control: Annotated[bool | None, Field(description="Активен ли сейчас контроль")] = None
+    remove_control: Annotated[bool | None, Field(description="Метка снятия с контроля")] = None
     control_employees: list[EmployeeDto] | None = None
 
 
@@ -642,41 +529,26 @@ class TasksAndProjectsDto(EdmsBaseDto):
 class DocumentVersionDto(EdmsBaseDto):
     id: UUID | None = Field(None, description="Идентификатор версии")
     version: int | None = Field(None, description="Номер версии")
+    create_date: datetime | None = None
     document_id: UUID | None = Field(None, description="Идентификатор документа")
     document: DocumentDto | None = Field(None, description="Документ")
     deleted: bool | None = None
 
 
 class DocumentRecipientDto(EdmsBaseDto):
-    id: Annotated[
-        UUID | None, Field(description="Идентификатор адресата документа")
-    ] = None
-    document_id: Annotated[
-        UUID | None, Field(description="Идентификатор документа")
-    ] = None
+    id: Annotated[UUID | None, Field(description="Идентификатор адресата документа")] = None
+    document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
     name: Annotated[str | None, Field(description="Наименование адресата")] = None
     status: str | None = None
-    sender: Annotated[
-        EmployeeDto | None, Field(description="Отправитель", alias="from")
-    ] = None
-    sender_id: Annotated[
-        UUID | None, Field(description="ИД отправителя", alias="fromId")
-    ] = None
+    sender: Annotated[EmployeeDto | None, Field(description="Отправитель", alias="from")] = None
+    sender_id: Annotated[UUID | None, Field(description="ИД отправителя", alias="fromId")] = None
     date_send: Annotated[datetime | None, Field(description="Дата отправки")] = None
     to_people: Annotated[str | None, Field(description="Кому отправить")] = None
     delivered: Annotated[bool | None, Field(description="Признак доставки")] = None
-    system: Annotated[
-        bool | None, Field(description="Признак отправлено ли системой")
-    ] = None
-    subscriber_id: Annotated[
-        UUID | None, Field(description="Идентификатор адресата СМДО")
-    ] = None
-    delivery_method_id: Annotated[
-        int | None, Field(description="Идентификатор способа доставки")
-    ] = None
-    delivery_method: Annotated[
-        DeliveryMethodDto | None, Field(description="Способ доставки")
-    ] = None
+    system: Annotated[bool | None, Field(description="Признак отправлено ли системой")] = None
+    subscriber_id: Annotated[UUID | None, Field(description="Идентификатор адресата СМДО")] = None
+    delivery_method_id: Annotated[int | None, Field(description="Идентификатор способа доставки")] = None
+    delivery_method: Annotated[DeliveryMethodDto | None, Field(description="Способ доставки")] = None
     correspondent: Any | None = None
     subscriber: SubscriberDto | None = None
     correspondent_id: UUID | None = None
@@ -692,12 +564,8 @@ class DocumentRecipientDto(EdmsBaseDto):
     aismv_abonent_reg_ack: bool | None = None
     aismb_abonent_reg_reject: bool | None = None
     unp: str | None = None
-    sign_date: Annotated[
-        datetime | None, Field(description="Договор подписан контрогентом")
-    ] = None
-    contract_number: Annotated[
-        str | None, Field(description="Договор номер контракта контрагента")
-    ] = None
+    sign_date: Annotated[datetime | None, Field(description="Договор подписан контрогентом")] = None
+    contract_number: Annotated[str | None, Field(description="Договор номер контракта контрагента")] = None
 
 
 class ExecutionDocumentStatCount(EdmsBaseDto):
@@ -764,16 +632,10 @@ class DocumentAccessEntryDto(EdmsBaseDto):
 
 
 class DocumentProfileDto(EdmsBaseDto):
-    id: Annotated[UUID | None, Field(description="Идентификатор профиля документа")] = (
-        None
-    )
+    id: Annotated[UUID | None, Field(description="Идентификатор профиля документа")] = None
     organization_id: str | None = None
-    name: Annotated[str | None, Field(description="Наименование профиля документа")] = (
-        None
-    )
-    formula: Annotated[list[str] | None, Field(description="Формула рег. номера")] = (
-        None
-    )
+    name: Annotated[str | None, Field(description="Наименование профиля документа")] = None
+    formula: Annotated[list[str] | None, Field(description="Формула рег. номера")] = None
     auto_create_incoming_doc: bool | None = None
     active: bool | None = None
     document_type_id: int | None = None
@@ -821,27 +683,15 @@ class DocumentProfileDto(EdmsBaseDto):
 
 
 class DocumentFormDto(EdmsBaseDto):
-    id: Annotated[UUID | None, Field(description="Идентификатор формы документа")] = (
-        None
-    )
-    name: Annotated[
-        str, Field(description="Наименование формы документа", min_length=1)
-    ]
+    id: Annotated[UUID | None, Field(description="Идентификатор формы документа")] = None
+    name: Annotated[str, Field(description="Наименование формы документа", min_length=1)]
     document_constant: Annotated[DocCategory, Field(description="Константа документа")]
-    active: Annotated[bool, Field(description="Признак активен ли форма документа")] = (
-        True
-    )
-    system: Annotated[bool, Field(description="Признак системной формы документа")] = (
-        False
-    )
+    active: Annotated[bool, Field(description="Признак активен ли форма документа")] = True
+    system: Annotated[bool, Field(description="Признак системной формы документа")] = False
     document_type_id: Annotated[int, Field(description="Идентификатор типа документа")]
     document_type: DocumentTypeDto | None = None
-    general: Annotated[
-        dict[str, Any] | None, Field(description="Общие настройки формы")
-    ] = None
-    fields: Annotated[
-        list[DocumentFormField] | None, Field(description="Поля формы документа")
-    ] = None
+    general: Annotated[dict[str, Any] | None, Field(description="Общие настройки формы")] = None
+    fields: Annotated[list[DocumentFormField] | None, Field(description="Поля формы документа")] = None
 
 
 class DocumentFormField(EdmsBaseDto):
@@ -851,20 +701,12 @@ class DocumentFormField(EdmsBaseDto):
 
 class DirectoryProcessDefinition(EdmsBaseDto):
     order: Annotated[int, Field(description="Порядковый номер процесса", ge=1)]
-    employees: Annotated[
-        list[DirectoryProcessEmployee] | None,
-        Field(description="Список сотрудников (исполнителей) процесса"),
-    ] = None
+    employees: Annotated[list[DirectoryProcessEmployee] | None, Field(description="Список сотрудников (исполнителей) процесса")] = None
     type: DocumentProcessType
     profile_id: UUID | None = None
     name: Annotated[str, Field(description="Наименование процесса", max_length=254)]
-    days: Annotated[
-        int | None, Field(description="Количество дней для исполнения процесса")
-    ] = None
-    emp_action_queue_type: Annotated[
-        ProcessEmployeeActionQueueType | None,
-        Field(description="Тип выполнения действий в процессе, null = ANY"),
-    ] = None
+    days: Annotated[int | None, Field(description="Количество дней для исполнения процесса")] = None
+    emp_action_queue_type: Annotated[ProcessEmployeeActionQueueType | None, Field(description="Тип выполнения действий в процессе, null = ANY")] = None
 
 
 class DirectoryProcessEmployee(EdmsBaseDto):
@@ -873,23 +715,11 @@ class DirectoryProcessEmployee(EdmsBaseDto):
 
 
 class ProfileContractAttachmentDto(EdmsBaseDto):
-    id: Annotated[
-        UUID | None,
-        Field(
-            description="Идентификатор вложения шаблона договора в профиле документа"
-        ),
-    ] = None
-    document_profile_id: Annotated[
-        UUID | None, Field(description="Идентификатор профиля документа")
-    ] = None
-    document_profile_org_id: Annotated[
-        str | None, Field(description="Идентификатор организации профиля документа")
-    ] = None
+    id: Annotated[UUID | None, Field(description="Идентификатор вложения шаблона договора в профиле документа")] = None
+    document_profile_id: Annotated[UUID | None, Field(description="Идентификатор профиля документа")] = None
+    document_profile_org_id: Annotated[str | None, Field(description="Идентификатор организации профиля документа")] = None
     document_profile: DocumentProfileDto | None = None
-    attachment: Annotated[
-        AttachmentDto | None,
-        Field(description="Файл шаблона печатной формы для договора"),
-    ] = None
+    attachment: Annotated[AttachmentDto | None, Field(description="Файл шаблона печатной формы для договора")] = None
     tag: Annotated[list[str] | None, Field(description="Список меток шаблона")] = None
     template: Annotated[bool, Field(description="Наличие меток")] = False
     upload_date: Annotated[datetime | None, Field(description="Дата загрузки")] = None
@@ -1080,37 +910,17 @@ class DocumentFilter(EdmsBaseDto):
 
 
 class DocumentProfileFilter(EdmsBaseDto):
-    name: Annotated[str | None, Field(description="Наименование профиля документа")] = (
-        None
-    )
-    doc_type_name: Annotated[
-        str | None, Field(description="Наименование вида документа")
-    ] = None
-    doc_category_name: Annotated[
-        str | None, Field(description="Наименование типа документа")
-    ] = None
-    reg_journal_name: Annotated[
-        str | None, Field(description="Наименование журнала регистрации")
-    ] = None
-    active: Annotated[
-        bool | None, Field(description="Признак активен ли профиль документа")
-    ] = None
-    doc_type_id: Annotated[
-        int | None, Field(description="Идентификатор вида документа")
-    ] = None
-    doc_category_id: Annotated[
-        UUID | None, Field(description="Идентификатор типа документа")
-    ] = None
-    reg_journal_id: Annotated[
-        UUID | None, Field(description="Идентификатор журнала регистрации")
-    ] = None
-    correspondent_id: Annotated[
-        UUID | None, Field(description="Идентификатор корреспондента")
-    ] = None
+    name: Annotated[str | None, Field(description="Наименование профиля документа")] = None
+    doc_type_name: Annotated[str | None, Field(description="Наименование вида документа")] = None
+    doc_category_name: Annotated[str | None, Field(description="Наименование типа документа")] = None
+    reg_journal_name: Annotated[str | None, Field(description="Наименование журнала регистрации")] = None
+    active: Annotated[bool | None, Field(description="Признак активен ли профиль документа")] = None
+    doc_type_id: Annotated[int | None, Field(description="Идентификатор вида документа")] = None
+    doc_category_id: Annotated[UUID | None, Field(description="Идентификатор типа документа")] = None
+    reg_journal_id: Annotated[UUID | None, Field(description="Идентификатор журнала регистрации")] = None
+    correspondent_id: Annotated[UUID | None, Field(description="Идентификатор корреспондента")] = None
     doc_category_const: DocCategory | None = None
-    with_access: Annotated[
-        bool | None, Field(description="Только доступные профили по списку доступа")
-    ] = None
+    with_access: Annotated[bool | None, Field(description="Только доступные профили по списку доступа")] = None
     includes: list[DocumentProfileFilterInclude] | None = None
 
 
@@ -1141,9 +951,7 @@ class ArgumentDefinition(EdmsBaseDto):
 
 class RoleMergeDto(EdmsBaseDto):
     role_id: Annotated[UUID | None, Field(description="ИД роли")] = None
-    merge: Annotated[
-        Merge | None, Field(description="Политика обработки слияния ИД")
-    ] = None
+    merge: Annotated[Merge | None, Field(description="Политика обработки слияния ИД")] = None
 
 
 class CountResult(EdmsBaseDto):
@@ -1163,14 +971,10 @@ class DocumentBasedExistingBody(EdmsBaseDto):
 
 
 class DocumentRecipientDeliveryHistoryDto(EdmsBaseDto):
-    id: Annotated[UUID | None, Field(description="Идентификатор истории доставки")] = (
-        None
-    )
+    id: Annotated[UUID | None, Field(description="Идентификатор истории доставки")] = None
     create_date: Annotated[datetime | None, Field(description="Дата создания")] = None
     log: Annotated[str | None, Field(description="Информация об изменениях")] = None
-    doc_recipient_id: Annotated[
-        UUID | None, Field(description="Идентификатор адресата")
-    ] = None
+    doc_recipient_id: Annotated[UUID | None, Field(description="Идентификатор адресата")] = None
 
 
 class TaskDto(EdmsBaseDto):
@@ -1178,55 +982,30 @@ class TaskDto(EdmsBaseDto):
     external_id: str | None = None
     type: TaskType | None = None
     organization_id: str | None = None
-    parent_id: Annotated[
-        UUID | None, Field(description="Идентификатор родительского поручения")
-    ] = None
+    parent_id: Annotated[UUID | None, Field(description="Идентификатор родительского поручения")] = None
     parent_org: str | None = None
     document_reg_date: datetime | None = None
     task_number: Annotated[str | None, Field(description="Номер поручения")] = None
-    create_date: Annotated[
-        datetime | None, Field(description="Дата создания поручения")
-    ] = None
+    create_date: Annotated[datetime | None, Field(description="Дата создания поручения")] = None
     task_status: TaskStatus | None = None
     author: Annotated[UserInfoDto | None, Field(description="Автор поручения")] = None
-    task_executors: Annotated[
-        list[TaskExecutorsDto] | None,
-        Field(description="Список исполнителей поручения"),
-    ] = None
-    planed_date_end: Annotated[
-        datetime | None, Field(description="Запланированная дата окончания")
-    ] = None
-    real_date_end: Annotated[
-        datetime | None, Field(description="Реальная дата окончания")
-    ] = None
-    task_change_date_requests: Annotated[
-        list[Any] | None, Field(description="Список изменений переносов")
-    ] = None
+    task_executors: Annotated[list[TaskExecutorsDto] | None, Field(description="Список исполнителей поручения")] = None
+    planed_date_end: Annotated[datetime | None, Field(description="Запланированная дата окончания")] = None
+    real_date_end: Annotated[datetime | None, Field(description="Реальная дата окончания")] = None
+    task_change_date_requests: Annotated[list[Any] | None, Field(description="Список изменений переносов")] = None
     task_text: Annotated[str | None, Field(description="Текст поручения")] = None
     on_control: Annotated[bool | None, Field(description="Признак контроля")] = None
-    remove_control: Annotated[
-        bool | None, Field(description="Метка снятия с контроля")
-    ] = None
-    control: Annotated[ControlDto | None, Field(description="Контроль поручения")] = (
-        None
-    )
-    document_id: Annotated[
-        UUID | None, Field(description="Идентификатор документа")
-    ] = None
+    remove_control: Annotated[bool | None, Field(description="Метка снятия с контроля")] = None
+    control: Annotated[ControlDto | None, Field(description="Контроль поручения")] = None
+    document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
     document_org_id: str | None = None
     document: Annotated[Any | None, Field(description="Документ")] = None
     revision: Annotated[bool | None, Field(description="Признак доработки")] = None
-    count_exec: Annotated[int | None, Field(description="Количество исполнителей")] = (
-        None
-    )
-    document_reg_num: Annotated[
-        str | None, Field(description="Рег номер документа")
-    ] = None
+    count_exec: Annotated[int | None, Field(description="Количество исполнителей")] = None
+    document_reg_num: Annotated[str | None, Field(description="Рег номер документа")] = None
     period_task_parent_number: str | None = None
     parent_task_number: str | None = None
-    count_completed_exec: Annotated[
-        int | None, Field(description="Количество исполнивших")
-    ] = None
+    count_completed_exec: Annotated[int | None, Field(description="Количество исполнивших")] = None
     date_request_count: int | None = None
     executed_date_request_count: int | None = None
     endless: Annotated[bool | None, Field(description="Без срока исполнения")] = None
@@ -1255,50 +1034,24 @@ class DocumentAismvRecreateRequest(EdmsBaseDto):
 
 
 class TaskExecutorsDto(EdmsBaseDto):
-    id: Annotated[
-        UUID | None, Field(description="Идентификатор исполнителя поручения")
-    ] = None
+    id: Annotated[UUID | None, Field(description="Идентификатор исполнителя поручения")] = None
     organization_id: str | None = None
     task_id: Annotated[UUID | None, Field(description="Идентификатор поручения")] = None
     task_org_id: str | None = None
     task: TaskDto | None = Field(None, description="Поручение")
     create_date: Annotated[datetime | None, Field(description="Дата назначения")] = None
-    executed_date: Annotated[datetime | None, Field(description="Дата исполнения")] = (
-        None
-    )
-    executor: Annotated[
-        UserInfoDto | None, Field(description="Исполнитель поручения")
-    ] = None
-    task_document_links: list[Any] | None = Field(
-        None, description="Список документов исполнения"
-    )
-    attachments: list[Any] | None = Field(
-        None, description="Список вложений прикрепленных к поручению"
-    )
-    responsible: Annotated[
-        bool | None, Field(description="Ответственный исполнитель")
-    ] = None
-    executed_by_execute_for_all: Annotated[
-        bool | None, Field(description="Исполнен методом выполнения за всех")
-    ] = None
-    executed_for_all: Annotated[bool | None, Field(description="Исполнил за всех")] = (
-        None
-    )
-    revision: Annotated[bool | None, Field(description="Отправлено на доработку")] = (
-        None
-    )
-    parent_task_id: Annotated[
-        UUID | None, Field(description="ИД родительского поручения")
-    ] = None
-    stamp_text: Annotated[
-        str | None, Field(description="Текст исполнения поручения")
-    ] = None
-    link_count: Annotated[
-        int | None, Field(description="Кол-во ссылок на документы")
-    ] = None
-    execution_doc_count: Annotated[
-        int | None, Field(description="Кол-во загруженных файлов")
-    ] = None
+    executed_date: Annotated[datetime | None, Field(description="Дата исполнения")] = None
+    executor: Annotated[UserInfoDto | None, Field(description="Исполнитель поручения")] = None
+    task_document_links: list[Any] | None = Field(None, description="Список документов исполнения")
+    attachments: list[Any] | None = Field(None, description="Список вложений прикрепленных к поручению")
+    responsible: Annotated[bool | None, Field(description="Ответственный исполнитель")] = None
+    executed_by_execute_for_all: Annotated[bool | None, Field(description="Исполнен методом выполнения за всех")] = None
+    executed_for_all: Annotated[bool | None, Field(description="Исполнил за всех")] = None
+    revision: Annotated[bool | None, Field(description="Отправлено на доработку")] = None
+    parent_task_id: Annotated[UUID | None, Field(description="ИД родительского поручения")] = None
+    stamp_text: Annotated[str | None, Field(description="Текст исполнения поручения")] = None
+    link_count: Annotated[int | None, Field(description="Кол-во ссылок на документы")] = None
+    execution_doc_count: Annotated[int | None, Field(description="Кол-во загруженных файлов")] = None
     child_task_count: int | None = None
 
 
@@ -1338,15 +1091,9 @@ class RepeatIdenticalAppealDto(EdmsBaseDto):
     reg_number: str | None = None
     reg_date: datetime | None = None
     short_summary: str | None = None
-    number: Annotated[int | None, Field(description="Номер повторного обращения")] = (
-        None
-    )
-    repeat_appeal_group_id: Annotated[
-        UUID | None, Field(description="Идентификатор группы")
-    ] = None
-    type: Annotated[AppealType | None, Field(description="Тип повторных обращений")] = (
-        None
-    )
+    number: Annotated[int | None, Field(description="Номер повторного обращения")] = None
+    repeat_appeal_group_id: Annotated[UUID | None, Field(description="Идентификатор группы")] = None
+    type: Annotated[AppealType | None, Field(description="Тип повторных обращений")] = None
     deleted: bool = False
 
 
@@ -1359,57 +1106,28 @@ class PermissionDto(EdmsBaseDto):
     doc_category: DocCategory | None = Field(None, description="Тип документа")
     profile_id: UUID | None = Field(None, description="ИД профиля документа")
     profile: DocumentProfileDto | None = Field(None, description="Профиль документа")
-    merge_roles: list[RoleMergeDto] | None = Field(
-        None, description="Политика обработки слияния ИД"
-    )
-    process_completed: bool | None = Field(
-        None, description="Признак выполнения процесса"
-    )
-    current_step_completed: bool | None = Field(
-        None, description="Признак выполнения текущего этапа"
-    )
-    last_step: bool | None = Field(
-        None, description="Признак того что текущий этап является последним"
-    )
-    process_started: bool | None = Field(
-        None, description="Признак того что процесс начал выполнение"
-    )
+    merge_roles: list[RoleMergeDto] | None = Field(None, description="Политика обработки слияния ИД")
+    process_completed: bool | None = Field(None, description="Признак выполнения процесса")
+    current_step_completed: bool | None = Field(None, description="Признак выполнения текущего этапа")
+    last_step: bool | None = Field(None, description="Признак того что текущий этап является последним")
+    process_started: bool | None = Field(None, description="Признак того что процесс начал выполнение")
     on_control: bool | None = Field(None, description="Документ стоит на контроле")
-    task_on_control: bool | None = Field(
-        None, description="Поручение стоит на контроле"
-    )
-    resolve_policy: ResolvePolicy | None = Field(
-        None, description="Политики обработки доступа"
-    )
+    task_on_control: bool | None = Field(None, description="Поручение стоит на контроле")
+    resolve_policy: ResolvePolicy | None = Field(None, description="Политики обработки доступа")
     has_reg_number: bool | None = Field(None, description="Регномер")
-    document_has_items: list[str] | None = Field(
-        None, description="Типы этапов в документе при которых доступно"
-    )
+    document_has_items: list[str] | None = Field(None, description="Типы этапов в документе при которых доступно")
     create_type: CreateType | None = Field(None, description="Типсоздания документа")
     task_completed: bool | None = Field(None, description="Поручение исполненно")
     task_on_revision: bool | None = Field(None, description="Поручение на доработке")
     child_task: bool | None = Field(None, description="Дочернее поручение")
     task_type: TaskType | None = Field(None, description="Тип поручения")
-    task_begin_execution: bool | None = Field(
-        None, description="Поручение начало исполнение"
-    )
+    task_begin_execution: bool | None = Field(None, description="Поручение начало исполнение")
     archive: bool | None = Field(None, description="Документ находится в архиве")
-    task_create_by_period: bool | None = Field(
-        None, description="Поручение создано для из-за переодического выполнения"
-    )
-    has_period_tasks: bool | None = Field(
-        None,
-        description="На основании этого поручения были созданны переодические поручения",
-    )
-    nomenclature_department_status: NomenclatureDepartmentStatus | None = Field(
-        None, description="Статус нумераторы подразделения"
-    )
-    summary_nomenclature_department_status: (
-        SummaryNomenclatureDepartmentStatus | None
-    ) = Field(None, description="Сводный статус подразделения")
-    destruction_act_status: DestructionActStatus | None = Field(
-        None, description="Статус акта уничтожения"
-    )
+    task_create_by_period: bool | None = Field(None, description="Поручение создано для из-за переодического выполнения")
+    has_period_tasks: bool | None = Field(None, description="На основании этого поручения были созданны переодические поручения")
+    nomenclature_department_status: NomenclatureDepartmentStatus | None = Field(None, description="Статус нумераторы подразделения")
+    summary_nomenclature_department_status: SummaryNomenclatureDepartmentStatus | None = Field(None, description="Сводный статус подразделения")
+    destruction_act_status: DestructionActStatus | None = Field(None, description="Статус акта уничтожения")
     acceptance_inventory_status: AcceptanceInventoryStatus | None = None
 
 
@@ -1422,20 +1140,12 @@ class PermissionRoleDto(EdmsBaseDto):
 
 
 class ContractVersionInfoDto(EdmsBaseDto):
-    id: Annotated[UUID | None, Field(description="Идентификатор версии договора")] = (
-        None
-    )
+    id: Annotated[UUID | None, Field(description="Идентификатор версии договора")] = None
     organization_id: str | None = None
-    document_id: Annotated[UUID | None, Field(description="Идентификатор договора")] = (
-        None
-    )
+    document_id: Annotated[UUID | None, Field(description="Идентификатор договора")] = None
     document_org_id: str | None = None
-    version_number: Annotated[
-        int | None, Field(description="Номер версии договора")
-    ] = None
-    create_date: Annotated[
-        datetime | None, Field(description="Дата создания договора")
-    ] = None
+    version_number: Annotated[int | None, Field(description="Номер версии договора")] = None
+    create_date: Annotated[datetime | None, Field(description="Дата создания договора")] = None
     attachments: list[ContractVersionAttachmentDto] | None = None
     file_name: Annotated[str | None, Field(description="Имя файла договора")] = None
 
@@ -1455,16 +1165,10 @@ class DocumentQuestionDto(EdmsBaseDto):
     document_id: UUID | None = None
     document_org_id: str | None = None
     document: DocumentDto | None = None
-    document_meeting_question_id: Annotated[
-        UUID | None, Field(description="Идентификатор документа заседания")
-    ] = None
-    document_meeting_question_org_id: Annotated[
-        str | None, Field(description="Идентификатор организации документа заседания")
-    ] = None
+    document_meeting_question_id: Annotated[UUID | None, Field(description="Идентификатор документа заседания")] = None
+    document_meeting_question_org_id: Annotated[str | None, Field(description="Идентификатор организации документа заседания")] = None
     document_meeting_question: DocumentDto | None = None
-    speakers: Annotated[
-        list[SpeakerDto] | None, Field(description="Список докладчиков")
-    ] = None
+    speakers: Annotated[list[SpeakerDto] | None, Field(description="Список докладчиков")] = None
 
 
 class SpeakerDto(EdmsBaseDto):
@@ -1533,9 +1237,7 @@ class ContractControlPointAttachmentDto(EdmsBaseDto):
     attachment: AttachmentDto | None = None
     contract_control_point_id: UUID | None = None
     contract_control_point_org_id: str | None = None
-    contract_control_point: Any | None = (
-        None  # To avoid circularity, will be ContractControlPointDto
-    )
+    contract_control_point: Any | None = None  # To avoid circularity, will be ContractControlPointDto
     create_date: datetime | None = None
 
 
@@ -1594,15 +1296,11 @@ class ControlTypeDto(EdmsBaseDto):
 
 
 class SignatureDto(EdmsBaseDto):
-    key_id: str | None = Field(
-        None, description="Идентификатор открытого ключа подписавшего"
-    )
+    key_id: str | None = Field(None, description="Идентификатор открытого ключа подписавшего")
     signer: str | None = Field(None, description="Имя подписавшего")
     signtime: datetime | None = Field(None, description="Дата/время подписи")
     operation_type: str | None = Field(None, description="Тип операции подписания")
-    orig_signature: str | None = Field(
-        None, description="Значение ЭЦП в исходной системе"
-    )
+    orig_signature: str | None = Field(None, description="Значение ЭЦП в исходной системе")
     data: str = Field(..., description="ЭЦП подпись в base64")
     cert_serial: str | None = Field(None, description="Номер сертификата")
     signer_fio: str | None = Field(None, description="ФИО подписавшего")
@@ -1633,27 +1331,17 @@ class AttachmentSignature(EdmsBaseDto):
 
 
 class DocumentPreNomenclatureDto(EdmsBaseDto):
-    id: Annotated[
-        UUID | None, Field(description="Идентификатор документа в номенклатуре")
-    ] = None
-    document_id: Annotated[
-        UUID | None, Field(description="Идентификатор документа")
-    ] = None
+    id: Annotated[UUID | None, Field(description="Идентификатор документа в номенклатуре")] = None
+    document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
     document: Annotated[Any | None, Field(description="Документ")] = None
-    nomenclature_affair_id: Annotated[
-        UUID | None, Field(description="Идентификатор номенклатуры")
-    ] = None
-    nomenclature_affair: Annotated[
-        Any | None, Field(description="Номенклатура дел")
-    ] = None
+    nomenclature_affair_id: Annotated[UUID | None, Field(description="Идентификатор номенклатуры")] = None
+    nomenclature_affair: Annotated[Any | None, Field(description="Номенклатура дел")] = None
     write_off: Annotated[bool | None, Field(description="Метка списания")] = None
     deleted: bool | None = None
 
 
 class NomenclatureAffairDto(EdmsBaseDto):
-    id: Annotated[UUID | None, Field(description="Идентификатор номенклатуры дел")] = (
-        None
-    )
+    id: Annotated[UUID | None, Field(description="Идентификатор номенклатуры дел")] = None
     external_id: str | None = None
     organization_id: str | None = None
     status: str | None = None
@@ -1712,82 +1400,41 @@ class NomenclatureAffairDto(EdmsBaseDto):
     completed: bool = False
 
 
+
 class DocumentAppealDto(EdmsBaseDto):
-    country_appeal_id: Annotated[
-        UUID | None, Field(description="Идентификатор страны заявителя")
-    ] = None
-    country_appeal_name: Annotated[
-        str | None, Field(description="Наименование страны заявителя")
-    ] = None
-    receipt_date: Annotated[
-        datetime | None, Field(description="Содержит дату поступления")
-    ] = None
-    declarant_type: Annotated[
-        DeclarantType | None, Field(description="Тип заявителя")
-    ] = None
-    citizen_type_id: Annotated[
-        UUID | None, Field(description="Идентификатор вида обращения")
-    ] = None
+    country_appeal_id: Annotated[UUID | None, Field(description="Идентификатор страны заявителя")] = None
+    country_appeal_name: Annotated[str | None, Field(description="Наименование страны заявителя")] = None
+    receipt_date: Annotated[datetime | None, Field(description="Содержит дату поступления")] = None
+    declarant_type: Annotated[DeclarantType | None, Field(description="Тип заявителя")] = None
+    citizen_type_id: Annotated[UUID | None, Field(description="Идентификатор вида обращения")] = None
     citizen_type: CitizenTypeDto | None = None
-    collective: Annotated[
-        bool | None, Field(description="Признак коллективного обращения")
-    ] = None
-    anonymous: Annotated[
-        bool | None, Field(description="Признак анонимного обращения")
-    ] = None
-    fio_applicant: Annotated[
-        str | None, Field(description="Содержит Ф.И.О. заявителя")
-    ] = None
+    collective: Annotated[bool | None, Field(description="Признак коллективного обращения")] = None
+    anonymous: Annotated[bool | None, Field(description="Признак анонимного обращения")] = None
+    fio_applicant: Annotated[str | None, Field(description="Содержит Ф.И.О. заявителя")] = None
     city_id: Annotated[UUID | None, Field(description="Идентификатор города")] = None
     city_name: Annotated[str | None, Field(description="Город")] = None
     region_id: Annotated[UUID | None, Field(description="Идентификатор области")] = None
     region_name: Annotated[str | None, Field(description="Область")] = None
-    district_id: Annotated[UUID | None, Field(description="Идентификатор района")] = (
-        None
-    )
+    district_id: Annotated[UUID | None, Field(description="Идентификатор района")] = None
     district_name: Annotated[str | None, Field(description="Район")] = None
     index: Annotated[str | None, Field(description="Индекс")] = None
-    full_address: Annotated[
-        str | None, Field(description="Содержит улицу, дом, корпус, квартиру")
-    ] = None
+    full_address: Annotated[str | None, Field(description="Содержит улицу, дом, корпус, квартиру")] = None
     phone: Annotated[str | None, Field(description="Контактный телефон")] = None
     email: Annotated[str | None, Field(description="e-mail заявителя")] = None
-    organization_name: Annotated[
-        str | None, Field(description="Наименование организации-заявителя")
-    ] = None
-    signed: Annotated[
-        str | None, Field(description="Ф.И.О. лица, подписавшего документ")
-    ] = None
-    correspondent_org_number: Annotated[
-        str | None, Field(description="Исходящий рег. номер организации-корреспондента")
-    ] = None
-    date_doc_correspondent_org: Annotated[
-        datetime | None,
-        Field(description="Дата рег. номера организации-корреспондента"),
-    ] = None
-    subject_id: Annotated[UUID | None, Field(description="Идентификатор тематики")] = (
-        None
-    )
+    organization_name: Annotated[str | None, Field(description="Наименование организации-заявителя")] = None
+    signed: Annotated[str | None, Field(description="Ф.И.О. лица, подписавшего документ")] = None
+    correspondent_org_number: Annotated[str | None, Field(description="Исходящий рег. номер организации-корреспондента")] = None
+    date_doc_correspondent_org: Annotated[datetime | None, Field(description="Дата рег. номера организации-корреспондента")] = None
+    subject_id: Annotated[UUID | None, Field(description="Идентификатор тематики")] = None
     subject: SubjectDto | None = None
-    correspondent_appeal: Annotated[
-        str | None, Field(description="Организация, переславшая обращение")
-    ] = None
+    correspondent_appeal: Annotated[str | None, Field(description="Организация, переславшая обращение")] = None
     correspondent_appeal_id: UUID | None = None
-    index_date_cover_letter: Annotated[
-        str | None, Field(description="Дата и индекс сопроводительного письма")
-    ] = None
-    repeat_identical_appeals: Annotated[
-        list[RepeatIdenticalAppealDto] | None,
-        Field(description="Повторные и идентичные обращения"),
-    ] = None
+    index_date_cover_letter: Annotated[str | None, Field(description="Дата и индекс сопроводительного письма")] = None
+    repeat_identical_appeals: Annotated[list[RepeatIdenticalAppealDto] | None, Field(description="Повторные и идентичные обращения")] = None
     review_progress: Annotated[str | None, Field(description="Ход рассмотрения")] = None
-    solution_result_id: Annotated[
-        UUID | None, Field(description="Идентификатор результата решения")
-    ] = None
+    solution_result_id: Annotated[UUID | None, Field(description="Идентификатор результата решения")] = None
     solution_result: SolutionResultDto | None = None
-    nomenclature_affair_id: Annotated[
-        UUID | None, Field(description="Идентификатор номенклатуры дел")
-    ] = None
+    nomenclature_affair_id: Annotated[UUID | None, Field(description="Идентификатор номенклатуры дел")] = None
     nomenclature_affair: NomenclatureAffairDto | None = None
     reasonably: bool | None = None
     submission_form: SubmissionFormAppeal | None = None
@@ -1795,30 +1442,14 @@ class DocumentAppealDto(EdmsBaseDto):
 
 class DocumentProcessDto(EdmsBaseDto):
     id: UUID | None = None
-    current_id: Annotated[
-        UUID | None, Field(description="Идентификатор текущего этапа процесса")
-    ] = None
-    current: Annotated[
-        DocumentProcessItemDto | None, Field(description="Текущий этап процесса")
-    ] = None
-    next_id: Annotated[
-        UUID | None, Field(description="Идентификатор следующего этапа процесса")
-    ] = None
-    next: Annotated[
-        DocumentProcessItemDto | None, Field(description="Следующий этап процесса")
-    ] = None
-    document_id: Annotated[
-        UUID | None, Field(description="Идентификатор документа")
-    ] = None
-    items: Annotated[
-        list[DocumentProcessItemDto] | None, Field(description="Список этапов процесса")
-    ] = None
-    completed: Annotated[
-        bool | None, Field(description="Признак прошел ли документ все этапы")
-    ] = None
-    started: Annotated[
-        bool | None, Field(description="Признак начал ли документ движение по маршруту")
-    ] = None
+    current_id: Annotated[UUID | None, Field(description="Идентификатор текущего этапа процесса")] = None
+    current: Annotated[DocumentProcessItemDto | None, Field(description="Текущий этап процесса")] = None
+    next_id: Annotated[UUID | None, Field(description="Идентификатор следующего этапа процесса")] = None
+    next: Annotated[DocumentProcessItemDto | None, Field(description="Следующий этап процесса")] = None
+    document_id: Annotated[UUID | None, Field(description="Идентификатор документа")] = None
+    items: Annotated[list[DocumentProcessItemDto] | None, Field(description="Список этапов процесса")] = None
+    completed: Annotated[bool | None, Field(description="Признак прошел ли документ все этапы")] = None
+    started: Annotated[bool | None, Field(description="Признак начал ли документ движение по маршруту")] = None
 
 
 class DocumentProcessItemDto(EdmsBaseDto):
@@ -1827,36 +1458,16 @@ class DocumentProcessItemDto(EdmsBaseDto):
     order: Annotated[int | None, Field(description="Порядковый номер")] = None
     name: Annotated[str | None, Field(description="Наименование")] = None
     days: Annotated[int | None, Field(description="Количество дней исполнения")] = None
-    start: Annotated[
-        datetime | None, Field(description="Дата начала этапа процесса")
-    ] = None
-    end: Annotated[
-        datetime | None, Field(description="Дата окончания этапа процесса")
-    ] = None
+    start: Annotated[datetime | None, Field(description="Дата начала этапа процесса")] = None
+    end: Annotated[datetime | None, Field(description="Дата окончания этапа процесса")] = None
     file_sign: bool | None = None
-    completed: Annotated[
-        bool, Field(description="Признак был ли завершен этап процесса")
-    ] = False
-    started: Annotated[
-        bool, Field(description="Признак был ли начаты действия по этапу процесса")
-    ] = False
-    executors: Annotated[
-        list[DocumentProcessExecutorDto] | None,
-        Field(description="Список исполнителей этапа процесса"),
-    ] = None
-    process_id: Annotated[UUID | None, Field(description="Идентификатор процесса")] = (
-        None
-    )
-    next_executor_id: Annotated[
-        UUID | None, Field(description="ИД следующего исполнителя")
-    ] = None
-    action_queue_type: Annotated[
-        ProcessEmployeeActionQueueType | None,
-        Field(description="Тип исполнения процесса"),
-    ] = None
-    task_definition_key: Annotated[
-        str | None, Field(description="ИД таски из дефинишена")
-    ] = None
+    completed: Annotated[bool, Field(description="Признак был ли завершен этап процесса")] = False
+    started: Annotated[bool, Field(description="Признак был ли начаты действия по этапу процесса")] = False
+    executors: Annotated[list[DocumentProcessExecutorDto] | None, Field(description="Список исполнителей этапа процесса")] = None
+    process_id: Annotated[UUID | None, Field(description="Идентификатор процесса")] = None
+    next_executor_id: Annotated[UUID | None, Field(description="ИД следующего исполнителя")] = None
+    action_queue_type: Annotated[ProcessEmployeeActionQueueType | None, Field(description="Тип исполнения процесса")] = None
+    task_definition_key: Annotated[str | None, Field(description="ИД таски из дефинишена")] = None
     document_id: UUID | None = None
 
 
@@ -1875,29 +1486,15 @@ class DocumentResponsibleExecutorDto(EdmsBaseDto):
 
 
 class DocumentProcessExecutorDto(EdmsBaseDto):
-    id: Annotated[
-        UUID | None, Field(description="Идентификатор исполнителя процесса в документе")
-    ] = None
-    start: Annotated[datetime | None, Field(description="Дата начала исполнения")] = (
-        None
-    )
-    execution_end: Annotated[
-        datetime | None, Field(description="Дата окончания исполнения")
-    ] = None
-    end: Annotated[datetime | None, Field(description="Дата окончания исполнения")] = (
-        None
-    )
-    document_process_item_id: Annotated[
-        UUID | None, Field(description="Идентификатор этапа процесса")
-    ] = None
+    id: Annotated[UUID | None, Field(description="Идентификатор исполнителя процесса в документе")] = None
+    start: Annotated[datetime | None, Field(description="Дата начала исполнения")] = None
+    execution_end: Annotated[datetime | None, Field(description="Дата окончания исполнения")] = None
+    end: Annotated[datetime | None, Field(description="Дата окончания исполнения")] = None
+    document_process_item_id: Annotated[UUID | None, Field(description="Идентификатор этапа процесса")] = None
     comment: Annotated[str | None, Field(description="Комментарий")] = None
-    result: Annotated[
-        bool | None, Field(description="Признак результата исполнения")
-    ] = None
+    result: Annotated[bool | None, Field(description="Признак результата исполнения")] = None
     executor: Annotated[UserInfoDto | None, Field(description="Исполнитель")] = None
-    order: Annotated[
-        int | None, Field(description="Позиция исполнителя в процессе")
-    ] = None
+    order: Annotated[int | None, Field(description="Позиция исполнителя в процессе")] = None
 
 
 class ProcessItemExecutorEntry(EdmsBaseDto):
@@ -1907,20 +1504,10 @@ class ProcessItemExecutorEntry(EdmsBaseDto):
 
 
 class SimpleProcessAction(EdmsBaseDto):
-    result: Annotated[
-        bool,
-        Field(description="Признак результата действия положительный/отрицательный"),
-    ]
-    employee_id: Annotated[
-        UUID,
-        Field(
-            description="Идентификатор участника процесса от лица которого делается действие"
-        ),
-    ]
+    result: Annotated[bool, Field(description="Признак результата действия положительный/отрицательный")]
+    employee_id: Annotated[UUID, Field(description="Идентификатор участника процесса от лица которого делается действие")]
     comment: Annotated[str | None, Field(description="Комментарий")] = None
-    ignore_errors: Annotated[
-        bool, Field(description="Признак игнорирования ошибок")
-    ] = False
+    ignore_errors: Annotated[bool, Field(description="Признак игнорирования ошибок")] = False
 
 
 class PaperworkProcessAction(SimpleProcessAction):
@@ -1937,18 +1524,8 @@ class DocumentAttachmentSignEntry(EdmsBaseDto):
 
 
 class RedirectReviewProcessAction(EdmsBaseDto):
-    employee_id: Annotated[
-        UUID,
-        Field(
-            description="Идентификатор участника процесса от лица которого делается действие"
-        ),
-    ]
-    redirect_employee_id: Annotated[
-        UUID,
-        Field(
-            description="ИД сотрудника котору будет выдан доступ к этапу рассмотрения"
-        ),
-    ]
+    employee_id: Annotated[UUID, Field(description="Идентификатор участника процесса от лица которого делается действие")]
+    redirect_employee_id: Annotated[UUID, Field(description="ИД сотрудника котору будет выдан доступ к этапу рассмотрения")]
     comment: Annotated[str | None, Field(description="Комментарий")] = None
 
 
@@ -1956,16 +1533,11 @@ class RegistrationProcessRequest(EdmsBaseDto):
     employee_id: Annotated[UUID, Field(description="Идентификатор сотрудника")]
     ignore_errors: Annotated[bool, Field(description="Признак игнорирования ошибок")]
     reg_date: Annotated[datetime | None, Field(description="Рег. дата")] = None
-    profile_id: Annotated[
-        UUID | None,
-        Field(description="ИД Профиля, если нужна регистрация другим профилем"),
-    ] = None
+    profile_id: Annotated[UUID | None, Field(description="ИД Профиля, если нужна регистрация другим профилем")] = None
 
 
 class FreeRegistrationProcessRequest(EdmsBaseDto):
-    employee_id: Annotated[
-        UUID | None, Field(description="Идентификатор сотрудника")
-    ] = None
+    employee_id: Annotated[UUID | None, Field(description="Идентификатор сотрудника")] = None
     reg_date: Annotated[datetime, Field(description="Рег. дата")]
     reg_num: Annotated[str, Field(description="Рег. номер", min_length=1)]
     journal_number: int | None = None

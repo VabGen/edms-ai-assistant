@@ -270,10 +270,7 @@ def create_document_from_file_tool(deps: AppDeps) -> StructuredTool:
                 ),
             }
 
-        doc_data: dict[str, Any] = (
-            created.get("document") or created if "document" in created else created
-        )
-        document_id: str = str(doc_data.get("id", ""))
+        document_id: str = str(created.document.id)
 
         if not document_id:
             return {

@@ -215,12 +215,12 @@ class DocControlInput(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _format_control_types(types: list[dict[str, Any]]) -> str:
+def _format_control_types(types: list[Any]) -> str:
     """Format control types list for display to user."""
     lines = []
     for i, ct in enumerate(types, 1):
-        name = ct.get("name", "Без названия")
-        ct_id = ct.get("id", "?")
+        name = getattr(ct, "name", None) or "Без названия"
+        ct_id = str(getattr(ct, "id", "?"))
         lines.append(f"  {i}. «{name}» (id: {ct_id})")
     return "\n".join(lines)
 
@@ -274,40 +274,35 @@ async def _resolve_control_type(
     if control_type_name:
         name_lower = control_type_name.lower()
         for ct in ctrl_types:
-            ct_name = str(ct["name"]) if "name" in ct else "".lower()
+            ct_name = str(getattr(ct, "name", "")).lower()
             if name_lower in ct_name or ct_name in name_lower:
-                return str(ct["id"]), str(ct["name"]) if "name" in ct else "", None
+                return str(getattr(ct, "id", "")), str(getattr(ct, "name", "")), None
 
-        options = [
-            InterruptOption(
-                id=str(ct["id"]), label=str(ct["name"]) if "name" in ct else ""
-            )
-            for ct in ctrl_types
-        ]
-        resume = ask_human(
-            SelectInterrupt(
-                prompt=(
-                    f"Тип контроля «{control_type_name}» не найден. "
-                    "Выберите из доступных:"
+        return (
+            None,
+            None,
+            _need_input(
+                message=(
+                        f"Тип контроля «{control_type_name}» не найден. "
+                        f"Доступные типы контроля:\n" + _format_control_types(ctrl_types)
                 ),
-                options=options,
-            )
+                missing_fields=[
+                    {
+                        "field": "control_type_name",
+                        "description": "Название типа контроля",
+                        "available_options": [
+                            {"id": str(getattr(ct, "id", "")), "name": str(getattr(ct, "name", ""))}
+                            for ct in ctrl_types
+                        ],
+                    }
+                ],
+            ),
         )
-        if not isinstance(resume, SelectResume):
-            raise ToolAborted("Тип контроля не выбран")
-        ct = next((c for c in ctrl_types if str(c["id"]) == resume.selected_id), None)
-        if not ct:
-            return (
-                None,
-                None,
-                {"status": "error", "message": "Выбранный тип контроля не найден."},
-            )
-        return str(ct["id"]), str(ct["name"]) if "name" in ct else "", None
 
     # ── No type specified ──────────────────────────────────────────────────
     if len(ctrl_types) == 1:
         ct = ctrl_types[0]
-        ct_id, ct_name = str(ct["id"]), str(ct["name"]) if "name" in ct else ""
+        ct_id, ct_name = str(getattr(ct, "id", "")), str(getattr(ct, "name", ""))
         logger.info(
             "Control type auto-selected (single): id=%s... name=%s",
             ct_id[:8],
@@ -315,23 +310,26 @@ async def _resolve_control_type(
         )
         return ct_id, ct_name, None
 
-    options = [
-        InterruptOption(id=str(ct["id"]), label=str(ct["name"]) if "name" in ct else "")
-        for ct in ctrl_types
-    ]
-    resume = ask_human(
-        SelectInterrupt(prompt="Выберите тип контроля:", options=options)
+    return (
+        None,
+        None,
+        _need_input(
+            message=(
+                    "Укажите тип контроля. Доступные типы:\n"
+                    + _format_control_types(ctrl_types)
+            ),
+            missing_fields=[
+                {
+                    "field": "control_type_name",
+                    "description": "Название типа контроля",
+                    "available_options": [
+                    {"id": str(getattr(ct, "id", "")), "name": str(getattr(ct, "name", ""))}
+                        for ct in ctrl_types
+                    ],
+                }
+            ],
+        ),
     )
-    if not isinstance(resume, SelectResume):
-        raise ToolAborted("Тип контроля не выбран")
-    ct = next((c for c in ctrl_types if str(c["id"]) == resume.selected_id), None)
-    if not ct:
-        return (
-            None,
-            None,
-            {"status": "error", "message": "Выбранный тип контроля не найден."},
-        )
-    return str(ct["id"]), str(ct["name"]) if "name" in ct else "", None
 
 
 def _is_uuid(value: str) -> bool:
@@ -349,8 +347,8 @@ async def _find_employee(
     """
     try:
         emp = await employee_client.find_by_last_name_fts(token, last_name)
-        if emp and emp.get("id"):
-            return str(emp["id"])
+        if emp and emp.id:
+            return str(emp.id)
     except Exception as exc:
         logger.debug("Employee FTS failed for '%s': %s", last_name, exc)
     return None

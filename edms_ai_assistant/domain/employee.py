@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from edms_ai_assistant.domain.base import EdmsBaseDto
+from edms_ai_assistant.domain.base import EdmsBaseDto, SliceDto
 from edms_ai_assistant.domain.enums import (
     BlockedField,
     EmployeeCreateType,

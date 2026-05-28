@@ -19,7 +19,7 @@ EDMS AI Assistant — Access Grief Search Tool (DI Factory).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
 import httpx
 from langchain_core.runnables import RunnableConfig
@@ -117,9 +117,12 @@ def _format_grief_brief(grief: AccessGriefDto) -> dict[str, Any]:
 
 def _format_employee_grief(grief: EmployeeAccessGriefDto) -> dict[str, Any]:
     """Форматирует EmployeeAccessGriefDto."""
+    name = "—"
+    if grief.access_grief:
+        name = grief.access_grief.name or "—"
     return {
         "id": str(grief.id or ""),
-        "name": grief.access_grief.name or "—",
+        "name": name,
     }
 
 
@@ -141,12 +144,12 @@ def _format_grief_employee(raw: EmployeeAccessGriefDto) -> dict[str, Any]:
     full_name = " ".join(p for p in parts if p).strip() or "—"
 
     return {
-        "id": str(emp.get("id", "")),
+        "id": str(getattr(emp, "id", "")),
         "full_name": full_name,
-        "post": post.get("postName") or "—",
-        "department": department.get("name") or "—",
-        "active": emp.get("active"),
-        "fired": emp.get("fired"),
+        "post": getattr(post, "post_name", None) or "—",
+        "department": getattr(department, "name", None) or "—",
+        "active": getattr(emp, "active", None),
+        "fired": getattr(emp, "fired", None),
     }
 
 
@@ -199,12 +202,14 @@ async def _get_grief_employees(
         }
 
         grief_info = await grief_client.get_grief(token, grief_id)
-        raw_employees = await grief_client.get_grief_employees(
+        raw_employees_page = await grief_client.get_grief_employees(
             token, grief_id, pageable=pageable
         )
 
-        employees = [_format_grief_employee(e) for e in raw_employees]
-        grief_label = grief_name or (grief_info.name if grief_info else grief_id[:8])
+        employees = [_format_grief_employee(e) for e in raw_employees_page.content]
+        grief_label = grief_name or (
+            grief_info.name if grief_info else grief_id[:8]
+        )
 
         if not employees:
             return {

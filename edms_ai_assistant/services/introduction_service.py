@@ -9,6 +9,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from edms_ai_assistant.clients.document_client import DocumentClient
+    from edms_ai_assistant.services.resolution_service import ResolutionService
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.services.resolution_service import ResolutionService
 

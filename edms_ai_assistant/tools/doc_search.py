@@ -452,7 +452,7 @@ def _serialize_document(d: DocumentDto) -> dict[str, Any]:
         "id": str(d.id) if d.id else "",
         "reg_number": d.reg_number or getattr(d, "reserved_reg_number", None) or "—",
         "reg_date": (str(d.reg_date)[:10] if d.reg_date else "—"),
-        "category": str(getattr(d, "doc_category_constant", "—")),
+        "category": str(getattr(d, "doc_category_const", None) or getattr(d, "doc_category_constant", "—")),
         "short_summary": (d.short_summary or "")[:200],
         "author": author_name,
         "status": str(d.status or "—"),

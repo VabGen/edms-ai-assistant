@@ -299,13 +299,12 @@ def create_file_compare_tool(
 
         # ── 2. Получение метаданных документа и списка вложений ───────────────────
         try:
-            doc = await document_client.get_document_metadata(token, document_id)
-            if not doc:
+            doc_raw = await document_client.get_document_metadata(token, document_id)
+            if not doc_raw:
                 return {"status": "error", "message": "Документ не найден."}
-
-            # DocumentDto использует extra='allow', поэтому поля, не описанные явно,
-            # доступны через getattr с ключом в том же формате, что пришел из API (camelCase)
-            attachments: list[Any] = getattr(doc, "attachmentDocument", []) or []
+            from edms_ai_assistant.domain.document import DocumentDto
+            doc = DocumentDto.model_validate(doc_raw)
+            attachments: list[Any] = doc.attachment_document or []
         except Exception as exc:
             logger.error("Document metadata fetch failed: %s", exc, exc_info=True)
             return {
@@ -378,11 +377,11 @@ def create_file_compare_tool(
                 logger.error("HITL disambiguation failed: %s", exc, exc_info=True)
                 return {"status": "error", "message": f"Ошибка выбора вложения: {exc}"}
 
-        resolved_id = _att_id(target)
-        resolved_name = _att_name(target) or "attachment"
+        resolved_id = str(target.id) if target.id else ""
+        resolved_name = target.name or "attachment"
         resolved_suffix = Path(resolved_name).suffix.lower() or ".tmp"
 
-        att_doc_id: str = str(getattr(target, "documentId", None) or document_id)
+        att_doc_id: str = str(target.document_id or document_id)
         if att_doc_id and att_doc_id != document_id:
             logger.debug(
                 "Attachment belongs to version document_id=%s…, context=%s…",
