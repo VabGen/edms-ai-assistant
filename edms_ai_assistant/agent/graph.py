@@ -52,12 +52,18 @@ class GraphBuilder:
         self._tools = tools
         self._checkpointer = checkpointer
         self._model: Runnable[Any, BaseMessage] | None = None
-        # Explicit initialization in __init__ is safe as long as GraphBuilder
-        # is instantiated within a running event loop (e.g. FastAPI lifespan).
-        self._model_lock = asyncio.Lock()
+        self._model_lock: asyncio.Lock | None = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Thread-safe lazy-init lock to ensure it's attached to the running event loop."""
+        if self._model_lock is None:
+            # Note: in a single-threaded asyncio app, this is safe.
+            self._model_lock = asyncio.Lock()
+        return self._model_lock
 
     async def set_model_async(self, model: Runnable[Any, BaseMessage]) -> None:
-        async with self._model_lock:
+        async with self.lock:
             self._model = model
 
     def set_model(self, model: Runnable[Any, BaseMessage]) -> None:

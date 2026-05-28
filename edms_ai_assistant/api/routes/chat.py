@@ -275,26 +275,44 @@ async def _stream_graph_events(
     compliance_sent = False
     navigate_sent = False
 
-    async def _aiter_with_heartbeat(ait: AsyncIterator[Any]) -> AsyncIterator[tuple[str, Any]]:
-        while True:
-            try:
-                yield await asyncio.wait_for(ait.__anext__(), timeout=5.0)
-            except asyncio.TimeoutError:
-                yield "__heartbeat__", None
-            except StopAsyncIteration:
-                break
-
+    next_chunk_task = None
     try:
         astream = agent.graph.astream(
             payload,
             config=config,
             stream_mode=["updates", "custom"],
         )
+        ait = astream.__aiter__()
 
-        async for mode, chunk in _aiter_with_heartbeat(astream.__aiter__()):
-            if mode == "__heartbeat__":
+        # We use a persistent task to drive the iterator to avoid task cancellation
+        # on heartbeat timeouts. asyncio.wait_for is dangerous here.
+        next_chunk_task = asyncio.create_task(ait.__anext__())
+
+        while True:
+            done, pending = await asyncio.wait(
+                {next_chunk_task},
+                timeout=5.0,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if not done:
+                # Timeout hit — yield keepalive and keep waiting
                 yield SSE_KEEPALIVE.decode()
                 continue
+
+            try:
+                mode, chunk = await next_chunk_task
+                # Immediately schedule the next fetch
+                next_chunk_task = asyncio.create_task(ait.__anext__())
+            except StopAsyncIteration:
+                next_chunk_task = None
+                break
+            except Exception:
+                next_chunk_task = None
+                # The task itself failed; we'll catch it in the outer try block
+                raise
+
+            logger.debug("Stream event: mode=%s chunk_keys=%s", mode, list(chunk.keys()) if isinstance(chunk, dict) else type(chunk))
 
             # ── Custom channel: UIDirective ──────────────────────────────
             if mode == "custom":
@@ -364,11 +382,16 @@ async def _stream_graph_events(
                             logger.info("Navigate UI event sent: %s", nav_url)
 
             # ── Agent messages (text responses) ─────────────────────────
-            agent_update = chunk.get("agent")
-            if isinstance(agent_update, dict):
-                for msg in agent_update.get("messages", []) or []:
+            # Use a more generic scan for messages instead of just chunk.get("agent")
+            # to be resilient to node renaming.
+            for node_name, node_update in chunk.items():
+                if not isinstance(node_update, dict):
+                    continue
+                msgs = node_update.get("messages", []) or []
+                for msg in msgs:
                     rendered = _serialise_message(msg)
                     if rendered is not None and rendered["role"] == "assistant":
+                        logger.debug("Yielding assistant message from node=%s", node_name)
                         yield format_sse("message", rendered)
 
     except GraphInterrupt as exc:
@@ -413,6 +436,15 @@ async def _stream_graph_events(
             {"code": "INTERNAL", "message": str(exc), "thread_id": thread_id},
         )
         return
+    finally:
+        if next_chunk_task is not None and not next_chunk_task.done():
+            next_chunk_task.cancel()
+            try:
+                await next_chunk_task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+            except Exception:
+                logger.warning("Error cancelling stream task", exc_info=True)
 
     yield format_sse("done", {"thread_id": thread_id, "paused": False})
 
