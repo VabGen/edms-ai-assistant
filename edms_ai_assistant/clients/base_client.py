@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from edms_ai_assistant.core.exceptions import EdmsError
+
 if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
@@ -66,13 +68,8 @@ class EdmsBaseClient:
         try:
             return response.json()
         except json.JSONDecodeError:
-            logger.error(
-                "Failed to decode JSON from %s %s",
-                method,
-                response.url,
-                extra={"response_text": response.text[:300]},
-            )
-            return {}
+            logger.error("Failed to decode JSON from %s %s", method, response.url)
+            raise EdmsError(f"Invalid JSON response from EDMS, status: {response.status_code}")
 
     async def _request_dto(
         self,

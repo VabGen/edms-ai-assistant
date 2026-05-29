@@ -21,10 +21,8 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_document_id_from_config,
     get_token_from_config,
 )
-
+from langchain_core.runnables import RunnableConfig
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
     from edms_ai_assistant.core.deps import AppDeps
     from edms_ai_assistant.services.introduction_service import IntroductionService
 

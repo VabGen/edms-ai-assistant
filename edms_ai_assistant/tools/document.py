@@ -23,6 +23,7 @@ from edms_ai_assistant.services.document_service import (
     DocumentService,
 )
 from edms_ai_assistant.utils.format_utils import clean_dict
+from langchain_core.runnables import RunnableConfig
 
 def _truncate_analytics(data: Any, max_list_items: int = 5) -> Any:
     """Рекурсивно обрезает длинные списки в аналитике документа для LLM."""
@@ -36,8 +37,8 @@ def _truncate_analytics(data: Any, max_list_items: int = 5) -> Any:
         return [_truncate_analytics(i, max_list_items) for i in data]
     return data
 
-if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
+# if TYPE_CHECKING:
+#     from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

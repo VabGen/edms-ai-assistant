@@ -36,11 +36,10 @@ from edms_ai_assistant.summarizer.service import (
 from edms_ai_assistant.summarizer.structured.models import SummaryMode
 from edms_ai_assistant.tools.attachment import create_attachment_fetch_tool
 from edms_ai_assistant.utils.hash_utils import get_file_hash
+from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 

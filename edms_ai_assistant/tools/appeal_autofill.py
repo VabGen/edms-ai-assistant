@@ -18,10 +18,8 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_token_from_config,
 )
 
-if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
-    from edms_ai_assistant.core.deps import AppDeps
+from langchain_core.runnables import RunnableConfig
+from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
