@@ -10,21 +10,20 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from edms_ai_assistant.agent.agent import EdmsDocumentAgent
-from edms_ai_assistant.api.deps import AgentDep, DepsDep, get_agent, get_deps
+from edms_ai_assistant.agent.agent import EdmsDocumentAgent  # noqa: TC001
+from edms_ai_assistant.api.deps import AgentDep, DepsDep  # noqa: TC001
 from edms_ai_assistant.api.helpers import (
     cleanup_file,
     is_system_attachment,
     resolve_user_context,
     unwrap_text_from_agent_result,
 )
-from edms_ai_assistant.core.deps import AppDeps
 from edms_ai_assistant.model import AssistantResponse, SummarizeInput, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 from edms_ai_assistant.summarizer.errors import SummarizerError

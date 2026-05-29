@@ -113,6 +113,7 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
         group_names: list[str] | None = None,
         personal_group_names: list[str] | None = None,
         include_subordinates: bool | None = None,
+        responsible_employee_id: str | None = None,
         planed_date_end: str | None = None,
         task_type: TaskType | None = None,
         selected_employee_ids: list[str] | None = None,

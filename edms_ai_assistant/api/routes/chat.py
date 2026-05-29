@@ -26,9 +26,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphInterrupt, GraphRecursionError
@@ -39,11 +39,10 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptPayloadAdapter,
     ResumeValueAdapter,
 )
-from edms_ai_assistant.api.deps import AgentDep, DepsDep
+from edms_ai_assistant.api.deps import AgentDep, DepsDep  # noqa: TC001
 from edms_ai_assistant.api.helpers import resolve_user_context
 from edms_ai_assistant.api.sse import SSE_KEEPALIVE, format_sse
 from edms_ai_assistant.api.sse_events import (
-    _parse_tool_content,
     build_compliance_sse_event,
     build_navigate_sse_event,
     extract_compliance_from_tool_message,
@@ -57,7 +56,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from edms_ai_assistant.agent.agent import EdmsDocumentAgent
-    from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +287,7 @@ async def _stream_graph_events(
         next_chunk_task = asyncio.create_task(ait.__anext__())
 
         while True:
-            done, pending = await asyncio.wait(
+            done, _pending = await asyncio.wait(
                 {next_chunk_task},
                 timeout=5.0,
                 return_when=asyncio.FIRST_COMPLETED
@@ -428,10 +426,9 @@ async def _stream_graph_events(
     except asyncio.CancelledError:
         logger.info("Stream cancelled for thread=%s", thread_id)
         # Attempt to send terminal marker if possible
-        try:
+        import contextlib
+        with contextlib.suppress(Exception):
             yield format_sse("done", {"thread_id": thread_id, "paused": False})
-        except Exception:
-            pass
         raise
     except Exception as exc:
         logger.exception("chat stream failed for thread=%s", thread_id)
