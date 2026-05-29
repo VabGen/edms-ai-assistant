@@ -133,8 +133,13 @@ function StructuredOutputRenderer({
             })
 
             // Give the agent ~8s to call doc_update_field before reloading the page.
-            window.setTimeout(() => {
-                void sendMessage('reloadActiveTab', undefined)
+            // Use a stable identifier for debouncing if possible, or just standard timeout.
+            const timeoutId = (window as any).__reload_timeout_id;
+            if (timeoutId) window.clearTimeout(timeoutId);
+
+            (window as any).__reload_timeout_id = window.setTimeout(() => {
+                void sendMessage('reloadActiveTab', undefined);
+                (window as any).__reload_timeout_id = null;
             }, 8000)
         },
         [messageId, updateMessage]
