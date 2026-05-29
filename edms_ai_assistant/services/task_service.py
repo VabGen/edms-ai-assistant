@@ -93,7 +93,7 @@ class TaskService:
         # Формируем DTO
         executors = [
             CreateTaskRequestExecutor(
-                employeeId=emp_id, responsible=(emp_id == responsible_id)
+                employee_id=emp_id, responsible=(emp_id == responsible_id)
             )
             for emp_id in emp_ids
         ]
@@ -128,7 +128,7 @@ class TaskService:
         responsible_id = responsible_employee_id or employee_ids[0]
         executors = [
             CreateTaskRequestExecutor(
-                employeeId=emp_id, responsible=(emp_id == responsible_id)
+                employee_id=emp_id, responsible=(emp_id == responsible_id)
             )
             for emp_id in employee_ids
         ]
@@ -169,7 +169,7 @@ class TaskService:
 
         executors = [
             CreateTaskRequestExecutor(
-                employeeId=emp_id, responsible=(emp_id == responsible_id)
+                employee_id=emp_id, responsible=(emp_id == responsible_id)
             )
             for emp_id in emp_ids
         ]
@@ -202,10 +202,10 @@ class TaskService:
         )
 
         task_request = CreateTaskRequest(
-            taskText=formatted_text,
-            planedDateEnd=planed_date_end,
+            task_text=formatted_text,
+            planed_date_end=planed_date_end,
             type=task_type,
-            periodTask=False,
+            period_task=False,
             endless=False,
             executors=executors,
         )

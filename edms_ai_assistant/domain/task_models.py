@@ -17,9 +17,6 @@ class CreateTaskRequestExecutor(EdmsBaseDto):
     employee_id: Annotated[
         UUID | None, Field(description="UUID сотрудника-исполнителя")
     ] = None
-    employeeId: Annotated[
-        UUID | None, Field(description="Alias for employee_id", alias="employeeId")
-    ] = None
     responsible: Annotated[
         bool | None, Field(description="Является ли сотрудник ответственным")
     ] = None
