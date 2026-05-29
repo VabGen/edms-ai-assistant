@@ -29,10 +29,11 @@ from edms_ai_assistant.tools.attachment import (
     _get_attachment_name,
     _resolve_attachment,
 )
-from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
     from edms_ai_assistant.clients.document_client import DocumentClient
     from edms_ai_assistant.core.deps import AppDeps

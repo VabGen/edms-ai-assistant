@@ -118,58 +118,75 @@ class ChatStateResponse(BaseModel):
 async def _ensure_clean_state(
     agent: EdmsDocumentAgent,
     config: dict[str, Any],
+    force: bool = False,
 ) -> None:
     """Repair the graph state if it contains dangling tool_calls.
 
-    This happens if a previous stream was aborted (e.g. user clicked Stop)
-    while the LLM had requested a tool call or while the tool node was
-    executing.  Without this repair the thread becomes permanently unusable.
+    Dangling tool_calls occur when an AIMessage with tool_calls is not followed
+    by corresponding ToolMessages. This happens on stream aborts or when
+    starting a new turn on a suspended (interrupted) thread.
 
-    IMPORTANT: If there are pending interrupts, the graph is NOT corrupted —
-    it is legitimately waiting for a HITL resume.  Do NOT repair in that case,
-    otherwise we break the interrupt/resume cycle and cause infinite loops.
+    Args:
+        agent: The agent instance.
+        config: The thread config.
+        force: If True, cleanup even if there are pending interrupts (used when
+               starting a new turn).
     """
     snapshot = await agent.graph.aget_state(config)
     if not snapshot or not snapshot.values:
         return
 
-    for task in getattr(snapshot, "tasks", []) or []:
-        for itr in getattr(task, "interrupts", []) or []:
-            if isinstance(itr, Interrupt):
-                logger.debug(
-                    "Pending interrupt found (id=%s) — skipping state repair",
-                    getattr(itr, "id", "?"),
-                )
-                return
+    # Check for interrupts if not forcing
+    if not force:
+        for task in getattr(snapshot, "tasks", []) or []:
+            for itr in getattr(task, "interrupts", []) or []:
+                if isinstance(itr, Interrupt):
+                    logger.debug("Pending interrupt found — skipping state repair")
+                    return
 
     messages = snapshot.values.get("messages", [])
     if not messages:
         return
 
-    last_msg = messages[-1]
-    if not isinstance(last_msg, AIMessage) or not last_msg.tool_calls:
-        return
+    # Identify all AIMessages with tool calls that lack ToolMessages
+    tool_messages_to_add = []
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, AIMessage) or not msg.tool_calls:
+            continue
 
-    tool_messages = []
-    for tc in last_msg.tool_calls:
-        tool_messages.append(
-            ToolMessage(
-                content="Выполнение инструмента было прервано пользователем или системой.",
-                tool_call_id=tc["id"],
-                name=tc.get("name"),
-                status="error",
-            )
+        expected_ids = {tc["id"] for tc in msg.tool_calls}
+        found_ids = set()
+
+        # Look ahead for ToolMessages
+        for j in range(i + 1, len(messages)):
+            candidate = messages[j]
+            if isinstance(candidate, ToolMessage) and candidate.tool_call_id in expected_ids:
+                found_ids.add(candidate.tool_call_id)
+            elif isinstance(candidate, AIMessage):
+                break  # Next turn started
+
+        missing_ids = expected_ids - found_ids
+        if missing_ids:
+            logger.warning("Found dangling tool calls in history at pos %d: %s", i, missing_ids)
+            for tc in msg.tool_calls:
+                if tc["id"] in missing_ids:
+                    tool_messages_to_add.append(
+                        ToolMessage(
+                            content="Выполнение прервано или перекрыто новым запросом.",
+                            tool_call_id=tc["id"],
+                            name=tc.get("name"),
+                            status="error",
+                        )
+                    )
+
+    if tool_messages_to_add:
+        # We update the state. Using as_node="tools" is usually best for ToolMessages.
+        agent.graph.update_state(
+            config,
+            {"messages": tool_messages_to_add},
+            as_node="tools",
         )
-
-    agent.graph.update_state(
-        config,
-        {"messages": tool_messages},
-        as_node="tools",
-    )
-    logger.warning(
-        "Repaired dangling tool calls: %s",
-        [tc["id"] for tc in last_msg.tool_calls],
-    )
+        logger.info("Successfully repaired %d dangling tool calls", len(tool_messages_to_add))
 
 
 def _make_config(
@@ -494,7 +511,9 @@ async def chat_stream(
     )
 
     config = _make_config(thread_id, body.user_token, str(user_id), body.context_ui_id)
-    await _ensure_clean_state(agent, config)
+    # When starting a NEW turn, we ALWAYS force cleanup of dangling calls
+    # even if there were interrupts, as the user is choosing to ignore them.
+    await _ensure_clean_state(agent, config, force=True)
 
     return StreamingResponse(
         _stream_graph_events(agent, inputs, config, thread_id),
@@ -542,7 +561,8 @@ async def chat_resume(
 
     resume_value = validated.model_dump(mode="json")
 
-    await _ensure_clean_state(agent, config)
+    # When RESUMING, we only fix if it's actually dangling (not interrupted)
+    await _ensure_clean_state(agent, config, force=False)
 
     return StreamingResponse(
         _stream_graph_events(

@@ -19,9 +19,10 @@ from edms_ai_assistant.agent.runnable_utils import (
 )
 from edms_ai_assistant.domain.document import ProcessActionWithSign, SimpleProcessAction
 from edms_ai_assistant.domain.enums import DocumentProcessType
-from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)

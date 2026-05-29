@@ -46,6 +46,13 @@ class EdmsBaseClient:
         # Рекурсивно конвертируем UUID в строки, если json_data — это dict/list
         if json_data is not None:
             json_data = self._ensure_json_serializable(json_data)
+            if self._settings.DEBUG:
+                logger.debug(
+                    "Outgoing JSON payload to %s %s: %s",
+                    method,
+                    endpoint,
+                    json.dumps(json_data, ensure_ascii=False),
+                )
 
         response = await self._transport.request(
             method,

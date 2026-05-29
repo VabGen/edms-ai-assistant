@@ -105,10 +105,12 @@ class IntroductionService:
         normalized_comment = self._normalize_comment(comment)
 
         # Подготавливаем операции для DOCUMENT_INTRODUCTION_CREATE
+        # Примечание: некоторые версии бэкенда ожидают 'executorIds' вместо 'executorListIds'
         operations = [
             {
                 "operationType": "DOCUMENT_INTRODUCTION_CREATE",
                 "body": {
+                    "executorIds": [str(eid) for eid in employee_ids],
                     "executorListIds": [str(eid) for eid in employee_ids],
                     "comment": normalized_comment,
                 },

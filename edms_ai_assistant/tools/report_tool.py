@@ -26,9 +26,10 @@ from edms_ai_assistant.domain.report import (
     ReportTaskFilter,
     VolumeOfDocumentFlowReportFilter,
 )
-from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)

@@ -13,7 +13,9 @@ from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field
 
 from edms_ai_assistant.agent.hitl_primitives import ToolAborted, ask_human
-from langchain_core.runnables import RunnableConfig
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 from edms_ai_assistant.agent.interrupt_contract import (
     CardSelectInterrupt,
     CardSelectResume,

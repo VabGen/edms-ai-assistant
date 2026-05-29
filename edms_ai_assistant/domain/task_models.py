@@ -30,7 +30,11 @@ class CreateTaskRequest(EdmsBaseDto):
 
     task_text: Annotated[str, Field(description="Текст поручения", min_length=1)]
     planed_date_end: Annotated[
-        datetime | None, Field(description="Плановая дата окончания")
+        datetime | None,
+        Field(
+            description="Плановая дата окончания",
+            alias="planedDateEnd",  # Keep original, but ensure alias is generated
+        ),
     ] = None
     author_id: Annotated[UUID | None, Field(description="Автор поручения")] = None
     type: Annotated[TaskType, Field(description="Тип поручения")] = TaskType.GENERAL
@@ -42,7 +46,7 @@ class CreateTaskRequest(EdmsBaseDto):
     period: Annotated[
         PeriodTaskInterval | None, Field(description="Интервал создания поручения")
     ] = None
-    create_task_for_each_executors: bool | None = False
+    create_task_for_each_executors: bool = False
     control_type_id: UUID | None = None
     control_employee_ids: list[UUID] | None = None
     control_plan_date_end: datetime | None = None

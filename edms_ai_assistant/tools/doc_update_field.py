@@ -17,9 +17,10 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_token_from_config,
 )
 from edms_ai_assistant.utils.json_encoder import CustomJSONEncoder
-from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from edms_ai_assistant.clients.document_client import DocumentClient
 
 logger = logging.getLogger(__name__)
