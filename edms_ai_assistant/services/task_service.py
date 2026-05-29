@@ -211,9 +211,20 @@ class TaskService:
         )
 
         try:
-            success = await self._task_client.create_tasks_batch(
-                token, document_id, [task_request]
-            )
+            if len([task_request]) == 1:
+                # Use single task creation endpoint for better permission compatibility
+                created_task = await self._task_client.create_task(
+                    token, document_id, task_request
+                )
+                success = created_task is not None
+            else:
+                # Should not happen currently as we only pass 1 task here,
+                # but good for future-proofing
+                results = await self._task_client.create_tasks_batch(
+                    token, document_id, [task_request]
+                )
+                success = bool(results)
+
             if success:
                 return TaskCreationResult(
                     success=True,

@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from edms_ai_assistant.clients.transport import IAsyncTransport
     from edms_ai_assistant.config import EdmsSettings
     from edms_ai_assistant.domain.task_models import (
-        CreateTaskBatchRequest,
         CreateTaskRequest,
         ExecuteTaskRequest,
         TaskRevisionRequest,
@@ -189,23 +188,20 @@ class TaskClient(EdmsBaseClient):
             f"api/document/{document_id}/task",
             token,
             TaskDto,
-            json_data=request.model_dump(by_alias=True, mode="json"),
+            json_data=request.model_dump(by_alias=True, mode="json", exclude_none=True),
         )
 
     async def create_tasks_batch(
         self, token: str, document_id: str | UUID, tasks: list[CreateTaskRequest]
     ) -> list[TaskDto]:
         """Creates a batch of tasks in a document."""
-        from edms_ai_assistant.domain.task_models import CreateTaskBatchRequest
-
         logger.info(f"Creating batch of tasks for document {document_id}")
-        batch = CreateTaskBatchRequest(tasks=tasks)
         return await self._request_list(
             "POST",
             f"api/document/{document_id}/task/batch",
             token,
             TaskDto,
-            json_data=batch.model_dump(by_alias=True, mode="json"),
+            json_data=[t.model_dump(by_alias=True, mode="json", exclude_none=True) for t in tasks],
         )
 
     async def update_task(
