@@ -48,39 +48,31 @@ _ALLOWED_APPEAL_FIELDS: dict[str, str] = {
 
 
 class UpdateDocumentFieldInput(BaseModel):
-    """Validated input for updating a single document field."""
+    """Validated input for updating document fields."""
 
-    field_name: str = Field(
+    updates: dict[str, str] = Field(
         ...,
         description=(
-            "Имя поля для обновления. Допустимые значения:\n"
+            "Словарь полей и их новых значений. Допустимые ключи:\n"
             "Основные: shortSummary (заголовок), note, pages, additionalPages, exemplarCount\n"
             "Обращение: fullAddress, phone, email, index, indexDateCoverLetter, signed, "
             "correspondentOrgNumber, organizationName, fioApplicant, reviewProgress"
         ),
     )
-    field_value: str = Field(
-        ...,
-        description="Новое значение поля",
-        min_length=1,
-        max_length=500,
-    )
 
-    @field_validator("field_name")
+    @field_validator("updates")
     @classmethod
-    def validate_field_name(cls, v: str) -> str:
+    def validate_updates(cls, v: dict[str, str]) -> dict[str, str]:
+        if not v:
+            raise ValueError("Список обновлений не может быть пустым")
         allowed = set(_ALLOWED_FIELDS) | set(_ALLOWED_APPEAL_FIELDS)
-        if v not in allowed:
-            raise ValueError(
-                f"Поле '{v}' не поддерживается. "
-                f"Допустимые: {', '.join(sorted(allowed))}"
-            )
-        return v
-
-    @field_validator("field_value")
-    @classmethod
-    def clean_value(cls, v: str) -> str:
-        return v.strip()
+        for field_name in v:
+            if field_name not in allowed:
+                raise ValueError(
+                    f"Поле '{field_name}' не поддерживается. "
+                    f"Допустимые: {', '.join(sorted(allowed))}"
+                )
+        return {k: str(val).strip() for k, val in v.items()}
 
 
 def _enum_value(val: Any) -> Any:
@@ -216,40 +208,25 @@ async def _fetch_appeal_required_fields(
 def create_doc_update_field_tool(
     document_client: DocumentClient,
 ) -> StructuredTool:
-    """Фабрика для создания инструмента обновления поля документа.
-
-    Args:
-        document_client: Клиент для работы с документами EDMS.
-
-    Returns:
-        Настроенный StructuredTool, готовый к регистрации в агенте.
-    """
+    """Фабрика для создания инструмента обновления полей документа."""
 
     async def doc_update_field(
-        field_name: str,
-        field_value: str,
+        updates: dict[str, str],
         config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> dict[str, Any]:
-        """Обновляет одно поле документа через API EDMS.
+        """Обновляет поля документа через API EDMS (поддерживает массовое обновление).
 
-        Используй когда пользователь просит:
-        - «Поменяй заголовок на "Обращение о..."»  -> field_name="shortSummary"
-        - «Измени примечание»                        -> field_name="note"
-        - «Поправь адрес заявителя»                  -> field_name="fullAddress"
-        - «Обнови телефон в карточке»                -> field_name="phone"
-        - «Исправь почтовый индекс»                  -> field_name="index"
-        - «Измени ФИО подписанта»                    -> field_name="signed"
+        Передавай словарь полей, которые нужно изменить. Это эффективнее, чем вызывать
+        инструмент для каждого поля отдельно, так как вызывает одну перезагрузку страницы.
+
+        Пример: updates={"phone": "+37529...", "email": "test@mail.ru", "index": "220000"}
+
+        Допустимые поля:
+        - Основные: shortSummary (заголовок), note, pages, additionalPages, exemplarCount
+        - Обращение: fullAddress, phone, email, index, indexDateCoverLetter, signed,
+          correspondentOrgNumber, organizationName, fioApplicant, reviewProgress
 
         ВАЖНО: Токен авторизации и ID документа передаются системой АВТОМАТИЧЕСКИ.
-        Тебе НЕ НУЖНО запрашивать их у пользователя или передавать в аргументах.
-
-        Args:
-            field_name: Имя поля (см. описание).
-            field_value: Новое значение.
-            config: LangGraph RunnableConfig (инжектируется автоматически).
-
-        Returns:
-            Dict со статусом операции.
         """
         try:
             token = get_token_from_config(config)
@@ -258,51 +235,59 @@ def create_doc_update_field_tool(
             logger.error("Missing context in tool call: %s", exc)
             return {"status": "error", "message": str(exc)}
 
-        if field_name == "shortSummary" and len(field_value) > 80:
-            field_value = field_value[:80]
-            logger.warning("shortSummary обрезан до 80 символов: '%s'", field_value)
-
-        is_appeal_field = field_name in _ALLOWED_APPEAL_FIELDS
-        operation_type = (
-            "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE"
-            if is_appeal_field
-            else "DOCUMENT_MAIN_FIELDS_UPDATE"
-        )
-
-        value: Any = field_value
-        if field_name in ("pages", "additionalPages", "exemplarCount"):
-            try:
-                value = int(field_value)
-            except ValueError:
-                return {
-                    "status": "error",
-                    "message": f"Поле '{field_name}' должно быть числом, получено: '{field_value}'",
-                }
-
         logger.info(
-            "doc_update_field: %s.%s = %r (operation=%s)",
+            "doc_update_field: processing batch update for %s: %s",
             document_id[:8],
-            field_name,
-            value,
-            operation_type,
+            list(updates.keys()),
         )
+
+        main_updates: dict[str, Any] = {}
+        appeal_updates: dict[str, Any] = {}
+
+        for name, val in updates.items():
+            if name == "shortSummary" and len(val) > 80:
+                val = val[:80]
+
+            processed_val: Any = val
+            if name in ("pages", "additionalPages", "exemplarCount"):
+                try:
+                    processed_val = int(val)
+                except ValueError:
+                    return {
+                        "status": "error",
+                        "message": f"Поле '{name}' должно быть числом, получено: '{val}'",
+                    }
+
+            if name in _ALLOWED_APPEAL_FIELDS:
+                appeal_updates[name] = processed_val
+            else:
+                main_updates[name] = processed_val
 
         try:
-            if is_appeal_field:
-                existing = await _fetch_appeal_required_fields(
+            operations = []
+
+            if main_updates:
+                existing_main = await _fetch_main_required_fields(
                     document_client, token, document_id
                 )
-            else:
-                existing = await _fetch_main_required_fields(
+                operations.append({
+                    "operationType": "DOCUMENT_MAIN_FIELDS_UPDATE",
+                    "body": {**existing_main, **main_updates}
+                })
+
+            if appeal_updates:
+                existing_appeal = await _fetch_appeal_required_fields(
                     document_client, token, document_id
                 )
+                operations.append({
+                    "operationType": "DOCUMENT_MAIN_FIELDS_APPEAL_UPDATE",
+                    "body": {**existing_appeal, **appeal_updates}
+                })
 
-            body: dict[str, Any] = {**existing, field_name: value}
+            if not operations:
+                return {"status": "info", "message": "Нет полей для обновления."}
 
-            payload = [{"operationType": operation_type, "body": body}]
-            json_payload = json.loads(json.dumps(payload, cls=CustomJSONEncoder))
-
-            logger.debug("doc_update_field payload keys: %s", list(body.keys()))
+            json_payload = json.loads(json.dumps(operations, cls=CustomJSONEncoder))
 
             success = await document_client.execute_document_operations(
                 token=token,
@@ -313,34 +298,31 @@ def create_doc_update_field_tool(
             if not success:
                 return {
                     "status": "error",
-                    "message": f"❌ Не удалось обновить поле «{field_name}»: API вернул ошибку",
+                    "message": "❌ Не удалось обновить поля: API вернул ошибку",
                 }
 
-            field_label = (
-                _ALLOWED_FIELDS.get(field_name)
-                or _ALLOWED_APPEAL_FIELDS.get(field_name)
-                or field_name
-            )
+            labels = []
+            for k in updates:
+                label = _ALLOWED_FIELDS.get(k) or _ALLOWED_APPEAL_FIELDS.get(k) or k
+                labels.append(f"«{label}»")
 
-            logger.info("doc_update_field success: %s = %r", field_name, value)
             return {
                 "status": "success",
-                "message": f"✅ Поле «{field_label}» успешно обновлено: «{value}».",
-                "field_name": field_name,
-                "new_value": value,
+                "message": f"✅ Успешно обновлены поля: {', '.join(labels)}.",
+                "updated_fields": list(updates.keys()),
                 "requires_reload": True,
             }
 
         except Exception as exc:
-            logger.error("doc_update_field failed: %s", exc, exc_info=True)
+            logger.error("doc_update_field batch failed: %s", exc, exc_info=True)
             return {
                 "status": "error",
-                "message": f"❌ Не удалось обновить поле «{field_name}»: {exc}",
+                "message": f"❌ Ошибка при обновлении полей: {exc}",
             }
 
     return StructuredTool.from_function(
         coroutine=doc_update_field,
         name="doc_update_field",
-        description="Обновляет одно поле документа через API EDMS.",
+        description="Обновляет поля документа через API EDMS (поддерживает массовое обновление).",
         args_schema=UpdateDocumentFieldInput,
     )

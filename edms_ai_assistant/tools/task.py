@@ -80,6 +80,10 @@ class TaskCreateInput(BaseModel):
             "Подчинённые — сотрудники подразделения, которым руководит пользователь."
         ),
     )
+    responsible_employee_id: str | None = Field(
+        None,
+        description="UUID ответственного исполнителя, если он уже известен.",
+    )
     planed_date_end: str | None = Field(
         None, description="Плановая дата окончания в ISO 8601"
     )
@@ -159,6 +163,13 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
 
         try:
             try:
+                # ================================================================
+                # Шаг 0: Подготовка ответственного
+                # ================================================================
+                resp_id: UUID | None = (
+                    UUID(responsible_employee_id) if responsible_employee_id else None
+                )
+
                 # ================================================================
                 # Шаг 1: Резолвинг массовых исполнителей
                 # ================================================================
@@ -274,6 +285,7 @@ def create_task_tool(deps: AppDeps) -> StructuredTool:
                     task_text=task_text,
                     employee_ids=unique_uuids,
                     planed_date_end=deadline,
+                    responsible_employee_id=resp_id,
                     task_type=effective_task_type,
                 )
 

@@ -1,16 +1,14 @@
 # edms_ai_assistant/domain/task_models.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from datetime import datetime
+from typing import Annotated, Any
+from uuid import UUID
 
 from pydantic import Field
 
 from edms_ai_assistant.domain.base import EdmsBaseDto
 from edms_ai_assistant.domain.enums import PeriodTaskInterval, TaskType
-
-if TYPE_CHECKING:
-    from datetime import datetime
-    from uuid import UUID
 
 
 class CreateTaskRequestExecutor(EdmsBaseDto):
@@ -107,3 +105,15 @@ class TaskCreationResult(EdmsBaseDto):
         default=None,
         description="List of ambiguous employee matches requiring user selection",
     )
+
+
+# ─── Model Rebuild ───────────────────────────────────────────────────────────
+
+CreateTaskRequestExecutor.model_rebuild()
+CreateTaskRequest.model_rebuild()
+UpdateTaskRequest.model_rebuild()
+ExecuteTaskRequest.model_rebuild()
+TaskRevisionRequest.model_rebuild()
+ChangeResponsibleStatus.model_rebuild()
+CreateTaskBatchRequest.model_rebuild()
+TaskCreationResult.model_rebuild()
