@@ -22,10 +22,9 @@ from edms_ai_assistant.services.search_utils import (
     get_merged_name_parts,
     merge_name_parts,
 )
+from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
     from edms_ai_assistant.clients.department_client import DepartmentClient
     from edms_ai_assistant.domain.employee import EmployeeDto
     from edms_ai_assistant.clients.employee_client import EmployeeClient

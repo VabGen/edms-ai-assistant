@@ -23,10 +23,9 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_token_from_config,
 )
 from edms_ai_assistant.domain.task_models import TaskType
+from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
     from edms_ai_assistant.core.deps import AppDeps
 
 logger = logging.getLogger(__name__)

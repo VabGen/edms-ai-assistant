@@ -40,10 +40,9 @@ from edms_ai_assistant.agent.interrupt_contract import (
     InterruptCard,
 )
 from edms_ai_assistant.agent.runnable_utils import get_token_from_config
+from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
     from edms_ai_assistant.clients.document_client import DocumentClient
     from edms_ai_assistant.domain.document import DocumentDto
 

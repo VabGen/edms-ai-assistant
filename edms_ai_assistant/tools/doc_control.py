@@ -49,10 +49,9 @@ from edms_ai_assistant.agent.runnable_utils import (
     get_token_from_config,
 )
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
     from edms_ai_assistant.clients.control_client import ControlClient
     from edms_ai_assistant.clients.employee_client import EmployeeClient
 

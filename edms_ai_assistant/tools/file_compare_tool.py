@@ -32,10 +32,9 @@ from edms_ai_assistant.agent.runnable_utils import (
 )
 from edms_ai_assistant.services.file_processor import FileProcessorService
 from edms_ai_assistant.utils.regex_utils import UUID_RE
+from langchain_core.runnables import RunnableConfig
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
     from edms_ai_assistant.clients.attachment_client import AttachmentClient
     from edms_ai_assistant.clients.document_client import DocumentClient
 
