@@ -55,13 +55,19 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
 
 
 def _run_sync_migrations() -> None:
-    """Синхронный запуск миграций Alembic через subprocess."""
+    """Синхронный запуск миграций Alembic через subprocess.
+    
+    Raises:
+        RuntimeError: If alembic.ini not found or migration fails.
+        subprocess.TimeoutExpired: If migration takes longer than timeout.
+    """
     project_root = Path(__file__).resolve().parent.parent.parent
     alembic_ini_path = project_root / "alembic.ini"
 
     if not alembic_ini_path.exists():
-        logger.error(f"alembic.ini not found at {alembic_ini_path}")
-        return
+        error_msg = f"alembic.ini not found at {alembic_ini_path}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
     logger.info(f"Attempting to run Alembic migrations from {project_root}...")
 
@@ -80,16 +86,22 @@ def _run_sync_migrations() -> None:
             if result.stdout:
                 logger.debug(f"Alembic output:\n{result.stdout.strip()}")
         else:
-            logger.error(
-                f"Alembic migration failed with return code {result.returncode}"
+            error_msg = (
+                f"Alembic migration failed with return code {result.returncode}. "
+                f"stderr: {result.stderr.strip() if result.stderr else 'None'}. "
+                f"stdout: {result.stdout.strip() if result.stdout else 'None'}."
             )
-            logger.error(f"Alembic stderr:\n{result.stderr.strip()}")
-            logger.error(f"Alembic stdout:\n{result.stdout.strip()}")
-            raise RuntimeError("Alembic migration failed")
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
+    except subprocess.TimeoutExpired as e:
+        error_msg = f"Alembic migration timed out after {e.timeout}s"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg) from e
     except Exception as e:
-        logger.error(f"Failed to run Alembic subprocess: {e!r}")
-        raise
+        error_msg = f"Failed to run Alembic subprocess: {e!r}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg) from e
 
 
 async def _run_async_migrations() -> None:
@@ -101,22 +113,38 @@ async def _run_async_migrations() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Database Initialization  DELETE FROM alembic_version;
+# Database Initialization
 # ---------------------------------------------------------------------------
 
 
 async def init_db():
-    """Инициализация БД: применение миграций Alembic и проверка подключения."""
+    """Инициализация БД: применение миграций Alembic и проверка подключения.
+    
+    Raises:
+        RuntimeError: If migration fails or database connection cannot be established.
+    """
 
     # ── 1. Запуск миграций ────────────────────────────────────────────
-    with contextlib.suppress(Exception):
+    logger.info("Running database migrations...")
+    try:
         await _run_async_migrations()
+        logger.info("Database migrations completed successfully")
+    except Exception as exc:
+        logger.error("Database migration failed", exc_info=True)
+        raise RuntimeError(
+            f"Failed to apply database migrations: {exc}. "
+            "Application cannot start without compatible database schema."
+        ) from exc
 
     # ── 2. Проверка подключения ───────────────────────────────────────
+    logger.info("Verifying database connection...")
     async with engine.connect() as conn:
         try:
             await conn.execute(text("SELECT 1"))
-            logger.info("Database connection established.")
-        except Exception as e:
-            logger.error(f"Database connection failed: {e}")
-            raise
+            logger.info("Database connection established and verified.")
+        except Exception as exc:
+            logger.error("Database connection verification failed", exc_info=True)
+            raise RuntimeError(
+                f"Database connection check failed: {exc}. "
+                "Cannot start application without database connectivity."
+            ) from exc

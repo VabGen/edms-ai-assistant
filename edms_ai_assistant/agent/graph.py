@@ -52,14 +52,30 @@ class GraphBuilder:
         self._tools = tools
         self._checkpointer = checkpointer
         self._model: Runnable[Any, BaseMessage] | None = None
-        self._model_lock: asyncio.Lock | None = None
+        # Initialize lock in constructor to avoid race conditions in lazy initialization
+        # Note: asyncio.Lock should be created in the event loop, but for GraphBuilder
+        # which is created during app startup (when event loop exists), this is safe.
+        try:
+            self._model_lock = asyncio.Lock()
+        except RuntimeError:
+            # Fallback for edge cases where event loop doesn't exist yet
+            # This shouldn't happen in normal FastAPI application lifecycle
+            self._model_lock = None
 
     @property
     def lock(self) -> asyncio.Lock:
-        """Thread-safe lazy-init lock to ensure it's attached to the running event loop."""
+        """Get the lock, creating it if needed (fallback for edge cases).
+        
+        This property is thread-safe for asyncio context. The lock is normally
+        initialized in __init__, but this fallback handles edge cases where
+        the event loop wasn't available during construction.
+        """
         if self._model_lock is None:
-            # Note: in a single-threaded asyncio app, this is safe.
+            # This should rarely happen, but provides a safety net
+            # The lock creation here is safe because asyncio.Lock() is
+            # designed to be called from within a running event loop
             self._model_lock = asyncio.Lock()
+            logger.warning("Lock was created lazily - this may indicate a lifecycle issue")
         return self._model_lock
 
     async def set_model_async(self, model: Runnable[Any, BaseMessage]) -> None:

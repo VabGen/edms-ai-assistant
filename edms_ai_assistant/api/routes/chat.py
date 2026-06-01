@@ -49,12 +49,12 @@ from edms_ai_assistant.api.sse_events import (
     extract_navigate_url_from_tool_message,
 )
 from edms_ai_assistant.config import settings
+from edms_ai_assistant.core.distributed_lock import DistributedLockManager
 from edms_ai_assistant.model import NewChatRequest, UserInput
 from edms_ai_assistant.security import extract_user_id_from_token
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
     from edms_ai_assistant.agent.agent import EdmsDocumentAgent
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,7 @@ async def _ensure_clean_state(
     agent: EdmsDocumentAgent,
     config: dict[str, Any],
     force: bool = False,
+    distributed_lock: DistributedLockManager | None = None,
 ) -> None:
     """Repair the graph state if it contains dangling tool_calls.
 
@@ -131,7 +132,30 @@ async def _ensure_clean_state(
         config: The thread config.
         force: If True, cleanup even if there are pending interrupts (used when
                starting a new turn).
+        distributed_lock: Optional distributed lock manager for thread-safe operations.
+    
+    Note:
+        This function uses distributed locking when available to prevent race conditions
+        when multiple requests try to modify the same thread state concurrently.
     """
+    thread_id = config.get("configurable", {}).get("thread_id", "unknown")
+    
+    # Use distributed lock if available to prevent race conditions
+    if distributed_lock:
+        async with distributed_lock.thread_state_lock(thread_id):
+            await _repair_graph_state(agent, config, force, thread_id)
+    else:
+        logger.warning("No distributed lock available - proceeding without race condition protection")
+        await _repair_graph_state(agent, config, force, thread_id)
+
+
+async def _repair_graph_state(
+    agent: EdmsDocumentAgent,
+    config: dict[str, Any],
+    force: bool,
+    thread_id: str,
+) -> None:
+    """Internal function to repair graph state (assumes locking is handled by caller)."""
     snapshot = await agent.graph.aget_state(config)
     if not snapshot or not snapshot.values:
         return
@@ -141,7 +165,10 @@ async def _ensure_clean_state(
         for task in getattr(snapshot, "tasks", []) or []:
             for itr in getattr(task, "interrupts", []) or []:
                 if isinstance(itr, Interrupt):
-                    logger.debug("Pending interrupt found — skipping state repair")
+                    logger.debug(
+                        "Pending interrupt found — skipping state repair for thread %s",
+                        thread_id
+                    )
                     return
 
     messages = snapshot.values.get("messages", [])
@@ -167,7 +194,10 @@ async def _ensure_clean_state(
 
         missing_ids = expected_ids - found_ids
         if missing_ids:
-            logger.warning("Found dangling tool calls in history at pos %d: %s", i, missing_ids)
+            logger.warning(
+                "Found dangling tool calls in thread %s at pos %d: %s",
+                thread_id, i, missing_ids
+            )
             for tc in msg.tool_calls:
                 if tc["id"] in missing_ids:
                     tool_messages_to_add.append(
@@ -186,7 +216,11 @@ async def _ensure_clean_state(
             {"messages": tool_messages_to_add},
             as_node="tools",
         )
-        logger.info("Successfully repaired %d dangling tool calls", len(tool_messages_to_add))
+        logger.info(
+            "Successfully repaired %d dangling tool calls for thread %s",
+            len(tool_messages_to_add),
+            thread_id
+        )
 
 
 def _make_config(
@@ -480,9 +514,17 @@ async def chat_stream(
     agent: AgentDep,
     deps: DepsDep,
 ) -> StreamingResponse:
+    if not body.user_token or not body.user_token.strip():
+        logger.warning("Chat stream failed: Empty user_token in request body")
+        raise HTTPException(status_code=401, detail="user_token is required and cannot be empty")
+    
     try:
         user_id = extract_user_id_from_token(body.user_token)
     except ValueError as exc:
+        logger.warning(
+            "Chat stream failed: Invalid user_token",
+            extra={"error": str(exc), "token_prefix": body.user_token[:20] if body.user_token else "empty"}
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     thread_id = (
@@ -511,9 +553,13 @@ async def chat_stream(
     )
 
     config = _make_config(thread_id, body.user_token, str(user_id), body.context_ui_id)
+    
+    # Create distributed lock manager
+    distributed_lock = DistributedLockManager(deps.redis)
+    
     # When starting a NEW turn, we ALWAYS force cleanup of dangling calls
     # even if there were interrupts, as the user is choosing to ignore them.
-    await _ensure_clean_state(agent, config, force=True)
+    await _ensure_clean_state(agent, config, force=True, distributed_lock=distributed_lock)
 
     return StreamingResponse(
         _stream_graph_events(agent, inputs, config, thread_id),
@@ -533,7 +579,12 @@ async def chat_stream(
 async def chat_resume(
     body: ChatResumeRequest,
     agent: AgentDep,
+    deps: DepsDep,
 ) -> StreamingResponse:
+    if not body.user_token or not body.user_token.strip():
+        logger.warning("Chat resume failed: Empty user_token in request body")
+        raise HTTPException(status_code=401, detail="user_token is required and cannot be empty")
+    
     try:
         validated = ResumeValueAdapter.validate_python(body.resume_value)
     except ValidationError as exc:
@@ -542,6 +593,10 @@ async def chat_resume(
     try:
         user_id = extract_user_id_from_token(body.user_token)
     except ValueError as exc:
+        logger.warning(
+            "Chat resume failed: Invalid user_token",
+            extra={"error": str(exc), "token_prefix": body.user_token[:20] if body.user_token else "empty"}
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     document_id = body.context_ui_id
@@ -557,12 +612,15 @@ async def chat_resume(
 
     config = _make_config(body.thread_id, body.user_token, str(user_id), document_id)
 
+    # Create distributed lock manager
+    distributed_lock = DistributedLockManager(deps.redis)
+
     await _validate_resume_kind(agent.graph, config, body.interrupt_id, validated.kind)
 
     resume_value = validated.model_dump(mode="json")
 
     # When RESUMING, we only fix if it's actually dangling (not interrupted)
-    await _ensure_clean_state(agent, config, force=False)
+    await _ensure_clean_state(agent, config, force=False, distributed_lock=distributed_lock)
 
     return StreamingResponse(
         _stream_graph_events(

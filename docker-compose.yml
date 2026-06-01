@@ -48,7 +48,9 @@ services:
     image: ollama/ollama:latest
     container_name: edms-ollama
     environment:
-      OLLAMA_API_KEY: "ed5c1410da944c899b6390190f26ce7a.vDqAfMrGbl99BylQoBTdZc1A"
+      # SECURITY: API key should be provided via environment variable or Docker secrets
+      # Leave empty for local development, set strong random value for production
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped

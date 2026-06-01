@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import redis.asyncio as aioredis
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
 
@@ -37,10 +38,7 @@ from edms_ai_assistant.services.query_refiner import QueryRefiner
 from edms_ai_assistant.services.resolution_service import ResolutionService
 from edms_ai_assistant.services.task_service import TaskService
 
-if TYPE_CHECKING:
-    import redis.asyncio as aioredis
-
-    from edms_ai_assistant.clients.transport import IAsyncTransport
+from edms_ai_assistant.clients.transport import IAsyncTransport
 
 
 class AppDeps(BaseModel):
@@ -82,7 +80,6 @@ class AppDeps(BaseModel):
     nlp_service: EDMSNaturalLanguageService
     chat_model: BaseChatModel
 
-    # Опциональные сервисы (инициализируемые позже в lifespan)
     summarization_service: Any | None = None
 
 
@@ -90,24 +87,7 @@ def init_deps(
     transport: IAsyncTransport, redis: aioredis.Redis, llm: BaseChatModel
 ) -> AppDeps:
     """Фабрика для создания и связывания всех зависимостей приложения."""
-
-    if not getattr(AppDeps, "_is_rebuilt", False):
-        import redis.asyncio as _aioredis
-        from langchain_core.language_models import (
-            BaseChatModel as _BaseChatModel,
-        )
-
-        from edms_ai_assistant.clients.transport import (
-            IAsyncTransport as _IAsyncTransport,
-        )
-
-        globals()["IAsyncTransport"] = _IAsyncTransport
-        globals()["aioredis"] = _aioredis
-        globals()["BaseChatModel"] = _BaseChatModel
-
-        AppDeps.model_rebuild()
-        AppDeps._is_rebuilt = True
-
+    
     base_client = EdmsBaseClient(transport, edms_settings)
 
     # ── Инициализация клиентов ────────────────────────────────────────────────

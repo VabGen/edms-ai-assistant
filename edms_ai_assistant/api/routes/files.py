@@ -34,6 +34,10 @@ async def upload_file(
     user_token: Annotated[str, Form(...)],
     file: Annotated[UploadFile, File(...)],
 ) -> FileUploadResponse:
+    if not user_token or not user_token.strip():
+        logger.warning("File upload failed: Empty user_token in request")
+        raise HTTPException(status_code=401, detail="user_token is required and cannot be empty")
+    
     try:
         extract_user_id_from_token(user_token)
         if not file.filename:

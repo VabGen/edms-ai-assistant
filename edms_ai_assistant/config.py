@@ -226,6 +226,12 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: SecretStr | None = None
     CACHE_TTL_SECONDS: int = Field(default=300, ge=30, le=86400)
+    
+    # Circuit breaker configuration
+    REDIS_CIRCUIT_BREAKER_ENABLED: bool = True
+    REDIS_CIRCUIT_FAILURE_THRESHOLD: int = Field(default=5, ge=1, le=20)
+    REDIS_CIRCUIT_RECOVERY_TIMEOUT: float = Field(default=60.0, ge=10.0, le=300.0)
+    REDIS_CIRCUIT_OPERATION_TIMEOUT: float = Field(default=5.0, ge=1.0, le=30.0)
 
     # ── File Upload Configuration ────────────────────────────────────────────
     UPLOAD_DIR: str = "./uploads"
@@ -292,6 +298,50 @@ class Settings(BaseSettings):
         env = info.data.get("ENVIRONMENT", "development")
         return "DEBUG" if env == "development" else "INFO"
 
+    @field_validator("JWT_SECRET_KEY")
+    @classmethod
+    def validate_jwt_secret_strength(cls, v: SecretStr, info) -> SecretStr:
+        """Проверяет сложность JWT_SECRET_KEY."""
+        secret_value = v.get_secret_value()
+
+        environment = info.data.get("ENVIRONMENT", "development")
+        if environment != "production":
+            if len(secret_value) < 4:
+                raise ValueError(
+                    f"JWT_SECRET_KEY is too short ({len(secret_value)} chars). Minimum 4 characters required."
+                )
+            return v
+
+        if secret_value in ("change-me-in-production", "change-me", "secret", "test"):
+            raise ValueError(
+                "JWT_SECRET_KEY is using a default/weak value in production. "
+                "Generate a secure key: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+
+        if len(secret_value) < 32:
+            raise ValueError(
+                f"JWT_SECRET_KEY is too short ({len(secret_value)} chars). "
+                "Minimum 32 characters required for HS256 algorithm security."
+            )
+
+        if secret_value.isalpha() or secret_value.isdigit():
+            raise ValueError(
+                "JWT_SECRET_KEY should contain mixed characters (letters, numbers, symbols) "
+                "for better security."
+            )
+        
+        return v
+    
+    @field_validator("JWT_ALGORITHM")
+    @classmethod
+    def validate_jwt_algorithm(cls, v: str) -> str:
+        """Запрещает небезопасные алгоритмы."""
+        if v.upper() in ("NONE", "HS1", "HS512"):
+            raise ValueError(
+                f"JWT algorithm '{v}' is not recommended. Use 'HS256' for best security/performance balance."
+            )
+        return v
+    
     @model_validator(mode="after")
     def enforce_production_security(self) -> Settings:
         """Запрещает запуск в production с дефолтными секретами."""
@@ -303,6 +353,10 @@ class Settings(BaseSettings):
             if self.POSTGRES_PASSWORD.get_secret_value() == "password":
                 raise ValueError(
                     "POSTGRES_PASSWORD must be changed from default in production!"
+                )
+            if self.DEBUG:
+                raise ValueError(
+                    "DEBUG cannot be True in production environment for security reasons."
                 )
         return self
 

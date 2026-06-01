@@ -72,25 +72,23 @@ class TaskService:
                 not_found_employees=not_found,
             )
 
-        # Резолвим ответственного
         responsible_id: UUID | None = None
         if responsible_last_name:
             resp_ids, _, resp_ambiguous = await self._resolution.resolve_employees(
                 token, [responsible_last_name]
             )
             if resp_ids:
-                responsible_id = resp_ids.pop()
+                responsible_id = next(iter(resp_ids), None)
             elif resp_ambiguous:
                 return TaskCreationResult(
                     success=False,
                     status="requires_disambiguation",
-                    ambiguous_matches=[am.__dict__ for am in resp_ambiguous],
+                    ambiguous_matches=[am.model_dump() for am in resp_ambiguous],
                 )
 
-        if not responsible_id:
+        if not responsible_id and emp_ids:
             responsible_id = next(iter(emp_ids))
 
-        # Формируем DTO
         executors = [
             CreateTaskRequestExecutor(
                 employee_id=emp_id, responsible=(emp_id == responsible_id)
@@ -125,7 +123,15 @@ class TaskService:
                 error_message="Необходимо указать хотя бы одного исполнителя.",
             )
 
-        responsible_id = responsible_employee_id or employee_ids[0]
+        # Safe extraction with fallback
+        responsible_id = responsible_employee_id or (employee_ids[0] if employee_ids else None)
+        if not responsible_id:
+            return TaskCreationResult(
+                success=False,
+                status="error",
+                error_message="Не указан ответственный сотрудник.",
+            )
+        
         executors = [
             CreateTaskRequestExecutor(
                 employee_id=emp_id, responsible=(emp_id == responsible_id)
@@ -162,10 +168,10 @@ class TaskService:
                 token, [responsible_last_name]
             )
             if resp_ids:
-                responsible_id = next(iter(resp_ids))
+                responsible_id = next(iter(resp_ids), None)
 
         if not responsible_id and emp_ids:
-            responsible_id = next(iter(emp_ids))
+            responsible_id = next(iter(emp_ids), None)
 
         executors = [
             CreateTaskRequestExecutor(
@@ -175,7 +181,8 @@ class TaskService:
         ]
 
         ambiguous_data = [
-            {"search_query": am.search_query, "matches": am.matches} for am in ambiguous
+            {"search_query": am.search_query, "matches": am.matches} 
+            for am in ambiguous
         ]
 
         return executors, not_found, ambiguous_data
@@ -211,19 +218,10 @@ class TaskService:
         )
 
         try:
-            if len([task_request]) == 1:
-                # Use single task creation endpoint for better permission compatibility
-                created_task = await self._task_client.create_task(
-                    token, document_id, task_request
-                )
-                success = created_task is not None
-            else:
-                # Should not happen currently as we only pass 1 task here,
-                # but good for future-proofing
-                results = await self._task_client.create_tasks_batch(
-                    token, document_id, [task_request]
-                )
-                success = bool(results)
+            created_task = await self._task_client.create_task(
+                token, document_id, task_request
+            )
+            success = created_task is not None
 
             if success:
                 return TaskCreationResult(

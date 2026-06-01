@@ -164,6 +164,72 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ---
 
+## Production Security
+
+### Secret Management
+
+For production deployments, never commit secrets to git. Use environment variables or Docker secrets:
+
+**Using Environment Variables:**
+```bash
+# .env (gitignored)
+JWT_SECRET_KEY=<your-64-char-hex-key>
+OLLAMA_API_KEY=<your-api-key>
+POSTGRES_PASSWORD=<strong-password>
+```
+
+**Using Docker Secrets (Recommended):**
+```yaml
+# docker-compose.prod.yml
+services:
+  app:
+    secrets:
+      - jwt_secret
+      - ollama_api_key
+secrets:
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  ollama_api_key:
+    file: ./secrets/ollama_api_key.txt
+```
+
+### Security Best Practices
+
+1. **JWT Secret**: Must be minimum 32 characters with mixed characters (letters, numbers, symbols)
+2. **Environment**: Never run with `DEBUG=true` in production
+3. **Algorithm**: Use `HS256` for JWT (configured by default)
+4. **API Keys**: Rotate credentials regularly and use different keys per environment
+5. **Network**: Use internal networks for service-to-service communication
+
+---
+
+## Architecture & Dependency Injection
+
+The application now uses **dependency-injector** for production-ready dependency management, replacing the ad-hoc `app.state` pattern.
+
+**Benefits:**
+- **Clear dependency graph** - explicit dependencies between components
+- **Testability** - easy dependency override for testing
+- **Lifecycle management** - proper resource initialization and cleanup
+- **Type-safe injection** - compile-time dependency checking
+
+**DI Structure:**
+- `ApplicationContainer` - Root container with all core dependencies
+- Infrastructure providers - Redis, HTTP transport, LLM models
+- Service providers - Business logic services
+- Backward compatibility - Maintains AppDeps during migration
+
+**Diagnostics:**
+- `/health/di` (Admin) - DI container status and configuration
+- `/health/cache` (Admin) - Redis circuit breaker metrics
+
+**Testing:**
+```bash
+uv run pytest tests/test_di_container.py -v
+```
+
+---
+
 ## Docker Commands
 
 ```bash

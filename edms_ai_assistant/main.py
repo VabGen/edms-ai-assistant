@@ -24,6 +24,9 @@ from edms_ai_assistant.api import (
 from edms_ai_assistant.api.deps import UPLOAD_DIR
 from edms_ai_assistant.clients.transport import HttpxTransport
 from edms_ai_assistant.config import edms_settings, settings
+from edms_ai_assistant.core.di_container import init_container as init_di_container
+from edms_ai_assistant.core.di_container import shutdown_container as shutdown_di_container
+from edms_ai_assistant.core.di_container import get_container
 from edms_ai_assistant.core.deps import init_deps
 from edms_ai_assistant.db.database import init_db
 from edms_ai_assistant.llm import get_chat_model
@@ -71,22 +74,24 @@ def _setup_telemetry(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Application lifespan — startup and shutdown."""
+    """Application lifespan — startup and shutdown using DI container."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     await init_db()
 
-    import redis.asyncio as aioredis
+    # Initialize DI container with all dependencies
+    container = await init_di_container()
 
-    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    transport = HttpxTransport(
-        base_url=str(edms_settings.base_url), default_timeout=edms_settings.timeout
-    )
-    llm = get_chat_model()
+    # Get dependencies from container
+    deps = container.app_deps()
+    redis = container.redis()
+    agent = container.agent()
+    llm = container.chat_model()
 
     state: _AppState = _app.state
-    deps = init_deps(transport, redis, llm)
     state.deps = deps
+    state.container = container  # Store container for potential future use
 
+    # Initialize summarization service
     try:
         summarization_service = await build_summarization_service(settings)
         state.summarization_service = summarization_service
@@ -98,25 +103,22 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         )
         state.summarization_service = None
 
+    logger.info("EDMS AI Assistant started with DI container")
+
     try:
-        agent = EdmsDocumentAgent(deps=deps, llm=llm)
-        state.agent = agent
-        logger.info("EDMS AI Assistant started")
-    except Exception as exc:
-        logger.critical("Agent initialization failed. Exiting.", exc_info=True)
-        raise SystemExit(1) from exc
+        yield
+    finally:
+        # Cleanup in reverse order
+        service = getattr(state, "summarization_service", None)
+        if service is not None:
+            try:
+                await service.aclose()
+            except Exception as exc:
+                logger.warning("Error closing SummarizationService: %s", exc)
 
-    yield
-
-    await redis.close()
-    await transport.close()
-
-    service = getattr(state, "summarization_service", None)
-    if service is not None:
-        try:
-            await service.aclose()
-        except Exception as exc:
-            logger.warning("Error closing SummarizationService: %s", exc)
+        # Shutdown DI container (handles Redis, transport cleanup)
+        await shutdown_di_container()
+        logger.info("EDMS AI Assistant shutdown complete")
 
 
 if settings.OTEL_ENABLED:
@@ -163,7 +165,7 @@ app = create_app()
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
+        request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     logger.error(
         "422 Validation Error on %s %s: %s",
